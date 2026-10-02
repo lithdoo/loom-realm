@@ -259,16 +259,92 @@ test("modal cancel semantics, propagation blocking and local size limit are exac
   assert.equal(result.lightDismiss, false);
 });
 
-test("real dialog layout gives scrolling only to the Schema Form body", async (t) => {
+test("short dialog stays compact without creating a scroll range", async (t) => {
   const page = await pageWithBundle(t);
   await page.setViewportSize({ width: 1000, height: 600 });
   const result = await page.evaluate(async () => {
     const root = document.createElement("lr-schema-form");
     root.receiveRenderContext({ resources: {}, emitCustomEvent() {} });
-    root.receiveRenderData({ title: "Layout", description: "Scrollable form", cancelable: true });
-    const fields = Array.from({ length: 30 }, (_, index) => {
+    root.receiveRenderData({ title: "Compact", description: "One field", cancelable: true });
+    const field = document.createElement("lr-schema-form-field");
+    field.receiveRenderData({ key: "field", kind: "string", label: "Field", required: false, value: "", multiline: false });
+    root.append(field);
+    document.body.append(root);
+    await Promise.all([root.updateComplete, field.updateComplete]);
+    const dialogHost = root.shadowRoot.querySelector("wa-dialog");
+    await dialogHost.updateComplete;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const nativeDialog = dialogHost.shadowRoot.querySelector("dialog");
+    const waBody = dialogHost.shadowRoot.querySelector('[part="body"]');
+    const shell = root.shadowRoot.querySelector(".shell");
+    const body = root.shadowRoot.querySelector(".body");
+    const dialogRect = nativeDialog.getBoundingClientRect();
+    const shellRect = shell.getBoundingClientRect();
+    body.scrollTop = 100;
+    return {
+      dialogWidth: dialogRect.width,
+      dialogHeight: dialogRect.height,
+      shellHeight: shellRect.height,
+      viewportHeight: innerHeight,
+      waBodyOverflowY: getComputedStyle(waBody).overflowY,
+      waBodyScrollable: waBody.scrollHeight > waBody.clientHeight,
+      shellOverflowY: getComputedStyle(shell).overflowY,
+      shellScrollable: shell.scrollHeight > shell.clientHeight,
+      bodyOverflowY: getComputedStyle(body).overflowY,
+      bodyOverflowX: getComputedStyle(body).overflowX,
+      bodyScrollable: body.scrollHeight > body.clientHeight,
+      bodyScrollTop: body.scrollTop,
+    };
+  });
+  assert.ok(result.dialogWidth <= 600.5, JSON.stringify(result));
+  assert.ok(result.dialogWidth >= 599.5, JSON.stringify(result));
+  assert.ok(result.dialogHeight < result.viewportHeight * 0.8, JSON.stringify(result));
+  assert.ok(result.shellHeight < result.viewportHeight * 0.8, JSON.stringify(result));
+  assert.equal(result.waBodyOverflowY, "hidden");
+  assert.equal(result.waBodyScrollable, false);
+  assert.equal(result.shellOverflowY, "hidden");
+  assert.equal(result.shellScrollable, false);
+  assert.equal(result.bodyOverflowY, "auto");
+  assert.equal(result.bodyOverflowX, "hidden");
+  assert.equal(result.bodyScrollable, false);
+  assert.equal(result.bodyScrollTop, 0);
+});
+
+test("real wheel scrolling is owned only by the long-form body and survives refresh", async (t) => {
+  const page = await pageWithBundle(t);
+  await page.setViewportSize({ width: 1000, height: 600 });
+  await page.evaluate(async () => {
+    const longText = "unbroken-content-".repeat(24);
+    const root = document.createElement("lr-schema-form");
+    let fields = [];
+    let refreshes = 0;
+    root.receiveRenderContext({
+      resources: {},
+      emitCustomEvent(name) {
+        if (name !== "change") return;
+        refreshes += 1;
+        root.receiveRenderData({ title: "Long form refreshed", description: `refreshed-${longText}`, cancelable: true });
+        fields[0].receiveRenderData({
+          key: "field-0", kind: "string", label: longText, description: longText,
+          error: `updated-${longText}`, required: false, value: "changed", multiline: false,
+        });
+      },
+    });
+    root.receiveRenderData({ title: "Long form", description: longText, cancelable: true });
+    fields = Array.from({ length: 36 }, (_, index) => {
       const field = document.createElement("lr-schema-form-field");
-      field.receiveRenderData({ key: `field-${index}`, kind: "string", label: `Field ${index}`, required: false, value: "", multiline: false });
+      if (index === 35) {
+        field.receiveRenderData({
+          key: `field-${index}`, kind: "select", label: longText, description: longText,
+          error: longText, required: false, value: "selected",
+          options: [{ value: "selected", label: longText }],
+        });
+      } else {
+        field.receiveRenderData({
+          key: `field-${index}`, kind: "string", label: longText, description: longText,
+          error: longText, required: false, value: longText, multiline: false,
+        });
+      }
       root.append(field);
       return field;
     });
@@ -277,15 +353,25 @@ test("real dialog layout gives scrolling only to the Schema Form body", async (t
     const dialogHost = root.shadowRoot.querySelector("wa-dialog");
     await dialogHost.updateComplete;
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    globalThis.schemaScrollFixture = {
+      root,
+      fields,
+      body: root.shadowRoot.querySelector(".body"),
+      get refreshes() { return refreshes; },
+    };
+  });
+
+  const initial = await page.evaluate(() => {
+    const { root, body } = globalThis.schemaScrollFixture;
+    const dialogHost = root.shadowRoot.querySelector("wa-dialog");
     const nativeDialog = dialogHost.shadowRoot.querySelector("dialog");
     const waBody = dialogHost.shadowRoot.querySelector('[part="body"]');
     const shell = root.shadowRoot.querySelector(".shell");
-    const body = root.shadowRoot.querySelector(".body");
     const header = root.shadowRoot.querySelector("header");
     const footer = root.shadowRoot.querySelector("footer");
-    const before = { header: header.getBoundingClientRect().top, footer: footer.getBoundingClientRect().top };
-    body.scrollTop = body.scrollHeight;
-    const after = { header: header.getBoundingClientRect().top, footer: footer.getBoundingClientRect().top };
+    const bodyRect = body.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
+    const footerRect = footer.getBoundingClientRect();
     const dialogRect = nativeDialog.getBoundingClientRect();
     const shellRect = shell.getBoundingClientRect();
     return {
@@ -294,27 +380,98 @@ test("real dialog layout gives scrolling only to the Schema Form body", async (t
       shellHeight: shellRect.height,
       viewportWidth: innerWidth,
       viewportHeight: innerHeight,
-      waBodyOverflow: getComputedStyle(waBody).overflow,
+      waBodyOverflowY: getComputedStyle(waBody).overflowY,
       waBodyScrollable: waBody.scrollHeight > waBody.clientHeight,
+      shellOverflowY: getComputedStyle(shell).overflowY,
+      shellScrollable: shell.scrollHeight > shell.clientHeight,
       bodyOverflowY: getComputedStyle(body).overflowY,
+      bodyOverflowX: getComputedStyle(body).overflowX,
+      bodyOverscroll: getComputedStyle(body).overscrollBehavior,
       bodyScrollable: body.scrollHeight > body.clientHeight,
+      bodyHorizontalRange: body.scrollWidth > body.clientWidth + 1,
+      shellHorizontalRange: shell.scrollWidth > shell.clientWidth + 1,
+      waBodyHorizontalRange: waBody.scrollWidth > waBody.clientWidth + 1,
+      documentHasScrollRange: document.scrollingElement.scrollHeight > document.scrollingElement.clientHeight,
       headerAndFooterOutsideBody: header.parentElement === shell && footer.parentElement === shell && !body.contains(header) && !body.contains(footer),
-      headerFixed: before.header === after.header,
-      footerFixed: before.footer === after.footer,
+      bodyStartsAfterHeader: bodyRect.top >= headerRect.bottom - 1,
+      bodyEndsBeforeFooter: bodyRect.bottom <= footerRect.top + 1,
     };
   });
-  assert.ok(result.dialogWidth <= 600.5, JSON.stringify(result));
-  assert.ok(result.dialogWidth <= result.viewportWidth * 0.8 + 0.5, JSON.stringify(result));
-  assert.ok(result.dialogWidth >= 599.5, JSON.stringify(result));
-  assert.ok(result.dialogHeight <= result.viewportHeight * 0.8 + 0.5, JSON.stringify(result));
-  assert.ok(result.shellHeight <= result.viewportHeight * 0.8 + 0.5, JSON.stringify(result));
-  assert.equal(result.waBodyOverflow, "hidden");
-  assert.equal(result.waBodyScrollable, false);
-  assert.equal(result.bodyOverflowY, "auto");
-  assert.equal(result.bodyScrollable, true);
-  assert.equal(result.headerAndFooterOutsideBody, true);
-  assert.equal(result.headerFixed, true);
-  assert.equal(result.footerFixed, true);
+  assert.ok(initial.dialogWidth <= 600.5, JSON.stringify(initial));
+  assert.ok(initial.dialogWidth <= initial.viewportWidth * 0.8 + 0.5, JSON.stringify(initial));
+  assert.ok(initial.dialogHeight <= initial.viewportHeight * 0.8 + 0.5, JSON.stringify(initial));
+  assert.ok(initial.shellHeight <= initial.viewportHeight * 0.8 + 0.5, JSON.stringify(initial));
+  assert.equal(initial.waBodyOverflowY, "hidden");
+  assert.equal(initial.waBodyScrollable, false);
+  assert.equal(initial.shellOverflowY, "hidden");
+  assert.equal(initial.shellScrollable, false);
+  assert.equal(initial.bodyOverflowY, "auto");
+  assert.equal(initial.bodyOverflowX, "hidden");
+  assert.equal(initial.bodyOverscroll, "contain");
+  assert.equal(initial.bodyScrollable, true);
+  assert.equal(initial.bodyHorizontalRange, false);
+  assert.equal(initial.shellHorizontalRange, false);
+  assert.equal(initial.waBodyHorizontalRange, false);
+  assert.equal(initial.documentHasScrollRange, false);
+  assert.equal(initial.headerAndFooterOutsideBody, true);
+  assert.equal(initial.bodyStartsAfterHeader, true);
+  assert.equal(initial.bodyEndsBeforeFooter, true);
+
+  const refresh = await page.evaluate(async () => {
+    const fixture = globalThis.schemaScrollFixture;
+    const { root, fields, body } = fixture;
+    body.scrollTop = Math.min(160, body.scrollHeight - body.clientHeight);
+    const scrollTopBefore = body.scrollTop;
+    const headerTopBefore = root.shadowRoot.querySelector("header").getBoundingClientRect().top;
+    const footerTopBefore = root.shadowRoot.querySelector("footer").getBoundingClientRect().top;
+    const control = fields[0].shadowRoot.querySelector("wa-input");
+    control.value = "changed";
+    control.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    await Promise.all([root.updateComplete, fields[0].updateComplete]);
+    const currentBody = root.shadowRoot.querySelector(".body");
+    return {
+      refreshes: fixture.refreshes,
+      sameBody: currentBody === body,
+      scrollTopBefore,
+      scrollTopAfter: currentBody.scrollTop,
+      headerFixed: root.shadowRoot.querySelector("header").getBoundingClientRect().top === headerTopBefore,
+      footerFixed: root.shadowRoot.querySelector("footer").getBoundingClientRect().top === footerTopBefore,
+    };
+  });
+  assert.equal(refresh.refreshes, 1);
+  assert.equal(refresh.sameBody, true);
+  assert.ok(refresh.scrollTopBefore > 0);
+  assert.ok(Math.abs(refresh.scrollTopAfter - refresh.scrollTopBefore) <= 1, JSON.stringify(refresh));
+  assert.equal(refresh.headerFixed, true);
+  assert.equal(refresh.footerFixed, true);
+
+  const wheelBefore = await page.evaluate(() => {
+    const { root, body } = globalThis.schemaScrollFixture;
+    body.scrollTop = 0;
+    return {
+      bodyScrollTop: body.scrollTop,
+      pageScrollTop: document.scrollingElement.scrollTop,
+      headerTop: root.shadowRoot.querySelector("header").getBoundingClientRect().top,
+      footerTop: root.shadowRoot.querySelector("footer").getBoundingClientRect().top,
+    };
+  });
+  await page.locator("lr-schema-form").locator("form.shell > .body").hover();
+  await page.mouse.wheel(0, 700);
+  await page.waitForFunction(() => globalThis.schemaScrollFixture.body.scrollTop > 0);
+  const wheelAfter = await page.evaluate(() => {
+    const { root, body } = globalThis.schemaScrollFixture;
+    return {
+      bodyScrollTop: body.scrollTop,
+      pageScrollTop: document.scrollingElement.scrollTop,
+      headerTop: root.shadowRoot.querySelector("header").getBoundingClientRect().top,
+      footerTop: root.shadowRoot.querySelector("footer").getBoundingClientRect().top,
+    };
+  });
+  assert.equal(wheelBefore.bodyScrollTop, 0);
+  assert.ok(wheelAfter.bodyScrollTop > 0, JSON.stringify({ wheelBefore, wheelAfter }));
+  assert.equal(wheelAfter.pageScrollTop, wheelBefore.pageScrollTop);
+  assert.equal(wheelAfter.headerTop, wheelBefore.headerTop);
+  assert.equal(wheelAfter.footerTop, wheelBefore.footerTop);
 });
 
 test("focus returns after cancel and submit, and removed targets are ignored", async (t) => {

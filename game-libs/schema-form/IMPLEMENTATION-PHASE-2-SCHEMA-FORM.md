@@ -1283,8 +1283,15 @@ wa-dialog remains open until RenderDomain removal
 without-header=true
 Schema Form shell width 600px, max-width 80vw
 shell max-height 80vh
-only shell body scrolls
+wa-dialog internal body overflow is hidden
+shell overflow is hidden
+shell/body min-width and min-height allow grid content to shrink
+only Schema Form body scrolls vertically with overflow-y:auto
+Schema Form body prohibits horizontal scrolling with overflow-x:hidden
+Schema Form body contains overscroll so wheel scrolling does not move the page
 header/footer fixed in shell grid
+short forms remain compact rather than filling 80vh
+RenderData refresh preserves body scrollTop through stable DOM
 accessible label = title ?? "Form"
 light-dismiss disabled
 wa-hide always preventDefault()
@@ -1296,6 +1303,20 @@ before Window-level physical input handling. No InputListener/InputTarget author
 changes are introduced.
 
 Backdrop interaction never emits cancel because `light-dismiss` is not enabled.
+
+Long-form scroll ownership is exact:
+
+```text
+wa-dialog internal body → never scrolls
+Schema Form shell       → never scrolls
+Schema Form body        → only vertical scroll container
+header/footer           → outside body; do not move with field scrolling
+document/page           → unchanged by wheel scrolling over the body
+horizontal form scroll  → prohibited
+```
+
+Do not add a scroll manager or store scroll position. Stable Lit DOM preserves the
+body element and its current `scrollTop` across RenderData refreshes.
 
 ## 31. Browser RenderData validation failure
 
@@ -1482,6 +1503,13 @@ wa-hide is always prevented
 Escape emits cancel only when allowed
 backdrop does not cancel because light-dismiss is disabled
 pointer/keyboard propagation blocked before Window input source
+short form remains compact with no body scroll range
+long form is capped at 80vh and only its body has vertical scroll range
+real Chromium wheel input increases body scrollTop without changing page scrollTop
+wa-dialog body and Schema Form shell have no independent scroll range
+body scroll box stays between fixed header/footer rows
+horizontal form scrolling is absent for long text and controls
+RenderData refresh preserves body identity and scrollTop
 Change/Submit emit complete snapshots
 browser >128 KiB data never reaches emitCustomEvent
 size error clears after snapshot becomes small

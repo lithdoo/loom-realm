@@ -119,13 +119,13 @@ function controlValue(event: Event): string {
 
 export class SchemaFormFieldElement extends LitElement {
   static styles = css`
-    :host { display: block; }
-    .field { display: grid; gap: .35rem; }
-    .label { font-weight: 600; }
+    :host { display: block; min-width: 0; max-width: 100%; }
+    .field { min-width: 0; display: grid; gap: .35rem; }
+    .label { font-weight: 600; overflow-wrap: anywhere; }
     .required { color: var(--wa-color-danger-60); }
-    .hint { color: var(--wa-color-neutral-60); font-size: .875rem; }
-    .error { color: var(--wa-color-danger-60); font-size: .875rem; }
-    wa-input, wa-textarea, wa-select { width: 100%; }
+    .hint { color: var(--wa-color-neutral-60); font-size: .875rem; overflow-wrap: anywhere; }
+    .error { color: var(--wa-color-danger-60); font-size: .875rem; overflow-wrap: anywhere; }
+    wa-input, wa-textarea, wa-select { box-sizing: border-box; min-width: 0; width: 100%; max-width: 100%; }
   `;
 
   private current?: SchemaFormFieldRenderDataV1;
@@ -212,15 +212,32 @@ export class SchemaFormElement extends LitElement {
   static styles = css`
     wa-dialog { --width: min(600px, 80vw); --spacing: 0; }
     wa-dialog::part(body) { padding: 0; overflow: hidden; }
-    .shell { box-sizing: border-box; width: 100%; max-height: 80vh; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
-    header, footer { display: flex; align-items: center; gap: .75rem; padding: 1rem; }
+    .shell {
+      box-sizing: border-box;
+      min-width: 0;
+      min-height: 0;
+      width: 100%;
+      max-width: 100%;
+      max-height: 80vh;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+    }
+    header, footer { min-width: 0; display: flex; align-items: center; gap: .75rem; padding: 1rem; }
     header { justify-content: space-between; border-bottom: 1px solid var(--wa-color-neutral-30); }
-    header h2 { margin: 0; }
-    .body { min-height: 0; overflow: auto; padding: 1rem; }
-    .description { margin: 0 0 1rem; color: var(--wa-color-neutral-60); }
-    ::slotted(lr-schema-form-field) { margin-bottom: 1rem; }
+    header h2 { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+    .body {
+      min-width: 0;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 1rem;
+    }
+    .description { min-width: 0; margin: 0 0 1rem; color: var(--wa-color-neutral-60); overflow-wrap: anywhere; }
+    ::slotted(lr-schema-form-field) { min-width: 0; max-width: 100%; margin-bottom: 1rem; }
     footer { justify-content: flex-end; border-top: 1px solid var(--wa-color-neutral-30); }
-    .size-error { color: var(--wa-color-danger-60); margin-right: auto; }
+    .size-error { min-width: 0; color: var(--wa-color-danger-60); margin-right: auto; overflow-wrap: anywhere; }
   `;
 
   private context?: WebPresentationContext;

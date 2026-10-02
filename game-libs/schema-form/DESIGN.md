@@ -989,14 +989,31 @@ wa-dialog open + without-header
 The shell uses:
 
 ```text
-width: 600px
-max-width: 80vw
-max-height: 80vh
+dialog preferred width: 600px
+dialog max-width: 80vw
+shell width/max-width: 100%
+shell max-height: 80vh
+shell min-width/min-height: 0
 grid rows: header / minmax(0, 1fr) / footer
-body overflow: auto
+wa-dialog internal body overflow: hidden
+shell overflow: hidden
+body overflow-x: hidden
+body overflow-y: auto
+body overscroll-behavior: contain
 ```
 
-Only the body scrolls. Header/footer remain fixed in the shell layout.
+Long-form scroll ownership is frozen:
+
+- the `wa-dialog` internal body never scrolls;
+- the Schema Form shell never scrolls;
+- the Schema Form body is the only vertical scroll container;
+- header/footer remain outside the body and never move with field scrolling;
+- horizontal form scrolling is prohibited;
+- body scrolling does not propagate into document/page scrolling; and
+- RenderData refresh preserves the current body scroll position through stable DOM.
+
+Short forms remain compact because `80vh` is a maximum rather than a forced height.
+Long forms are capped at `80vh`; only their body acquires a vertical scroll range.
 
 The `wa-dialog` accessible label is the current Schema Form title. When no title is
 declared, the browser component uses a stable fallback accessible label
@@ -1036,6 +1053,10 @@ InputListener priority, capture, exclusivity, suspension, or another authority l
 Pointer and keyboard events handled by the form presentation are stopped before they
 bubble to the Window-level Renderer physical input source. The dialog's modal
 behavior prevents ordinary underlying DOM interaction and keeps focus in the modal.
+
+Wheel input over an overflowing Schema Form body scrolls that body without scrolling
+the document/page. The body uses contained overscroll; no global scrolling manager or
+additional modal authority is introduced.
 
 This requirement is limited to browser pointer/keyboard interaction. Gamepad and
 other non-DOM physical input suppression remain outside Schema Form v1.
