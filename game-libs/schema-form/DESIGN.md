@@ -198,8 +198,8 @@ one interaction, that API shape can be reconsidered separately.
 Schema Form v1 allows at most one active `openSchemaForm()` interaction for the same
 Frame at a time.
 
-Opening a second form while another Schema Form is still active for that Frame fails
-immediately with:
+Opening a second form while another Schema Form is still active for that Frame rejects
+the returned Promise before creating any second-form resource with:
 
 ```text
 SCHEMA_FORM_ALREADY_OPEN
@@ -518,8 +518,7 @@ const validator = new Function(
 A validator receives the current form data snapshot:
 
 ```ts
-type SchemaFormValidationDataV1 =
-  Readonly<Record<string, unknown>>;
+type SchemaFormValidationDataV1 = SchemaFormDataV1;
 ```
 
 Its logical result shape is:
@@ -681,6 +680,11 @@ validator returns an invalid result shape
 
 Schema and initial-value validation are preflight checks. They run before Schema Form
 creates a RenderDomain, InputListener, abort subscription, or active-form registration.
+
+`openSchemaForm()` has one failure surface: it always returns a Promise and never
+reports argument/preflight failures by a synchronous throw. Invalid outer API shape
+rejects that Promise with `TypeError`; Schema Form preflight/program failures reject
+it with the documented `SchemaFormError`; Frame abort rejects it with `AbortError`.
 
 Therefore:
 
@@ -864,7 +868,12 @@ const rootKey = `sf:${formSerial}`;
 {
   key: rootKey,
   tag: "lr-schema-form",
-  attrs: {},
+  attrs: {
+    class:
+      "wa-theme-default wa-palette-default " +
+      "wa-brand-blue wa-neutral-gray " +
+      "wa-success-green wa-warning-yellow wa-danger-red",
+  },
   data: formRenderData,
   children: fields.map((field, index) => ({
     key: `sf:${formSerial}:f:${index}`,
@@ -914,136 +923,80 @@ state are not authoritative form validity.
 
 Schema Form is always presented as a modal dialog in v1.
 
-The modal must visually and interactively cover the underlying presentation while it
-is open.
+`lr-schema-form` uses the bundled Web Awesome `wa-dialog` as the browser modality
+primitive. Schema Form does not implement a second focus-trap, backdrop, or modal
+stack.
 
-Its fixed structural regions are:
+The dialog is kept open for the lifetime of the current RenderNode. The component
+uses `wa-dialog` with its built-in header disabled and renders the Schema Form shell
+inside it:
 
 ```text
-backdrop
-└── dialog
+wa-dialog open + without-header
+└── schema-form shell
     ├── header
     │   ├── title
-    │   └── close icon button   (cancelable=true only)
-    │
+    │   └── Close button   (cancelable=true only)
     ├── body
-    │   └── form field slot
-    │
+    │   └── projected field slot
     └── footer
-        ├── Cancel button       (cancelable=true only)
+        ├── Cancel button  (cancelable=true only)
         └── Submit button
 ```
 
-The header displays the form title. The body contains the projected field nodes. The
-footer contains form actions.
+The shell uses:
 
-The preferred browser layout constraints are:
-
-```css
-.dialog {
-  width: 600px;
-  max-width: 80vw;
-  max-height: 80vh;
-
-  display: grid;
-  grid-template-rows:
-    auto
-    minmax(0, 1fr)
-    auto;
-}
-
-.body {
-  overflow: auto;
-}
+```text
+width: 600px
+max-width: 80vw
+max-height: 80vh
+grid rows: header / minmax(0, 1fr) / footer
+body overflow: auto
 ```
 
-The header and footer remain fixed within the dialog while only the body scrolls when
-the field content exceeds the available height.
+Only the body scrolls. Header/footer remain fixed in the shell layout.
 
-The backdrop covers the full viewport:
+The `wa-dialog` accessible label is the current Schema Form title. When no title is
+declared, the browser component uses a stable fallback accessible label
+`"Form"`. That fallback is presentation-only and does not alter RenderData.
 
-```css
-.backdrop {
-  position: fixed;
-  inset: 0;
+Schema Form does not enable `light-dismiss`; backdrop clicks therefore never request
+cancel.
 
-  display: grid;
-  place-items: center;
+Every `wa-hide` request is intercepted and `preventDefault()` is called so the
+browser component never closes itself ahead of Schema Form authority.
 
-  pointer-events: auto;
-}
+```text
+cancelable=true
++ wa-hide request (Escape or dialog close request)
+→ preventDefault()
+→ root emits semantic cancel
+→ Subsystem settles
+→ RenderDomain closes
+→ DOM disappears
+
+cancelable=false
++ wa-hide request
+→ preventDefault()
+→ emit nothing
+→ dialog remains open
 ```
 
-The root dialog must expose modal accessibility semantics, conceptually:
-
-```html
-<section role="dialog" aria-modal="true">
-```
-
-The browser implementation must trap focus within the dialog while open and restore
-the previous focus target when the modal closes.
-
-When `cancelable=true`, the header close icon button, footer Cancel button, and
-Escape key all produce the same semantic action:
-
-```ts
-{ type: "cancel" }
-```
-
-Backdrop clicks do not cancel the form in v1.
-
-When `cancelable=false` or is omitted, no user-visible cancel affordance is rendered
-and Escape does not request cancellation.
-
-The root RenderData carries the resolved boolean:
-
-```ts
-readonly cancelable: boolean;
-```
-
-The Web Component must not inspect the original request object to determine
-cancelability.
+The explicit Schema Form Close and Cancel buttons do not directly close
+`wa-dialog`; they call the same local `cancel()` action. Submit likewise never
+directly closes the dialog.
 
 ### Modal interaction blocking
 
-Schema Form modality is a browser-presentation concern in v1. It does not introduce
-or require a new LoomRealm input-authority mechanism.
+Browser modality is delegated to `wa-dialog`; Schema Form does not add
+InputListener priority, capture, exclusivity, suspension, or another authority layer.
 
-While the modal is open, the presentation must prevent underlying browser mouse and
-keyboard interaction from reaching lower presentation layers.
+Pointer and keyboard events handled by the form presentation are stopped before they
+bubble to the Window-level Renderer physical input source. The dialog's modal
+behavior prevents ordinary underlying DOM interaction and keeps focus in the modal.
 
-The full-screen backdrop blocks pointer interaction with elements underneath it.
-
-The modal must also keep keyboard focus inside the dialog. Keyboard and pointer
-events originating inside the modal presentation must be stopped before they bubble
-to the Window-level Renderer physical input source.
-
-Conceptually:
-
-```text
-pointer
-  ↓
-full-screen modal backdrop/dialog
-  ↓
-handled locally + stopPropagation()
-  ×
-underlying DOM / Window gameplay input listener
-
-keyboard
-  ↓
-focus remains inside modal
-  ↓
-handled locally + stopPropagation()
-  ×
-Window gameplay input listener
-```
-
-This requirement is intentionally limited to browser mouse/pointer and keyboard
-interaction. Schema Form v1 does not add InputListener priority, capture, exclusivity,
-or suspension semantics and does not modify Main/InputTarget/InputGate authority.
-
-Gamepad or other non-DOM physical input suppression is outside this modal
-presentation requirement.
+This requirement is limited to browser pointer/keyboard interaction. Gamepad and
+other non-DOM physical input suppression remain outside Schema Form v1.
 
 ### Field RenderData
 
@@ -1217,15 +1170,21 @@ Lit and Web Awesome are build-time browser dependencies, not runtime module-load
 requirements of Renderer Window. esbuild bundles all selected component JavaScript
 into `schema-form.browser.js`.
 
-The browser style entry imports Web Awesome's bundled stylesheet:
+The browser CSS entry imports only the required Web Awesome theme and palette:
 
-```ts
-import "@awesome.me/webawesome/dist/styles/webawesome.css";
+```css
+@import "@awesome.me/webawesome/dist/styles/themes/default.css";
+@import "@awesome.me/webawesome/dist/styles/color/palettes/default.css";
 ```
 
-plus Schema Form modal/layout/override styles. esbuild emits the resulting
-`schema-form.browser.css`. Games and Renderer hosts do not separately know which
-Web Awesome theme, palette, or version Schema Form uses.
+It MUST NOT import the aggregate `webawesome.css` bundle. Schema Form adds only its
+own modal/layout/override CSS. esbuild emits the resulting
+`schema-form.browser.css`.
+
+The root RenderNode carries the fixed Web Awesome theme/palette/variant classes, so
+the variables cascade through `lr-schema-form`, its projected field children, and
+their shadow trees without mutating `document.documentElement` or requiring the game
+host to know Web Awesome.
 
 The browser source imports only required Web Awesome component implementations:
 
@@ -1236,11 +1195,19 @@ The browser source imports only required Web Awesome component implementations:
 @awesome.me/webawesome/dist/components/select/select.js
 @awesome.me/webawesome/dist/components/option/option.js
 @awesome.me/webawesome/dist/components/button/button.js
+@awesome.me/webawesome/dist/components/dialog/dialog.js
 ```
 
 The final classic bundle MUST contain no dynamic `import()`, no external bare npm
 specifier, no ESM module graph, and no dependency on `node_modules` at presentation
 runtime.
+
+The bundled Web Awesome component registrations are Window-global. Schema Form v1
+therefore claims exclusive ownership of the Web Awesome tags bundled into this
+presentation artifact for the Renderer Window lifetime. It does not attempt to reuse,
+version-negotiate, or coexist with a separately loaded Web Awesome bundle. Any
+registration collision during classic-script evaluation is an ordinary Web
+Presentation bootstrap failure, so presentation does not start in that Window.
 
 The v1 control mapping is frozen:
 
@@ -1287,7 +1254,8 @@ A number field deliberately uses a text-capable `wa-input`. The field wrapper ke
 
 ```ts
 private draft: string;
-private lastAuthoritativeValue: number | undefined;
+private dirty: boolean;
+private authoritativeValue: number | undefined;
 ```
 
 The presentation snapshot conversion is exact:
@@ -1314,18 +1282,36 @@ A complete numeric draft follows JSON number lexical structure:
 The DOM input may accept a wider temporary lexical draft; only `readFormValue()`
 performs the conversion above.
 
-RenderData reconciliation preserves an active compatible lexical draft whenever the
-incoming authoritative value is unchanged from `lastAuthoritativeValue`.
-
-When the authoritative value actually changes:
+Reconciliation is intentionally asymmetric because opened Schema Form v1 has no
+external field-value mutation API. Canonical value changes during the interaction
+come from the same browser presentation snapshots.
 
 ```text
-undefined → draft = ""
-number    → draft = String(value)
+first successful RenderData
+→ authoritativeValue = incoming value
+→ draft = incoming value === undefined ? "" : String(incoming value)
+→ dirty = false
+
+local number input
+→ draft = exact editor text
+→ dirty = true
+
+later successful RenderData while dirty=false
+→ authoritativeValue = incoming value
+→ synchronize draft from incoming value
+
+later successful RenderData while dirty=true
+→ authoritativeValue = incoming value
+→ NEVER overwrite draft
+→ update only errors/label/constraints/other presentation facts
 ```
 
-and `lastAuthoritativeValue` is updated. This is the only v1 authoritative reset of
-the number draft.
+Once the user has edited a number field, `dirty` remains true for that field
+element's lifetime. It is reset only by a fresh element/form lifetime.
+
+This preserves incomplete or formatting-significant drafts such as `"-"`, `"1."`,
+`"1.0"`, and `"1e"` across Change/validation RenderData round trips while the
+Subsystem remains authority for canonical number-or-absence state.
 
 ### Stable editing DOM
 
@@ -1366,8 +1352,9 @@ and incomplete numeric text, belong to Presentation.
 
 Schema Form remains authority for canonical field values.
 
-An incoming RenderData refresh must not unnecessarily destroy an equivalent active
-local draft. An actual authoritative value change may replace the local draft.
+Before the first local number edit, RenderData remains the source of the editor text.
+After the first local number edit, later RenderData MUST NOT replace that field's
+lexical draft for the lifetime of the current element.
 
 ### Presentation actions
 
@@ -1649,30 +1636,14 @@ outward presentation value  = null
 The local draft `"1."` is not sent to the subsystem. The root form contributes
 `null` for that field.
 
-If validation causes the subsystem to return RenderData whose authoritative value has
-not changed, the field component must not unnecessarily destroy the active local
-draft merely because the authoritative value remains `1` or becomes absent.
-
-A field should therefore distinguish at least:
-
-```text
-last authoritative value
-current presentation-local editor state
-```
-
-On `receiveRenderData()`:
-
-```text
-authoritative value unchanged
-→ preserve compatible active local draft
-→ update error/label/constraints
-
-authoritative value actually changed
-→ authoritative replacement may reset local draft
-```
+If validation returns RenderData after such an edit, the field component preserves
+the exact draft regardless of whether the canonical authoritative value is unchanged,
+changed to another number, or becomes absent. It still records the new authoritative
+value and applies new errors/labels/constraints.
 
 This keeps number editing, selection, focus, and IME behavior stable while the
-subsystem continues to own canonical values and validation.
+Subsystem continues to own canonical values and validation. There is no v1
+programmatic external field-value update that needs to override a dirty editor.
 
 ### Existing Web Presentation dependency
 
