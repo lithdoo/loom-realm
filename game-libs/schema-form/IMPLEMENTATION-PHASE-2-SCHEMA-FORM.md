@@ -1132,14 +1132,12 @@ The number field keeps:
 ```ts
 private draft: string;
 private dirty: boolean;
-private authoritativeValue: number | undefined;
 ```
 
 State transitions are frozen:
 
 ```text
 first successful RenderData:
-  authoritativeValue = incoming value
   draft = incoming value === undefined ? "" : String(incoming value)
   dirty = false
 
@@ -1148,11 +1146,9 @@ local input:
   dirty = true
 
 later RenderData while dirty=false:
-  authoritativeValue = incoming value
   draft = incoming value === undefined ? "" : String(incoming value)
 
 later RenderData while dirty=true:
-  authoritativeValue = incoming value
   preserve draft exactly
   update errors/label/constraints/etc.
 ```
@@ -1160,9 +1156,8 @@ later RenderData while dirty=true:
 Once dirty, the field remains dirty for that element lifetime. Only a fresh field
 element/form resets it.
 
-Do not compare incoming authoritative value to decide whether a dirty draft should be
-rewritten. In particular, all of these must survive their own Change/validation
-round-trip unchanged:
+Later successful RenderData must never rewrite a dirty draft. In particular, all of
+these must survive their own Change/validation round-trip unchanged:
 
 ```text
 "-"
@@ -1283,12 +1278,41 @@ wa-dialog remains open until RenderDomain removal
 without-header=true
 Schema Form shell width 600px, max-width 80vw
 shell max-height 80vh
-only shell body scrolls
+wa-dialog internal body overflow is hidden
+shell overflow is hidden
+shell/body min-width and min-height allow grid content to shrink
+only Schema Form body scrolls vertically with overflow-y:auto
+Schema Form body prohibits horizontal scrolling with overflow-x:hidden
+Schema Form body contains overscroll so wheel scrolling does not move the page
 header/footer fixed in shell grid
+short forms remain compact rather than filling 80vh
+RenderData refresh preserves body scrollTop through stable DOM
 accessible label = title ?? "Form"
 light-dismiss disabled
 wa-hide always preventDefault()
-previous focus restoration is owned by wa-dialog/browser behavior
+wa-dialog owns modal/top-layer mechanics, focus containment while open,
+  and backdrop/modal browser behavior
+lr-schema-form owns previous-focus capture and restoration after
+  RenderDomain-driven removal
+```
+
+On connection, `lr-schema-form` captures the previously focused meaningful
+`HTMLElement`. Removal after submit, cancel, or Frame abort runs
+`disconnectedCallback()`, which queues restoration. It calls
+`focus({ preventScroll: true })` only if the previous target remains connected,
+visible, enabled, not inert, and focusable. If the target is detached, disabled,
+hidden, inert, or otherwise unfocusable, restoration is skipped silently without
+throwing.
+
+Because every `wa-hide` is prevented, the normal successful `wa-dialog` close path
+is not a settlement path. The actual lifecycle is:
+
+```text
+semantic submit/cancel/abort
+→ Subsystem settles
+→ RenderDomain closes
+→ Schema Form DOM is removed
+→ lr-schema-form restores previous focus
 ```
 
 Pointer/keyboard events handled inside the Schema Form presentation are still stopped
@@ -1296,6 +1320,20 @@ before Window-level physical input handling. No InputListener/InputTarget author
 changes are introduced.
 
 Backdrop interaction never emits cancel because `light-dismiss` is not enabled.
+
+Long-form scroll ownership is exact:
+
+```text
+wa-dialog internal body → never scrolls
+Schema Form shell       → never scrolls
+Schema Form body        → only vertical scroll container
+header/footer           → outside body; do not move with field scrolling
+document/page           → unchanged by wheel scrolling over the body
+horizontal form scroll  → prohibited
+```
+
+Do not add a scroll manager or store scroll position. Stable Lit DOM preserves the
+body element and its current `scrollTop` across RenderData refreshes.
 
 ## 31. Browser RenderData validation failure
 
@@ -1475,13 +1513,21 @@ fresh element resets dirty state from authoritative value
 Chromium qualification covers:
 
 ```text
-wa-dialog supplies modal semantics/focus behavior
+wa-dialog supplies modal/top-layer mechanics and focus containment while open
+lr-schema-form restores previous focus after RenderDomain-driven removal
 accessible label title/fallback
 cancelable controls
 wa-hide is always prevented
 Escape emits cancel only when allowed
 backdrop does not cancel because light-dismiss is disabled
 pointer/keyboard propagation blocked before Window input source
+short form remains compact with no body scroll range
+long form is capped at 80vh and only its body has vertical scroll range
+real Chromium wheel input increases body scrollTop without changing page scrollTop
+wa-dialog body and Schema Form shell have no independent scroll range
+body scroll box stays between fixed header/footer rows
+horizontal form scrolling is absent for long text and controls
+RenderData refresh preserves body identity and scrollTop
 Change/Submit emit complete snapshots
 browser >128 KiB data never reaches emitCustomEvent
 size error clears after snapshot becomes small
@@ -1616,7 +1662,9 @@ Phase 2 is complete only if:
 [ ] browser event data <= 131072 bytes before emit
 [ ] subsystem independently rechecks <= 131072 bytes before parsing
 [ ] dirty number draft is never overwritten by later RenderData in same element lifetime
-[ ] wa-dialog owns modal/focus/backdrop mechanics; Schema Form owns semantic cancel
+[ ] wa-dialog owns modal/top-layer/focus-containment/backdrop mechanics
+[ ] lr-schema-form owns previous-focus capture/restoration after RenderDomain removal
+[ ] Schema Form owns semantic cancel
 [ ] modal DOM blocking does not change LoomRealm input authority
 [ ] browser bundle contains no runtime ESM/dynamic-import/bare-specifier dependency
 [ ] CSS bundle owns only required Web Awesome theme/palette + Schema Form styles
