@@ -134,14 +134,18 @@ tsc -p tsconfig.json
 → dist/browser/schema-form.browser.css
 ```
 
-The browser style entry includes:
+The browser CSS entry imports only:
 
-```ts
-import "@awesome.me/webawesome/dist/styles/webawesome.css";
+```css
+@import "@awesome.me/webawesome/dist/styles/themes/default.css";
+@import "@awesome.me/webawesome/dist/styles/color/palettes/default.css";
 ```
 
-plus Schema Form modal/layout/override styles. The final CSS is owned by the Schema
-Form browser artifact; the game/host does not separately load a Web Awesome theme.
+plus Schema Form modal/layout/override styles.
+
+Do NOT import the aggregate `webawesome.css` bundle. The root RenderNode's fixed
+Web Awesome theme/palette/variant classes scope inherited design tokens to the Schema
+Form subtree. The game/host does not separately load or configure Web Awesome.
 
 Package exports become:
 
@@ -236,10 +240,22 @@ invalid scope capability object
 invalid Frame capability object
 invalid request object
 cancelable present but not boolean
-→ synchronous TypeError / rejected async function TypeError
+→ returned Promise rejects TypeError
 ```
 
 Do not map those outer API-shape failures to a `SchemaFormErrorCode`.
+
+Implement `openSchemaForm()` as an async function (or an observably equivalent
+always-Promise function). It MUST NOT synchronously throw for argument/preflight
+validation. All failures are observed by awaiting/catching the returned Promise:
+
+```text
+outer API shape        → reject TypeError
+schema/initial/active   → reject SchemaFormError
+validator program       → reject SchemaFormError
+Frame abort             → reject AbortError
+internal opened failure → reject original/internal error after cleanup
+```
 
 `request.schema` shape/content failures map to
 `SCHEMA_FORM_INVALID_SCHEMA`.
@@ -444,14 +460,16 @@ Compile validators after the one-active-form check and before Session resources.
 
 ## 11. Validator execution and result rules
 
-Each execution receives:
+Each execution receives a detached `SchemaFormDataV1` snapshot:
 
 ```ts
-Object.freeze({ ...canonicalData })
+const validationData: SchemaFormDataV1 =
+  Object.freeze({ ...canonicalData });
 ```
 
-All canonical values are primitives, so a shallow frozen detached snapshot is
-sufficient to isolate module state.
+The validator argument type is exactly `SchemaFormDataV1`, not
+`Readonly<Record<string, unknown>>`. All canonical values are primitives, so a
+shallow frozen detached snapshot is sufficient to isolate module state.
 
 Execution throw:
 
@@ -570,8 +588,15 @@ Initial RenderDomain state:
 ```text
 zIndex = 2_147_483_647
 roots = one lr-schema-form
+root attrs.class =
+  "wa-theme-default wa-palette-default wa-brand-blue wa-neutral-gray " +
+  "wa-success-green wa-warning-yellow wa-danger-red"
 children = one lr-schema-form-field per schema field, in schema order
 ```
+
+The root theme classes are private browser-presentation wiring. They are not schema
+ABI. They scope Web Awesome design tokens to this form subtree without mutating
+document-global classes.
 
 Use `RenderDomain.update()` for ordinary value/error refreshes.
 
@@ -841,7 +866,7 @@ lr-schema-form-field
 
 at classic bundle evaluation time.
 
-Before defining either tag:
+Before defining either LoomRealm-owned tag:
 
 ```text
 customElements.get("lr-schema-form") === undefined
@@ -850,6 +875,17 @@ customElements.get("lr-schema-form-field") === undefined
 
 must both hold. Otherwise throw `TypeError` and define neither Schema Form tag.
 
+The bundled Web Awesome modules perform their own Window-global `wa-*` registrations
+during classic-script evaluation. Schema Form v1 deliberately treats those bundled
+Web Awesome registrations as exclusively owned by this presentation artifact for the
+Renderer Window lifetime.
+
+There is no reuse/version negotiation with another Web Awesome bundle. A collision
+on any bundled/transitive `wa-*` tag is an ordinary Web Presentation bootstrap
+script-evaluation failure. Presentation does not start in that Window. Partial vendor
+registrations left by a failed bootstrap are irrelevant because that Renderer Window
+does not enter presentation.
+
 The finished `dist/browser/schema-form.browser.js` is loaded as an ordinary ordered
 classic script by Web Presentation Config v1 before projection starts. There is no
 runtime `import()`, registration Promise, retry state, module resolver, or dynamic
@@ -857,7 +893,8 @@ component loader.
 
 ## 25. Browser bundling and Web Awesome imports
 
-The build-time source statically imports exactly the Web Awesome components used:
+The build-time source statically imports exactly the directly used Web Awesome
+components:
 
 ```ts
 import "@awesome.me/webawesome/dist/components/input/input.js";
@@ -866,18 +903,25 @@ import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
 import "@awesome.me/webawesome/dist/components/select/select.js";
 import "@awesome.me/webawesome/dist/components/option/option.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
+import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
 ```
 
-It also causes the browser CSS bundle to include:
+Transitive Web Awesome dependencies required by the pinned components are bundled
+normally by esbuild.
 
-```ts
-import "@awesome.me/webawesome/dist/styles/webawesome.css";
+The CSS entry imports:
+
+```css
+@import "@awesome.me/webawesome/dist/styles/themes/default.css";
+@import "@awesome.me/webawesome/dist/styles/color/palettes/default.css";
 ```
 
-or the mechanically equivalent esbuild CSS entry/import arrangement.
+plus Schema Form-owned styles. Do not import
+`@awesome.me/webawesome/dist/styles/webawesome.css`.
 
 esbuild MUST bundle the component implementations into one classic IIFE JS artifact
-and emit one CSS artifact containing Web Awesome styles plus Schema Form styles.
+and emit one CSS artifact containing only the selected Web Awesome theme/palette plus
+Schema Form styles.
 
 Final-artifact checks MUST prove:
 
@@ -886,7 +930,8 @@ schema-form.browser.js has no dynamic import()
 no unresolved bare @awesome.me/* or lit import specifiers
 no ESM import/export syntax required at runtime
 no dependency on node_modules at presentation runtime
-schema-form.browser.css contains the required Web Awesome + Schema Form styles
+schema-form.browser.css contains default theme + default palette + Schema Form styles
+schema-form.browser.css does not include aggregate Web Awesome native/utility bundle
 ```
 
 Do not use the Web Awesome autoloader.
@@ -938,7 +983,7 @@ read value by frozen JSON-number lexical rule
 invalid/incomplete → null
 ```
 
-## 27. Numeric lexical rule
+## 27. Numeric lexical rule and reconciliation
 
 A complete canonicalizable draft matches:
 
@@ -972,17 +1017,53 @@ Examples:
 "1,5"    → null
 ```
 
-Reconciliation uses `lastAuthoritativeValue`:
+The number field keeps:
+
+```ts
+private draft: string;
+private dirty: boolean;
+private authoritativeValue: number | undefined;
+```
+
+State transitions are frozen:
 
 ```text
-incoming authoritative value unchanged
-→ preserve active compatible draft
+first successful RenderData:
+  authoritativeValue = incoming value
+  draft = incoming value === undefined ? "" : String(incoming value)
+  dirty = false
 
-incoming authoritative value changed
-→ undefined becomes ""
-→ number becomes String(number)
-→ replace draft
+local input:
+  draft = exact editor text
+  dirty = true
+
+later RenderData while dirty=false:
+  authoritativeValue = incoming value
+  draft = incoming value === undefined ? "" : String(incoming value)
+
+later RenderData while dirty=true:
+  authoritativeValue = incoming value
+  preserve draft exactly
+  update errors/label/constraints/etc.
 ```
+
+Once dirty, the field remains dirty for that element lifetime. Only a fresh field
+element/form resets it.
+
+Do not compare incoming authoritative value to decide whether a dirty draft should be
+rewritten. In particular, all of these must survive their own Change/validation
+round-trip unchanged:
+
+```text
+"-"
+"1."
+"1.0"
+"1e"
+```
+
+This is safe in v1 because there is no external programmatic field-value mutation API
+for an already-open form. Canonical changes during the interaction originate from
+the same browser presentation snapshots.
 
 ## 28. lr-schema-form root
 
@@ -990,11 +1071,33 @@ The root element:
 
 - stores the injected `WebPresentationContext`;
 - validates root RenderData;
-- renders a modal `<form novalidate>`;
-- owns Submit/Cancel/Escape/header-close actions;
+- renders one always-open `wa-dialog` with `without-header`;
+- renders its own Schema Form header/body/footer shell inside that dialog;
+- owns Submit/Cancel/Escape/header-close semantics;
 - collects all direct current field elements into a complete snapshot;
 - is the only Schema Form node calling `context.emitCustomEvent()`;
 - accepts a field notification only when that field is still its direct child.
+
+The `wa-dialog` accessible label is `RenderData.title` or presentation fallback
+`"Form"`. Do not enable `light-dismiss`.
+
+Every `wa-hide` is canceled synchronously with `preventDefault()`.
+
+```text
+cancelable=true:
+  wa-hide request (including Escape)
+  → preventDefault()
+  → local cancel()
+  → emit semantic "cancel"
+
+cancelable=false:
+  wa-hide request
+  → preventDefault()
+  → emit nothing
+```
+
+Header Close and footer Cancel are rendered only when cancelable and call the same
+local `cancel()`; they never directly set `wa-dialog.open=false`.
 
 Outward names:
 
@@ -1049,40 +1152,29 @@ Cancel always uses an empty data object and is unaffected by snapshot size.
 
 ## 30. Modal behavior
 
-Root modal requirements:
+Schema Form delegates browser modality to the pinned Web Awesome `wa-dialog`.
+Do not implement a second focus trap or backdrop.
+
+Requirements:
 
 ```text
-full-screen backdrop
-dialog width 600px, max-width 80vw
-max-height 80vh
-body scroll only
-header/footer fixed in dialog layout
-role="dialog"
-aria-modal="true"
-focus trapped inside
-previous focus restored on disconnect/close where still focusable
+wa-dialog remains open until RenderDomain removal
+without-header=true
+Schema Form shell width 600px, max-width 80vw
+shell max-height 80vh
+only shell body scrolls
+header/footer fixed in shell grid
+accessible label = title ?? "Form"
+light-dismiss disabled
+wa-hide always preventDefault()
+previous focus restoration is owned by wa-dialog/browser behavior
 ```
 
-Cancelable:
+Pointer/keyboard events handled inside the Schema Form presentation are still stopped
+before Window-level physical input handling. No InputListener/InputTarget authority
+changes are introduced.
 
-```text
-true:
-  header close
-  footer Cancel
-  Escape
-  → cancel()
-
-false:
-  no close affordance
-  no Cancel button
-  Escape ignored
-```
-
-Backdrop never cancels.
-
-Pointer/keyboard events handled inside the modal presentation are stopped before
-Window-level physical input handling. No InputListener/InputTarget authority changes
-are introduced.
+Backdrop interaction never emits cancel because `light-dismiss` is not enabled.
 
 ## 31. Browser RenderData validation failure
 
@@ -1161,6 +1253,7 @@ change validator independent from submit validator
 Cover:
 
 ```text
+outer API/preflight failures reject Promise and never throw synchronously
 one active form per same Frame
 different Frames can open independently
 active registration released after submit
@@ -1224,8 +1317,10 @@ Cover:
 ```text
 classic bundle evaluation registers both Schema Form tags
 foreign Schema Form tag collision throws TypeError before defining either tag
-bundle contains required Web Awesome element registrations
-bundle CSS includes Web Awesome + Schema Form styles
+bundle contains required Web Awesome element registrations including wa-dialog
+preexisting bundled wa-* collision causes bootstrap failure
+bundle CSS contains default theme + default palette + Schema Form styles
+bundle CSS excludes aggregate webawesome.css/native-utility layer
 no runtime dynamic import/module loader/bare npm specifier
 root/field RenderData runtime validation
 stable control identity across refreshes
@@ -1238,8 +1333,10 @@ boolean unchecked false
 select unset null
 select explicit "" option
 number lexical cases
-authoritative number unchanged preserves draft
-authoritative number changed replaces draft
+pristine number follows authoritative RenderData
+dirty "-", "1.", "1.0", "1e" survive canonical RenderData round trips exactly
+dirty number draft survives authoritative number→unset and unset→number transitions
+fresh element resets dirty state from authoritative value
 ```
 
 ## 38. Testing: modal + event size
@@ -1247,11 +1344,12 @@ authoritative number changed replaces draft
 Chromium qualification covers:
 
 ```text
-role=dialog + aria-modal
-focus enters/traps/restores
+wa-dialog supplies modal semantics/focus behavior
+accessible label title/fallback
 cancelable controls
-Escape cancel only when allowed
-backdrop does not cancel
+wa-hide is always prevented
+Escape emits cancel only when allowed
+backdrop does not cancel because light-dismiss is disabled
 pointer/keyboard propagation blocked before Window input source
 Change/Submit emit complete snapshots
 browser >128 KiB data never reaches emitCustomEvent
@@ -1356,10 +1454,12 @@ Phase 2 is complete only if:
 [ ] Submit is independent of previous Change delivery
 [ ] browser event data <= 131072 bytes before emit
 [ ] subsystem independently rechecks <= 131072 bytes before parsing
-[ ] number draft model preserves incomplete lexical edits
+[ ] dirty number draft is never overwritten by later RenderData in same element lifetime
+[ ] wa-dialog owns modal/focus/backdrop mechanics; Schema Form owns semantic cancel
 [ ] modal DOM blocking does not change LoomRealm input authority
 [ ] browser bundle contains no runtime ESM/dynamic-import/bare-specifier dependency
-[ ] CSS bundle owns required Web Awesome + Schema Form styles
+[ ] CSS bundle owns only required Web Awesome theme/palette + Schema Form styles
+[ ] bundled Web Awesome tag namespace ownership/collision behavior is qualified
 [ ] Chromium qualification proves real bundled browser path
 [ ] no new Renderer/Main/Subsystem architecture change was required
 ```
