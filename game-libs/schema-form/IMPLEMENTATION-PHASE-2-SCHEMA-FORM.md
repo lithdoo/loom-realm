@@ -755,41 +755,56 @@ Do not treat backdrop clicks as Cancel.
 `@loomrealm-game/schema-form/browser` exports:
 
 ```ts
-export function registerSchemaFormElements(): void;
+export function registerSchemaFormElements(): Promise<void>;
 ```
 
 It MAY also export the two element constructor types/classes if useful for direct
 browser tests, but they are not exported from the root package.
 
-Registration behavior:
+Importing the browser subpath MUST NOT register either Schema Form tags or Web Awesome
+tags.
+
+Use one module-local registration Promise to converge concurrent calls. The operation
+is:
 
 ```text
-tag absent
-→ define module constructor
-
-tag already defined to exact module constructor
-→ no-op
-
-tag already defined to anything else
-→ synchronous TypeError
+preflight current lr-schema-form / lr-schema-form-field registrations
+→ conflicting constructor → reject TypeError
+→ already exact constructors → resolve
+→ dynamically import required Web Awesome component modules
+→ re-check Schema Form tag collisions
+→ define any absent Schema Form tags
+→ resolve
 ```
 
-No automatic registration on import.
+If dynamic import or registration fails, clear the in-flight registration Promise so
+a later call may retry. Successfully completed registration remains idempotent.
+
+A collision failure is observed as a rejected Promise with `TypeError`; no Schema
+Form tag is intentionally overwritten.
+
+Web Awesome global theme CSS is not injected by this function. The Web Presentation
+host/bootstrap MUST load a compatible Web Awesome theme stylesheet before presenting
+Schema Form. Chromium qualification loads the pinned 3.14.0 default theme explicitly. The browser entry point and element module
+MUST NOT statically import Web Awesome component-registration modules.
 
 ## 25. Web Awesome imports
 
-Cherry-pick exactly the components used:
+Load exactly these component modules inside the explicit async registration operation:
 
 ```ts
-import "@awesome.me/webawesome/dist/components/input/input.js";
-import "@awesome.me/webawesome/dist/components/textarea/textarea.js";
-import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
-import "@awesome.me/webawesome/dist/components/select/select.js";
-import "@awesome.me/webawesome/dist/components/option/option.js";
-import "@awesome.me/webawesome/dist/components/button/button.js";
+await Promise.all([
+  import("@awesome.me/webawesome/dist/components/input/input.js"),
+  import("@awesome.me/webawesome/dist/components/textarea/textarea.js"),
+  import("@awesome.me/webawesome/dist/components/checkbox/checkbox.js"),
+  import("@awesome.me/webawesome/dist/components/select/select.js"),
+  import("@awesome.me/webawesome/dist/components/option/option.js"),
+  import("@awesome.me/webawesome/dist/components/button/button.js"),
+]);
 ```
 
-Do not import the Web Awesome autoloader or all components.
+Do not import the Web Awesome autoloader or all components. Do not statically import
+these registration modules at browser-subpath module evaluation time.
 
 Do not use `wa-number-input` in v1.
 
@@ -1109,10 +1124,10 @@ depends on focus/custom-elements/Web Awesome.
 Cover:
 
 ```text
-explicit registration
-idempotent same-constructor registration
-foreign tag collision TypeError
-no import-time registration
+explicit async registration
+concurrent/idempotent same-constructor registration
+foreign tag collision rejected TypeError
+no import-time Schema Form or Web Awesome registration
 root/field RenderData runtime validation
 stable control identity across refreshes
 field→root local communication only
