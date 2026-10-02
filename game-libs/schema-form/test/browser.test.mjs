@@ -1,0 +1,211 @@
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import test from "node:test";
+import { chromium } from "playwright";
+
+const packageRoot = path.resolve(import.meta.dirname, "..");
+const bundlePath = path.join(packageRoot, "dist/browser/schema-form.browser.js");
+const cssPath = path.join(packageRoot, "dist/browser/schema-form.browser.css");
+
+function executablePath() {
+  const candidates = [
+    process.env.LOOMREALM_CHROMIUM_PATH,
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+  ].filter(Boolean);
+  return candidates.find(existsSync);
+}
+
+async function pageWithBundle(t) {
+  const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent("<!doctype html><html><body></body></html>");
+  await page.addStyleTag({ path: cssPath });
+  await page.addScriptTag({ path: bundlePath });
+  return page;
+}
+
+test("classic bundle is isolated and CSS contains only the selected style layers", async () => {
+  const [javascript, stylesheet] = await Promise.all([readFile(bundlePath, "utf8"), readFile(cssPath, "utf8")]);
+  assert.doesNotMatch(javascript, /\bimport\s*\(/);
+  assert.doesNotMatch(javascript, /\b(?:import|export)\s+(?:[^({*]|\{)/);
+  assert.doesNotMatch(javascript, /(?:from\s*|import\s*)["'](?:lit|@awesome\.me|@loomrealm\/renderer)/);
+  assert.match(stylesheet, /wa-theme-default/);
+  assert.match(stylesheet, /wa-palette-default/);
+  assert.match(stylesheet, /\/\* browser\/schema-form\.browser\.css \*\//);
+  assert.doesNotMatch(stylesheet, /wa-visually-hidden|wa-cloak/);
+});
+
+test("bundle registers required elements and foreign LoomRealm collision defines neither", async (t) => {
+  const page = await pageWithBundle(t);
+  const registered = await page.evaluate(() => [
+    "lr-schema-form", "lr-schema-form-field", "wa-input", "wa-textarea", "wa-checkbox",
+    "wa-select", "wa-option", "wa-button", "wa-dialog", "wa-icon", "wa-tag", "wa-popup", "wa-spinner",
+  ].map((tag) => [tag, customElements.get(tag) !== undefined]));
+  assert.ok(registered.every(([, present]) => present), JSON.stringify(registered));
+
+  const collisionContext = await page.context().browser().newContext();
+  t.after(() => collisionContext.close());
+  const collisionPage = await collisionContext.newPage();
+  await collisionPage.setContent("<!doctype html><html><body></body></html>");
+  await collisionPage.evaluate(() => customElements.define("lr-schema-form", class extends HTMLElement {}));
+  const collisionError = collisionPage.waitForEvent("pageerror");
+  await collisionPage.addScriptTag({ path: bundlePath });
+  assert.match((await collisionError).message, /Schema Form browser element collision/);
+  assert.deepEqual(await collisionPage.evaluate(() => ({
+    root: customElements.get("lr-schema-form") !== undefined,
+    field: customElements.get("lr-schema-form-field") !== undefined,
+  })), { root: true, field: false });
+});
+
+test("Web Awesome namespace collision fails browser bootstrap", async (t) => {
+  const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent("<!doctype html><html><body></body></html>");
+  await page.evaluate(() => customElements.define("wa-input", class extends HTMLElement {}));
+  const collisionError = page.waitForEvent("pageerror");
+  await page.addScriptTag({ path: bundlePath });
+  assert.match((await collisionError).message, /Schema Form browser element collision/);
+  assert.equal(await page.evaluate(() => customElements.get("lr-schema-form") === undefined), true);
+});
+
+test("field controls keep stable DOM, exact event mapping, number drafts and select tokens", async (t) => {
+  const page = await pageWithBundle(t);
+  const result = await page.evaluate(async () => {
+    const events = [];
+    const root = document.createElement("lr-schema-form");
+    root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
+    root.receiveRenderData({ title: "Form", cancelable: true });
+    const stringField = document.createElement("lr-schema-form-field");
+    const numberField = document.createElement("lr-schema-form-field");
+    const selectField = document.createElement("lr-schema-form-field");
+    const booleanField = document.createElement("lr-schema-form-field");
+    root.append(stringField, numberField, selectField, booleanField);
+    document.body.append(root);
+    stringField.receiveRenderData({ key: "text", kind: "string", label: "Text", required: true, value: "", multiline: false, description: "Hint" });
+    numberField.receiveRenderData({ key: "number", kind: "number", label: "Number", required: false, value: 1, integer: false });
+    selectField.receiveRenderData({ key: "select", kind: "select", label: "Select", required: false, options: [{ value: "", label: "Empty" }, { value: "x", label: "X" }] });
+    booleanField.receiveRenderData({ key: "boolean", kind: "boolean", label: "Boolean", required: false, value: false });
+    await Promise.all([root.updateComplete, stringField.updateComplete, numberField.updateComplete, selectField.updateComplete, booleanField.updateComplete]);
+    const stringControl = stringField.shadowRoot.querySelector("wa-input");
+    const numberControl = numberField.shadowRoot.querySelector("wa-input");
+    const selectControl = selectField.shadowRoot.querySelector("wa-select");
+    const booleanControl = booleanField.shadowRoot.querySelector("wa-checkbox");
+
+    stringControl.value = "hello";
+    stringControl.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    numberControl.value = "1.";
+    numberControl.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    selectControl.value = "o:0";
+    selectControl.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    booleanControl.checked = true;
+    booleanControl.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    const afterEvents = events.map((event) => structuredClone(event));
+
+    numberField.receiveRenderData({ key: "number", kind: "number", label: "Changed", required: false, integer: false, error: "Required" });
+    stringField.receiveRenderData({ key: "text", kind: "string", label: "Text 2", required: false, value: "server", multiline: false });
+    await Promise.all([numberField.updateComplete, stringField.updateComplete]);
+    const stable = stringField.shadowRoot.querySelector("wa-input") === stringControl &&
+      numberField.shadowRoot.querySelector("wa-input") === numberControl;
+    const preservedDraft = numberField.shadowRoot.querySelector("wa-input").value;
+    const programmaticCount = events.length;
+
+    const oldLabel = stringField.shadowRoot.querySelector(".label").textContent;
+    let invalidThrew = false;
+    try { stringField.receiveRenderData({ key: "text", kind: "string", label: "Bad", required: false, value: "changed", multiline: false, unknown: true }); }
+    catch (error) { invalidThrew = error instanceof TypeError; }
+    await stringField.updateComplete;
+
+    return {
+      afterEvents,
+      stable,
+      preservedDraft,
+      programmaticCount,
+      invalidThrew,
+      labelAfterInvalid: stringField.shadowRoot.querySelector(".label").textContent,
+      oldLabel,
+      selectOptions: [...selectField.shadowRoot.querySelectorAll("wa-option")].map((option) => option.value),
+      selectExplicitEmpty: selectField.readFormValue(),
+      requiredMarker: stringField.shadowRoot.querySelector(".required") === null,
+    };
+  });
+  assert.equal(result.afterEvents.length, 4);
+  assert.deepEqual(result.afterEvents[0], { name: "change", data: { values: { text: "hello", number: 1, select: null, boolean: false } } });
+  assert.equal(result.afterEvents[1].data.values.number, null);
+  assert.equal(result.afterEvents[2].data.values.select, "");
+  assert.equal(result.afterEvents[3].data.values.boolean, true);
+  assert.equal(result.stable, true);
+  assert.equal(result.preservedDraft, "1.");
+  assert.equal(result.programmaticCount, 4);
+  assert.equal(result.invalidThrew, true);
+  assert.equal(result.labelAfterInvalid, result.oldLabel);
+  assert.deepEqual(result.selectOptions, ["o:0", "o:1"]);
+  assert.deepEqual(result.selectExplicitEmpty, { key: "select", value: "" });
+  assert.equal(result.requiredMarker, true);
+});
+
+test("modal cancel semantics, propagation blocking and local size limit are exact", async (t) => {
+  const page = await pageWithBundle(t);
+  const result = await page.evaluate(async () => {
+    const events = [];
+    let windowKeys = 0;
+    window.addEventListener("keydown", () => { windowKeys += 1; });
+    const root = document.createElement("lr-schema-form");
+    const field = document.createElement("lr-schema-form-field");
+    root.append(field);
+    document.body.append(root);
+    root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
+    root.receiveRenderData({ cancelable: false });
+    field.receiveRenderData({ key: "text", kind: "string", label: "", required: false, value: "", multiline: false });
+    await Promise.all([root.updateComplete, field.updateComplete]);
+    const dialog = root.shadowRoot.querySelector("wa-dialog");
+    const denied = new CustomEvent("wa-hide", { bubbles: true, cancelable: true, composed: true });
+    dialog.dispatchEvent(denied);
+    dialog.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, composed: true, key: "A" }));
+    const deniedEvents = events.length;
+
+    root.receiveRenderData({ title: "Title", cancelable: true });
+    await root.updateComplete;
+    const allowed = new CustomEvent("wa-hide", { bubbles: true, cancelable: true, composed: true });
+    root.shadowRoot.querySelector("wa-dialog").dispatchEvent(allowed);
+    const input = field.shadowRoot.querySelector("wa-input");
+    input.value = "x".repeat(131_100);
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    await root.updateComplete;
+    const oversizeCount = events.length;
+    const showedSizeError = root.shadowRoot.querySelector(".size-error")?.textContent;
+    input.value = "small";
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    await root.updateComplete;
+    return {
+      deniedPrevented: denied.defaultPrevented,
+      allowedPrevented: allowed.defaultPrevented,
+      deniedEvents,
+      names: events.map((event) => event.name),
+      oversizeCount,
+      showedSizeError,
+      sizeErrorCleared: root.shadowRoot.querySelector(".size-error") === null,
+      windowKeys,
+      label: root.shadowRoot.querySelector("wa-dialog").label,
+      open: root.shadowRoot.querySelector("wa-dialog").open,
+      lightDismiss: root.shadowRoot.querySelector("wa-dialog").lightDismiss,
+    };
+  });
+  assert.equal(result.deniedPrevented, true);
+  assert.equal(result.allowedPrevented, true);
+  assert.equal(result.deniedEvents, 0);
+  assert.deepEqual(result.names, ["cancel", "change"]);
+  assert.equal(result.oversizeCount, 1);
+  assert.equal(result.showedSizeError, "Form data is too large");
+  assert.equal(result.sizeErrorCleared, true);
+  assert.equal(result.windowKeys, 0);
+  assert.equal(result.label, "Title");
+  assert.equal(result.open, true);
+  assert.equal(result.lightDismiss, false);
+});

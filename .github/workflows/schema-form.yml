@@ -1,0 +1,64 @@
+name: Schema Form v1
+
+on:
+  pull_request:
+    paths:
+      - "game-libs/schema-form/**"
+      - "test/schema-form-v1/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/schema-form.yml"
+      - ".github/actions/setup-workspace/**"
+  push:
+    branches: [main]
+    paths:
+      - "game-libs/schema-form/**"
+      - "test/schema-form-v1/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/schema-form.yml"
+      - ".github/actions/setup-workspace/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  schema-form:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install qualification Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Test Schema Form package
+        run: npm test -w @loomrealm-game/schema-form
+
+      - name: Test architecture dependencies
+        run: |
+          npm test -w @loomrealm/data
+          npm test -w @loomrealm/subsystem
+          npm test -w @loomrealm/renderer
+
+      - name: Run M13 Web Presentation qualification
+        run: npm run test:m13:qualification
+
+      - name: Run Schema Form Chromium qualification
+        run: npm run test:schema-form:qualification
+
+      - name: Verify publishable package surface
+        run: npm pack -w @loomrealm-game/schema-form --dry-run
