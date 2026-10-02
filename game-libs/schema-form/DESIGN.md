@@ -1,6 +1,6 @@
 # Schema Form Design
 
-Status: draft
+Status: **Frozen / Phase 2 implementation-ready / no design discretion**
 
 This document defines the v1 form declaration shape and public module boundary for
 `@loomrealm-game/schema-form`.
@@ -454,10 +454,12 @@ initialValue, when present, matches one option.value
 
 `initialValue` must not contain unknown field keys.
 
-A Change or Submit presentation payload must remain below 128 KiB after compact JSON
-encoding. Presentation must contain an oversize snapshot locally rather than passing
-it into the Renderer/Data writer. The lower limit intentionally leaves room below
-the generic User Input transport hard limit.
+For Change and Submit, the complete component-supplied custom-event data object
+(`{ values: ... }`) must have compact JSON UTF-8 size <= 131,072 bytes (128 KiB).
+The browser root performs this check before calling `emitCustomEvent()`. Oversize
+Change snapshots remain local and are not emitted; an oversize Submit also remains
+local and displays the presentation-local form-size error defined below. The lower
+limit intentionally leaves room below the generic User Input transport hard limit.
 
 ## Trusted scripted validation
 
@@ -791,49 +793,61 @@ initial-value precedence, canonical form values, or submission validity.
 
 The v1 presentation uses one root element and one stable child RenderNode per field.
 
-Each `openSchemaForm()` call allocates a unique root RenderNode key for that form
-instance. The key is stable for the lifetime of the open form and is used to correlate
-presentation events back to that instance without exposing the RenderDomain wire id.
+Renderer node identity is private implementation identity. It MUST NOT be derived
+from the schema field key. A legal `field.key` may already consume the full
+128-byte RenderNode key limit, so prefixing or otherwise embedding it into a node key
+would make valid Schema Form declarations unrenderable.
 
-For example:
+Each `openSchemaForm()` allocates one process-local monotonic safe-integer serial.
+For serial `N` the implementation uses short internal keys:
 
 ```text
-lr-schema-form                schema-form:12
-├── lr-schema-form-field      field:name
-├── lr-schema-form-field      field:age
-├── lr-schema-form-field      field:enabled
-└── lr-schema-form-field      field:class
+root       sf:N
+field 0    sf:N:f:0
+field 1    sf:N:f:1
+...
 ```
+
+The exact textual spelling above is frozen for v1 implementation consistency but is
+not public Schema Form semantic identity. The serial is never reused while the
+process is alive. If another serial cannot be represented as a JavaScript safe
+integer, opening a new form fails as an internal module failure rather than wrapping
+or reusing an old serial.
 
 Conceptually:
 
 ```ts
-const rootKey = allocateSchemaFormRootKey();
+const rootKey = `sf:${formSerial}`;
 
 {
   key: rootKey,
   tag: "lr-schema-form",
   attrs: {},
   data: formRenderData,
-  children: fields.map((field) => ({
-    key: `field:${field.key}`,
+  children: fields.map((field, index) => ({
+    key: `sf:${formSerial}:f:${index}`,
     tag: "lr-schema-form-field",
     attrs: {},
-    data: fieldRenderData,
+    data: {
+      ...fieldRenderData,
+      key: field.key,
+    },
     children: [],
   })),
 }
 ```
 
-A root key may be implemented with a process-local monotonic serial such as
-`schema-form:12`. The exact textual serial is private implementation detail; uniqueness
-among concurrently/live created form RenderNodes is the requirement.
+The schema `field.key` remains only semantic form identity and is carried in field
+RenderData. Field order is represented by RenderNode child order. A field kind and
+its internal RenderNode key are stable for the lifetime of one open form.
 
-The field declaration key is semantic form identity. The field RenderNode key derives
-deterministically from it. Field order is represented by RenderNode child order.
+Schema Form creates its RenderDomain with:
 
-A field kind is stable for the lifetime of an open form. The presentation must not
-change the tag of a live RenderNode.
+```ts
+const SCHEMA_FORM_Z_INDEX = 2_147_483_647;
+```
+
+v1 does not add a z-index allocator or overlay manager.
 
 ### Root RenderData
 
@@ -1005,7 +1019,7 @@ interface SchemaFormFieldRenderBaseV1 {
 export type SchemaFormFieldRenderDataV1 =
   | (SchemaFormFieldRenderBaseV1 & {
       readonly kind: "string";
-      readonly value?: string;
+      readonly value: string;
       readonly placeholder?: string;
       readonly multiline: boolean;
       readonly minLength?: number;
@@ -1020,7 +1034,7 @@ export type SchemaFormFieldRenderDataV1 =
     })
   | (SchemaFormFieldRenderBaseV1 & {
       readonly kind: "boolean";
-      readonly value?: boolean;
+      readonly value: boolean;
     })
   | (SchemaFormFieldRenderBaseV1 & {
       readonly kind: "select";
@@ -1032,23 +1046,26 @@ export type SchemaFormFieldRenderDataV1 =
     });
 ```
 
-Each field node is self-contained. For example, a field receives its own current
-error string rather than the complete form error map.
+The value-presence rules are exact:
 
-The Web Component must not receive or execute:
+```text
+string   → value is always present; empty is ""
+boolean  → value is always present; unchecked is false
+number   → value member is absent when canonical value is unset
+select   → value member is absent when canonical value is unset
+```
 
-- field defaults;
-- invocation `initialValue`;
-- `validateOnChange`;
-- `validateOnSubmit`;
-- validator source;
-- validation authority state that it is expected to reinterpret.
+When an authoritative number/select changes from a concrete value to unset,
+`RenderDomain.update()` removes the `value` member. It MUST NOT attempt to encode
+`undefined` into RenderData. String/boolean values are always updated through a
+concrete `set.value`.
 
-Schema Form resolves those concerns before projection.
+Each field node is self-contained. A field receives its own current error string
+rather than the complete form error map.
 
-For example, if a number field has `default: 1`, the presentation receives
-`value: 1`; it does not receive an absent value plus a default and decide which one
-to display.
+The Web Component must not receive or execute field defaults, invocation
+`initialValue`, validator source, or any other authority that it would have to
+reinterpret. Schema Form resolves those concerns before projection.
 
 ### Web Components
 
@@ -1080,189 +1097,163 @@ The components receive state through the existing Web presentation
 shape before applying it.
 
 
-### Browser component implementation strategy
+### Browser module and registration boundary
 
-The browser presentation should avoid reimplementing low-level form-control behavior
-such as keyboard interaction, focus management, accessibility semantics, select
-popups, checkbox behavior, and basic control styling.
-
-The preferred v1 implementation stack is:
+The platform-neutral module and browser presentation use separate package entry
+points:
 
 ```text
-LoomRealm Renderer contract
-        │
-        │ receiveRenderData(data)
-        ▼
-lr-schema-form / lr-schema-form-field
-        │
-        │ implemented with
-        ▼
-Lit
-        │
-        │ composes
-        ▼
-Web Awesome controls
+@loomrealm-game/schema-form
+@loomrealm-game/schema-form/browser
 ```
 
-Lit is used only as an implementation aid for the two LoomRealm-owned Custom
-Elements. It provides stable reactive rendering and localized DOM updates while the
-public Renderer contract remains the ordinary Custom Element
-`receiveRenderData(data)` convention.
+The root entry point exports Schema Form declarations, errors, RenderData types, and
+`openSchemaForm()`. It MUST NOT import DOM, Lit, Web Awesome, or register Custom
+Elements as an import side effect.
 
-Web Awesome provides the underlying browser form controls.
+The browser entry point exports:
 
-The intended mapping is:
-
-```text
-Schema Form field                  Browser control
-────────────────────────────────   ─────────────────────
-string + multiline=false           wa-input
-string + multiline=true            wa-textarea
-number                              wa-number-input
-boolean                             wa-checkbox
-select                              wa-select + wa-option
-
-form action                         wa-button
+```ts
+registerSchemaFormElements(): void;
 ```
 
-The LoomRealm-owned wrapper components remain:
+That function registers exactly:
 
 ```text
 lr-schema-form
 lr-schema-form-field
 ```
 
-Third-party component names must not appear in `SchemaFormV1`,
-`SchemaFormFieldRenderDataV1`, public module APIs, or authoritative form state.
-They are browser-presentation implementation details only.
+Registration is explicit. Importing either package entry point alone does not mutate
+the global CustomElementRegistry.
 
-In particular, v1 must not introduce schema properties such as:
+Repeated registration is a no-op only when the existing registrations are the exact
+constructors owned by this module. If either tag is already registered to a different
+constructor, `registerSchemaFormElements()` synchronously throws `TypeError`.
 
-```ts
-widget: "wa-input"
-component: "wa-select"
-```
+The implementation commit updates `package.json` to export `./browser` and keeps
+`sideEffects: false`. Browser compilation includes the DOM library, but the root
+entry point stays platform-neutral in its runtime dependencies.
 
-The dependency direction must remain:
+### Browser component implementation strategy
+
+The v1 browser stack is frozen to:
 
 ```text
-Schema contract
-    ↓
-Schema Form authority
-    ↓
-RenderData contract
-    ↓
-LoomRealm Web Component wrapper
-    ↓
-Lit / Web Awesome
+LoomRealm Web Presentation contract
+        ↓
+lr-schema-form / lr-schema-form-field
+        ↓
+Lit 3.3.3
+        ↓
+Web Awesome 3.14.0
 ```
 
-and never the reverse.
+The implementation commit pins direct dependencies:
+
+```json
+{
+  "lit": "3.3.3",
+  "@awesome.me/webawesome": "3.14.0"
+}
+```
+
+It cherry-picks only the required Web Awesome component modules rather than loading
+an autoloader or the full component set:
+
+```text
+@awesome.me/webawesome/dist/components/input/input.js
+@awesome.me/webawesome/dist/components/textarea/textarea.js
+@awesome.me/webawesome/dist/components/checkbox/checkbox.js
+@awesome.me/webawesome/dist/components/select/select.js
+@awesome.me/webawesome/dist/components/option/option.js
+@awesome.me/webawesome/dist/components/button/button.js
+```
+
+The v1 control mapping is frozen:
+
+```text
+string + multiline=false   → wa-input
+string + multiline=true    → wa-textarea
+number                     → wa-input with text editing + inputmode="decimal"
+boolean                    → wa-checkbox
+select                     → wa-select + wa-option
+form action                → wa-button
+```
+
+`wa-number-input` is intentionally not used in v1. Canonical Schema Form number
+authority must not be coupled to a third-party numeric model that may normalize an
+in-progress lexical draft.
+
+Third-party component names never appear in `SchemaFormV1`,
+`SchemaFormFieldRenderDataV1`, canonical state, or the root public module API.
 
 #### Root form behavior
 
-`lr-schema-form` should render a semantic browser `<form>` shell, field slot, and
-submit/cancel controls.
-
-The browser form should not become validation authority. The preferred browser
-presentation uses `novalidate` and treats Submit as a semantic submit attempt.
-
-Built-in browser or third-party constraint-validation behavior may assist
-presentation, but the Schema Form module remains the authority that decides whether
-submission completes.
+`lr-schema-form` renders a semantic browser `<form novalidate>` shell, field slot,
+and submit/cancel controls. Browser/native validity is not submission authority.
+Submit is only a semantic submit attempt sent back to the Schema Form module.
 
 #### Field wrapper behavior
 
-`lr-schema-form-field` should translate
-`SchemaFormFieldRenderDataV1` into the corresponding third-party form control and
-report local edit changes to its owning `lr-schema-form`.
+`lr-schema-form-field` translates one
+`SchemaFormFieldRenderDataV1` snapshot into the corresponding Web Awesome control
+and reports local edits to its owning `lr-schema-form`.
 
-Field components do not communicate with the Renderer or subsystem directly.
-`lr-schema-form` is the single outward communication boundary for the complete
-form component tree.
-
-It remains responsible for Schema Form-specific presentation concerns such as:
-
-- mapping `label`, `description`, `required`, and `error`;
-- maintaining presentation-local edit state when required;
-- preserving focus, selection, and IME composition;
-- exposing the current error with appropriate accessible semantics;
-- exposing its current presentation edit value to the owning form;
-- notifying the owning form when that local edit value changes;
-- insulating the Schema Form contract from third-party component APIs.
-
-The field wrapper should not own defaults, validation rules, canonical value
-authority, or submission decisions.
+The wrapper owns presentation-only conversion and lexical draft state. It does not
+decide Schema Form validity.
 
 #### Error presentation
 
-The RenderData contract remains:
+Field errors come only from `SchemaFormFieldRenderDataV1.error`. Web Awesome/native
+validation may assist accessibility and presentation but MUST NOT create independent
+Schema Form validation authority.
+
+### Number editing strategy
+
+A number field deliberately uses a text-capable `wa-input`. The field wrapper keeps:
 
 ```ts
-readonly error?: string;
+private draft: string;
+private lastAuthoritativeValue: number | undefined;
 ```
 
-The wrapper may map this onto whatever error, hint, invalid-state, ARIA, or supporting
-text facilities the selected component library provides.
-
-If the third-party component does not provide an appropriate error presentation, the
-wrapper may render LoomRealm-owned error markup around it.
-
-The Schema Form authority must not depend on a third-party validation API or
-third-party error object shape.
-
-#### Number-control qualification
-
-The numeric control requires explicit qualification before its implementation choice
-is frozen.
-
-A browser numeric editor must preserve usable transient lexical states such as:
+The presentation snapshot conversion is exact:
 
 ```text
--
-1.
+""                → null
+"-"               → null
+"+"               → null
+"1." / "-1."      → null
+complete JSON-style decimal/exponent lexical form
+                  → Number(draft), only when finite
+all other drafts  → null
 ```
 
-without prematurely forcing them into canonical JSON numbers or destroying the
-user's local draft.
+No trim, locale decimal conversion, grouping separator conversion, or Unicode-number
+normalization is performed.
 
-The preferred first candidate is `wa-number-input`.
-
-Before freezing that choice, an implementation spike must verify its behavior for:
-
-- incomplete numeric input;
-- negative sign entry;
-- decimal separator entry;
-- focus and selection preservation across RenderData refreshes;
-- `beforeinput`, `input`, and `change` behavior;
-- external authoritative value replacement.
-
-If its normalization behavior conflicts with Schema Form's canonical-value versus
-presentation-draft model, the wrapper should instead use a text-capable control
-(for example `wa-input` with an appropriate input mode) and own numeric lexical
-draft handling itself.
-
-#### Alternative component libraries
-
-Other standards-based Web Component libraries may be evaluated, but they must remain
-behind the same LoomRealm-owned wrapper boundary.
-
-Spectrum Web Components is a possible alternative when adopting the Adobe Spectrum
-design language is desirable.
-
-Lion is a possible white-label foundation, but its own model-value, validation,
-formatting, parsing, and form-registration abstractions overlap substantially with
-Schema Form authority. For v1, that overlap makes it a less direct fit than a thinner
-presentation library.
-
-The preferred v1 direction is therefore:
+A complete numeric draft follows JSON number lexical structure:
 
 ```text
-Lit + Web Awesome
+-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?
 ```
 
-subject to the number-control qualification above.
+The DOM input may accept a wider temporary lexical draft; only `readFormValue()`
+performs the conversion above.
 
+RenderData reconciliation preserves an active compatible lexical draft whenever the
+incoming authoritative value is unchanged from `lastAuthoritativeValue`.
+
+When the authoritative value actually changes:
+
+```text
+undefined → draft = ""
+number    → draft = String(value)
+```
+
+and `lastAuthoritativeValue` is updated. This is the only v1 authoritative reset of
+the number draft.
 
 ### Stable editing DOM
 
@@ -1611,389 +1602,65 @@ authoritative value actually changed
 This keeps number editing, selection, focus, and IME behavior stable while the
 subsystem continues to own canonical values and validation.
 
-### Required LoomRealm Web Presentation extension
+### Existing Web Presentation dependency
 
-The existing Web Presentation API already injects a Renderer-owned context into each
-business Custom Element through:
+The architecture required by Schema Form Phase 2 is already implemented and
+normative. Schema Form consumes it; it does not redefine or extend it.
 
-```ts
-receiveRenderContext(context)
-```
-
-Schema Form does not require a second public capability object or a separate
-presentation-event API surface.
-
-Instead, the existing `WebPresentationContext` is extended directly:
-
-```ts
-interface WebPresentationContext {
-  readonly resources: PresentationResourceClient;
-
-  emitCustomEvent(
-    name: string,
-    data?: JsonObject,
-  ): void;
-}
-```
-
-The intended public surface is exactly the context above. v1 does not introduce an
-additional shape such as:
-
-```ts
-context.events.emit(...)
-```
-
-or a separate public `PresentationEventClient`.
-
-This is an intentional reopen of the current Web Presentation v1 context, whose
-frozen shape currently contains only `resources`.
-
-The reason for reopening is a demonstrated interactive business-component
-requirement: a business Custom Element must be able to report semantic user actions
-back through the Renderer while preserving existing LoomRealm authority boundaries.
-
-This extension must not create a reverse Render protocol and must not make DOM state
-authoritative.
-
-### Shared resources, per-RenderNode context
-
-The current WebProjector implementation creates one shared
-`WebPresentationContext` instance and injects that same object into every projected
-Custom Element.
-
-That implementation is sufficient while the context contains only a Window-scoped
-resource capability:
+The existing path is:
 
 ```text
-all projected elements
-        ↓
-same WebPresentationContext
-        ↓
-same PresentationResourceClient
+WebPresentationContext.emitCustomEvent(name, data)
+    ↓
+Renderer-bound RenderNode provenance/currentness
+    ↓
+x.loomrealm.web-presentation.event
+    ↓
+existing User Input v1 targeted delivery
 ```
 
-It is not sufficient once `emitCustomEvent()` is added.
-
-A call such as:
-
-```ts
-context.emitCustomEvent("submit", data);
-```
-
-must be attributed to the exact live RenderNode that received that context. The
-business component must not be required or allowed to provide Renderer authority
-identity itself.
-
-Therefore the WebProjector implementation changes from:
+Normative platform contracts are:
 
 ```text
-one shared WebPresentationContext
+doc/15-contracts/web-presentation-api-v1.md
+doc/15-contracts/user-input-v1.md
 ```
 
-to:
+Schema Form correlates an incoming event only by the unique root `targetKey`
+allocated for its active form. `domainId` remains generic Renderer provenance and is
+not Schema Form semantic identity.
+
+The root `lr-schema-form` is the only node that emits Renderer custom events.
+Field components communicate with the root locally. The only outward names are:
 
 ```text
-one shared PresentationResourceClient
-+ one WebPresentationContext per live RenderNode
+change
+submit
+cancel
 ```
 
-The resource capability remains shared because its authority/lifetime is
-Renderer-Window scoped.
-
-The event closure is per RenderNode because its authority/lifetime is bound to that
-specific live projected identity.
-
-Conceptually:
+Change and Submit use:
 
 ```ts
-const sharedResources =
-  createPresentationResourceClient(...);
-
-const context = Object.freeze({
-  resources: sharedResources,
-
-  emitCustomEvent(name, data = {}) {
-    emitPresentationEvent({
-      sessionId: record.sessionId,
-      subsystemKey: record.subsystemKey,
-      generation: record.generation,
-      domainId: record.domainId,
-      targetKey: record.targetKey,
-      name,
-      data,
-    });
-  },
-});
-```
-
-The public component API therefore stays simple:
-
-```ts
-context.emitCustomEvent("submit", {
+context.emitCustomEvent(name, {
   values: this.collectValues(),
 });
 ```
 
-while the closure already knows which RenderNode emitted the event.
-
-### Identity-bound capability
-
-A live projected node already has the Renderer-known identity:
+The presentation enforces the Schema Form-specific custom-event data bound before
+calling `emitCustomEvent()`:
 
 ```text
-(Session, subsystemKey, generation, domainId, targetKey)
+compact JSON byte length of the component-supplied data object <= 131,072 bytes
 ```
 
-The Web Component must not be allowed to provide or override:
+For Change, an oversize snapshot is retained locally and no event is emitted. For
+Submit, no event is emitted and the root shows a presentation-local
+"Form data is too large" message. This message is not a field validation error and is
+cleared once the current collected snapshot is within the bound.
 
-```text
-sessionId
-subsystemKey
-generation
-domainId
-targetKey
-frameId
-activationId
-input channel
-```
-
-Those values are Renderer/Main authority facts.
-
-The semantic rule is:
-
-```text
-receiveRenderData(...)
-→ data belongs to this RenderNode
-
-emitCustomEvent(...)
-→ event also belongs to this RenderNode
-```
-
-That symmetry is the reason for binding `emitCustomEvent()` through a
-per-RenderNode context closure rather than through a shared anonymous event function.
-
-Schema Form itself uses the capability only on the root `lr-schema-form`; field
-components communicate with that root locally. The Renderer-level capability remains
-generic so other business Web Components may use the same context contract in the
-future.
-
-### Stale capability behavior
-
-A business component may retain a reference to an old presentation context.
-
-Therefore `emitCustomEvent()` must fail closed after its source RenderNode is no
-longer live.
-
-Before forwarding an event, the WebProjector must verify that:
-
-```text
-Projector is not torn down
-AND Projector has not structurally failed
-AND the bound LiveElement record is still the current record for that identity
-```
-
-If any check fails, the event is dropped.
-
-The ControlHolder must independently re-check current authority before accepting the
-event. At minimum:
-
-```text
-current Session matches
-AND current subsystem Data slot exists
-AND current generation matches
-AND current carrier/store is presentation-current
-AND domainId is live and baselined
-AND targetKey is currently live in that domain
-```
-
-A stale Session, retired generation, removed node, missing baseline, or retired Data
-carrier must never produce subsystem input.
-
-### Presentation custom-event payload
-
-The Web Presentation layer should map the node-bound event onto one reserved custom
-User Input event channel:
-
-```text
-x.loomrealm.web-presentation.event
-```
-
-The payload is:
-
-```ts
-interface WebPresentationCustomEventPayloadV1 {
-  readonly domainId: string;
-  readonly targetKey: string;
-  readonly name: string;
-  readonly data: JsonObject;
-}
-```
-
-Example Submit payload:
-
-```json
-{
-  "domainId": "d3",
-  "targetKey": "schema-form:12",
-  "name": "submit",
-  "data": {}
-}
-```
-
-Example Change payload:
-
-```json
-{
-  "domainId": "d3",
-  "targetKey": "schema-form:12",
-  "name": "change",
-  "data": {
-    "values": {
-      "name": "Alice",
-      "age": null,
-      "enabled": false,
-      "class": "mage"
-    }
-  }
-}
-```
-
-Schema Form emits outward events only from the root `lr-schema-form` RenderNode.
-Field components communicate with that root locally.
-
-The Web Component supplies only `name` and `data`. The Renderer supplies
-`domainId` and `targetKey`.
-
-### Reuse of User Input
-
-No new Renderer↔Subsystem wire protocol is required.
-
-The reserved presentation event channel uses the existing User Input custom-channel
-mechanism:
-
-```text
-Web Component
-    ↓
-context.emitCustomEvent(...)
-    ↓
-WebProjector identity-bound capability
-    ↓
-Renderer currentness validation
-    ↓
-RendererInputGate
-    ↓
-x.loomrealm.web-presentation.event
-    ↓
-existing Renderer Data / User Input transport
-    ↓
-Subsystem InputManager
-    ↓
-scope.createInputListener(...)
-    ↓
-Schema Form module
-```
-
-The following remain unchanged:
-
-- Renderer Data connection framing;
-- `input.event` wire shape;
-- Main-owned InputTarget / Activation authority;
-- Subsystem `InputListener` delivery semantics;
-- Render Update direction and authority.
-
-### Targeted Renderer input delivery
-
-Ordinary physical `RendererInputSource` events such as keyboard/pointer/gamepad are
-Renderer-wide producer observations.
-
-A Web Presentation custom event is different because its source subsystem is already
-known from the projected RenderNode.
-
-Therefore the Renderer input gate should support a targeted event operation,
-conceptually:
-
-```ts
-emitEventForSubsystem(
-  subsystemKey: string,
-  channel: InputEventChannelV1,
-  payload: InputEventV1["payload"],
-): void;
-```
-
-This method must inspect only the matching subsystem slot.
-
-The event is delivered only if that subsystem currently has:
-
-```text
-a valid InputTarget lease
-AND current Activation
-AND interest in x.loomrealm.web-presentation.event
-AND producer availability for that channel
-```
-
-If the RenderNode belongs to subsystem A while subsystem B owns the current
-InputTarget, the event from A is dropped rather than redirected to B.
-
-This is why Presentation custom events should not be flattened into the existing
-global `RendererInputSource.emitEvent()` path before subsystem identity is checked.
-
-### Renderer-local producer availability
-
-The Presentation custom-event channel is a Renderer-owned producer capability, not a
-physical platform input source.
-
-Renderer input gating should therefore distinguish physical-source availability from
-Renderer-local producer availability.
-
-Conceptually:
-
-```text
-physical source availability
-  keyboard / pointer / gamepad
-
-Renderer-local availability
-  x.loomrealm.web-presentation.event
-```
-
-The effective producer check may treat a channel as available when either the
-appropriate physical source or the appropriate Renderer-local producer is available.
-
-Resetting/restarting the external physical `RendererInputSource` must not
-accidentally clear the Window-local Presentation custom-event capability.
-
-### Event argument validation
-
-`emitCustomEvent()` is a business presentation boundary and must validate before
-entering the Renderer input publisher.
-
-It must reject or locally contain invalid values rather than allowing an invalid
-payload to reach Data serialization.
-
-At minimum:
-
-```text
-name
-  non-empty valid Unicode string
-  bounded consistently with presentation/input identifiers
-
-data
-  plain JSON object
-  no DOM/Host objects
-  no class instances
-  no undefined / Function / Symbol / BigInt
-  no NaN / Infinity
-  no cycles
-  bounded by existing User Input payload depth/member/byte limits
-```
-
-The complete payload, including Renderer-added `domainId`, `targetKey`, and
-`name`, must satisfy existing User Input payload limits before publication.
-
-The implementation should reuse or expose the existing Data/Wire JSON payload
-validation semantics instead of creating an incompatible duplicate validator.
-
-The Renderer must snapshot/detach the accepted JSON data so later mutation by the
-Web Component cannot alter an already accepted event.
+The generic Renderer/User Input limit remains independently authoritative after this
+stricter presentation-local check.
 
 ### Subsystem consumption
 
@@ -2026,6 +1693,20 @@ Schema Form does not need access to the Renderer wire `domainId` to identify its
 own form instance. `domainId` may remain present in the generic presentation-event
 payload as Renderer provenance, but it is not part of the Schema Form module's
 correlation contract.
+
+The subsystem-side event boundary is fail-closed:
+
+```text
+targetKey != active rootKey       → ignore
+unknown event name                → ignore
+malformed change/submit payload   → ignore with no state mutation
+cancel while cancelable=false     → ignore
+duplicate event after settlement  → ignore
+```
+
+Malformed presentation input does not add another public `SchemaFormErrorCode`.
+Validator/program failures remain the only opened-form program failures described by
+the public error contract.
 
 For Change and Submit, `data.values` must have exactly the schema field-key set.
 Missing keys, unknown extra keys, wrong value types, non-finite numbers, null
@@ -2080,40 +1761,23 @@ This preserves the rule that field components own browser-local conversion, whil
 Schema Form module owns canonical data, validation, completion, and RenderDomain
 lifetime.
 
-### Implementation impact
+### Phase 2 implementation boundary
 
-The intended LoomRealm implementation changes are narrowly scoped:
+Phase 2 changes Schema Form package code and its tests/qualification only. It does
+not add another Renderer/Main/Subsystem architecture feature.
+
+The implementation may depend on the existing public capabilities:
 
 ```text
-packages/renderer/src/internal/web-projector.ts
-  keep one shared PresentationResourceClient
-  inject one identity-bound WebPresentationContext per LiveElement
-  add emitCustomEvent directly to the existing context shape
-
-packages/renderer/src/internal/presentation-seam.ts
-  add Renderer-internal presentation-event forwarding capability
-
-packages/renderer/src/control.ts
-  validate current Session/subsystem/generation/store target
-  forward targeted presentation event into InputGate
-
-packages/renderer/src/internal/render-store.ts
-  expose a readonly current-target check for domainId/targetKey
-
-packages/renderer/src/internal/input-gate.ts
-  support targeted subsystem events
-  support Renderer-local producer availability
-
-packages/data / wire-facing helpers
-  expose/reuse bounded JSON input-payload validation if needed
-  keep existing input.event wire schema unchanged
+SubsystemScope.createRenderDomain(...)
+SubsystemScope.createInputListener(...)
+Frame.signal
+WEB_PRESENTATION_EVENT_CHANNEL_V1
+WebPresentationContext.emitCustomEvent(...)
 ```
 
-Desktop/PWA platform composition does not need a second presentation-specific Data
-connection and does not need a reverse Render transport.
-
-The existing Renderer presentation attachment is sufficient to connect WebProjector
-to Renderer-owned capability handling.
+No new Renderer wire message, RenderDomain operation, InputListener priority,
+InputTarget authority, subsystem definition, or `frame.call()` path is permitted.
 
 ### Separation from modal event blocking
 
@@ -2148,7 +1812,7 @@ and a current validation error for `age`, the projection may be:
 {
   zIndex: 100,
   roots: [{
-    key: "schema-form:12",
+    key: "sf:12",
     tag: "lr-schema-form",
     attrs: {},
     data: {
@@ -2157,7 +1821,7 @@ and a current validation error for `age`, the projection may be:
     },
     children: [
       {
-        key: "field:name",
+        key: "sf:12:f:0",
         tag: "lr-schema-form-field",
         attrs: {},
         data: {
@@ -2171,7 +1835,7 @@ and a current validation error for `age`, the projection may be:
         children: [],
       },
       {
-        key: "field:age",
+        key: "sf:12:f:1",
         tag: "lr-schema-form-field",
         attrs: {},
         data: {
@@ -2193,6 +1857,18 @@ and a current validation error for `age`, the projection may be:
 The projection is a complete current presentation snapshot. Presentation errors or
 Renderer teardown must not be interpreted as submit or cancel.
 
+
+## Phase 2 implementation contract
+
+The executable implementation plan is frozen separately in:
+
+```text
+game-libs/schema-form/IMPLEMENTATION-PHASE-2-SCHEMA-FORM.md
+```
+
+That document controls implementation order, private file boundaries, tests, package
+changes, and acceptance criteria. This DESIGN document controls public/observable v1
+semantics.
 
 ## Explicit v1 exclusions
 
