@@ -1859,11 +1859,16 @@ and a current validation error for `age`, the projection may be:
 
 ```ts
 {
-  zIndex: 100,
+  zIndex: 2_147_483_647,
   roots: [{
     key: "sf:12",
     tag: "lr-schema-form",
-    attrs: {},
+    attrs: {
+      class:
+        "wa-theme-default wa-palette-default " +
+        "wa-brand-blue wa-neutral-gray " +
+        "wa-success-green wa-warning-yellow wa-danger-red",
+    },
     data: {
       title: "Character",
       cancelable: true,
