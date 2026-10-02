@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
-import { createSubsystemDataPeer, WEB_PRESENTATION_EVENT_CHANNEL_V1 } from "@loomrealm/data";
+import {
+  createSubsystemDataPeer,
+  validateInputPayloadV1,
+  WEB_PRESENTATION_EVENT_CHANNEL_V1,
+} from "@loomrealm/data";
 import { createMainRendererControlPeer, prepareRendererHelloResultV1 } from "@loomrealm/renderer-control";
 import { createRendererControlHolder } from "../dist/index.js";
 import { attachRendererPresentation } from "../dist/internal/presentation-seam.js";
@@ -12,6 +16,39 @@ const snapshot = (sessionId, revision, dataAuthorities = []) => ({
   stack: [], inputTarget: null, dataAuthorities,
 });
 const turn = () => new Promise((resolve) => setImmediate(resolve));
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
+function controlledOutboundCarrier(endpoint) {
+  let blocked = null;
+  return {
+    carrier: {
+      closed: endpoint.closed,
+      messages: () => endpoint.messages(),
+      close: () => endpoint.close(),
+      async send(message) {
+        const pending = blocked;
+        if (pending !== null) {
+          blocked = null;
+          pending.started.resolve();
+          await pending.release.promise;
+        }
+        return endpoint.send(message);
+      },
+    },
+    blockNextSend() {
+      if (blocked !== null) throw new Error("A Data send is already blocked");
+      const started = deferred();
+      const release = deferred();
+      blocked = { started, release };
+      return { started: started.promise, release: release.resolve };
+    },
+  };
+}
 
 function main(pair, sessionId, dataAuthorities) {
   return createMainRendererControlPeer({
@@ -132,6 +169,7 @@ test("presentation attachment callback is stable, detach-revoked, and fresh on r
 test("presentation node events pass currentness and validation before targeted User Input delivery", async (t) => {
   const inputEvents = [];
   const dataPeers = [];
+  const dataSendControls = [];
   let holdReplacement = false;
   let releaseReplacement;
   const holder = createRendererControlHolder({
@@ -140,6 +178,7 @@ test("presentation node events pass currentness and validation before targeted U
         await new Promise((resolve) => { releaseReplacement = resolve; });
       }
       const pair = createMemoryCarrierPair();
+      const outbound = controlledOutboundCarrier(pair.right);
       const peer = createSubsystemDataPeer({
         binding: { carrier: pair.left, subsystemKey, generation, dataProfile },
         handlers: {
@@ -153,7 +192,8 @@ test("presentation node events pass currentness and validation before targeted U
         },
       });
       dataPeers.push(peer);
-      return pair.right;
+      dataSendControls.push(outbound);
+      return outbound.carrier;
     },
   });
   t.after(async () => Promise.allSettled(dataPeers.map((peer) => peer.close())));
@@ -241,6 +281,49 @@ test("presentation node events pass currentness and validation before targeted U
   }
   assert.equal(inputEvents.length, 0);
 
+  let acceptedLength = 0;
+  let rejectedLength = 1_024;
+  while (true) {
+    try {
+      validateInputPayloadV1({ value: "x".repeat(rejectedLength) });
+      acceptedLength = rejectedLength;
+      rejectedLength *= 2;
+    } catch {
+      break;
+    }
+  }
+  while (rejectedLength - acceptedLength > 1) {
+    const candidate = Math.floor((acceptedLength + rejectedLength) / 2);
+    try {
+      validateInputPayloadV1({ value: "x".repeat(candidate) });
+      acceptedLength = candidate;
+    } catch {
+      rejectedLength = candidate;
+    }
+  }
+  const envelopeOverflowData = { value: "x".repeat(acceptedLength) };
+  assert.equal(validateInputPayloadV1(envelopeOverflowData), envelopeOverflowData);
+  assert.throws(() => validateInputPayloadV1({
+    domainId: "domain",
+    targetKey: "node",
+    name: "commit",
+    data: envelopeOverflowData,
+  }));
+  assert.throws(
+    () => emitNodeEvent(nodeEvent({ data: envelopeOverflowData })),
+    TypeError,
+  );
+  await turn();
+  assert.equal(inputEvents.length, 0, "invalid full envelope never enters Data publication");
+  assert.equal(
+    await Promise.race([
+      dataPeers[0].terminal.then(() => true),
+      turn().then(() => false),
+    ]),
+    false,
+    "invalid full envelope leaves the Data connection healthy",
+  );
+
   const mutable = { value: 7 };
   emitNodeEvent(nodeEvent({ data: mutable }));
   mutable.value = 99;
@@ -257,7 +340,10 @@ test("presentation node events pass currentness and validation before targeted U
       data: { value: 7 },
     },
   });
-  emitNodeEvent(nodeEvent({ name: "queued-before-remove", data: {} }));
+  const blocked = dataSendControls[0].blockNextSend();
+  emitNodeEvent(nodeEvent({ name: "blocked-before-remove", data: { order: 1 } }));
+  await blocked.started;
+  emitNodeEvent(nodeEvent({ name: "queued-before-remove", data: { order: 2 } }));
   await dataPeers[0].render.sendPatch({
     type: "render.patch",
     domainId: "domain",
@@ -265,10 +351,16 @@ test("presentation node events pass currentness and validation before targeted U
     revision: 2,
     ops: [{ op: "remove", key: "node" }],
   });
-  await waitFor(() => inputEvents.length === 2, "accepted event after node removal");
-  assert.equal(inputEvents[1].payload.name, "queued-before-remove");
+  await turn();
+  assert.equal(inputEvents.length, 1, "blocked send keeps both accepted events pending");
+  blocked.release();
+  await waitFor(() => inputEvents.length === 3, "queued events after node removal");
+  assert.deepEqual(
+    inputEvents.slice(1).map(({ payload }) => [payload.name, payload.data.order]),
+    [["blocked-before-remove", 1], ["queued-before-remove", 2]],
+  );
   assert.doesNotThrow(() => emitNodeEvent(nodeEvent({ name: Symbol("removed"), data: 1n })));
-  assert.equal(inputEvents.length, 2);
+  assert.equal(inputEvents.length, 3);
 
   const oldAttachmentCallback = emitNodeEvent;
   detach();
@@ -285,7 +377,7 @@ test("presentation node events pass currentness and validation before targeted U
   await dataPeers[0].close();
   await waitFor(() => typeof releaseReplacement === "function", "retired carrier replacement acquire");
   assert.doesNotThrow(() => freshAttachmentCallback(nodeEvent({ name: Symbol("retired"), data: 1n })));
-  assert.equal(inputEvents.length, 2);
+  assert.equal(inputEvents.length, 3);
   releaseReplacement();
   await waitFor(() => dataPeers.length === 2, "replacement Data peer");
   await dataPeers[1].input.sendInterest({
@@ -294,7 +386,7 @@ test("presentation node events pass currentness and validation before targeted U
   });
   await dataPeers[1].render.sendDomains({ type: "render.domains", domains: ["domain"] });
   assert.doesNotThrow(() => freshAttachmentCallback(nodeEvent({ name: Symbol("partial"), data: 1n })));
-  assert.equal(inputEvents.length, 2);
+  assert.equal(inputEvents.length, 3);
   await dataPeers[1].render.sendSnapshot({
     type: "render.snapshot",
     domainId: "domain",
@@ -308,8 +400,8 @@ test("presentation node events pass currentness and validation before targeted U
     name: "after-rebaseline",
     data: {},
   }));
-  await waitFor(() => inputEvents.length === 3, "event after complete rebaseline");
-  assert.equal(inputEvents[2].payload.name, "after-rebaseline");
+  await waitFor(() => inputEvents.length === 4, "event after complete rebaseline");
+  assert.equal(inputEvents[3].payload.name, "after-rebaseline");
   assert.equal(inputEvents.some(({ payload }) => payload.name === "revoked"), false);
   publisher.retire();
 });

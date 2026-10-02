@@ -54,6 +54,7 @@ interface LiveElement {
 }
 
 const noData = Symbol("loomrealm.renderer.no-presentation-data");
+const EMPTY_JSON_OBJECT = Object.freeze({}) as InputEventV1["payload"];
 
 function identity(sessionId: string, subsystemKey: string, generation: number, domainId: string, key: string): string {
   return JSON.stringify([sessionId, subsystemKey, generation, domainId, key]);
@@ -192,8 +193,12 @@ export class WebProjector implements RendererPresentationEffect {
       let record: LiveElement;
       const context: WebPresentationContext = Object.freeze({
         resources: this.resources,
-        emitCustomEvent: (name: string, data: InputEventV1["payload"] = {}) => {
-          this.emitNodeEvent(record, name, data);
+        emitCustomEvent: (name: string, data?: InputEventV1["payload"]) => {
+          this.emitNodeEvent(
+            record,
+            name,
+            data === undefined ? EMPTY_JSON_OBJECT : data,
+          );
         },
       });
       record = {

@@ -510,11 +510,10 @@ class ControlHolder implements RendererControlHolder {
     );
     if (authority === undefined || authority.generation !== event.generation) return;
     const slot = this.dataSlots.get(event.subsystemKey);
-    const carrier = slot?.current;
+    if (slot === undefined) return;
+    const carrier = slot.current;
     if (
-      slot === undefined ||
       carrier === null ||
-      carrier === undefined ||
       carrier.identity.controlPeer !== current.peer ||
       carrier.identity.subsystemKey !== event.subsystemKey ||
       carrier.identity.generation !== authority.generation ||
@@ -523,16 +522,22 @@ class ControlHolder implements RendererControlHolder {
     ) return;
 
     const name = validatePresentationEventName(event.name);
-    let data: InputEventV1["payload"];
+    let payload: InputEventV1["payload"];
     try {
-      data = validateInputPayloadV1(event.data);
+      const data = validateInputPayloadV1(event.data);
+      payload = validateInputPayloadV1({
+        domainId: event.domainId,
+        targetKey: event.targetKey,
+        name,
+        data,
+      });
     } catch {
-      throw new TypeError("Invalid Web Presentation custom event data");
+      throw new TypeError("Invalid Web Presentation custom event payload");
     }
     this.inputGate.emitEventForSubsystem(
       event.subsystemKey,
       WEB_PRESENTATION_EVENT_CHANNEL_V1,
-      { domainId: event.domainId, targetKey: event.targetKey, name, data },
+      payload,
     );
   }
 

@@ -333,7 +333,7 @@ Caller-provided AbortSignal只取消其单次 read；caller cancellation同样�
 
 ### 8.1 RenderNode custom event return path
 
-Each live RenderNode receives its own stable `WebPresentationContext`; all such contexts share the same Window-lifetime `PresentationResourceClient`. `emitCustomEvent(name, data = {})` is the only Phase 1 reverse capability. It emits through the existing User Input v1 wire using the reserved channel:
+Each live RenderNode receives its own stable `WebPresentationContext`; all such contexts share the same Window-lifetime `PresentationResourceClient`. `emitCustomEvent(name, data)` is the only Phase 1 reverse capability. An omitted or explicitly `undefined` `data` argument uses one frozen module-local empty JSON object; `null` is not a default and remains invalid. The method emits through the existing User Input v1 wire using the reserved channel:
 
 ```ts
 const WEB_PRESENTATION_EVENT_CHANNEL_V1 =
@@ -357,11 +357,12 @@ Acceptance order is normative:
 
 ```text
 attachment + Control/Data/Store/RenderNode currentness
-→ name and data validation
+→ name validation
+→ complete reserved User Input payload validation
 → targeted InputGate delivery to the owning subsystem
 ```
 
-Events from a detached attachment, ended or structurally failed Projector, expired exact live record, old Session/generation, retired carrier, partial rebaseline, or removed target MUST be silently dropped before argument validation. A current source with an invalid name or payload MUST synchronously throw `TypeError` and MUST NOT enter InputGate or the Data writer. Names are valid Unicode scalar strings of 1..128 UTF-8 bytes. Data uses the existing User Input payload JSON/depth/member/byte limits.
+Events from a detached attachment, ended or structurally failed Projector, expired exact live record, old Session/generation, retired carrier, partial rebaseline, or removed target MUST be silently dropped before argument validation. A current source with an invalid name or payload MUST synchronously throw `TypeError` and MUST NOT enter InputGate or the Data writer. Names are valid Unicode scalar strings of 1..128 UTF-8 bytes. After name validation, Renderer uses the Data payload validator first to require component `data` itself to be an `InputEventV1["payload"]` object, then again on the complete `{ domainId, targetKey, name, data }` reserved payload. The complete envelope—not `data` alone—must satisfy the existing User Input plain-JSON, finite-number, relative-depth, container-member, and compact-JSON limit of 262,144 UTF-8 bytes. This validation includes the Renderer-added envelope.
 
 Delivery is targeted to the RenderNode's owning subsystem. A different current `InputTarget` MUST cause a drop, never a redirect. Once the bounded User Input publisher accepts an event, later RenderNode removal does not retract it.
 

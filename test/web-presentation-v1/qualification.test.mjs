@@ -16,6 +16,17 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const version = `sha256:${"c".repeat(64)}`;
 const CHROMIUM_TEST_TIMEOUT_MS = 30_000;
 const ASYNC_STAGE_TIMEOUT_MS = 10_000;
+const browserImportMap = JSON.stringify({
+  imports: {
+    "@loomrealm/foundation": "/packages/foundation/dist/index.js",
+    "@loomrealm/foundation/testing": "/packages/foundation/dist/testing/index.js",
+    "@loomrealm/wire": "/packages/wire/dist/index.js",
+    "@loomrealm/data": "/packages/data/dist/index.js",
+    "@loomrealm/platform-ports": "/packages/platform-ports/dist/index.js",
+    "@loomrealm/renderer-control": "/packages/renderer-control/dist/index.js",
+    "@loomrealm/renderer": "/packages/renderer/dist/index.js",
+  },
+});
 
 async function within(promise, label, timeoutMs = ASYNC_STAGE_TIMEOUT_MS) {
   let timer;
@@ -53,7 +64,7 @@ async function fixtureServer(t) {
     requests.push(url.pathname);
     if (url.pathname === "/") {
       response.setHeader("content-type", "text/html");
-      response.end("<!doctype html><html><head></head><body></body></html>");
+      response.end(`<!doctype html><html><head><script type="importmap">${browserImportMap}</script></head><body></body></html>`);
       return;
     }
     if (url.pathname === "/business/first.js") {
@@ -96,7 +107,7 @@ async function fixtureServer(t) {
       return;
     }
     const relative = url.pathname.slice(1);
-    if (relative.startsWith("packages/renderer/dist/internal/") && relative.endsWith(".js")) {
+    if (relative.startsWith("packages/") && relative.includes("/dist/") && relative.endsWith(".js")) {
       try {
         response.setHeader("content-type", "text/javascript");
         response.end(await readFile(path.join(root, relative)));
@@ -409,6 +420,199 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
     return { html: document.body.innerHTML, instance: element.instance, contexts: element.contexts, connects: element.connects, disconnects: element.disconnects ?? 0, deliveries: element.deliveries };
   });
   assert.deepEqual(afterControlLoss, beforeControlLoss, "Control transport loss freezes the mounted browser presentation");
+});
+
+test("real Chromium WebPresentationContext emits current node events through User Input v1", { timeout: CHROMIUM_TEST_TIMEOUT_MS }, async (t) => {
+  const fixture = await fixtureServer(t);
+  const page = await browserPage(t);
+  await within(page.goto(fixture.origin), "node event qualification navigation");
+
+  const result = await within(page.evaluate(async () => {
+    const [foundation, data, rendererControl, renderer, presentation] = await Promise.all([
+      import("@loomrealm/foundation/testing"),
+      import("@loomrealm/data"),
+      import("@loomrealm/renderer-control"),
+      import("@loomrealm/renderer"),
+      import("/packages/renderer/dist/web-presentation.js"),
+    ]);
+    const waitForBrowser = async (predicate, label) => {
+      const deadline = performance.now() + 5_000;
+      while (performance.now() < deadline) {
+        if (predicate()) return;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      throw new Error(`Timed out waiting for ${label}`);
+    };
+
+    const received = [];
+    const peers = [];
+    const holder = renderer.createRendererControlHolder({
+      async acquire(subsystemKey, generation, dataProfile) {
+        const pair = foundation.createMemoryCarrierPair();
+        const peer = data.createSubsystemDataPeer({
+          binding: { carrier: pair.left, subsystemKey, generation, dataProfile },
+          handlers: {
+            onInputState: () => ({ kind: "accepted" }),
+            onInputEvent: (message) => {
+              received.push(message);
+              return { kind: "accepted" };
+            },
+            onInputReset: () => ({ kind: "accepted" }),
+            onViewportState: () => ({ kind: "accepted" }),
+          },
+        });
+        peers.push(peer);
+        return pair.right;
+      },
+    });
+
+    class EventQualifiedElement extends HTMLElement {
+      receiveRenderContext(context) {
+        this.presentationContext = context;
+        this.contextShape = {
+          resources: context.resources !== null && typeof context.resources === "object",
+          emitCustomEvent: typeof context.emitCustomEvent,
+        };
+      }
+    }
+    customElements.define("lr-event-qualified", EventQualifiedElement);
+    const projector = new presentation.WebProjector({
+      document,
+      resourceClient: { async resource() { throw new Error("unused"); } },
+    });
+    const detach = presentation.attachRendererPresentation(holder, projector);
+
+    const authority = {
+      subsystemKey: "forms",
+      generation: 1,
+      dataProfile: data.RENDERER_DATA_PROFILE_V1,
+    };
+    const initial = {
+      sessionId: "browser-session",
+      revision: 1,
+      runtimes: [{ subsystemKey: "forms", state: "ready" }],
+      stack: [{
+        frameId: "browser-frame",
+        subsystemKey: "forms",
+        lifecycle: "active",
+        activationId: "browser-activation",
+      }],
+      inputTarget: {
+        subsystemKey: "forms",
+        frameId: "browser-frame",
+        activationId: "browser-activation",
+      },
+      dataAuthorities: [authority],
+    };
+    const controlPair = foundation.createMemoryCarrierPair();
+    const publisher = rendererControl.createMainRendererControlPeer({
+      carrier: controlPair.left,
+      acceptHello() {
+        return {
+          kind: "accepted",
+          snapshot: initial,
+          preparedHelloText: rendererControl.prepareRendererHelloResultV1(initial),
+        };
+      },
+    });
+    await holder.connect({ carrier: controlPair.right, rendererControlToken: "browser-token" });
+    await waitForBrowser(() => peers.length === 1, "browser Data peer");
+    await peers[0].input.sendInterest({
+      type: "input.interest",
+      frames: [{
+        frameId: "browser-frame",
+        channels: [data.WEB_PRESENTATION_EVENT_CHANNEL_V1],
+      }],
+    });
+    const renderNode = (key) => ({
+      key,
+      tag: "lr-event-qualified",
+      attrs: { "data-key": key },
+      data: {},
+      children: [],
+    });
+    await peers[0].render.sendDomains({ type: "render.domains", domains: ["form-domain"] });
+    await peers[0].render.sendSnapshot({
+      type: "render.snapshot",
+      domainId: "form-domain",
+      revision: 1,
+      zIndex: 0,
+      roots: [renderNode("node-A"), renderNode("node-B")],
+    });
+    await waitForBrowser(() => document.body.children.length === 2, "two projected event nodes");
+    const [nodeA, nodeB] = document.body.children;
+    const contextShape = [nodeA.contextShape, nodeB.contextShape];
+
+    nodeA.presentationContext.emitCustomEvent("browser-test", { value: 1 });
+    nodeB.presentationContext.emitCustomEvent("browser-test", { value: 2 });
+    nodeB.presentationContext.emitCustomEvent("omitted-data");
+    nodeB.presentationContext.emitCustomEvent("undefined-data", undefined);
+    await waitForBrowser(() => received.length === 4, "initial browser node events");
+
+    let invalidTypeError = false;
+    let nullTypeError = false;
+    try {
+      nodeB.presentationContext.emitCustomEvent("invalid", { value: 1n });
+    } catch (error) {
+      invalidTypeError = error instanceof TypeError;
+    }
+    try {
+      nodeB.presentationContext.emitCustomEvent("null", null);
+    } catch (error) {
+      nullTypeError = error instanceof TypeError;
+    }
+    nodeB.presentationContext.emitCustomEvent("after-invalid", { healthy: true });
+    await waitForBrowser(() => received.length === 5, "valid browser event after invalid payloads");
+
+    const staleContext = nodeA.presentationContext;
+    await peers[0].render.sendPatch({
+      type: "render.patch",
+      domainId: "form-domain",
+      baseRevision: 1,
+      revision: 2,
+      ops: [{ op: "remove", key: "node-A" }],
+    });
+    await waitForBrowser(() => document.body.children.length === 1, "removed browser node");
+    staleContext.emitCustomEvent("stale", { ignored: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const eventCountAfterStale = received.length;
+
+    detach();
+    projector.teardown();
+    publisher.retire();
+    await Promise.allSettled(peers.map((peer) => peer.close()));
+    return {
+      contextShape,
+      invalidTypeError,
+      nullTypeError,
+      eventCountAfterStale,
+      events: received.map(({ frameId, activationId, channel, payload }) => ({
+        frameId,
+        activationId,
+        channel,
+        payload,
+      })),
+    };
+  }), "browser node event qualification");
+
+  assert.deepEqual(result.contextShape, [
+    { resources: true, emitCustomEvent: "function" },
+    { resources: true, emitCustomEvent: "function" },
+  ]);
+  assert.equal(result.invalidTypeError, true);
+  assert.equal(result.nullTypeError, true);
+  assert.equal(result.eventCountAfterStale, 5);
+  assert.deepEqual(result.events.map(({ payload }) => [payload.targetKey, payload.name, payload.data]), [
+    ["node-A", "browser-test", { value: 1 }],
+    ["node-B", "browser-test", { value: 2 }],
+    ["node-B", "omitted-data", {}],
+    ["node-B", "undefined-data", {}],
+    ["node-B", "after-invalid", { healthy: true }],
+  ]);
+  assert.ok(result.events.every(({ frameId, activationId, channel }) =>
+    frameId === "browser-frame" &&
+    activationId === "browser-activation" &&
+    channel === "x.loomrealm.web-presentation.event"));
 });
 
 test("real Chromium proves structural data delivery and independent optional receivers", { timeout: CHROMIUM_TEST_TIMEOUT_MS }, async (t) => {

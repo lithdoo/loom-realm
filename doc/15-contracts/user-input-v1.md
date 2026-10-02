@@ -192,7 +192,7 @@ Renderer-bound Web Presentation provenance supplies `domainId`, `targetKey`, and
 
 The reserved producer is always available for Effective-gate calculation, including after `resetProducerFacts()`. Ordinary `RendererInputSource` implementations MUST NOT declare availability, State, or Event production for this channel; attempting to do so synchronously throws `TypeError` under the existing source failure semantics.
 
-Before publication, Renderer MUST establish attachment, Control/Data carrier, Store baseline, and live RenderNode currentness. Stale or revoked sources are silently dropped without validating their event arguments. Current sources validate the event name and the existing bounded JSON payload rules; invalid arguments synchronously throw `TypeError` without entering InputGate or Data writer. Once accepted by the bounded publisher, an Event remains established even if its RenderNode is later removed.
+Before publication, Renderer MUST establish attachment, Control/Data carrier, Store baseline, and live RenderNode currentness. Stale or revoked sources are silently dropped without validating their event arguments. Current sources first validate the event name, require component `data` itself to be a valid `InputEventV1["payload"]` object, and then validate the complete `{ domainId, targetKey, name, data }` reserved payload using the same Data helper. The complete envelope—not component `data` alone—MUST satisfy the plain-JSON and finite-number requirements, relative depth and member limits, and the 262,144-byte compact JSON limit. Invalid arguments synchronously throw `TypeError` without entering InputGate or Data writer. Once accepted by the bounded publisher, an Event remains established even if its RenderNode is later removed.
 
 ---
 
