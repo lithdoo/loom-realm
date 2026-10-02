@@ -48,23 +48,31 @@ JSON Schema
 async validators
 array/object/null canonical values
 Phase 1 architecture changes
+runtime browser module loader / dynamic import graph
 ```
 
 ## 2. Package layout
 
-Use this minimal production layout:
+Use this minimal production/build layout:
 
 ```text
 game-libs/schema-form/
 ├── src/
 │   ├── index.ts
 │   ├── model.ts
-│   ├── internal/
-│   │   ├── validation.ts
-│   │   └── session.ts
+│   └── internal/
+│       ├── validation.ts
+│       └── session.ts
+├── browser/
+│   ├── schema-form.browser.ts
+│   └── schema-form.browser.css
+├── scripts/
+│   └── build-browser.mjs
+├── dist/
+│   ├── index.js / index.d.ts
 │   └── browser/
-│       ├── index.ts
-│       └── elements.ts
+│       ├── schema-form.browser.js
+│       └── schema-form.browser.css
 ├── test/
 ├── DESIGN.md
 └── package.json
@@ -81,25 +89,61 @@ const activeForms = new WeakMap<Frame, Session>();
 
 plus the private monotonic form serial allocator.
 
-## 3. Package dependencies and exports
+Browser source may use ordinary local modules if needed for readability, but the
+published browser runtime is exactly the two bundled files in `dist/browser/`.
+
+## 3. Package dependencies, build, and exports
 
 The implementation commit updates `package.json` and lockfile together.
 
-Direct runtime dependencies:
+Core runtime dependencies:
 
 ```json
 {
   "@loomrealm/data": "0.1.0-alpha.0",
-  "@loomrealm/subsystem": "0.1.0-alpha.0",
+  "@loomrealm/subsystem": "0.1.0-alpha.0"
+}
+```
+
+Browser authoring/build dependencies are development dependencies because their code
+and styles are bundled into the published browser artifacts:
+
+```json
+{
+  "typescript": "5.9.2",
+  "esbuild": "0.25.9",
   "lit": "3.3.3",
   "@awesome.me/webawesome": "3.14.0"
 }
 ```
 
-Keep TypeScript at the package's existing pinned development version unless the
-workspace requires one consistent lockfile resolution.
+Do not require Lit, Web Awesome, esbuild, or `node_modules` in the Renderer Window.
 
-Exports become:
+The build is:
+
+```text
+tsc -p tsconfig.json
+→ scripts/build-browser.mjs
+→ esbuild bundle browser/schema-form.browser.ts
+   platform=browser
+   format=iife
+   bundle=true
+   splitting=false
+→ dist/browser/schema-form.browser.js
+→ bundle imported Web Awesome + Schema Form CSS
+→ dist/browser/schema-form.browser.css
+```
+
+The browser style entry includes:
+
+```ts
+import "@awesome.me/webawesome/dist/styles/webawesome.css";
+```
+
+plus Schema Form modal/layout/override styles. The final CSS is owned by the Schema
+Form browser artifact; the game/host does not separately load a Web Awesome theme.
+
+Package exports become:
 
 ```json
 {
@@ -107,24 +151,25 @@ Exports become:
     "types": "./dist/index.d.ts",
     "import": "./dist/index.js"
   },
-  "./browser": {
-    "types": "./dist/browser/index.d.ts",
-    "import": "./dist/browser/index.js"
-  }
+  "./browser/schema-form.browser.js": "./dist/browser/schema-form.browser.js",
+  "./browser/schema-form.browser.css": "./dist/browser/schema-form.browser.css"
 }
 ```
 
-Keep:
-
-```json
-"sideEffects": false
-```
-
-The root entry point MUST NOT import `src/browser/**`, Lit, Web Awesome, or DOM-only
+The root entry point MUST NOT import browser source, Lit, Web Awesome, or DOM-only
 runtime code.
 
-The TypeScript build includes `"lib": ["ES2022", "DOM"]` so the browser subpath can
-compile, while the root module remains runtime-platform-neutral.
+The browser JS artifact is intentionally side-effectful because classic-script
+evaluation registers Custom Elements. Package metadata MUST either omit a package-wide
+`sideEffects: false` declaration or use a sideEffects allow-list that preserves:
+
+```text
+./dist/browser/schema-form.browser.js
+./dist/browser/schema-form.browser.css
+```
+
+Do not publish a `@loomrealm-game/schema-form/browser` runtime API and do not expose
+a registration function.
 
 ## 4. Public core surface
 
@@ -246,10 +291,16 @@ Implement closed runtime validation for all v1 field kinds exactly as documented
 Hard Schema Form limits:
 
 ```text
-fields.length                 <= 128
-field.key UTF-8 bytes         1..128
-custom event data             <= 131,072 compact UTF-8 bytes
+fields.length                           <= 128
+field.key UTF-8 bytes                   1..128
+compact complete SchemaFormV1 JSON      <= 65,536 UTF-8 bytes
+compact complete initialValue JSON      <= 65,536 UTF-8 bytes
+compact validator error-map JSON        <= 65,536 UTF-8 bytes
+Change/Submit component event data      <= 131,072 UTF-8 bytes
 ```
+
+The schema/initial/error-map limits are Schema Form-owned bounds chosen to keep every
+accepted projection well below the existing RenderData/message ceilings.
 
 Rules include:
 
@@ -258,6 +309,7 @@ Rules include:
 - `required` boolean when present;
 - string defaults/constraints exact;
 - `minLength` / `maxLength` non-negative integers and ordered;
+- string length validation uses ECMAScript `value.length` UTF-16 code units;
 - finite number defaults/min/max;
 - `min <= max`;
 - `integer=true` requires integer default;
@@ -268,7 +320,15 @@ Rules include:
 - no unknown field kind;
 - no unknown declaration members.
 
-A schema default must itself satisfy all built-in constraints for that field.
+A schema default must satisfy field kind/type constraints and all built-in
+constraints except `required`. `required` is interaction-time validation only.
+
+Every string in the validated schema that enters semantic identity, RenderData, or
+validator source must contain valid Unicode scalar sequences.
+
+After structural schema validation, compact-JSON UTF-8 encode the complete validated
+`SchemaFormV1`. If it exceeds 65,536 bytes, reject
+`SCHEMA_FORM_INVALID_SCHEMA`.
 
 Throw:
 
@@ -304,10 +364,12 @@ Each present value must match the field kind:
 string  → string
 number  → finite number
 boolean → boolean
-select  → string matching one option.value
+select  → string matching one option.value, including `""` when that exact option exists
 ```
 
-It must satisfy all declared built-in constraints.
+It must satisfy all declared built-in constraints except `required`. Explicit
+empty/unset values are allowed at preflight when they are otherwise type/constraint
+valid; `required` is evaluated only on Change/Submit.
 
 Absence is allowed; fallback precedence remains:
 
@@ -323,6 +385,10 @@ Failures use:
 SCHEMA_FORM_INVALID_INITIAL_VALUE
 path = initialValue.<fieldKey>
 ```
+
+After structural/content validation, compact-JSON UTF-8 encode the complete supplied
+`initialValue`. If it exceeds 65,536 bytes, reject
+`SCHEMA_FORM_INVALID_INITIAL_VALUE`.
 
 Do not mutate the caller's object.
 
@@ -409,6 +475,10 @@ error string, or non-string error value:
 SCHEMA_FORM_INVALID_VALIDATOR_RESULT
 ```
 
+For a structurally valid non-null error map, compact-JSON UTF-8 encode the complete
+map before accepting it. If it exceeds 65,536 bytes, reject
+`SCHEMA_FORM_INVALID_VALIDATOR_RESULT`.
+
 Normalize passing results to an empty internal error map.
 
 ## 12. Built-in validation
@@ -423,8 +493,8 @@ required number and key absent          → error
 required select and key absent          → error
 boolean required                         → never means "must be true"
 
-string minLength/maxLength              → error when violated
-number min/max/integer                  → error when violated
+string minLength/maxLength              → compare using ECMAScript value.length
+number min/max/integer                   → error when violated
 ```
 
 Presentation snapshots with an invalid select option or wrong primitive type are
@@ -634,6 +704,12 @@ Malformed payload:
 ignore with zero state/error mutation
 ```
 
+For current-root Change/Submit, before snapshot parsing, compact-JSON UTF-8 encode the
+complete component-supplied event data object. If it exceeds 131,072 bytes, treat the
+event as malformed and ignore it with zero state/error mutation. This subsystem-side
+check is authoritative even though the browser bundle performs the same bound check
+before `emitCustomEvent()`.
+
 Do not throw from the InputListener callback for malformed presentation input.
 
 Program failures such as validator failure are caught inside the callback and settle
@@ -656,7 +732,7 @@ Per field:
 string  → string only; null invalid
 number  → finite number | null
 boolean → boolean only; null invalid
-select  → string matching declared option | null
+select  → string matching declared option (including "") | null
 ```
 
 Unknown/missing keys, extra data members, arrays/class instances/accessors/symbol
@@ -750,61 +826,70 @@ cancelable !== true
 
 Do not treat backdrop clicks as Cancel.
 
-## 24. Browser entry point
+## 24. Browser bundle entry and registration
 
-`@loomrealm-game/schema-form/browser` exports:
+There is no runtime registration API.
 
-```ts
-export function registerSchemaFormElements(): Promise<void>;
-```
-
-It MAY also export the two element constructor types/classes if useful for direct
-browser tests, but they are not exported from the root package.
-
-Importing the browser subpath MUST NOT register either Schema Form tags or Web Awesome
-tags.
-
-Use one module-local registration Promise to converge concurrent calls. The operation
-is:
+`browser/schema-form.browser.ts` is the build-time entry point. It statically imports
+Lit and only the required Web Awesome component modules, defines the two Schema Form
+Custom Element classes, then registers exactly:
 
 ```text
-preflight current lr-schema-form / lr-schema-form-field registrations
-→ conflicting constructor → reject TypeError
-→ already exact constructors → resolve
-→ dynamically import required Web Awesome component modules
-→ re-check Schema Form tag collisions
-→ define any absent Schema Form tags
-→ resolve
+lr-schema-form
+lr-schema-form-field
 ```
 
-If dynamic import or registration fails, clear the in-flight registration Promise so
-a later call may retry. Successfully completed registration remains idempotent.
+at classic bundle evaluation time.
 
-A collision failure is observed as a rejected Promise with `TypeError`; no Schema
-Form tag is intentionally overwritten.
+Before defining either tag:
 
-Web Awesome global theme CSS is not injected by this function. The Web Presentation
-host/bootstrap MUST load a compatible Web Awesome theme stylesheet before presenting
-Schema Form. Chromium qualification loads the pinned 3.14.0 default theme explicitly. The browser entry point and element module
-MUST NOT statically import Web Awesome component-registration modules.
+```text
+customElements.get("lr-schema-form") === undefined
+customElements.get("lr-schema-form-field") === undefined
+```
 
-## 25. Web Awesome imports
+must both hold. Otherwise throw `TypeError` and define neither Schema Form tag.
 
-Load exactly these component modules inside the explicit async registration operation:
+The finished `dist/browser/schema-form.browser.js` is loaded as an ordinary ordered
+classic script by Web Presentation Config v1 before projection starts. There is no
+runtime `import()`, registration Promise, retry state, module resolver, or dynamic
+component loader.
+
+## 25. Browser bundling and Web Awesome imports
+
+The build-time source statically imports exactly the Web Awesome components used:
 
 ```ts
-await Promise.all([
-  import("@awesome.me/webawesome/dist/components/input/input.js"),
-  import("@awesome.me/webawesome/dist/components/textarea/textarea.js"),
-  import("@awesome.me/webawesome/dist/components/checkbox/checkbox.js"),
-  import("@awesome.me/webawesome/dist/components/select/select.js"),
-  import("@awesome.me/webawesome/dist/components/option/option.js"),
-  import("@awesome.me/webawesome/dist/components/button/button.js"),
-]);
+import "@awesome.me/webawesome/dist/components/input/input.js";
+import "@awesome.me/webawesome/dist/components/textarea/textarea.js";
+import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
+import "@awesome.me/webawesome/dist/components/select/select.js";
+import "@awesome.me/webawesome/dist/components/option/option.js";
+import "@awesome.me/webawesome/dist/components/button/button.js";
 ```
 
-Do not import the Web Awesome autoloader or all components. Do not statically import
-these registration modules at browser-subpath module evaluation time.
+It also causes the browser CSS bundle to include:
+
+```ts
+import "@awesome.me/webawesome/dist/styles/webawesome.css";
+```
+
+or the mechanically equivalent esbuild CSS entry/import arrangement.
+
+esbuild MUST bundle the component implementations into one classic IIFE JS artifact
+and emit one CSS artifact containing Web Awesome styles plus Schema Form styles.
+
+Final-artifact checks MUST prove:
+
+```text
+schema-form.browser.js has no dynamic import()
+no unresolved bare @awesome.me/* or lit import specifiers
+no ESM import/export syntax required at runtime
+no dependency on node_modules at presentation runtime
+schema-form.browser.css contains the required Web Awesome + Schema Form styles
+```
+
+Do not use the Web Awesome autoloader.
 
 Do not use `wa-number-input` in v1.
 
@@ -1124,10 +1209,10 @@ depends on focus/custom-elements/Web Awesome.
 Cover:
 
 ```text
-explicit async registration
-concurrent/idempotent same-constructor registration
-foreign tag collision rejected TypeError
-no import-time Schema Form or Web Awesome registration
+classic bundle evaluation registers both Schema Form tags
+foreign Schema Form tag collision throws TypeError before defining either tag
+bundle contains required Web Awesome element registrations
+no runtime dynamic import/module loader
 root/field RenderData runtime validation
 stable control identity across refreshes
 field→root local communication only
@@ -1185,20 +1270,21 @@ No test-only reverse transport is allowed in the end-to-end path.
 Implement in this order:
 
 ```text
-1. package dependencies/exports/lockfile + tsconfig DOM lib
+1. package core deps + browser build devDeps + exports/lockfile
 2. public model + SchemaFormError
-3. validation + initial canonicalization
-4. trusted validator compilation/result handling
+3. validation budgets + initial canonicalization
+4. trusted validator compilation/result handling/error-map budget
 5. RenderData projection helpers + internal node allocator
 6. Session/openSchemaForm lifecycle
-7. InputListener event parsing/change/submit/cancel
-8. browser registration boundary
+7. InputListener event parsing + authoritative 128 KiB recheck
+8. browser Lit/Web Awesome source
 9. lr-schema-form-field
 10. lr-schema-form modal root
-11. unit/integration tests
-12. Chromium qualification
-13. package pack/export checks
-14. full workspace regression relevant to changed dependencies
+11. esbuild classic JS/CSS bundle
+12. unit/integration tests
+13. Chromium qualification using bundled Web Presentation resources
+14. bundle/package artifact checks
+15. full workspace regression relevant to changed dependencies
 ```
 
 Do not implement browser components before core snapshot/event contracts are covered
@@ -1212,6 +1298,7 @@ At minimum execute from the final implementation HEAD:
 npm install / lockfile update using workspace-standard npm
 npm run build -w @loomrealm-game/schema-form
 npm test -w @loomrealm-game/schema-form
+verify schema-form.browser.js/.css are self-contained Web Presentation artifacts
 npm test -w @loomrealm/data
 npm test -w @loomrealm/subsystem
 npm test -w @loomrealm/renderer
@@ -1229,7 +1316,7 @@ Phase 2 is complete only if:
 
 ```text
 [ ] root module is platform-neutral at runtime
-[ ] browser module is explicit and side-effect-free on import
+[ ] browser delivery is one classic self-contained JS bundle + one CSS bundle
 [ ] no frame.call/schema-form subsystem exists
 [ ] one active form per Frame enforced
 [ ] all preflight error codes match DESIGN
@@ -1238,6 +1325,11 @@ Phase 2 is complete only if:
 [ ] canonical data contains only string/number/boolean
 [ ] string "" and boolean false are concrete values
 [ ] number/select absence is omission
+[ ] schema <= 65536 bytes and initialValue <= 65536 bytes preflight budgets enforced
+[ ] validator error map <= 65536 bytes enforced
+[ ] required is interaction-only, not preflight rejection
+[ ] string min/max length uses ECMAScript value.length
+[ ] select "" is explicit option value; null alone means unset
 [ ] trusted validators are isolated and synchronous
 [ ] internal RenderNode identity never derives from field.key
 [ ] string/boolean RenderData value is always concrete
@@ -1246,10 +1338,13 @@ Phase 2 is complete only if:
 [ ] full Change/Submit snapshots are exact-key
 [ ] malformed presentation input is fail-closed
 [ ] Submit is independent of previous Change delivery
-[ ] browser event data <= 131072 bytes
+[ ] browser event data <= 131072 bytes before emit
+[ ] subsystem independently rechecks <= 131072 bytes before parsing
 [ ] number draft model preserves incomplete lexical edits
 [ ] modal DOM blocking does not change LoomRealm input authority
-[ ] Chromium qualification proves real browser path
+[ ] browser bundle contains no runtime ESM/dynamic-import/bare-specifier dependency
+[ ] CSS bundle owns required Web Awesome + Schema Form styles
+[ ] Chromium qualification proves real bundled browser path
 [ ] no new Renderer/Main/Subsystem architecture change was required
 ```
 
