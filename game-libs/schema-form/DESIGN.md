@@ -1,6 +1,6 @@
 # Schema Form Design
 
-Status: **Frozen / Phase 2 implementation-ready / no design discretion**
+Status: **Frozen / AI implementation-ready / no design discretion**
 
 This document defines the v1 form declaration shape and public module boundary for
 `@loomrealm-game/schema-form`.
@@ -468,10 +468,26 @@ Every field default and every supplied `initialValue[field.key]` must match the
 declared field kind and all built-in constraints except `required`. The `required`
 rule is evaluated only for interactive Change/Submit validation.
 
+Declaration cardinality and string rules are exact:
+
+```text
+fields.length                  0..128
+select.options.length          0..unbounded-by-count
+                               (bounded only by the 65,536-byte schema budget)
+field.key                      non-empty, valid Unicode, 1..128 UTF-8 bytes
+all other schema strings       valid Unicode and MAY be ""
+validator error strings        non-empty
+```
+
+An empty `validateOnChange` / `validateOnSubmit` string is structurally a string,
+then fails validator compilation as `SCHEMA_FORM_VALIDATOR_FAILED`; it is not an
+invalid schema-shape special case.
+
 Select rules are:
 
 ```text
 option.value values are unique
+option.value may be ""
 default, when present, matches one option.value
 initialValue, when present, matches one option.value
 ```
@@ -653,6 +669,13 @@ export type SchemaFormErrorCode =
   | "SCHEMA_FORM_INVALID_VALIDATOR_RESULT";
 
 export class SchemaFormError extends Error {
+  constructor(
+    code: SchemaFormErrorCode,
+    message: string = code,
+    path?: string,
+    options?: ErrorOptions,
+  );
+
   readonly code: SchemaFormErrorCode;
   readonly path?: string;
 }
@@ -695,17 +718,36 @@ invalid schema / initialValue
 → require no cleanup
 ```
 
-When useful, `SchemaFormError.path` should identify the failing declaration location,
-for example:
+`SchemaFormError.name` is exactly `"SchemaFormError"`.
+
+`SchemaFormError.path` is deterministic:
 
 ```text
-schema.fields[2].key
-schema.fields[4].min
-initialValue.level
+SCHEMA_FORM_INVALID_SCHEMA
+  concrete declaration/member failure
+  → exact schema path, e.g. schema.fields[2].key
+  whole-schema shape/version/size failure
+  → "schema"
+
+SCHEMA_FORM_INVALID_INITIAL_VALUE
+  concrete field/member failure
+  → initialValue.<fieldKey>
+  whole-object shape/size failure
+  → "initialValue"
+
+SCHEMA_FORM_ALREADY_OPEN
+  → undefined
+
+SCHEMA_FORM_VALIDATOR_FAILED
+SCHEMA_FORM_INVALID_VALIDATOR_RESULT
+  validateOnChange failure/result
+  → "schema.validateOnChange"
+  validateOnSubmit failure/result
+  → "schema.validateOnSubmit"
 ```
 
 `path` is diagnostic metadata only; callers must branch on `code`, not on message
-text or path formatting.
+text.
 
 Preflight validation order is:
 
@@ -729,8 +771,8 @@ Frame abort remains separate and rejects with `AbortError`, not `SchemaFormError
 Validators receive a snapshot of current form values rather than direct mutable
 access to Schema Form internal state.
 
-The public contract treats the argument as read-only. Implementations should use a
-defensive snapshot and may freeze that snapshot as an implementation detail.
+The validator argument is exactly a detached `SchemaFormDataV1` snapshot. The
+implementation MUST shallow-freeze that detached snapshot before invocation.
 
 Validator mutation must never become an implicit state update mechanism.
 
@@ -1088,8 +1130,9 @@ These mappings are browser-presentation implementation choices. They are not par
 the public SchemaForm schema ABI.
 
 The components receive state through the existing Web presentation
-`receiveRenderData(data)` convention. They should validate the incoming RenderData
-shape before applying it.
+`receiveRenderData(data)` convention. They MUST validate the complete incoming
+RenderData shape before applying any part of it. Invalid RenderData synchronously
+throws `TypeError` and leaves the last successfully applied browser state unchanged.
 
 
 ### Browser build and registration boundary
@@ -1099,6 +1142,18 @@ The platform-neutral TypeScript entry point remains:
 ```text
 @loomrealm-game/schema-form
 ```
+
+Browser TypeScript MUST reuse the formal Renderer presentation context type with a
+type-only import:
+
+```ts
+import type {
+  WebPresentationContext,
+} from "@loomrealm/renderer/web-presentation";
+```
+
+This is a build-time type dependency only and MUST NOT create a browser/runtime
+Renderer import in the emitted bundle.
 
 It exports Schema Form declarations, errors, RenderData types, and
 `openSchemaForm()`. It MUST NOT import DOM, Lit, Web Awesome, or browser-only code.
@@ -1245,8 +1300,28 @@ decide Schema Form validity.
 #### Error presentation
 
 Field errors come only from `SchemaFormFieldRenderDataV1.error`. Web Awesome/native
-validation may assist accessibility and presentation but MUST NOT create independent
-Schema Form validation authority.
+constraint validation MUST NOT create a second validity authority.
+
+The browser adapter does not forward Schema Form `required`, `minLength`,
+`maxLength`, `min`, `max`, or `integer` into native/Web Awesome constraints
+that can block, normalize, or independently invalidate input. `required` is rendered
+only as a Schema Form visual required marker. `placeholder`, labels, descriptions,
+and module-produced `error` remain ordinary presentation.
+
+A select is always rendered `with-clear` so unset remains user-reachable. Web
+Awesome's empty control value is reserved internally for unset. Each semantic option
+is mapped to a stable private DOM token by schema order:
+
+```text
+option index 0 → "o:0"
+option index 1 → "o:1"
+...
+```
+
+RenderData semantic `option.value` strings are never placed directly into
+`wa-option.value`. On RenderData, semantic value → token; on user read,
+token → semantic value. Thus semantic `option.value === ""` remains distinct from
+browser unset.
 
 ### Number editing strategy
 
@@ -1537,8 +1612,29 @@ intermediate events may be dropped under bounded backpressure, while any later C
 event contains the complete current edit snapshot and can converge the subsystem to
 the latest presentation state.
 
-Presentation may coalesce multiple rapid field changes into one later Change event,
-provided that the emitted event contains the complete latest snapshot.
+Presentation does not debounce or coalesce Change in v1.
+
+The field-to-root trigger is frozen:
+
+```text
+single-line string / wa-input  → input
+multiline string / wa-textarea → input
+number / wa-input              → input
+boolean / wa-checkbox          → change
+select / wa-select             → change
+```
+
+Each accepted user-originated control event performs exactly one:
+
+```text
+fieldChanged()
+→ collectValues()
+→ event-size preflight
+→ emit one complete Change snapshot when within the size bound
+```
+
+Programmatic control updates caused by `receiveRenderData()` MUST NOT call
+`fieldChanged()` or emit Change.
 
 ### Submit event
 
