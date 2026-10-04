@@ -1,15 +1,17 @@
 # Realm State：Session 级共享业务状态系统
 
 > 层级：系统架构  
-> 状态：Proposal / Architecture Semantics Closed  
-> 稳定程度：**Not Implemented / Not Contract Frozen / Not Qualified**  
-> 主要定义：Session 级共享业务状态 authority、Namespace Record Collection、Game Entry 初始状态、immutable initial value、materialized record index、consistent snapshot、optimistic transaction、subscription linearization、commit evidence、生命周期与平台边界  
+> 状态：Proposal / **Core Architecture Semantics Closed**  
+> 稳定程度：**Not Implemented / Formal Contract Pending / Not Qualified**  
+> 主要定义：Session 级共享业务状态 authority、Namespace Record Collection、Game Entry 初始状态、immutable initial value、materialized Collection index、consistent snapshot、optimistic transaction、subscription linearization、commit evidence、生命周期与平台边界  
 > 依赖：[系统架构总览](./system-overview.md)、[模块子系统模型](./subsystem-model.md)、[栈式运行系统](./stack-runtime-system.md)、[存储与内容系统](./storage-system.md)、[通信系统](./communication-system.md)、[Game Package v1](../15-contracts/game-package-v1.md)  
 > 最近复核：2026-10-05
 
 本文定义 LoomRealm 的候选 **Realm State**：位于 `Main` 控制 authority 与各 `Subsystem Runtime` 局部业务状态之间的 **Session 级、跨 Subsystem、可变业务状态唯一 authority**。
 
-本文的核心架构语义已经闭合；后续工作是把这些语义落实到 Game Package、Realm State protocol、Launcher、Subsystem API、Hostra/PWA realization、测试与 qualification。本文不宣称对应生产实现已经存在。
+本文冻结的是 **core architecture semantics**：authority、lifetime、Collection/Record/Transaction 粒度、initial/current、materialization、consistent read、OCC mutation、commit evidence、subscription linearization 与 persistence boundary。后续仍需把这些语义落实到 Game Package、Realm State logical protocol、Subsystem author API、Launcher、Hostra/PWA realization、实现与 qualification。
+
+以下内容仍属于 **formal contract closure**，不代表 Realm State 核心架构仍开放：API empty/duplicate input 规则、部分返回数组的 canonical ordering、revision/version 数值 representation bound、JsonValue encoded-size/depth 的精确计算规则、wire error serialization 等。
 
 ---
 
@@ -20,29 +22,31 @@
 3. Game Entry v1 直接增加 optional `state` 字段，继续使用 `formatVersion: 1`；
 4. 缺少 `state` 的既有 Game Entry 继续合法，并等价于空 Realm State initial definition；
 5. Realm State 必须在任何 business Runtime side effect 前初始化完成；
-6. `namespace` 是 **Record Collection identifier**：负责组织、发现一组 materialized Records；`key` 是该 Collection 内的 Record identifier；
+6. `namespace` 是 **Record Collection identifier**：负责组织与发现一组 materialized Records；`key` 是该 Collection 内的 Record identifier；
 7. Namespace/Collection 不拥有 value、version、conflict、ACL、transaction 或独立 lifecycle；
-8. `(namespace,key)` Record 是读写、版本与冲突单位；
-9. Transaction 是跨 Record 的原子提交单位，并 MAY 跨 namespace；
-10. Collection 不需要预创建；不存在 NamespaceRegistry、`createNamespace()` 或 `deleteNamespace()`；Collection existence 由 materialized Records 派生；
-11. v1 使用 whole-record replacement，不提供 field-level patch；
-12. 每个 logical key 具有 immutable `initialValue` 与 mutable current `value`；
-13. Game Entry 未声明 key 时 `initialValue = null`；新游戏 current `value = initialValue`；
-14. 每个新 Session 的 global revision 与所有 Record version 从 `0` 开始；Load Game 不继承旧 Session concurrency metadata；
-15. 多 key `read()` 返回同一 logical snapshot；
-16. mutation 使用 optimistic concurrency control（OCC）：read-set version conditions + atomic write-set；
-17. 每个 write target MUST 出现在 conditions 中；read-only business dependencies MAY 同样进入 conditions；
-18. stale condition → `CONFLICT` + zero write；
-19. v1 不提供跨 Runtime 长事务锁，也不自动 retry business transaction；
-20. Realm State v1 不提供 Subsystem / namespace / key 业务 ACL；
-21. `list()` 是 Collection/Record discovery API，可枚举全部 materialized Collections，或只枚举指定 namespace Collection；
-22. `list()` 返回一致 revision 的 Collection → Record key/version index，不返回业务 value；
-23. Save 可以只保存部分 current values；Load Game 使用 sparse current-value override；
-24. RealmStateAuthority fatal → Session terminal；
-25. Key grammar、capacity limits、transaction shape、deep-equal write、Collection/index ordering 均为确定 contract semantics；
-26. Subscription 采用 authority 原子 baseline + observer registration；断线/overflow 后 fresh subscribe，不提供 replay cursor；
-27. `commit()` 不支持 remote cancellation；一旦 dispatch，结果丢失时使用 `OUTCOME_UNKNOWN`，不得自动 retry；
-28. v1 不引入 transaction ID、dedup journal、status query 或 generic transaction coordinator。
+8. Collection membership 是 **observational discovery metadata**，不是 OCC condition 或 transactional set predicate；
+9. `(namespace,key)` Record 是读写、replacement、version 与 conflict 单位；
+10. Transaction 是跨 Record 的原子提交单位，并 MAY 跨 Collection；
+11. Collection 不需要预创建；不存在 NamespaceRegistry、`createNamespace()` 或 `deleteNamespace()`；Collection existence 由 materialized Records 派生；
+12. v1 使用 whole-record replacement，不提供 field-level patch；
+13. 每个 logical key 具有 immutable `initialValue` 与 mutable current `value`；
+14. Game Entry 未声明 key 时 `initialValue = null`；新游戏 current `value = initialValue`；
+15. 每个新 Session 的 global revision 与所有 Record version 从 `0` 开始；Load Game 不继承旧 Session concurrency metadata；
+16. 多 key `read()` 返回同一 logical snapshot；
+17. mutation 使用 optimistic concurrency control（OCC）：read-set Record version conditions + atomic write-set；
+18. 每个 write target MUST 出现在 conditions 中；read-only business dependencies MAY 同样进入 conditions；
+19. stale condition → `CONFLICT` + zero write；
+20. v1 不提供跨 Runtime 长事务锁，也不自动 retry business transaction；
+21. Realm State v1 不提供 Subsystem / namespace / key 业务 ACL；
+22. `list()` 是 Collection/Record discovery API，可枚举全部 materialized Collections，或只枚举指定 namespace Collection；
+23. `list()` 返回一致 revision 的 Collection → Record key/version index，不返回业务 value，也不是 transactional Collection scan；
+24. Subscription 只观察显式已知 `RealmStateKey` Records；v1 不提供 namespace wildcard subscription；
+25. Save 可以只保存部分 current values；Load Game 使用 sparse current-value override；
+26. RealmStateAuthority fatal → Session terminal；
+27. Key grammar、capacity limits、transaction shape、deep-equal write、Collection/index ordering 均为已确定架构方向；
+28. Subscription 采用 authority 原子 baseline + observer registration；断线/overflow 后 fresh subscribe，不提供 replay cursor；
+29. `commit()` 不支持 remote cancellation；一旦 dispatch，结果丢失时使用 `OUTCOME_UNKNOWN`，不得自动 retry；
+30. v1 不引入 transaction ID、dedup journal、status query 或 generic transaction coordinator。
 
 ---
 
@@ -89,7 +93,7 @@ Realm State
     "共享业务事实初始是什么、现在是什么"
 
 Namespace / Collection
-    "这些 Records 属于哪一组"
+    "这些 Records 属于哪一组、当前可发现哪些 materialized Records"
 
 Record key
     "它是该 Collection 中哪一个 Record"
@@ -116,7 +120,7 @@ consistent snapshot
 record version / conflict
 atomic commit
 initialValue immutability
-collection/index discovery consistency
+Collection/index discovery consistency
 subscription ordering
 Runtime / Session lifetime
 commit evidence
@@ -131,6 +135,8 @@ ACL / RBAC / policy engine
 independent NamespaceRegistry
 createNamespace() / deleteNamespace()
 namespace value / namespace version / namespace transaction
+Collection membership OCC condition / Collection predicate lock
+namespace wildcard subscription
 schema registry
 field-level JSON patch
 SQL/query language / secondary indexes
@@ -179,11 +185,11 @@ profile / economy / main / side-001
     = key inside that Collection
 ```
 
-因此精确定义为：
+精确定义：
 
 ```text
 Namespace
-    Record Collection / discovery boundary
+    Record Collection / organization + discovery boundary
 
 Key
     Record identifier within one Collection
@@ -249,7 +255,37 @@ quest/main-story
 
 因为 v1 没有 dematerialize Record 的操作，所以一个已经出现的 Collection 在当前 Session 中不会因为 `put(null)` 消失。
 
-### 4.3 Record
+### 4.3 Collection Membership Is Observational, Not Transactional
+
+Collection membership / Collection index 是 **observational discovery metadata**。
+
+Realm State v1 不提供：
+
+```text
+Collection version
+Collection OCC condition
+"Collection still contains exactly these Records" predicate
+Collection membership lock
+Collection-wide conflict domain
+```
+
+因此：
+
+```text
+list({ namespace: "quest" }) @ revision 100
+```
+
+只证明 revision 100 时 `quest` Collection 的 materialized membership 是该 snapshot 所示集合；它不保证之后某个 `commit()` 时没有新的 `quest/*` Record 被其他 Runtime materialize。
+
+如果业务 correctness 真正依赖“成员集合本身没有变化”，业务 SHOULD 把该 membership/invariant 显式建模成普通 Record，例如：
+
+```text
+quest/index
+```
+
+并让该 Record 的 version 进入普通 OCC conditions。Realm State core 不把 Collection membership 隐式升级为第二套 version/conflict 系统。
+
+### 4.4 Record
 
 ```ts
 interface RealmStateKey {
@@ -277,7 +313,7 @@ quest/main-story
 world/flags
 ```
 
-### 4.4 Transaction
+### 4.5 Transaction
 
 Transaction 是 atomicity unit，并 MAY 跨 Collection：
 
@@ -291,7 +327,7 @@ quest/shopping-tutorial
 
 必须 all-or-nothing。
 
-Collection 不限制 transaction 边界。
+Collection 不限制 transaction 边界，也不形成额外 OCC condition。
 
 ---
 
@@ -517,7 +553,7 @@ transaction writes count              <= 128
 transaction total payload             <= 2 MiB
 ```
 
-`encoded JSON size` 按 logical protocol 的 UTF-8 JSON payload 计算；物理 carrier 不得绕过限制。
+`encoded JSON size` 按 logical protocol 的 UTF-8 JSON payload 计算；物理 carrier 不得绕过限制。精确 canonical encoding/size accounting 与 nesting-depth accounting 由 formal protocol contract 冻结。
 
 `list()` v1 不分页。materialized Record 数和 namespace/key size 已有 hard bound，因此全量 Collection index 响应天然有界。
 
@@ -669,6 +705,19 @@ interface RealmStateSubscription {
 
 所有 live Runtime-scoped clients 可访问任意 valid Collection/Record；v1 没有业务 ACL。
 
+### 13.1 Subscription Handle Visibility
+
+`subscribe()` establishment 在 Authority 上仍按 §18 的 atomic linearization 完成，但 author API 还必须保证：
+
+```text
+subscription established
+→ Promise resolves with RealmStateSubscription handle
+→ only then may listener receive baseline
+→ then subsequent changes
+```
+
+也就是 **subscription handle MUST become observable before the first listener callback**。这样 listener 在 baseline callback 内安全调用 `subscription.close()` 不会遇到 handle 尚未返回的 race。
+
 ---
 
 ## 14. Consistent Read
@@ -690,7 +739,7 @@ Collection 只组织 Records，不改变 `read()` 的 snapshot/Record semantics�
 
 ## 15. Collection Index / `list()`
 
-`list()` 是 Realm State 的 Collection/Record discovery API。
+`list()` 是 Realm State 的 Collection/Record **discovery API**。
 
 ### 15.1 Index Shape
 
@@ -723,7 +772,7 @@ current value
 ```text
 which materialized Collections exist
 which materialized Record keys exist in each Collection
-current version of each Record
+current version of each Record at the index snapshot revision
 ```
 
 ### 15.2 Full Discovery
@@ -774,7 +823,49 @@ v1 不制造 empty Collection object，因为 Collection existence 由 materiali
 
 Authority 不得一边遍历 Collection/Record index、一边接受 commit，最后返回混合 revision 的索引。
 
-### 15.5 Canonical Ordering
+### 15.5 Discovery Snapshot, Not Transactional Scan
+
+`list()` 是 point-in-time discovery snapshot，不是 transactional Collection scan。
+
+例如：
+
+```text
+list({ namespace: "quest" }) @ revision 100
+→ choose discovered Record keys
+→ concurrent commit materializes quest/side-002 @ revision 101
+→ read(previously-selected keys) @ revision 101
+```
+
+这是合法的。`list()` 与之后的 `read()` 不要求来自相同 revision。
+
+因此：
+
+```text
+list(namespace)
++ read(discoveredKeys)
+!= atomic Collection key-set + value snapshot
+```
+
+适合使用 `list()` 的场景：
+
+```text
+Save discovery
+tooling / diagnostics
+UI discovery
+finding dynamic Records
+```
+
+单独依赖 `list()` **不足以**表达：
+
+```text
+"the Collection still contains exactly these Records"
+"no new Record has appeared"
+collection-wide transactional invariant
+```
+
+这类业务 invariant SHOULD 通过普通 versioned Record 显式建模，而不是给 Collection index 隐式增加 OCC semantics。
+
+### 15.6 Canonical Ordering
 
 ```text
 collections:
@@ -788,7 +879,7 @@ records inside each Collection:
 
 该顺序仅用于 deterministic presentation、tests、diagnostics 与 serialization stability，不赋予业务优先级。
 
-### 15.6 Save Discovery
+### 15.7 Save Discovery
 
 ```text
 list()
@@ -799,7 +890,7 @@ list()
 → serialize selected current values
 ```
 
-`list()` revision 与随后 `read()` revision 不要求相同。v1 不引入 snapshot token / long-lived MVCC handle。
+Save 流程接受 `list()` 与后续 `read()` revision 可能不同；如果未来 persistence consumer 要求 exact key-set + values 同 revision capture，应基于真实需求设计独立 snapshot/capture 能力，而不是让普通 `list()` 承担 MVCC handle 语义。
 
 ---
 
@@ -876,7 +967,7 @@ validate complete request
 → publish one committed change
 ```
 
-普通 transaction 使用 per-record version 做 conflict detection；global revision 不作为默认全局条件；Namespace/Collection 没有独立 version。
+普通 transaction 使用 per-record version 做 conflict detection；global revision 不作为默认全局条件；Namespace/Collection membership 不参与 OCC。
 
 ---
 
@@ -990,11 +1081,15 @@ type RealmStateSubscriptionEvent =
     }
   | {
       readonly type: "terminal";
-      readonly reason: "closed" | "binding-terminal" | "overflow";
+      readonly reason: "binding-terminal" | "overflow";
     };
 ```
 
-Subscription 仍按明确 `RealmStateKey[]` 订阅 Records；v1 不增加“订阅整个 namespace Collection”的隐式 wildcard 语义。
+Subscription 按显式 `RealmStateKey[]` 订阅已知 Records；v1 不增加“订阅整个 namespace Collection”的隐式 wildcard 语义。
+
+因此一个 subscription 建立后，新 materialize 的同 namespace Record **不会因为 Collection membership 而自动匹配该 subscription**。
+
+如果业务需要实时观察动态 membership，业务 SHOULD 订阅自己显式维护的普通 index Record；v1 不为此增加 Collection-level observer/version system。
 
 每个成功 commit 对一个 subscription 至多产生一个 `change` event；若同一 transaction 修改多个 subscribed Records，它们 MUST 位于同一个 change event 中。
 
@@ -1022,15 +1117,16 @@ Authority MUST 在同一个 serialized logical step 内：
 
 这定义 subscription establishment linearization point。
 
-即使 revision `N+1` 在 baseline 物理传输完成前就已 commit，binding 也必须先交付 baseline，再交付已缓冲的相关 change；不得漏掉 relevant commit。
+即使 revision `N+1` 在 baseline 物理传输完成前就已 commit，binding 也必须保存/缓冲该 relevant change；author API 必须先使 subscription handle 可观察，再交付 baseline，然后才按顺序交付这些 post-baseline changes。
 
 Delivery invariant：
 
 ```text
-first event MUST be baseline @ N
+Promise resolves with subscription handle before first listener callback
+first listener event MUST be baseline @ N
 all subsequent change revisions MUST be > N
 change revisions MUST be monotonically increasing
-all relevant commits after N MUST be delivered unless subscription terminals
+all relevant commits after N MUST be delivered unless subscription terminals/closes
 unrelated commits MAY cause revision gaps
 ```
 
@@ -1053,7 +1149,7 @@ v1 不提供 replay journal、resume cursor 或 `resumeFromRevision`。
 
 ```text
 binding / connection lost
-→ old subscription terminal
+→ old subscription terminal(reason = binding-terminal)
 → reconnect
 → fresh subscribe
 → fresh baseline @ current revision
@@ -1063,7 +1159,19 @@ binding / connection lost
 
 ### 18.5 Close
 
-`subscription.close()` 是 observation-side teardown，不影响 Realm State authority。close 后不要求继续交付已排队 change；不得在 close 后重新激活同一 subscription identity。
+`subscription.close()` 是 author-initiated observation teardown，不影响 Realm State authority。
+
+固定：
+
+```text
+close() is idempotent
+close() performs local subscription teardown
+once close() returns, listener MUST NOT be invoked again
+close() does NOT emit terminal("closed")
+closed subscription identity MUST NOT be reactivated
+```
+
+`terminal` event 只表示非 caller 主动请求导致的 subscription loss，例如 `binding-terminal` 或 `overflow`。
 
 ---
 
@@ -1218,6 +1326,7 @@ load absent key → current Game initialValue
 revision/version baseline = 0 per new Session
 Namespace as derived Record Collection
 Collection existence derived from materialized Records
+Collection membership observational, not transactional
 no NamespaceRegistry / createNamespace / deleteNamespace
 explicit namespace/key grammar / hard limits
 one RealmStateAuthority per Session
@@ -1225,20 +1334,24 @@ bootstrap-before-runtime barrier
 materialized Record index
 list() full Collection index
 list({ namespace }) Collection-filtered index
-consistent deterministic Collection/Record ordering
+list() as discovery snapshot, not transactional Collection scan
+consistent deterministic Collection/Record index ordering
 whole-record put
 successful deep-equal put advances version/revision
 consistent multi-key read
 strict transaction shape validation
-OCC read-set version conditions
+OCC read-set Record-version conditions
 write-set ⊆ read-set
 atomic multi-record / cross-Collection commit
 explicit INVALID_REQUEST / LIMIT_EXCEEDED / CONFLICT / TERMINAL / OUTCOME_UNKNOWN
 commit() without AbortSignal / remote cancellation
 no automatic mutation retry
 atomic subscription baseline + observer establishment
-ordered relevant changes
+subscription handle observable before baseline callback
+ordered relevant Record changes
+no namespace wildcard subscription
 subscription overflow/disconnect → terminal
+close() idempotent, no post-close callback
 fresh subscribe + fresh baseline recovery
 Runtime-scoped RealmStateClient
 RealmStateAuthority fatal → Session terminal
@@ -1251,6 +1364,7 @@ Desktop in-process authority + explicit transport seam
 independent NamespaceRegistry
 empty namespace objects
 namespace value/version/transaction/lifecycle
+Collection membership version / predicate lock
 namespace ACL / security boundary
 namespace wildcard subscription
 Game Entry v2 only for State
@@ -1281,8 +1395,8 @@ transparent authority restart/recovery
 
 ```text
 Game Entry / Bootstrap
-- existing GameEntryV1 without state remains valid
-- optional state validates as part of GameEntryV1
+- existing GameEntryV1 without state remains valid after formal contract update
+- optional state validates as part of GameEntryV1 after formal contract update
 - invalid/duplicate/oversized initial Records reject during PREPARE
 - State is READY before first business Runtime side effect
 
@@ -1295,8 +1409,10 @@ Namespace Collection / Index
 - put(null) does not remove Record or Collection membership
 - list() returns all materialized Collections at one revision
 - list({ namespace }) returns only that Collection at one revision
-- missing/empty Collection filter returns collections: []
+- missing Collection filter returns collections: []
 - Collection ordering and per-Collection Record ordering are canonical UTF-8 byte order
+- Collection membership is not accepted as an OCC condition
+- list()+read is not treated as atomic Collection scan
 
 Key / Limits
 - exact grammar behaves identically across platforms
@@ -1332,13 +1448,16 @@ Commit Evidence
 
 Subscription
 - establishment captures baseline and registers observer atomically
+- Promise resolves with subscription handle before baseline callback
 - baseline is delivered before buffered post-baseline changes
-- no relevant post-baseline commit can be silently lost
+- no relevant subscribed-Record commit can be silently lost
+- newly materialized same-Collection Record is not implicitly subscribed
 - change revisions are monotonically increasing
 - one transaction maps to at most one change event per subscription
 - unrelated commits may create revision gaps
 - slow-consumer overflow terminals instead of dropping changes
 - disconnect terminals old subscription
+- close() is idempotent and prevents future listener invocation after return
 - reconnect uses fresh subscribe + fresh baseline
 - no replay/cursor is required for v1
 
@@ -1349,11 +1468,78 @@ Lifetime / Failure
 
 ---
 
-## 27. 已关闭、不再开放的核心设计问题
+## 27. Formal Contract Closure Checklist
+
+以下项目 **不改变 Realm State core architecture semantics**，但正式 `loomrealm.realm-state/1` / `@loomrealm/subsystem` author contract MUST 在实现前冻结：
+
+```text
+Observation request shape
+- read([]) 是否合法
+- duplicate read Record identities 如何处理
+- subscribe([]) 是否合法
+- duplicate subscription Record identities 如何处理
+
+Returned-array ordering
+- RealmStateSnapshot.records canonical ordering
+- RealmStateCommit.records canonical ordering
+- subscription change.records canonical ordering
+
+Numeric representation
+- revision/version 的 exact integer representation bound
+- invalid/overflow representation handling
+
+JsonValue bound accounting
+- single-value encoded-size canonical calculation
+- transaction total payload-size canonical calculation
+- nesting-depth exact counting rule
+
+Wire/API errors
+- public error object shape
+- stable category serialization
+- structural path / diagnostics boundary
+
+Transport/profile realization
+- bounded subscription queue profile
+- Load current-seed total resource bound
+```
+
+这些项目属于 formal contract / profile / qualification closure，不应被重新解释为需要扩张 Realm State authority model 的架构缺口。
+
+---
+
+## 28. Contract Synchronization Work
+
+架构结论已经要求后续正式同步：
+
+```text
+Game Package v1
+    closed schema 增加 optional state
+    RealmStateGameDefinitionV1 / initial Record validation
+
+Subsystem author contract
+    SubsystemScope.state
+    RealmStateClient / subscription surface
+
+Realm State logical protocol
+    read / list / commit / subscribe / terminal / evidence
+
+Launcher / Platform Composition
+    prepared State projection
+    State bootstrap barrier
+
+Hostra / PWA
+    equivalent logical semantics + limits + failure behavior
+```
+
+在这些 normative contract 完成前，本文仍不得被解释为“功能已经实现”。
+
+---
+
+## 29. 已关闭、不再开放的核心设计问题
 
 ```text
 namespace semantic role
-    = Record Collection / discovery boundary
+    = Record Collection / organization + discovery boundary
 
 namespace is independent authority object
     = no
@@ -1370,11 +1556,23 @@ createNamespace() / deleteNamespace()
 Collection existence
     = derived from materialized Record membership
 
+Collection membership participates in OCC
+    = no
+
+Collection index is transactional set predicate
+    = no
+
 list() can filter one namespace Collection
     = yes
 
 list() index shape
     = Collection -> Record key/version
+
+list()+read is atomic Collection key-set/value snapshot
+    = no
+
+namespace wildcard subscription
+    = no
 
 Game Entry state requires v2
     = no
@@ -1418,7 +1616,7 @@ deep-equal successful put is no-op
 empty / condition-only / duplicate-key transaction allowed
     = no
 
-Collection/Record order unspecified
+Collection/Record index order unspecified
     = no; canonical UTF-8 byte ordering
 
 protocol limits implementation-defined/unbounded
@@ -1439,7 +1637,13 @@ v1 requires transaction ID / status query / dedup journal
 subscription baseline and observer registration are separate non-atomic operations
     = no
 
+subscription handle may be unavailable during first callback
+    = no
+
 subscription may silently drop changes on overflow
+    = no
+
+close() may continue invoking listener after return
     = no
 
 v1 subscription reconnect replays history
@@ -1454,37 +1658,42 @@ business Runtime may start before Realm State initialization
 
 ---
 
-## 28. Final Invariants
+## 30. Final Invariants
 
 1. Main 唯一拥有 Control Authority；Realm State 唯一拥有 Session shared mutable business facts；
-2. Namespace 是一等的 **Record Collection / discovery boundary**；Key 是该 Collection 内的 Record identifier；
+2. Namespace 是一等的 **Record Collection / organization + discovery boundary**；Key 是该 Collection 内的 Record identifier；
 3. Namespace/Collection 不拥有 value、version、conflict、replacement、transaction、ACL 或独立 lifecycle；
 4. Collection existence 由 materialized Record membership 派生；v1 不存在 NamespaceRegistry、`createNamespace()` 或 `deleteNamespace()`；
-5. `(namespace,key)` Record 是 replacement/version/conflict unit；Transaction 是 atomicity unit，并可跨 Collection；
-6. RealmStateKey 使用 exact、case-sensitive、no-normalization identity，并受明确 UTF-8 hard bounds；
-7. 每个 key 有 immutable `initialValue` 与 mutable current value；缺失 initial key → `initialValue = null`；
-8. GameEntryV1 `state` optional，不因 Realm State 升级 document version；
-9. 每个新 Session 的 revision/version 从 0 开始；Load 不继承旧 Session concurrency metadata；
-10. Materialization 只来自 explicit initial、explicit load seed 或 successful write；read unknown key 不 materialize Record/Collection；
-11. `put(null)` 不 dematerialize Record，也不移除 Collection membership；
-12. `list()` 返回一致 revision 的 Collection → Record key/version index，可选择 namespace filter，并按 canonical UTF-8 byte order 排序；
-13. 所有 key/value/request/session resource 均受明确 hard limits；
-14. `read(keys)` 使用完整 Record identities，并返回一致 logical snapshot；
-15. 每个 write target 必须且只能有一个 caller-observed Record version condition；Authority 原子执行 condition check + all writes；
-16. stale condition → `CONFLICT` + zero write；successful deep-equal put 仍推进 version/revision；
-17. `commit()` 不提供 remote cancellation；dispatch 后失去确定结果 → `OUTCOME_UNKNOWN`；不得自动 retry；
-18. v1 不提供 mutation ID/dedup/status journal；
-19. Subscription establishment 原子绑定 baseline revision 与后续 observer；baseline 后 relevant commits 不得漏失；
-20. Subscription 只交付 ordered committed Record changes；revision 可因 unrelated commits 跳号；
-21. Overflow/disconnect 必须 terminal subscription，不得 silent drop；恢复使用 fresh subscribe + fresh baseline；
-22. Realm State v1 不提供业务 ACL；live Runtime-scoped client 可 read/list/commit/subscribe；
-23. Runtime terminal 终止其 client/subscriptions；RealmStateAuthority fatal → Session terminal；
-24. Realm State 必须在第一项 business Runtime side effect 前 READY；
-25. Hostra/PWA physical realization 可不同，但上述 Collection/Record semantics、hard limits、commit evidence 与 subscription semantics 必须一致。
+5. Collection membership 是 observational discovery metadata，不参与 OCC，也不提供“成员集合未变化”的 transactional predicate；
+6. `(namespace,key)` Record 是 replacement/version/conflict unit；Transaction 是 atomicity unit，并可跨 Collection；
+7. RealmStateKey 使用 exact、case-sensitive、no-normalization identity，并受明确 UTF-8 hard bounds；
+8. 每个 key 有 immutable `initialValue` 与 mutable current value；缺失 initial key → `initialValue = null`；
+9. GameEntryV1 `state` optional，不因 Realm State 升级 document version；
+10. 每个新 Session 的 revision/version 从 0 开始；Load 不继承旧 Session concurrency metadata；
+11. Materialization 只来自 explicit initial、explicit load seed 或 successful write；read unknown key 不 materialize Record/Collection；
+12. `put(null)` 不 dematerialize Record，也不移除 Collection membership；
+13. `list()` 返回一致 revision 的 Collection → Record key/version discovery index，可选择 namespace filter，并按 canonical UTF-8 byte order 排序；
+14. `list()` 不是 transactional Collection scan；`list()` + 后续 `read()` 不保证 key-set 与 values 同 revision；
+15. 所有 key/value/request/session resource 均受明确 hard limits；精确 wire size/depth accounting 属 formal contract closure；
+16. `read(keys)` 使用完整 Record identities，并返回一致 logical snapshot；
+17. 每个 write target 必须且只能有一个 caller-observed Record version condition；Authority 原子执行 condition check + all writes；
+18. stale condition → `CONFLICT` + zero write；successful deep-equal put 仍推进 version/revision；
+19. `commit()` 不提供 remote cancellation；dispatch 后失去确定结果 → `OUTCOME_UNKNOWN`；不得自动 retry；
+20. v1 不提供 mutation ID/dedup/status journal；
+21. Subscription establishment 原子绑定 baseline revision 与后续 observer；author handle 必须先于第一条 callback 可观察；
+22. Subscription 只观察显式 Record identities，不隐式观察 Collection membership；
+23. Subscription 只交付 ordered committed Record changes；revision 可因 unrelated commits 跳号；
+24. Overflow/disconnect 必须 terminal subscription，不得 silent drop；恢复使用 fresh subscribe + fresh baseline；
+25. `subscription.close()` idempotent；返回后不得再次调用 listener；主动 close 不产生 terminal("closed")；
+26. Realm State v1 不提供业务 ACL；live Runtime-scoped client 可 read/list/commit/subscribe；
+27. Runtime terminal 终止其 client/subscriptions；RealmStateAuthority fatal → Session terminal；
+28. Realm State 必须在第一项 business Runtime side effect 前 READY；
+29. Hostra/PWA physical realization 可不同，但上述 Collection/Record semantics、hard limits、commit evidence 与 subscription semantics 必须一致；
+30. Formal contract checklist 中的 API/wire edge rules 必须在实现前冻结，但不得因此引入第二套 Collection authority/version/transaction model。
 
 ---
 
-## 29. Architectural Summary
+## 31. Architectural Summary
 
 ```text
                      GameEntryV1
@@ -1516,13 +1725,18 @@ LogicalGameBootstrap      Realm State Initial Definition
                     ┌─────────────┼────────────────┐
                     ▼             ▼                ▼
                 read(keys)      list(...)      subscribe(keys)
-                 snapshot      collections       baseline @ N
-                               + key/version         │
-                                                    └→ ordered changes > N
+                 snapshot      discovery         baseline @ N
+                               index only           │
+                                                    └→ ordered Record changes > N
+
+Collection membership
+    observational discovery metadata
+    no version / OCC predicate / wildcard subscription
 
                     local business computation
                               │
-                   conditions + write-set
+                   Record-version conditions
+                        + write-set
                               │
                               ▼
                     atomic OCC commit
@@ -1543,6 +1757,7 @@ LogicalGameBootstrap      Realm State Initial Definition
 Namespace / Collection
     organization + discovery boundary
     derived from materialized Record membership
+    observational, not transactional
 
 Record key
     identifier inside one Collection
@@ -1551,10 +1766,11 @@ Record (namespace,key)
     initialValue + current value + version
     replacement / conflict unit
 
-Collection Index
+Materialized Collection Index
     materialized Collections
       → materialized Record keys + versions
     one revision + deterministic order
+    discovery snapshot only
 
 Read Snapshot
     one revision + selected Record values + versions
@@ -1564,9 +1780,11 @@ Transaction
     multi-record / cross-Collection atomicity
 
 Subscription
+    explicit Record identities only
     atomic baseline + observer registration
+    handle-before-callback ordering
     ordered relevant committed Record changes
     fresh-baseline recovery
 ```
 
-至此 Realm State v1 的核心架构语义已经闭合。下一阶段应转向 **正式 contract、reference authority、Launcher/Subsystem projection、Desktop binding 与 qualification**，而不是继续向 core 增加未被真实 consumer 证明必要的机制。
+至此 Realm State v1 的 **core architecture semantics** 已闭合。下一阶段应转向 **formal contract closure、reference authority、Game Package/Subsystem contract synchronization、Launcher projection、Desktop binding 与 qualification**，而不是继续向 core 增加未被真实 consumer 证明必要的机制。
