@@ -3,23 +3,29 @@
 > 层级：系统架构  
 > 状态：Proposal / Active Design  
 > 稳定程度：Evolving / **Not Implemented / Not Contract Frozen / Not Qualified**  
-> 主要定义：Session 级共享业务状态 authority、Game Entry 初始状态、immutable initial value、namespace/record/transaction 粒度、RealmStateBootstrap、Subsystem 访问 capability、事务/版本/订阅语义、生命周期与平台边界  
+> 主要定义：Session 级共享业务状态 authority、Game Entry 初始状态、immutable initial value、namespace/record/transaction 粒度、consistent snapshot、optimistic transaction、Subsystem 访问 capability、订阅/权限/生命周期与平台边界  
 > 依赖：[系统架构总览](./system-overview.md)、[模块子系统模型](./subsystem-model.md)、[栈式运行系统](./stack-runtime-system.md)、[存储与内容系统](./storage-system.md)、[通信系统](./communication-system.md)、[Game Package v1](../15-contracts/game-package-v1.md)  
-> 最近复核：2026-10-04
+> 最近复核：2026-10-05
 
-本文记录 LoomRealm 当前架构中已识别的一项设计缺口及候选解决方向：在 `Main` 的控制权威与各 `Subsystem Runtime` 的局部业务状态之间，缺少一个 **Session 级、跨 Subsystem、可变业务状态的唯一 authority**。
+本文记录 LoomRealm 当前架构中已识别的一项设计缺口及候选解决方向：在 `Main` 的控制权威与各 `Subsystem Runtime` 的局部业务状态之间，需要一个 **Session 级、跨 Subsystem、可变业务状态的唯一 authority**。
 
-本文同时固定以下架构方向：
+本文当前固定以下架构方向：
 
 1. 新游戏 Realm State 的初始业务值属于 platform-neutral Game Entry；
 2. Platform Launcher 在 PREPARE 阶段验证并投影 Game Entry state；
 3. Platform Composition 必须先建立并初始化 Realm State authority，才允许任何 business Runtime side effect；
-4. `namespace` 只承担逻辑分组/授权边界，不是更新、版本或事务单位；
+4. `namespace` 只承担逻辑分组/授权边界，不是更新、版本、冲突或事务单位；
 5. `record = namespace + key` 是读写、版本与冲突的基本单位；
 6. `transaction` 是跨 record 的原子提交单位，并且 MAY 跨 namespace；
-7. v1 写入是 whole-record value replacement，不提供 field-level patch；
+7. v1 写入采用 whole-record value replacement，不提供 field-level patch；
 8. 每个 key 同时具有不可变 `initialValue` 与可变 `value`；未在 Game Entry 中声明初始值时 `initialValue = null`；
-9. 新游戏的 `value` 初始等于 `initialValue`；读档只恢复 current `value`，不得修改 Game Entry 定义的 `initialValue`。
+9. 新游戏的 `value` 初始等于 `initialValue`；读档只恢复 current `value`，不得修改 Game Entry 定义的 `initialValue`；
+10. 多 key `read()` 返回同一 logical snapshot；
+11. v1 mutation 采用 **optimistic concurrency control**：业务先读取 record/version，再以 read-set version conditions 原子提交 write-set；
+12. 每个 write target MUST 同时出现在 transaction read-set/conditions 中；read-set MAY 包含只读但参与业务判断的 record；
+13. 任一 observed version 已变化时，整个 transaction 返回 `CONFLICT` 且 zero write；
+14. v1 不提供跨 Runtime 的长生命周期锁事务，也不自动重试冲突；
+15. transport ambiguity 与 `CONFLICT` 必须区分：前者可能已提交，后者明确 known-no-commit。
 
 本文仍是架构提案，不改变现有 Frozen contracts，也不宣称存在对应生产实现。尤其当前 Game Package v1 是 closed schema，尚不接受 `state` 字段；正式实现前必须通过 ADR / contract revision 明确兼容与版本策略。
 
@@ -103,12 +109,13 @@ Realm State
 2. 允许多个 Subsystem 显式读取/修改；
 3. 保证多 record 原子 commit；
 4. 支持 per-record version、冲突检测和一致 snapshot；
-5. 支持 immutable initial value 与 mutable current value；
-6. 支持只观察 authoritative commit 的 subscription；
-7. 独立于 Frame / Activation / Renderer / Data carrier 生命周期；
-8. 保持 Hostra/PWA logical semantics 一致；
-9. 提供确定的新游戏/读档初始化 barrier；
-10. 不把 Main、Content、Renderer 或 `frame.call()` 扩张成通用业务状态系统。
+5. 保证业务写入建立在自己实际观察到的 state version 上；
+6. 支持 immutable initial value 与 mutable current value；
+7. 支持只观察 authoritative commit 的 subscription；
+8. 独立于 Frame / Activation / Renderer / Data carrier 生命周期；
+9. 保持 Hostra/PWA logical semantics 一致；
+10. 提供确定的新游戏/读档初始化 barrier；
+11. 不把 Main、Content、Renderer 或 `frame.call()` 扩张成通用业务状态系统。
 
 核心原则：
 
@@ -135,6 +142,7 @@ Content replacement
 Renderer Store replacement
 Save Game / persistence system
 field-level JSON patch framework
+cross-Runtime long-lived lock manager
 ```
 
 禁止：
@@ -165,7 +173,8 @@ Realm State
     ├── mutable current values
     ├── per-record versions
     ├── global commit revision
-    ├── atomic transactions
+    ├── consistent snapshots
+    ├── optimistic atomic transactions
     └── subscriptions to committed state
 
 Subsystem
@@ -182,7 +191,7 @@ Main 与 Realm State 是同一 Session 下的两个不同逻辑 authority：
 
 ```text
 Main owns "who is running / active / authorized"
-Realm State owns "what shared game facts currently are"
+Realm State owns "what shared game facts initially are and currently are"
 ```
 
 Realm State MUST NOT 被实现为 Main 内部任意业务字段集合。
@@ -303,9 +312,9 @@ quest/side-001
 world/flags
 ```
 
-**Record 是 v1 的读写、版本和冲突基本单位。**
+**Record 是 v1 的 read/write/version/conflict 基本单位。**
 
-例如修改：
+修改：
 
 ```text
 player/economy
@@ -357,15 +366,12 @@ inventory/main @ version 15
 }
 ```
 
-把 potion 从 `3` 改为 `2` 时，author 读取 detached snapshot，生成新的完整 record value，然后 conditional put：
+把 potion 从 `3` 改为 `2`：
 
 ```text
-inventory/main @ version 15
-→ put {
-     "potion": 2,
-     "pokeball": 8,
-     "ether": 2
-   }
+read inventory/main @ version 15
+→ construct detached next value
+→ conditional put whole value
 → version 16
 ```
 
@@ -444,20 +450,20 @@ initialValue = null
 value        = null
 ```
 
-`null` 是 author-visible 的 canonical empty/unset value；v1 不要求业务作者区分“从未物理 materialize”与“逻辑值为 null”。
+`null` 是 author-visible canonical empty/unset value；v1 不要求业务作者区分“从未物理 materialize”与“逻辑值为 null”。
 
 ### 8.2 Initial Value Is Immutable
 
-`initialValue` 在 Game Entry validation / Realm State bootstrap 时确定，此后在整个 Session lifetime 内：
+`initialValue` 在 Game Entry validation / Realm State bootstrap 时确定，此后整个 Session lifetime：
 
 ```text
 MUST NOT mutate
 MUST NOT be replaced by commit
-MUST NOT be affected by reset/current write
+MUST NOT be affected by current write
 MUST NOT be changed by Runtime/Frame/Renderer/Data reconnect
 ```
 
-Realm State transaction 只能修改 `value`。
+Realm State transaction 只能修改 current `value`。
 
 不提供：
 
@@ -467,7 +473,7 @@ patchInitial(...)
 commitInitial(...)
 ```
 
-如果业务需要恢复默认值，可以：
+如果业务需要恢复默认值：
 
 ```text
 read initialValue
@@ -478,9 +484,9 @@ read initialValue
 
 ### 8.3 Initial Value vs Session Start Value
 
-`initialValue` 精确指 **Game Entry 定义的游戏初始基线**，不是“本次 Session 启动时碰巧载入的 current value”。
+`initialValue` 精确指 **Game Entry 定义的游戏初始基线**，不是“本次 Session 启动时载入的 current value”。
 
-因此读档必须保持：
+读档必须保持：
 
 ```text
 Game Entry initial records
@@ -489,8 +495,6 @@ Game Entry initial records
 Save snapshot
     → current value seed
 ```
-
-而不是把 Save snapshot 覆盖为新的 initial value。
 
 例如：
 
@@ -506,19 +510,11 @@ Loaded Session:
     value        = { money: 12500 }
 ```
 
-这样 Subsystem 可以稳定比较：
-
-```text
-current vs game-defined initial baseline
-```
-
-而不受 New Game / Load Game 启动来源影响。
-
 ---
 
 ## 9. Game Entry Owns Initial Values
 
-新游戏 Realm State 的初始业务值属于 **platform-neutral Game Entry**，而不是 `launch.hostra.json`、`launch.pwa.json` 或 Main bootstrap。
+新游戏 Realm State 初始业务值属于 **platform-neutral Game Entry**，而不是 `launch.hostra.json`、`launch.pwa.json` 或 Main bootstrap。
 
 候选 Game Entry：
 
@@ -530,16 +526,12 @@ current vs game-defined initial baseline
       {
         "namespace": "player",
         "key": "profile",
-        "value": {
-          "name": "Player"
-        }
+        "value": { "name": "Player" }
       },
       {
         "namespace": "player",
         "key": "economy",
-        "value": {
-          "money": 3000
-        }
+        "value": { "money": 3000 }
       },
       {
         "namespace": "inventory",
@@ -550,10 +542,7 @@ current vs game-defined initial baseline
   },
   "initial": {
     "subsystem": "loom.map",
-    "input": {
-      "mapId": 1,
-      "spawn": "new-game"
-    }
+    "input": { "mapId": 1, "spawn": "new-game" }
   },
   "subsystems": [
     { "key": "loom.map" },
@@ -619,9 +608,9 @@ value = null
 version = 0
 ```
 
-实现不需要为无限 key 空间预创建物理 record；这是 author-visible logical default。
+实现不需要为无限 key 空间预创建物理 record。
 
-Exact numeric baseline 仍需由正式 contract 冻结，但本设计优先采用 `0 = bootstrap baseline`，以区分初始化与运行期 commit。
+Exact numeric baseline 仍需由正式 contract 冻结，但本设计优先采用 `0 = bootstrap baseline`。
 
 ---
 
@@ -635,16 +624,6 @@ state
 
 initial.input
     initial Frame invocation parameters
-```
-
-例如：
-
-```text
-state.player/profile
-    "这个游戏初始玩家是谁"
-
-initial.input.mapId
-    "initial Frame 从哪张地图开始"
 ```
 
 Realm State 的出现不应把所有 Frame 参数搬进共享状态；反之，也不应为了跨 Subsystem 共享而把长期业务事实塞进 `initial.input`。
@@ -694,7 +673,7 @@ Hostra/PWA Launcher 对同一个 Game Entry 必须产生等价 initial-state def
 
 ## 13. New Game / Load Game Bootstrap
 
-Platform Composition 最终创建 Realm State authority 时，应形成两个概念输入：
+Platform Composition 创建 Realm State authority 时，应形成两个概念输入：
 
 ```text
 Game-defined initial baseline
@@ -728,8 +707,6 @@ Game Entry initial
 validated/migrated Save snapshot
 → current value seed
 ```
-
-对于 Save 未提供的 key，current seed SHOULD 默认使用 Game-defined `initialValue`；确切 migration/partial-save policy 由未来 Save contract 冻结。
 
 关键不变量：
 
@@ -823,7 +800,7 @@ version
 
 ## 16. Consistent Read
 
-多 key read MUST 来自同一 logical snapshot：
+多 key `read()` MUST 来自同一 logical snapshot：
 
 ```ts
 interface RealmStateSnapshot {
@@ -832,17 +809,18 @@ interface RealmStateSnapshot {
 }
 ```
 
-例如：
+例如一次读取：
 
-```ts
-const snapshot = await state.read([
-  { namespace: 'player', key: 'profile' },
-  { namespace: 'inventory', key: 'main' },
-  { namespace: 'party', key: 'current' }
-]);
+```text
+Realm revision = 105
+player/economy  version = 8
+inventory/main  version = 15
+world/flags     version = 20
 ```
 
-即使某个 key 从未在 Game Entry 或运行期显式 materialize，也必须返回 logical default：
+三个 record 必须属于同一个 snapshot，而不是三次独立读取拼出来的混合时刻。
+
+即使某个 key 从未显式 materialize，也必须返回 logical default：
 
 ```text
 initialValue = null
@@ -854,16 +832,60 @@ version = 0   // 若正式 contract 采用 0 baseline
 
 ---
 
-## 17. Atomic Commit / Conflict
+## 17. Optimistic Transaction Model
 
-核心写语义是 conditional atomic transaction：
+Realm State v1 的 mutation 模型是：
+
+```text
+consistent read
+→ local business computation without lock
+→ conditional atomic commit
+```
+
+它不是：
+
+```text
+begin transaction
+→ acquire remote locks
+→ hold locks while business code runs
+→ commit / rollback
+```
+
+### 17.1 Read-set / Conditions
+
+Transaction 的 `conditions` 表示本次业务决策依赖的 observed records：
+
+```ts
+interface RealmStateCondition {
+  readonly key: RealmStateKey;
+  readonly version: number;
+}
+```
+
+如果一个 record 的 `value` 影响了本次业务判断，即使最终不写它，它也 SHOULD 出现在 conditions/read-set 中。
+
+例如折扣取决于：
+
+```text
+world/flags.shopDiscount
+```
+
+但交易只写：
+
+```text
+player/economy
+inventory/main
+```
+
+那么 `world/flags` 的 observed version 仍应进入 conditions；否则可能在折扣已经失效后按旧状态提交。
+
+### 17.2 Write-set
+
+候选 transaction：
 
 ```ts
 interface RealmStateTransaction {
-  readonly conditions: readonly {
-    readonly key: RealmStateKey;
-    readonly version: number;
-  }[];
+  readonly conditions: readonly RealmStateCondition[];
 
   readonly writes: readonly {
     readonly type: 'put';
@@ -873,82 +895,244 @@ interface RealmStateTransaction {
 }
 ```
 
-v1 推荐不再需要独立 `delete` 业务语义：
+v1 固定：
 
 ```text
-put value = null
+every write key MUST appear exactly once in conditions
+writes MAY be a strict subset of conditions
 ```
 
-即 canonical clear/unset。
+即：
 
-事务语义：
+```text
+write-set ⊆ read-set
+```
+
+这保证每个写入都明确建立在 caller 实际观察到的 record version 上。
+
+对于逻辑上未 materialize 的 key，caller 可读取：
+
+```text
+value = null
+version = 0
+```
+
+然后以 `version == 0` 作为 create/first-write condition。
+
+### 17.3 Atomic Authority Step
+
+RealmStateAuthority 在一个短暂的原子临界区内执行：
 
 ```text
 validate complete request
 → authorize complete request
-→ check all conditions against one current snapshot
-→ conflict: zero write
-→ otherwise replace all targeted record current values atomically
-→ fresh global revision
-→ fresh changed-record versions
+→ verify conditions are unique/well-formed
+→ verify every write target appears in conditions
+→ compare every condition.version with current record.version
+→ any mismatch: CONFLICT / zero write
+→ otherwise replace every write target current value atomically
+→ assign one fresh global commit revision
+→ assign fresh versions to changed records
 → publish committed change
 ```
 
-`initialValue` 不参与 writes，且不能作为写 target。
+这个检查和 commit 之间不得释放 authority serialization；否则无法保证 OCC 正确性。
 
-典型跨 namespace transaction：
+### 17.4 Multi-record Example
+
+读取 snapshot：
 
 ```text
-player/economy.money -= 100
-inventory/main.potion += 1
-quest/shopping-tutorial.value = completed
+revision 105
+
+player/economy
+    value   = { money: 1000 }
+    version = 8
+
+inventory/main
+    value   = { potion: 2 }
+    version = 15
+
+world/flags
+    value   = { shopDiscount: true }
+    version = 20
 ```
 
-必须 all-or-nothing。
+业务按折扣计算后提交：
+
+```text
+conditions/read-set:
+    player/economy  == version 8
+    inventory/main  == version 15
+    world/flags     == version 20
+
+writes/write-set:
+    player/economy  → { money: 920 }
+    inventory/main  → { potion: 3 }
+```
+
+只有三个 observed versions 全部仍然 current 时才提交。
+
+任何一个变为新 version：
+
+```text
+CONFLICT
+zero write
+```
+
+### 17.5 Record Version vs Global Revision
+
+常规 transaction conflict detection SHOULD 使用 per-record version，而不是要求 global revision 未变化。
+
+原因：
+
+```text
+player/economy + inventory/main purchase
+```
+
+不应因为无关的：
+
+```text
+world/weather
+```
+
+发生提交而冲突。
+
+因此：
+
+```text
+per-record version
+    optimistic concurrency / conflict detection
+
+global revision
+    snapshot identity / total commit order / subscription / diagnostics
+```
+
+如果未来出现真实 consumer 要求“自 snapshot 后 Realm State 任意 record 都不得变化”，可以另行设计 explicit global-revision condition；v1 不把它作为普通 mutation 默认条件。
 
 ---
 
-## 18. Conflict / Retry / Commit Evidence
+## 18. Commit Result
 
-发生版本冲突：
+成功 commit SHOULD 返回 authoritative post-commit metadata，而不只返回 `ok`。
 
-```text
-commit → CONFLICT / known no-commit
+候选：
+
+```ts
+interface RealmStateCommit {
+  readonly revision: number;
+  readonly records: readonly {
+    readonly key: RealmStateKey;
+    readonly version: number;
+    readonly value: JsonValue;
+  }[];
+}
 ```
 
-caller 可显式：
+这样 caller 在成功响应后立即知道：
+
+```text
+commit revision
+changed record new versions
+authoritative committed values
+```
+
+无需为了获得新 version 再执行一次 read。
+
+返回值仍必须 detached / immutable。
+
+---
+
+## 19. Conflict / Retry / Commit Evidence
+
+### 19.1 Conflict
+
+如果任一 condition version 已变化：
+
+```text
+commit → CONFLICT
+```
+
+`CONFLICT` 精确表示：
+
+```text
+known no-commit
+zero write
+```
+
+caller MAY：
 
 ```text
 fresh read
-→ recompute
-→ retry
+→ re-run business rules
+→ construct a new transaction
+→ explicitly retry
 ```
 
-Realm State SHOULD NOT 自动 retry application transaction。
+Realm State MUST NOT 自动重放旧 write-set。
+
+原因是 fresh state 可能改变业务结果：
+
+```text
+old read: money = 1000 → purchase valid
+fresh read: money = 50  → purchase invalid
+```
+
+自动再次写入旧 `{ money: 900 }` 会破坏业务正确性。
+
+### 19.2 No Long-lived Locks
+
+业务计算期间不持有 RealmStateAuthority 锁：
+
+```text
+read snapshot
+→ caller computes locally
+→ commit request
+→ authority performs short atomic check+commit
+```
+
+不提供 remote lock token、`beginTransaction()` 锁 lease、跨 Runtime lock ordering 或 deadlock recovery framework。
+
+### 19.3 Ambiguous Mutation
 
 继续遵守 LoomRealm commit evidence 原则：
 
 ```text
-成功响应        → known committed
-明确 conflict   → known no-commit
-超时/连接丢失   → applied/not-applied 若无法证明，则属于 ambiguous
+success response
+    → known committed
+
+CONFLICT / explicit pre-commit rejection
+    → known no-commit
+
+timeout / connection loss after request may have reached authority
+    → applied/not-applied ambiguous unless protocol can prove outcome
 ```
 
-ambiguous mutation 不得伪装成安全可重试错误。
+ambiguous mutation MUST NOT 被映射成 `CONFLICT`，也不得自动 retry。
+
+未来如需消除 ambiguity，可以单独设计：
+
+```text
+client transaction id
++
+status query / dedup journal
+```
+
+但不应为 v1 未验证需求提前引入通用 transaction coordinator。
 
 ---
 
-## 19. Subscription
+## 20. Subscription
 
 Subscription 只观察 authoritative current-value commit：
 
 ```text
-initial/current snapshot
+initial/current baseline snapshot
 → revision N+1 committed change
 → revision N+2 committed change
 ```
 
-`initialValue` 在 Session 中不可变，因此普通 commit change event 不需要把它当作“changed field”。Subscription 建立时的 baseline snapshot SHOULD 包含 initial/current 两个视图，使 consumer 能建立完整本地观察状态。
+`initialValue` 在 Session 中不可变，因此普通 commit change event 不需要把它当作 changed field。Subscription 建立时的 baseline snapshot SHOULD 包含 initial/current 两个视图，使 consumer 能建立完整本地观察状态。
 
 允许：
 
@@ -967,27 +1151,50 @@ openMenu
 buttonClicked
 ```
 
+failed/conflicted transaction MUST NOT 产生 state-change notification。
+
 ---
 
-## 20. Authorization
+## 21. Authorization Direction
 
-Realm State 不能成为所有 Subsystem 可任意写所有 key 的共享字典。
+Realm State 不能成为所有 Subsystem 可任意读写所有 key 的共享字典。
 
-Game logical configuration 最终 SHOULD 声明 namespace-level reader/writer policy；授权主体优先使用 `subsystemKey`，而不是 Frame/Activation。
+当前只固定以下方向，exact policy schema 留待下一阶段讨论：
 
-因此 namespace 是 authorization unit，但不是 write/version/transaction unit。
+```text
+authorization subject
+    = authenticated subsystemKey / Runtime-scoped client identity
 
-同一 transaction MAY 跨多个 namespace；Realm State 必须在任何 mutation 前验证 caller 对所有目标 namespace 都有对应权限。如果任一目标未授权：
+default policy direction
+    = namespace-level read/write capability
+
+namespace
+    = authorization unit
+    != replacement/version/transaction unit
+```
+
+同一 transaction MAY 跨多个 namespace；RealmStateAuthority 必须在任何 mutation 前验证 caller 对 transaction 涉及的所有 namespace 都具有对应权限。任何一项未授权：
 
 ```text
 zero commit
 ```
 
-确切 access-policy schema 尚未冻结；不能放进 Hostra/PWA executable manifest 中制造平台差异。
+权限不能放进 Hostra/PWA executable manifest 形成平台差异；它必须属于 platform-neutral Game logical policy 或由其确定地产生的 prepared policy。
+
+尚未冻结：
+
+```text
+exact Game Entry policy shape
+read/write 是否足够
+是否需要 subscribe 单独权限
+是否允许 key-prefix rule
+是否允许 self-owned namespace shortcut
+initialValue 与 current value 是否共享同一 read permission
+```
 
 ---
 
-## 21. Lifetime
+## 22. Lifetime
 
 Realm State authority 是 **Session-scoped**：
 
@@ -1024,7 +1231,7 @@ Runtime terminal 后，该 Runtime 既有 RealmStateClient 必须终止/inert。
 
 ---
 
-## 22. Communication Placement
+## 23. Communication Placement
 
 Realm State SHOULD 使用独立 logical protocol，例如：
 
@@ -1040,11 +1247,29 @@ many Subsystem Runtimes
 Realm State Authority
 ```
 
-不得塞进 `loomrealm.renderer-data/1`、Runtime Control 或 `frame.call()`。
+不得塞进：
+
+```text
+loomrealm.renderer-data/1
+Runtime Control
+frame.call()
+```
+
+Realm State protocol 至少需要表达：
+
+```text
+consistent read
+conditional commit
+commit result/conflict
+subscription baseline/change
+terminal/failure
+```
+
+物理 transport 可因 Hostra/PWA 不同，但 logical semantics 必须相同。
 
 ---
 
-## 23. Interaction with Main / Renderer / Content
+## 24. Interaction with Main / Renderer / Content
 
 ### Main
 
@@ -1075,11 +1300,23 @@ Realm State value
     mutable current Session shared business facts
 ```
 
-这三者不得合并成一个 Repository/service locator。
+三者不得合并成一个 Repository/service locator。
+
+### `frame.call()`
+
+```text
+frame.call()
+    control-flow composition
+
+Realm State transaction
+    shared-state coordination
+```
+
+例如进入 Battle 仍应 `Map → call(Battle)`；Battle 消耗 Potion 应通过 Realm State transaction 修改 inventory，而不是为了修改共享状态调用一个 Inventory Frame。
 
 ---
 
-## 24. Persistence / Save Game Boundary
+## 25. Persistence / Save Game Boundary
 
 Realm State authority 不等于 Save Game 系统。
 
@@ -1103,7 +1340,7 @@ Persistent Save
 → current-value seed
 ```
 
-Save snapshot SHOULD 主要保存 current values 及其 persistence-required schema/version metadata；是否保存 runtime record version/global revision 是未来 Save contract 的问题，不得默认把旧 Session concurrency metadata 当作新 Session runtime authority metadata。
+Save snapshot SHOULD 主要保存 current values 及 persistence-required schema/version metadata；是否保存 runtime record version/global revision 是未来 Save contract 的问题，不得默认把旧 Session concurrency metadata 当作新 Session runtime authority metadata。
 
 关键边界：
 
@@ -1112,11 +1349,11 @@ initialValue comes from current Game definition
 current value may come from Save
 ```
 
-如果 Game 升级改变了 initial definition，而旧 Save 被加载，migration 层负责决定旧 Save 如何映射到当前 Game definition；RealmStateAuthority 本身不执行游戏版本 migration。
+Game 升级时，旧 Save 如何映射到当前 Game definition 属于 migration 层；RealmStateAuthority 本身不执行游戏版本 migration。
 
 ---
 
-## 25. Physical Platform Realization
+## 26. Physical Platform Realization
 
 ### Hostra Desktop candidate
 
@@ -1135,6 +1372,8 @@ LoomRealm Desktop process
        RealmStateAuthority
 ```
 
+RealmStateAuthority 与 Main MAY 同进程，但必须是不同 logical owner/API。
+
 ### PWA candidate
 
 Realm State 可与 Main 共 Worker，也可独立 Worker；logical semantics 不变。
@@ -1146,7 +1385,8 @@ same initialValue semantics
 same default null semantics
 same namespace/record/transaction granularity
 same whole-record replacement semantics
-same snapshot semantics
+same consistent snapshot semantics
+same OCC read-set/write-set semantics
 same atomic commit/conflict semantics
 same authorization semantics
 same terminal/ambiguity semantics
@@ -1154,7 +1394,7 @@ same terminal/ambiguity semantics
 
 ---
 
-## 26. Initial Implementation Scope
+## 27. Initial Implementation Scope
 
 建议第一版只实现：
 
@@ -1167,14 +1407,17 @@ optional load-game current seed
 one RealmStateAuthority per Session
 bootstrap-before-runtime barrier
 namespace + key records
-namespace-level authorization
+namespace-level authorization baseline
 whole-record current-value put
 null as canonical clear/unset
 per-record version
 monotonic global revision
 consistent multi-key read
-conditional atomic multi-key commit
-explicit CONFLICT
+optimistic read-set version conditions
+write-set subset of read-set
+conditional atomic multi-record commit
+explicit CONFLICT / zero write
+post-commit revision+version result
 ordered state-change subscription
 Runtime-scoped RealmStateClient capability
 Desktop in-process authority + explicit transport seam
@@ -1184,13 +1427,17 @@ Desktop in-process authority + explicit transport seam
 
 ```text
 field-level patch
+long-lived lock transactions
+global-revision default mutation condition
+transaction auto-retry
+generic transaction coordinator
 large external bootstrap source
 persistence implementation
 schema registry
 cross-session sharing
 distributed authority
 CRDT
-automatic merge/retry
+automatic merge
 Renderer direct access
 query language
 secondary indexes
@@ -1199,17 +1446,17 @@ generic events
 
 ---
 
-## 27. Suggested Delivery Order
+## 28. Suggested Delivery Order
 
 ```text
 R1  Architecture closure
-    freeze role / authority / lifetime / namespace-record-transaction granularity / initial-current semantics
+    role / authority / lifetime / granularity / initial-current / OCC semantics
 
 R2  Game Package contract change proposal
     state initial schema + default null + validation + version/compatibility decision
 
 R3  Realm State contract v1
-    read(initial+current) / commit / conflict / subscription / terminal
+    consistent read / read-set conditions / atomic write-set / conflict / subscription / terminal
 
 R4  In-memory reference authority
     deterministic serialized implementation
@@ -1223,7 +1470,7 @@ R6  Subsystem author projection
 R7  Hostra Desktop physical binding
     bootstrap barrier + at least two real Subsystem consumers
 
-R8  Failure / reconnect / ambiguity qualification
+R8  Failure / reconnect / ambiguous mutation qualification
 
 R9  Save/Load proposal
     preserve Game initialValue + restore current seed
@@ -1233,7 +1480,7 @@ R10 PWA realization/equivalence
 
 ---
 
-## 28. Qualification Targets
+## 29. Qualification Targets
 
 正式关闭前至少证明：
 
@@ -1253,7 +1500,7 @@ Initial/current
 - load-game current seed cannot redefine initialValue
 
 Granularity
-- modifying one record does not replace sibling records in the same namespace
+- modifying one record does not replace sibling records in same namespace
 - record version changes only for changed records
 - one transaction may atomically span records/namespaces
 - namespace authorization does not imply namespace-wide replacement
@@ -1263,25 +1510,37 @@ Read
 - each record exposes immutable initialValue + current value + version
 - returned values detached from internal ownership
 
+Optimistic transaction
+- every write target has an observed-version condition
+- read-only dependency records may participate in conditions
+- write-set is a subset of read-set
+- all conditions are checked against one authority state before any write
+- one stale condition yields CONFLICT + zero write
+- unrelated record commits do not conflict unless caller conditioned on them
+- no lock is held while Subsystem performs business computation
+
 Commit
 - whole-record writes are all-or-nothing
-- stale version returns conflict with zero writes
 - one successful transaction has one commit revision
+- changed records receive authoritative new versions
+- success response exposes enough metadata for the caller to continue without rereading solely for version
 - concurrent writers serialize deterministically
 
 Authorization
 - unauthorized read/write rejected before mutation
+- cross-namespace transaction validates all involved permissions before any write
 - one Subsystem cannot forge another subsystemKey
+
+Failure
+- CONFLICT is known-no-commit
+- ambiguous transport loss is distinguishable from CONFLICT
+- no automatic retry of conflict or ambiguous mutation
 
 Lifetime
 - Frame suspend/close does not reset shared state
 - Renderer reload/Data reconnect does not affect shared state
 - Runtime terminal revokes its client
 - Session terminal retires authority
-
-Failure
-- known no-commit and ambiguous mutation distinguishable
-- no automatic retry of ambiguous commit
 
 Subscription
 - baseline exposes initial/current state
@@ -1292,20 +1551,24 @@ Subscription
 
 ---
 
-## 29. Open Questions
+## 30. Open Questions
 
 仍需正式冻结：
 
 1. Game Package 是 reopen current v1 还是引入新的 document version 来承载 `state`？
-2. namespace reader/writer policy 的 exact Game-level schema 是什么？
-3. initial record count、单 record / total payload、depth 上限是多少？
-4. 是否正式采用 `revision/version = 0` 作为 bootstrap baseline？
-5. v1 subscription 是否支持 reconnect baseline？
-6. ambiguous mutation 是否引入 client-generated transaction ID + status query？
-7. authorization 是否只做 namespace 粒度，还是未来需要 key-prefix 粒度？
-8. Realm State authority fatal 是否必然导致 Session terminal？
-9. 大型 initial state 何时需要 Content-derived seed / external source，而不是 inline Game Entry records？
-10. Save snapshot 缺少某 key 时，load policy 是否固定 fallback 到 Game-defined initialValue，还是必须由 migration 显式产出完整 current seed？
+2. namespace authorization 的 exact Game-level schema 是什么？
+3. 权限是否精确只需要 `read/write`，还是 `subscribe` 应独立？
+4. authorization 是否永远只做 namespace 粒度，还是未来允许 key-prefix 粒度？
+5. initialValue 与 current value 是否必然共用同一 read permission？
+6. initial record count、单 record / total payload、depth 上限是多少？
+7. 是否正式采用 `revision/version = 0` 作为 bootstrap baseline？
+8. condition/write 最大 record 数及 transaction payload 上限是多少？
+9. v1 subscription 是否支持 reconnect baseline？
+10. ambiguous mutation 是否引入 client-generated transaction ID + status query？
+11. Realm State authority fatal 是否必然导致 Session terminal？
+12. 大型 initial state 何时需要 Content-derived seed / external source，而不是 inline Game Entry records？
+13. Save snapshot 缺少某 key 时，load policy 是否固定 fallback 到 Game-defined initialValue，还是必须由 migration 显式产出完整 current seed？
+14. put 与现有 current value deep-equal 时，是产生新 version/revision 还是作为 no-op？
 
 以下问题不再开放：
 
@@ -1337,6 +1600,21 @@ new-game current baseline
 Save may redefine initialValue
     = no
 
+write may blindly replace a record without observing its version
+    = no
+
+write-set may contain a key absent from read-set/conditions
+    = no
+
+read-only business dependency may be included in conditions
+    = yes
+
+ordinary transaction holds remote locks while business computes
+    = no
+
+CONFLICT means known-no-commit
+    = yes
+
 Main LogicalGameBootstrap contains state payload
     = no
 
@@ -1346,7 +1624,7 @@ business Runtime may start before Realm State initialization
 
 ---
 
-## 30. Final Invariants
+## 31. Final Invariants
 
 1. Main 继续唯一拥有 Control Authority；
 2. Realm State 唯一拥有 Session shared mutable business facts；
@@ -1354,7 +1632,7 @@ business Runtime may start before Realm State initialization
 4. Content 继续只读；
 5. Renderer 不成为第二业务状态 authority；
 6. `frame.call()` 继续表示控制流，而不是普通共享状态 RPC；
-7. Namespace 是 logical/authorization unit，不是 replacement/version/transaction unit；
+7. Namespace 是 logical/authorization unit，不是 replacement/version/conflict/transaction unit；
 8. `(namespace,key)` Record 是 current value replacement、version、conflict 的基本单位；
 9. Transaction 是原子性单位并 MAY 跨 namespace；
 10. v1 写入 whole-record replacement，不提供 field-level patch；
@@ -1363,23 +1641,32 @@ business Runtime may start before Realm State initialization
 13. 新游戏 current `value = initialValue`；
 14. Runtime transaction 永远不能修改 `initialValue`；
 15. Load Game 可以 seed current value，但不能重定义 Game-defined initialValue；
-16. 新游戏 initial Realm State 属于 platform-neutral Game Entry，而不是 Hostra/PWA manifest；
-17. Launcher PREPARE 只验证/投影初始定义，不拥有 runtime state；
-18. Realm State 必须在第一项 business Runtime side effect 前原子初始化完成；
-19. `initial.input` 表示 initial Frame 参数，不替代 Session shared state；
-20. Game Entry 不指定 record version/global revision 等 runtime authority metadata；
-21. 同一 transaction 多 record all-or-nothing；
-22. stale write 必须显式 conflict，不允许静默 last-write-wins；
-23. subscription 只投影 committed current state，不成为 EventBus；
-24. Frame/Activation/Renderer/Data carrier 生命周期不得隐式重置 Realm State；
-25. Session terminal 终结 Realm State authority；
-26. author capability 通过 `@loomrealm/subsystem` 暴露，不泄漏 transport/platform implementation；
-27. Hostra/PWA 可以物理不同，但 logical Realm State semantics、initial/current semantics 必须一致；
-28. Save/Load 是独立 bootstrap/persistence 能力，不与 Realm State runtime authority 混为一体。
+16. `read(keys)` 返回一个一致 logical snapshot；
+17. 每个 record 的 version 是普通 transaction optimistic conflict detection 的依据；
+18. 每个 write target 必须携带 caller observed version condition；
+19. 影响业务判断但不写入的 record 可以且应该进入 read-set conditions；
+20. RealmStateAuthority 必须原子执行 condition check + all writes；
+21. 任一 condition stale → `CONFLICT` + zero write；
+22. stale transaction 不允许静默 last-write-wins；
+23. v1 不持有跨 Runtime 长事务锁；
+24. v1 不自动 retry business transaction；
+25. `CONFLICT` 与 ambiguous transport failure 必须区分；
+26. global revision 用于 snapshot/commit ordering，不作为普通 mutation 的全局锁；
+27. 新游戏 initial Realm State 属于 platform-neutral Game Entry，而不是 Hostra/PWA manifest；
+28. Launcher PREPARE 只验证/投影初始定义，不拥有 runtime state；
+29. Realm State 必须在第一项 business Runtime side effect 前原子初始化完成；
+30. `initial.input` 表示 initial Frame 参数，不替代 Session shared state；
+31. Game Entry 不指定 record version/global revision 等 runtime authority metadata；
+32. subscription 只投影 committed current state，不成为 EventBus；
+33. Frame/Activation/Renderer/Data carrier 生命周期不得隐式重置 Realm State；
+34. Session terminal 终结 Realm State authority；
+35. author capability 通过 `@loomrealm/subsystem` 暴露，不泄漏 transport/platform implementation；
+36. Hostra/PWA 可以物理不同，但 logical Realm State semantics、initial/current/OCC semantics 必须一致；
+37. Save/Load 是独立 bootstrap/persistence 能力，不与 Realm State runtime authority 混为一体。
 
 ---
 
-## 31. Architectural Summary
+## 32. Architectural Summary
 
 ```text
                         Game Entry
@@ -1393,16 +1680,29 @@ business Runtime may start before Realm State initialization
             Main                        │
       Control Authority                 │
                                         ▼
-Save (optional) ── current seed ──→ Realm State
-                               Shared Business Authority
+Save (optional) ─ current seed ─→ RealmStateAuthority
+                              Shared Business Authority
                                   │
                                   ├─ initialValue (immutable)
-                                  └─ value        (mutable)
+                                  ├─ value        (mutable)
+                                  ├─ record version
+                                  └─ global revision
+                                           │
+                         consistent read snapshot
                                            │
                               ┌────────────┼────────────┐
                               ▼            ▼            ▼
                              Map         Battle        Menu
                            Subsystem    Subsystem     Subsystem
+                              │            │            │
+                              └──── local computation ──┘
+                                           │
+                         conditions(read-set versions)
+                              + writes(write-set)
+                                           │
+                                           ▼
+                              RealmStateAuthority
+                         atomic check + atomic commit
 ```
 
 核心粒度：
@@ -1415,8 +1715,13 @@ Record (namespace + key)
     initialValue + current value + version
     replacement / conflict unit
 
+Read Snapshot
+    one global revision + observed record versions
+
 Transaction
+    read-set version conditions + write-set
+    write-set ⊆ read-set
     multi-record atomicity unit
 ```
 
-这不是弱化 single-authority 原则，而是补齐当前没有 owner 的业务事实，并为它建立确定的初始基线、当前值、版本、事务和 Session 初始化边界。
+这不是弱化 single-authority 原则，而是补齐当前没有 owner 的业务事实，并为它建立确定的初始基线、当前值、一致读取、版本、乐观事务和 Session 初始化边界。
