@@ -10,7 +10,6 @@ import {
 } from "@loomrealm/wire";
 import {
   RealmStateError,
-  identityToken,
   prepareRealmStateDefinition,
 } from "@loomrealm/realm-state";
 import { GamePackageError, type GamePackageErrorCode } from "./errors.js";
@@ -111,6 +110,48 @@ function member(object: JsonObject, key: string, path: readonly WirePathSegment[
   return descriptor.value;
 }
 
+function isDuplicateInitialRecordFailure(
+  records: JsonValue,
+  error: RealmStateError,
+): boolean {
+  if (
+    error.code !== "INVALID_REQUEST" ||
+    !Array.isArray(records) ||
+    error.path?.length !== 2 ||
+    error.path[0] !== "records" ||
+    typeof error.path[1] !== "number"
+  ) {
+    return false;
+  }
+  const index = error.path[1];
+  const candidate = records[index];
+  if (
+    candidate === null ||
+    typeof candidate !== "object" ||
+    Array.isArray(candidate) ||
+    Object.keys(candidate).length !== 3 ||
+    !Object.prototype.hasOwnProperty.call(candidate, "namespace") ||
+    !Object.prototype.hasOwnProperty.call(candidate, "key") ||
+    !Object.prototype.hasOwnProperty.call(candidate, "value")
+  ) {
+    return false;
+  }
+  const namespace = Object.getOwnPropertyDescriptor(candidate, "namespace")?.value;
+  const key = Object.getOwnPropertyDescriptor(candidate, "key")?.value;
+  if (typeof namespace !== "string" || typeof key !== "string") return false;
+  for (let prior = 0; prior < index; prior += 1) {
+    const entry = records[prior];
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+    if (
+      Object.getOwnPropertyDescriptor(entry, "namespace")?.value === namespace &&
+      Object.getOwnPropertyDescriptor(entry, "key")?.value === key
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function validateGameEntryV1(value: unknown): ValidatedGameEntryV1 {
   validateRepresentation(value);
   const entry = exactObject(value, TOP_LEVEL_REQUIRED_KEYS, [], TOP_LEVEL_KEYS);
@@ -167,12 +208,20 @@ export function validateGameEntryV1(value: unknown): ValidatedGameEntryV1 {
     const records = member(state, "records", ["state"]);
     try {
       const prepared = prepareRealmStateDefinition(records);
-      const byIdentity = new Map(prepared.records.map((record) => [identityToken(record.key), record] as const));
+      const byNamespace = new Map<string, Map<string, (typeof prepared.records)[number]>>();
+      for (const record of prepared.records) {
+        let collection = byNamespace.get(record.key.namespace);
+        if (collection === undefined) {
+          collection = new Map();
+          byNamespace.set(record.key.namespace, collection);
+        }
+        collection.set(record.key.key, record);
+      }
       stateRecords = Object.freeze((records as readonly JsonValue[]).map((entry, index) => {
         const record = entry as JsonObject;
         const namespace = member(record, "namespace", ["state", "records", index]) as string;
         const key = member(record, "key", ["state", "records", index]) as string;
-        const preparedRecord = byIdentity.get(identityToken({ namespace, key }))!;
+        const preparedRecord = byNamespace.get(namespace)!.get(key)!;
         return Object.freeze({ namespace, key, value: preparedRecord.value });
       }));
     } catch (error) {
@@ -180,7 +229,7 @@ export function validateGameEntryV1(value: unknown): ValidatedGameEntryV1 {
         const path = Object.freeze(["state", ...(error.path ?? [])] as WirePathSegment[]);
         const code = error.code === "LIMIT_EXCEEDED"
           ? "REALM_STATE_INITIAL_LIMIT_EXCEEDED"
-          : error.message.includes("Duplicate")
+          : isDuplicateInitialRecordFailure(records, error)
             ? "REALM_STATE_INITIAL_DUPLICATE"
             : "REALM_STATE_INITIAL_INVALID";
         fail(code, path, error);

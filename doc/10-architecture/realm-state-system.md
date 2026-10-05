@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active / **Core Architecture Semantics Closed / Implemented**
-> 稳定程度：**Implemented / Formal Contract Active / Qualified**
+> 稳定程度：**Implemented / Formal Contract Active / Requalification Pending**
 > 主要定义：Session 级共享业务状态 authority、Namespace Record Collection、Game Entry 初始状态、immutable initial value、materialized Record discovery index、consistent snapshot、optimistic transaction、subscription linearization、commit evidence、validation ownership、生命周期与平台边界  
 > 依赖：[系统架构总览](./system-overview.md)、[模块子系统模型](./subsystem-model.md)、[栈式运行系统](./stack-runtime-system.md)、[存储与内容系统](./storage-system.md)、[通信系统](./communication-system.md)、[Game Package v1](../15-contracts/game-package-v1.md)  
 > 正式化：[Realm State v1](../15-contracts/realm-state-v1.md)  

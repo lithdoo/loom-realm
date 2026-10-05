@@ -10,6 +10,7 @@ import {
 } from "@loomrealm/realm-state";
 import WebSocket from "ws";
 import { createWebSocketCarrier } from "../websocket-carrier.js";
+import { createRealmStateWebSocketCarrier } from "../realm-state-websocket-carrier.js";
 import { createRunnerDataProvisioning } from "./data-provisioning.js";
 import type { HostraContentAccess } from "../content-access.js";
 
@@ -33,7 +34,7 @@ export interface RunnerBootstrapV1 {
   readonly subsystemKey: string;
   readonly physicalModule: string;
   readonly controlEndpoint: string;
-  readonly realmStateEndpoint?: string;
+  readonly realmStateEndpoint: string;
   readonly bootstrapToken: string;
   readonly controlProtocolVersions: readonly [1];
   readonly helloDeadlineMs: number;
@@ -61,7 +62,7 @@ export function parseRunnerBootstrap(encoded: string): RunnerBootstrapV1 {
   const object = value as Record<string, unknown>;
   if (
     Object.keys(object).some((key) => !(BOOTSTRAP_KEYS as readonly string[]).includes(key)) ||
-    BOOTSTRAP_KEYS.filter((key) => key !== "realmStateEndpoint").some((key) => !Object.prototype.hasOwnProperty.call(object, key)) ||
+    BOOTSTRAP_KEYS.some((key) => !Object.prototype.hasOwnProperty.call(object, key)) ||
     object.version !== 1 ||
     typeof object.subsystemKey !== "string" || object.subsystemKey.length === 0 ||
     typeof object.physicalModule !== "string" || !path.isAbsolute(object.physicalModule) ||
@@ -90,23 +91,21 @@ export function parseRunnerBootstrap(encoded: string): RunnerBootstrapV1 {
   ) {
     throw new TypeError("Invalid Runner bootstrap");
   }
-  if (object.realmStateEndpoint !== undefined) {
-    if (typeof object.realmStateEndpoint !== "string") throw new TypeError("Invalid Runner bootstrap");
-    let stateEndpoint: URL;
-    try { stateEndpoint = new URL(object.realmStateEndpoint); } catch { throw new TypeError("Invalid Runner bootstrap"); }
-    if (
-      stateEndpoint.protocol !== "ws:" || stateEndpoint.hostname !== "127.0.0.1" ||
-      stateEndpoint.username !== "" || stateEndpoint.password !== "" || stateEndpoint.search !== "" ||
-      stateEndpoint.hash !== "" || stateEndpoint.port === "" ||
-      !/^\/[A-Za-z0-9_-]{43}$/.test(stateEndpoint.pathname)
-    ) throw new TypeError("Invalid Runner bootstrap");
-  }
+  if (typeof object.realmStateEndpoint !== "string") throw new TypeError("Invalid Runner bootstrap");
+  let stateEndpoint: URL;
+  try { stateEndpoint = new URL(object.realmStateEndpoint); } catch { throw new TypeError("Invalid Runner bootstrap"); }
+  if (
+    stateEndpoint.protocol !== "ws:" || stateEndpoint.hostname !== "127.0.0.1" ||
+    stateEndpoint.username !== "" || stateEndpoint.password !== "" || stateEndpoint.search !== "" ||
+    stateEndpoint.hash !== "" || stateEndpoint.port === "" ||
+    !/^\/[A-Za-z0-9_-]{43}$/.test(stateEndpoint.pathname)
+  ) throw new TypeError("Invalid Runner bootstrap");
   return Object.freeze({
     version: 1,
     subsystemKey: object.subsystemKey,
     physicalModule: object.physicalModule,
     controlEndpoint: object.controlEndpoint,
-    ...(object.realmStateEndpoint === undefined ? {} : { realmStateEndpoint: object.realmStateEndpoint }),
+    realmStateEndpoint: object.realmStateEndpoint,
     bootstrapToken: object.bootstrapToken,
     controlProtocolVersions: Object.freeze([1] as [1]),
     helloDeadlineMs: object.helloDeadlineMs,
@@ -115,7 +114,11 @@ export function parseRunnerBootstrap(encoded: string): RunnerBootstrapV1 {
   });
 }
 
-function connect(endpoint: string, signal: AbortSignal): Promise<MessageCarrier> {
+function connect(
+  endpoint: string,
+  signal: AbortSignal,
+  statePlane = false,
+): Promise<MessageCarrier> {
   if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(endpoint);
@@ -133,7 +136,9 @@ function connect(endpoint: string, signal: AbortSignal): Promise<MessageCarrier>
       if (settled) return;
       settled = true;
       signal.removeEventListener("abort", onAbort);
-      resolve(createWebSocketCarrier(socket));
+      resolve(statePlane
+        ? createRealmStateWebSocketCarrier(socket)
+        : createWebSocketCarrier(socket));
     });
     socket.once("error", finishReject);
   });
@@ -158,9 +163,13 @@ export async function runBootstrap(
     reconnectTimer.unref();
   };
   installStateBinding = async (required: boolean): Promise<void> => {
-    if (bootstrap.realmStateEndpoint === undefined || stateLifetime.signal.aborted) return;
+    if (stateLifetime.signal.aborted) return;
     try {
-      const carrier = await connect(bootstrap.realmStateEndpoint, stateLifetime.signal);
+      const carrier = await connect(
+        bootstrap.realmStateEndpoint,
+        stateLifetime.signal,
+        true,
+      );
       if (stateLifetime.signal.aborted) {
         await carrier.close();
         return;

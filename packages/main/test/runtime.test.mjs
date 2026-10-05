@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { prepareRendererHelloResultV1 } from "@loomrealm/renderer-control";
+import { createRealmStateClient } from "@loomrealm/realm-state";
 import {
   FrameCallRejectedError,
   completed,
@@ -105,6 +106,10 @@ function createFakePlatform(definitions, options = {}) {
             bootstrapToken: request.bootstrapToken,
             controlProtocolVersions: [1],
           },
+          state: (() => {
+            const client = createRealmStateClient();
+            return Object.freeze({ client, terminate: () => client.terminate() });
+          })(),
           ...(options.subsystemDataBinding === undefined
             ? {}
             : { data: options.subsystemDataBinding(request.subsystemKey) }),

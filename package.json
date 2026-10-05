@@ -14,7 +14,7 @@
     "test:core-packages": "npm test -w @loomrealm/foundation -w @loomrealm/wire",
     "test:game-package": "npm test -w @loomrealm/wire -w @loomrealm/realm-state -w @loomrealm/game-package",
     "test:realm-state": "npm test -w @loomrealm/realm-state -w @loomrealm/game-package -w @loomrealm/game-launcher-pwa -w @loomrealm/subsystem -w @loomrealm/main -w @loomrealm/game-launcher-hostra",
-    "test:realm-state:qualification:run": "node --test test/realm-state-v1/qualification.test.mjs",
+    "test:realm-state:qualification:run": "node --test packages/realm-state/test/authority.test.mjs packages/realm-state/test/carrier.test.mjs packages/realm-state/test/client.test.mjs packages/realm-state/test/validation.test.mjs packages/realm-state/test/worker.test.mjs packages/game-package/test/realm-state.test.mjs packages/game-launcher-pwa/test/projection.test.mjs packages/subsystem/test/runtime.test.mjs packages/game-launcher-hostra/test/e2e.test.mjs test/realm-state-v1/qualification.test.mjs",
     "test:realm-state:qualification": "npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/realm-state -w @loomrealm/game-package -w @loomrealm/game-launcher-pwa -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/subsystem -w @loomrealm/main -w @loomrealm/game-launcher-hostra -w @loomrealm/desktop && npm run test:realm-state:qualification:run",
     "test:runtime-control": "npm test -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/runtime-control",
     "test:data": "npm test -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/data",

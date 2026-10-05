@@ -109,7 +109,10 @@ async function createSession(factory, mainOverrides = {}, policy = defaultPolicy
       controlProtocolVersions: [1],
     },
     ...(data === undefined ? {} : { data }),
-    ...(state === undefined ? {} : { state }),
+    state: state ?? (() => {
+      const client = createRealmStateClient();
+      return Object.freeze({ client, terminate: () => client.terminate() });
+    })(),
   });
   void runtime.catch(() => {});
 
@@ -134,6 +137,31 @@ async function createSession(factory, mainOverrides = {}, policy = defaultPolicy
     },
   };
 }
+
+test("production runSubsystem rejects a missing State capability before business side effects", async () => {
+  let definitionCalls = 0;
+  let controlAcquires = 0;
+  await assert.rejects(runSubsystem({
+    definition: () => {
+      definitionCalls += 1;
+      return { frame: () => completed(null) };
+    },
+    runtimeControl: {
+      async acquire() {
+        controlAcquires += 1;
+        throw new Error("must not acquire");
+      },
+    },
+    runtimePolicy: defaultPolicy,
+    launch: {
+      subsystemKey: "demo",
+      bootstrapToken: "secret",
+      controlProtocolVersions: [1],
+    },
+  }), TypeError);
+  assert.equal(definitionCalls, 0);
+  assert.equal(controlAcquires, 0);
+});
 
 test("SubsystemScope.state is Runtime-scoped, Frame-independent, and terminal with the Runtime", async () => {
   const authority = createRealmStateAuthority(prepareRealmStateDefinition([]));
@@ -810,6 +838,10 @@ test("terminal cleanup is bounded and hook failure never replaces the primary ca
       bootstrapToken: "secret",
       controlProtocolVersions: [1],
     },
+    state: (() => {
+      const client = createRealmStateClient();
+      return Object.freeze({ client, terminate: () => client.terminate() });
+    })(),
   });
 
   await assert.rejects(

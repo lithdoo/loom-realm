@@ -53,7 +53,7 @@ test("trusted host keeps the exact M8 protocol and port dependency direction", a
   ]);
   const declaration = await readFile(new URL("../dist/host/run-subsystem.d.ts", import.meta.url), "utf8");
   assert.match(declaration, /readonly data\?: SubsystemDataBinding/);
-  assert.match(declaration, /readonly state\?: RealmStateRuntimeCapability/);
+  assert.match(declaration, /readonly state: RealmStateRuntimeCapability/);
   const model = await readFile(new URL("../dist/model.d.ts", import.meta.url), "utf8");
   assert.match(model, /readonly state: RealmStateClient/);
 });

@@ -16,6 +16,7 @@ const importMap = JSON.stringify({
     "@loomrealm/wire": "/packages/wire/dist/index.js",
     "@loomrealm/platform-ports": "/packages/platform-ports/dist/index.js",
     "@loomrealm/runtime-control": "/packages/runtime-control/dist/index.js",
+    "@loomrealm/realm-state": "/packages/realm-state/dist/index.js",
     "@loomrealm/renderer-control": "/packages/renderer-control/dist/index.js",
     "@loomrealm/data": "/packages/data/dist/index.js",
     "@loomrealm/subsystem": "/packages/subsystem/dist/index.js",
@@ -83,10 +84,11 @@ async function setup(page, origin, { cancelable = true } = {}) {
     outsideFocusTarget.textContent = "Outside focus target";
     document.body.append(outsideFocusTarget);
     outsideFocusTarget.focus();
-    const [foundation, runtimeControl, rendererControl, subsystem, subsystemHost, renderer, presentation, schemaForm] = await Promise.all([
+    const [foundation, runtimeControl, rendererControl, realmState, subsystem, subsystemHost, renderer, presentation, schemaForm] = await Promise.all([
       import("@loomrealm/foundation/testing"),
       import("@loomrealm/runtime-control"),
       import("@loomrealm/renderer-control"),
+      import("@loomrealm/realm-state"),
       import("@loomrealm/subsystem"),
       import("@loomrealm/subsystem/host"),
       import("@loomrealm/renderer"),
@@ -164,6 +166,10 @@ async function setup(page, origin, { cancelable = true } = {}) {
           return { carrier: dataPair.left, generation: 1, dataProfile: "loomrealm.renderer-data/1" };
         },
       },
+      state: (() => {
+        const client = realmState.createRealmStateClient();
+        return Object.freeze({ client, terminate: () => client.terminate() });
+      })(),
     });
     runtime.catch(() => {});
 

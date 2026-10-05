@@ -2,6 +2,10 @@ import type { MessageCarrier } from "@loomrealm/foundation";
 import type { JsonValue } from "@loomrealm/wire";
 import { RealmStateError, isRealmStateFailure, realmStateError } from "./failure.js";
 import { receiveRealmStateMessages, sendRealmStateMessage } from "./framing.js";
+import {
+  RealmStateSubscriptionDelivery,
+  type SubscriptionDeactivation,
+} from "./subscription-delivery.js";
 import type {
   RealmStateClient,
   RealmStateCommit,
@@ -23,24 +27,23 @@ import {
   validateAndSnapshotValue,
   validateRealmStateKey,
   validateTransaction,
-  subscriptionRecordPayloadBytes,
 } from "./validation.js";
 
 const PROTOCOL = "loomrealm.realm-state/1";
 interface PendingRequest {
   resolve(value: unknown): void;
   reject(error: unknown): void;
+  ignored: boolean;
 }
 
 interface ClientSubscription {
-  active: boolean;
-  readonly listener: (event: RealmStateSubscriptionEvent) => void;
-  readonly queue: RealmStateSubscriptionEvent[];
-  delivering: boolean;
-  pendingChanges: number;
-  pendingBytes: number;
-  terminalQueued: boolean;
+  readonly delivery: RealmStateSubscriptionDelivery;
+  baselineSeen: boolean;
+  lastRevision: number;
+  terminalSeen: boolean;
 }
+
+const MAX_PENDING_REQUESTS = 1024;
 
 function parseMessage(text: string): Record<string, unknown> {
   if (typeof text !== "string") {
@@ -60,6 +63,7 @@ function encode(value: unknown): string {
 }
 
 function decodeFailure(value: unknown): RealmStateError {
+  exactObject(value, ["code", "message"], ["path"]);
   if (!isRealmStateFailure(value)) throw new TypeError("Invalid Realm State failure");
   return new RealmStateError(value.code, value.message, value.path);
 }
@@ -78,12 +82,28 @@ function object(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function exactObject(
+  value: unknown,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): Record<string, unknown> {
+  const result = object(value);
+  const allowed = new Set([...required, ...optional]);
+  if (
+    required.some((key) => !Object.prototype.hasOwnProperty.call(result, key)) ||
+    Object.keys(result).some((key) => !allowed.has(key))
+  ) {
+    throw new TypeError("Invalid Realm State protocol object");
+  }
+  return result;
+}
+
 function decodeSnapshot(value: unknown): RealmStateSnapshot {
-  const raw = object(value);
+  const raw = exactObject(value, ["revision", "records"]);
   const revision = safeInteger(raw.revision, "revision");
   if (!Array.isArray(raw.records)) throw new TypeError("Invalid records");
   const records = raw.records.map((entry) => {
-    const item = object(entry);
+    const item = exactObject(entry, ["key", "value", "version"]);
     const key = validateRealmStateKey(item.key);
     const version = safeInteger(item.version, "version");
     const detached = validateAndSnapshotValue(item.value).value;
@@ -98,10 +118,10 @@ function decodeSnapshot(value: unknown): RealmStateSnapshot {
 }
 
 function decodeInitial(value: unknown): RealmStateInitialSnapshot {
-  const raw = object(value);
+  const raw = exactObject(value, ["records"]);
   if (!Array.isArray(raw.records)) throw new TypeError("Invalid records");
   const records = raw.records.map((entry) => {
-    const item = object(entry);
+    const item = exactObject(entry, ["key", "value"]);
     const key = validateRealmStateKey(item.key);
     const detached = validateAndSnapshotValue(item.value).value;
     return Object.freeze({ key, value: detached });
@@ -115,11 +135,11 @@ function decodeInitial(value: unknown): RealmStateInitialSnapshot {
 }
 
 function decodeIndex(value: unknown): RealmStateIndexSnapshot {
-  const raw = object(value);
+  const raw = exactObject(value, ["revision", "records"]);
   const revision = safeInteger(raw.revision, "revision");
   if (!Array.isArray(raw.records)) throw new TypeError("Invalid records");
   const records = raw.records.map((entry) => {
-    const item = object(entry);
+    const item = exactObject(entry, ["key", "version"]);
     return Object.freeze({
       key: validateRealmStateKey(item.key),
       version: safeInteger(item.version, "version"),
@@ -141,9 +161,11 @@ function decodeCommit(value: unknown): RealmStateCommit {
 function decodeEvent(value: unknown): RealmStateSubscriptionEvent {
   const raw = object(value);
   if (raw.type === "baseline") {
+    exactObject(value, ["type", "snapshot"]);
     return Object.freeze({ type: "baseline", snapshot: decodeSnapshot(raw.snapshot) });
   }
   if (raw.type === "change") {
+    exactObject(value, ["type", "revision", "records"]);
     const snapshot = decodeSnapshot({ revision: raw.revision, records: raw.records });
     return Object.freeze({ type: "change", revision: snapshot.revision, records: snapshot.records });
   }
@@ -151,6 +173,7 @@ function decodeEvent(value: unknown): RealmStateSubscriptionEvent {
     raw.type === "terminal" &&
     (raw.reason === "binding-terminal" || raw.reason === "overflow" || raw.reason === "authority-terminal")
   ) {
+    exactObject(value, ["type", "reason"]);
     return Object.freeze({ type: "terminal", reason: raw.reason });
   }
   throw new TypeError("Invalid Realm State subscription event");
@@ -163,73 +186,22 @@ export function createRealmStateCarrierBinding(
   let closed = false;
   const pending = new Map<number, PendingRequest>();
   const subscriptions = new Map<number, ClientSubscription>();
-  const earlyEvents = new Map<number, RealmStateSubscriptionEvent[]>();
-
-  const drainEvents = async (id: number, subscription: ClientSubscription) => {
-    if (subscription.delivering || !subscription.active) return;
-    subscription.delivering = true;
-    try {
-      while (subscription.active) {
-        const event = subscription.queue.shift();
-        if (event === undefined) break;
-        if (event.type === "change") {
-          subscription.pendingChanges -= 1;
-          subscription.pendingBytes -= event.records.reduce((total, record) => total + subscriptionRecordPayloadBytes(record), 0);
-        }
-        try {
-          const returned = subscription.listener(event) as unknown;
-          if (returned !== null && (typeof returned === "object" || typeof returned === "function") && typeof (returned as { then?: unknown }).then === "function") {
-            await Promise.resolve(returned).catch(() => undefined);
-          }
-        } catch {}
-        if (event.type === "terminal") {
-          subscription.active = false;
-          subscriptions.delete(id);
-        }
-      }
-    } finally {
-      subscription.delivering = false;
-      if (subscription.active && subscription.queue.length > 0) void drainEvents(id, subscription);
-    }
-  };
-  const deliverEvent = (id: number, subscription: ClientSubscription, event: RealmStateSubscriptionEvent) => {
-    if (!subscription.active || subscription.terminalQueued) return;
-    if (event.type === "change") {
-      const bytes = event.records.reduce((total, record) => total + subscriptionRecordPayloadBytes(record), 0);
-      if (
-        subscription.pendingChanges + 1 > REALM_STATE_LIMITS.subscriptionPendingEvents ||
-        subscription.pendingBytes + bytes > REALM_STATE_LIMITS.subscriptionPendingPayloadBytes
-      ) {
-        for (let index = subscription.queue.length - 1; index >= 0; index -= 1) {
-          if (subscription.queue[index]?.type === "change") subscription.queue.splice(index, 1);
-        }
-        subscription.pendingChanges = 0;
-        subscription.pendingBytes = 0;
-        subscription.terminalQueued = true;
-        subscription.queue.push(Object.freeze({ type: "terminal", reason: "overflow" }));
-        void drainEvents(id, subscription);
-        return;
-      }
-      subscription.pendingChanges += 1;
-      subscription.pendingBytes += bytes;
-    } else if (event.type === "terminal") {
-      subscription.terminalQueued = true;
-    }
-    subscription.queue.push(event);
-    void drainEvents(id, subscription);
-  };
+  let settleTerminal!: () => void;
+  const terminal = new Promise<void>((resolve) => { settleTerminal = resolve; });
 
   const failClosed = (cause: unknown) => {
     if (closed) return;
     closed = true;
+    settleTerminal();
     for (const request of pending.values()) request.reject(cause);
     pending.clear();
     for (const subscription of subscriptions.values()) {
-      if (!subscription.active) continue;
-      deliverEvent(-1, subscription, Object.freeze({ type: "terminal", reason: "binding-terminal" }));
+      subscription.delivery.enqueue(Object.freeze({
+        type: "terminal",
+        reason: "binding-terminal",
+      }));
     }
     subscriptions.clear();
-    earlyEvents.clear();
   };
 
   void (async () => {
@@ -238,26 +210,50 @@ export function createRealmStateCarrierBinding(
         const message = parseMessage(text);
         if (message.protocol !== PROTOCOL) throw new TypeError("Wrong Realm State protocol");
         if (message.type === "response") {
+          if (message.ok === true) {
+            exactObject(message, ["protocol", "type", "id", "ok", "result"]);
+          } else if (message.ok === false) {
+            exactObject(message, ["protocol", "type", "id", "ok", "failure"]);
+          } else {
+            throw new TypeError("Invalid Realm State response");
+          }
           const id = safeInteger(message.id, "request id");
           const request = pending.get(id);
-          if (request === undefined) continue;
+          if (request === undefined) {
+            throw new TypeError("Impossible Realm State response correlation");
+          }
           pending.delete(id);
+          if (request.ignored) continue;
           if (message.ok === true) request.resolve(message.result);
-          else if (message.ok === false) request.reject(decodeFailure(message.failure));
-          else throw new TypeError("Invalid Realm State response");
+          else request.reject(decodeFailure(message.failure));
           continue;
         }
         if (message.type === "event") {
+          exactObject(message, ["protocol", "type", "subscriptionId", "event"]);
           const id = safeInteger(message.subscriptionId, "subscription id");
           const subscription = subscriptions.get(id);
-          const event = decodeEvent(message.event);
           if (subscription === undefined) {
-            const buffered = earlyEvents.get(id) ?? [];
-            buffered.push(event);
-            earlyEvents.set(id, buffered);
-          } else {
-            deliverEvent(id, subscription, event);
+            throw new TypeError("Impossible Realm State subscription correlation");
           }
+          const event = decodeEvent(message.event);
+          if (subscription.terminalSeen) {
+            throw new TypeError("Realm State event followed subscription terminal");
+          }
+          if (event.type === "baseline") {
+            if (subscription.baselineSeen) {
+              throw new TypeError("Duplicate Realm State subscription baseline");
+            }
+            subscription.baselineSeen = true;
+            subscription.lastRevision = event.snapshot.revision;
+          } else if (event.type === "change") {
+            if (!subscription.baselineSeen || event.revision <= subscription.lastRevision) {
+              throw new TypeError("Out-of-order Realm State subscription event");
+            }
+            subscription.lastRevision = event.revision;
+          } else {
+            subscription.terminalSeen = true;
+          }
+          subscription.delivery.enqueue(event);
           continue;
         }
         throw new TypeError("Invalid Realm State carrier message type");
@@ -277,32 +273,46 @@ export function createRealmStateCarrierBinding(
     params: unknown,
     signal?: AbortSignal,
   ): { readonly dispatched: Promise<void>; readonly result: Promise<unknown> } => {
+    const rejectBeforeDispatch = (error: unknown) => {
+      const dispatched = Promise.reject(error);
+      const result = Promise.reject(error);
+      void result.catch(() => undefined);
+      return Object.freeze({ dispatched, result });
+    };
     if (closed) {
-      const error = unavailableCarrier();
-      return Object.freeze({ dispatched: Promise.reject(error), result: Promise.reject(error) });
+      return rejectBeforeDispatch(unavailableCarrier());
     }
     if (signal?.aborted) {
-      return Object.freeze({ dispatched: Promise.reject(signal.reason), result: Promise.reject(signal.reason) });
+      return rejectBeforeDispatch(signal.reason);
+    }
+    if (pending.size >= MAX_PENDING_REQUESTS || nextId === Number.MAX_SAFE_INTEGER) {
+      return rejectBeforeDispatch(unavailableCarrier());
     }
     const id = nextId++;
     const text = encode({ protocol: PROTOCOL, type: "request", id, method, params });
     let resolve!: (value: unknown) => void;
     let reject!: (error: unknown) => void;
     const result = new Promise<unknown>((res, rej) => { resolve = res; reject = rej; });
-    pending.set(id, { resolve, reject });
+    // The binding exposes dispatch and result as independent evidence. Observe
+    // the result internally as well so a pre-dispatch rejection cannot become
+    // an unhandled rejection while a caller is still awaiting dispatched.
+    void result.catch(() => undefined);
+    pending.set(id, { resolve, reject, ignored: false });
     const dispatched = sendRealmStateMessage(carrier, text).catch((error) => {
       const current = pending.get(id);
       if (current !== undefined) {
         pending.delete(id);
         current.reject(error);
       }
+      failClosed(error);
+      void carrier.close().catch(() => undefined);
       throw error;
     });
     if (signal !== undefined) {
       const onAbort = () => {
         const current = pending.get(id);
         if (current === undefined) return;
-        pending.delete(id);
+        current.ignored = true;
         current.reject(signal.reason);
       };
       signal.addEventListener("abort", onAbort, { once: true });
@@ -311,10 +321,26 @@ export function createRealmStateCarrierBinding(
     return Object.freeze({ dispatched, result });
   };
 
+  const decodeProtocolResult = <T>(decode: () => T): T => {
+    try {
+      return decode();
+    } catch (error) {
+      failClosed(error);
+      void carrier.close().catch(() => undefined);
+      throw error;
+    }
+  };
+
   const readRequest = async <T>(method: string, params: unknown, decodeResult: (value: unknown) => T, signal?: AbortSignal): Promise<T> => {
     const operation = request(method, params, signal);
-    await operation.dispatched;
-    return decodeResult(await operation.result);
+    try {
+      await operation.dispatched;
+    } catch (error) {
+      void operation.result.catch(() => undefined);
+      throw error;
+    }
+    const value = await operation.result;
+    return decodeProtocolResult(() => decodeResult(value));
   };
 
   const binding: RealmStatePhysicalBinding = {
@@ -339,46 +365,46 @@ export function createRealmStateCarrierBinding(
       const operation = request("commit", { transaction: validated });
       return Object.freeze({
         dispatched: operation.dispatched,
-        result: operation.result.then(decodeCommit),
+        result: operation.result.then((value) =>
+          decodeProtocolResult(() => decodeCommit(value))),
       });
     },
     async subscribe(keys, listener) {
       if (typeof listener !== "function") throw realmStateError("INVALID_REQUEST", "Invalid listener");
       const validated = validateKeyList(keys, REALM_STATE_LIMITS.subscribeKeys);
       const operation = request("subscribe", { keys: validated });
-      await operation.dispatched;
-      const response = object(await operation.result);
-      const id = safeInteger(response.subscriptionId, "subscription id");
+      try {
+        await operation.dispatched;
+      } catch (error) {
+        void operation.result.catch(() => undefined);
+        throw error;
+      }
+      const response = await operation.result;
+      const id = decodeProtocolResult(() => {
+        const decoded = exactObject(response, ["subscriptionId"]);
+        return safeInteger(decoded.subscriptionId, "subscription id");
+      });
+      const onDeactivate = (reason: SubscriptionDeactivation) => {
+        subscriptions.delete(id);
+        if (closed || (reason !== "closed" && reason !== "overflow")) return;
+        const close = request("unsubscribe", { subscriptionId: id });
+        void close.dispatched.catch(() => undefined);
+        void close.result.catch(() => undefined);
+      };
       const entry: ClientSubscription = {
-        active: true,
-        listener,
-        queue: [],
-        delivering: false,
-        pendingChanges: 0,
-        pendingBytes: 0,
-        terminalQueued: false,
+        delivery: new RealmStateSubscriptionDelivery(listener, onDeactivate),
+        baselineSeen: false,
+        lastRevision: -1,
+        terminalSeen: false,
       };
       subscriptions.set(id, entry);
-      const buffered = earlyEvents.get(id);
-      earlyEvents.delete(id);
-      if (buffered !== undefined) {
-        for (const event of buffered) deliverEvent(id, entry, event);
-      }
-      const handle: RealmStateSubscription = Object.freeze({
-        close() {
-          if (!entry.active) return;
-          entry.active = false;
-          entry.queue.length = 0;
-          subscriptions.delete(id);
-          const close = request("unsubscribe", { subscriptionId: id });
-          void close.dispatched.catch(() => undefined);
-          void close.result.catch(() => undefined);
-        },
-      });
-      return handle;
+      return entry.delivery;
     },
-    terminal: carrier.closed.then(() => undefined, () => undefined),
-    close() { return carrier.close(); },
+    terminal,
+    async close() {
+      failClosed(unavailableCarrier());
+      await carrier.close();
+    },
   };
   return Object.freeze(binding);
 }
@@ -388,14 +414,73 @@ function unavailableCarrier(): RealmStateError {
 }
 
 function failureObject(error: unknown): Readonly<Record<string, unknown>> {
-  if (isRealmStateFailure(error)) {
-    return Object.freeze({
-      code: error.code,
-      message: error.message,
-      ...(error.path === undefined ? {} : { path: error.path }),
-    });
+  if (!isRealmStateFailure(error)) {
+    throw new TypeError("Cannot encode an unknown Realm State failure");
   }
-  return Object.freeze({ code: "TERMINAL", message: "Realm State carrier request failed" });
+  return Object.freeze({
+    code: error.code,
+    message: error.message,
+    ...(error.path === undefined ? {} : { path: error.path }),
+  });
+}
+
+type DecodedServerRequest =
+  | { readonly method: "read" | "readInitial"; readonly keys: readonly RealmStateKey[] }
+  | { readonly method: "list" | "scan"; readonly namespace?: string }
+  | { readonly method: "commit"; readonly transaction: RealmStateTransaction }
+  | { readonly method: "subscribe"; readonly keys: readonly RealmStateKey[] }
+  | { readonly method: "unsubscribe"; readonly subscriptionId: number };
+
+function decodeServerRequest(method: unknown, value: unknown): DecodedServerRequest {
+  try {
+    switch (method) {
+      case "read":
+      case "readInitial": {
+        const params = exactObject(value, ["keys"]);
+        return Object.freeze({
+          method,
+          keys: validateKeyList(params.keys, REALM_STATE_LIMITS.readKeys),
+        });
+      }
+      case "list":
+      case "scan": {
+        const params = exactObject(value, [], ["namespace"]);
+        const namespace = params.namespace === undefined
+          ? undefined
+          : validateNamespace(params.namespace);
+        return Object.freeze({
+          method,
+          ...(namespace === undefined ? {} : { namespace }),
+        });
+      }
+      case "commit": {
+        const params = exactObject(value, ["transaction"]);
+        return Object.freeze({
+          method,
+          transaction: validateTransaction(params.transaction),
+        });
+      }
+      case "subscribe": {
+        const params = exactObject(value, ["keys"]);
+        return Object.freeze({
+          method,
+          keys: validateKeyList(params.keys, REALM_STATE_LIMITS.subscribeKeys),
+        });
+      }
+      case "unsubscribe": {
+        const params = exactObject(value, ["subscriptionId"]);
+        return Object.freeze({
+          method,
+          subscriptionId: safeInteger(params.subscriptionId, "subscription id"),
+        });
+      }
+      default:
+        throw realmStateError("INVALID_REQUEST", "Unknown Realm State method", ["method"]);
+    }
+  } catch (error) {
+    if (isRealmStateFailure(error)) throw error;
+    throw realmStateError("INVALID_REQUEST", "Invalid Realm State request");
+  }
 }
 
 export interface RealmStateCarrierServer {
@@ -431,40 +516,70 @@ export function serveRealmStateCarrier(
     try {
       for await (const text of receiveRealmStateMessages(carrier)) {
         const message = parseMessage(text);
-        if (message.protocol !== PROTOCOL || message.type !== "request") {
+        if (
+          message.protocol !== PROTOCOL ||
+          message.type !== "request" ||
+          Object.keys(message).length !== 5 ||
+          !Object.prototype.hasOwnProperty.call(message, "id") ||
+          !Object.prototype.hasOwnProperty.call(message, "method") ||
+          !Object.prototype.hasOwnProperty.call(message, "params")
+        ) {
           throw new TypeError("Invalid Realm State request");
         }
         const id = safeInteger(message.id, "request id");
-        const method = message.method;
-        const params = object(message.params);
+        let request: DecodedServerRequest;
         try {
-          let result: unknown;
-          switch (method) {
+          request = decodeServerRequest(message.method, message.params);
+        } catch (error) {
+          await sendResponse(id, false, failureObject(error));
+          continue;
+        }
+        let result: unknown;
+        try {
+          switch (request.method) {
             case "read":
-              result = await authority.read(params.keys as readonly RealmStateKey[]);
+              result = await authority.read(request.keys);
               break;
             case "readInitial":
-              result = await authority.readInitial(params.keys as readonly RealmStateKey[]);
+              result = await authority.readInitial(request.keys);
               break;
             case "list":
-              result = await authority.list(params.namespace === undefined ? undefined : { namespace: params.namespace as string });
+              result = await authority.list(
+                request.namespace === undefined ? undefined : { namespace: request.namespace },
+              );
               break;
             case "scan":
-              result = await authority.scan(params.namespace === undefined ? undefined : { namespace: params.namespace as string });
+              result = await authority.scan(
+                request.namespace === undefined ? undefined : { namespace: request.namespace },
+              );
               break;
             case "commit":
-              result = await authority.commit(params.transaction as RealmStateTransaction);
+              result = await authority.commit(request.transaction);
               break;
             case "subscribe": {
+              if (nextSubscriptionId === Number.MAX_SAFE_INTEGER) {
+                throw new Error("Realm State subscription identity exhausted");
+              }
               const subscriptionId = nextSubscriptionId++;
               const subscription = await authority.subscribe(
-                params.keys as readonly RealmStateKey[],
+                request.keys,
                 (event) => {
                   if (closed) return;
-                  void sendRealmStateMessage(carrier, encode({ protocol: PROTOCOL, type: "event", subscriptionId, event })).catch(() => {
-                    void carrier.close().catch(() => undefined);
-                  });
-                  if (event.type === "terminal") subscriptions.delete(subscriptionId);
+                  const sent = sendRealmStateMessage(carrier, encode({
+                    protocol: PROTOCOL,
+                    type: "event",
+                    subscriptionId,
+                    event,
+                  }));
+                  return sent.then(
+                    () => {
+                      if (event.type === "terminal") subscriptions.delete(subscriptionId);
+                    },
+                    async (error) => {
+                      try { await carrier.close(); } catch {}
+                      throw error;
+                    },
+                  );
                 },
               );
               subscriptions.set(subscriptionId, subscription);
@@ -472,19 +587,18 @@ export function serveRealmStateCarrier(
               break;
             }
             case "unsubscribe": {
-              const subscriptionId = safeInteger(params.subscriptionId, "subscription id");
-              subscriptions.get(subscriptionId)?.close();
-              subscriptions.delete(subscriptionId);
+              subscriptions.get(request.subscriptionId)?.close();
+              subscriptions.delete(request.subscriptionId);
               result = Object.freeze({});
               break;
             }
-            default:
-              throw realmStateError("INVALID_REQUEST", "Unknown Realm State method");
           }
-          await sendResponse(id, true, result);
         } catch (error) {
+          if (!isRealmStateFailure(error)) throw error;
           await sendResponse(id, false, failureObject(error));
+          continue;
         }
+        await sendResponse(id, true, result);
       }
     } catch {
       try { await carrier.close(); } catch {}

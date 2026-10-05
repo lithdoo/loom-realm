@@ -2,9 +2,9 @@ import { parentPort } from "node:worker_threads";
 import {
   RealmStateError,
   createRealmStateAuthority,
-  jsonValueMetrics,
   prepareRealmStateDefinition,
 } from "../dist/index.js";
+import { jsonValueMetrics } from "../dist/testing.js";
 
 try {
   const a = { namespace: "é", key: "x" };

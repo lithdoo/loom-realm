@@ -1,10 +1,10 @@
 # LoomRealm Realm State v1 Contract
 
 > 层级：正式契约  
-> 状态：**Active / Normative / Implemented / Qualified**
+> 状态：**Active / Normative / Implemented / Requalification Pending**
 > 契约版本：1  
 > 逻辑协议：`loomrealm.realm-state/1`  
-> 稳定程度：**Architecture + Logical Semantics + Deterministic Surface Frozen / Implemented / Qualified**
+> 稳定程度：**Architecture + Logical Semantics + Deterministic Surface Frozen / Implemented / Requalification Pending**
 > 架构来源：[Realm State：Session 级共享业务状态系统](../10-architecture/realm-state-system.md)  
 > 相关契约：[Game Package v1](./game-package-v1.md)  
 > 最近复核：2026-10-05
@@ -929,6 +929,8 @@ no change event may be delivered after terminal
 
 Overflow MUST NOT block the Authority commit lane and MUST NOT silently continue with dropped changes。
 
+For a remote subscription, the carrier-side listener MUST remain pending until the complete framed event has been accepted by the physical carrier。Fire-and-forget physical sends MUST NOT cause Authority accounting to treat an event as delivered。Per-subscription callback delivery and per-carrier framed sends MUST preserve logical event order without unbounded Promise accumulation。
+
 ### 15.3 Close
 
 `close()` MUST be idempotent。After it returns, listener MUST NOT be invoked again。Active close MUST NOT emit a synthetic terminal("closed") event and the subscription identity MUST NOT reactivate。
@@ -1064,6 +1066,12 @@ Session-fatal report from Authority to Main
 Hostra/PWA physical realization MAY differ, including validation/copy pass count and process/Worker placement, but observable logical semantics、limits、ordering、commit evidence、binding fencing and lifetime MUST match。
 
 Protocol MUST NOT be embedded into Renderer Data、Runtime Control、`frame.call()` or Hostra generic RPC application bus。
+
+Physical realization MUST serialize complete logical sends per binding so chunks from concurrent logical messages cannot reorder author-visible messages。It MUST place hard bounds on incomplete streams、chunks per stream、buffered physical bytes and adapter-queued units；exceeding or corrupting those bounds MUST terminalize only that physical binding。
+
+A valid protocol request envelope with an invalid logical method/parameter/key/transaction/subscription request MUST return `INVALID_REQUEST` and leave the binding usable。Invalid framing、wrong physical protocol、broken/truncated chunk sequence、impossible response correlation or invalid response body MUST terminalize the binding。
+
+An unexpected server implementation/transport failure after a commit request was dispatched MUST NOT be encoded as a synthetic `TERMINAL` failure。The binding MUST fail so the logical client derives `OUTCOME_UNKNOWN` from dispatch evidence plus the missing definitive result。
 
 ---
 

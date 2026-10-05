@@ -4,7 +4,6 @@ import type {
   SubsystemDataBinding,
 } from "@loomrealm/platform-ports";
 import {
-  createRealmStateClient,
   type RealmStateClient,
 } from "@loomrealm/realm-state";
 import {
@@ -55,7 +54,7 @@ export interface RunSubsystemOptions {
   readonly launch: SubsystemLaunchContext;
   readonly data?: SubsystemDataBinding;
   readonly content?: ContentClient;
-  readonly state?: RealmStateRuntimeCapability;
+  readonly state: RealmStateRuntimeCapability;
 }
 
 export interface RealmStateRuntimeCapability {
@@ -172,6 +171,21 @@ function validateOptions(options: RunSubsystemOptions): void {
   if (options.content !== undefined && (options.content === null || typeof options.content !== "object" || typeof options.content.record !== "function" || typeof options.content.resource !== "function")) {
     throw new TypeError("Invalid ContentClient");
   }
+  if (
+    options.state === null ||
+    typeof options.state !== "object" ||
+    options.state.client === null ||
+    typeof options.state.client !== "object" ||
+    typeof options.state.client.read !== "function" ||
+    typeof options.state.client.readInitial !== "function" ||
+    typeof options.state.client.list !== "function" ||
+    typeof options.state.client.scan !== "function" ||
+    typeof options.state.client.commit !== "function" ||
+    typeof options.state.client.subscribe !== "function" ||
+    typeof options.state.terminate !== "function"
+  ) {
+    throw new TypeError("Invalid Realm State Runtime capability");
+  }
   const policy = options.runtimePolicy;
   if (
     policy === null ||
@@ -258,12 +272,7 @@ class SubsystemHost {
   private readonly runtimeState: RealmStateRuntimeCapability;
 
   constructor(private readonly options: RunSubsystemOptions) {
-    if (options.state === undefined) {
-      const client = createRealmStateClient();
-      this.runtimeState = Object.freeze({ client, terminate: () => client.terminate() });
-    } else {
-      this.runtimeState = options.state;
-    }
+    this.runtimeState = options.state;
   }
 
   run(): Promise<void> {

@@ -61,7 +61,7 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Run Realm State package and vertical tests
         run: npm run test:realm-state
-      - name: Run frozen-contract boundary qualification
+      - name: Run behavioral and boundary qualification
         run: npm run test:realm-state:qualification
       - name: Run Desktop composition tests
         run: npm test -w @loomrealm/desktop

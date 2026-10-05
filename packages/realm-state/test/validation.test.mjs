@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import {
   REALM_STATE_LIMITS,
   RealmStateError,
+  prepareRealmStateDefinition,
+} from "../dist/index.js";
+import {
   compareRealmStateKeys,
   jsonValueMetrics,
-  prepareRealmStateDefinition,
   validateRealmStateKey,
   validateTransaction,
-} from "../dist/index.js";
+} from "../dist/testing.js";
 
 const fails = (code) => (error) => error instanceof RealmStateError && error.code === code;
 

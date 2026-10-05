@@ -1,6 +1,8 @@
 import type { CarrierClosed, MessageCarrier } from "@loomrealm/foundation";
 
 const CLOSE_SENTINEL = "\u001eloomrealm.realm-state.port.close/1";
+const MAX_QUEUED_MESSAGES = 64;
+const MAX_QUEUED_BYTES = 64 * 1024 * 1024;
 
 interface PortMessageEvent {
   readonly data: unknown;
@@ -35,6 +37,7 @@ export function createRealmStateMessagePortCarrier(
   }
   const queue: string[] = [];
   const waiters: Waiter[] = [];
+  let queuedBytes = 0;
   let terminal: CarrierClosed | null = null;
   let settleClosed!: (fact: CarrierClosed) => void;
   const closed = new Promise<CarrierClosed>((resolve) => { settleClosed = resolve; });
@@ -59,7 +62,21 @@ export function createRealmStateMessagePortCarrier(
       return;
     }
     const waiter = waiters.shift();
-    if (waiter === undefined) queue.push(event.data);
+    if (waiter === undefined) {
+      const bytes = new TextEncoder().encode(event.data).byteLength;
+      if (
+        queue.length + 1 > MAX_QUEUED_MESSAGES ||
+        queuedBytes + bytes > MAX_QUEUED_BYTES
+      ) {
+        finish({
+          kind: "lost",
+          cause: new Error("Realm State MessagePort receive buffer exceeded"),
+        });
+        return;
+      }
+      queue.push(event.data);
+      queuedBytes += bytes;
+    }
     else waiter.resolve({ done: false, value: event.data });
   };
   const onMessageError = (event: unknown) => finish({ kind: "lost", cause: event });
@@ -74,6 +91,10 @@ export function createRealmStateMessagePortCarrier(
         throw new TypeError("Invalid Realm State MessagePort unit");
       }
       port.postMessage(message);
+      // MessagePort has no drain callback. Yield one task before accepting the
+      // next framed unit so a compliant peer can consume without an unbounded
+      // local postMessage burst.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     },
     messages(): AsyncIterable<string> {
       let acquired = false;
@@ -84,8 +105,18 @@ export function createRealmStateMessagePortCarrier(
           return Object.freeze({
             next(): Promise<IteratorResult<string>> {
               const value = queue.shift();
-              if (value !== undefined) return Promise.resolve({ done: false, value });
+              if (value !== undefined) {
+                queuedBytes -= new TextEncoder().encode(value).byteLength;
+                return Promise.resolve({ done: false, value });
+              }
               if (terminal !== null) return Promise.resolve({ done: true, value: undefined });
+              if (waiters.length >= 1) {
+                finish({
+                  kind: "lost",
+                  cause: new Error("Realm State MessagePort reader over-acquired"),
+                });
+                return Promise.resolve({ done: true, value: undefined });
+              }
               return new Promise((resolve) => waiters.push({ resolve }));
             },
           });

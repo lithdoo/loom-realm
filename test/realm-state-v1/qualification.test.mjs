@@ -45,6 +45,10 @@ test("frozen v1 exclusions remain absent from the public package", async () => {
     "RealmStateAuthority", "RealmStateClient", "PreparedRealmStateDefinition",
     "ReplaceableRealmStateClient", "createRealmStateCarrierBinding", "createRealmStateMessagePortCarrier",
   ]) assert.match(declaration, new RegExp(`\\b${required}\\b`, "u"));
+  for (const internal of [
+    "identityToken", "snapshotJsonValue", "validateRealmStateKey",
+    "validateTransaction", "sendRealmStateMessage", "receiveRealmStateMessages",
+  ]) assert.doesNotMatch(declaration, new RegExp(`\\b${internal}\\b`, "u"));
 });
 
 test("Hostra uses a dedicated State plane and Subsystem owns the author-facing capability", async () => {
@@ -54,6 +58,16 @@ test("Hostra uses a dedicated State plane and Subsystem owns the author-facing c
   assert.match(hosting, /serveRealmStateCarrier/u);
   assert.doesNotMatch(hosting, /frame\.call\([^)]*state/iu);
   assert.match(subsystem, /readonly state: RealmStateClient/u);
+});
+
+test("cross-boundary validation does not classify machine failures from diagnostic text", async () => {
+  const validation = await readFile(
+    path.join(root, "packages/game-package/src/validate.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(validation, /error\.message\.(?:includes|startsWith|match)/u);
+  assert.match(validation, /error\.code/u);
+  assert.match(validation, /error\.path/u);
 });
 
 test("Realm State changes have a cross-platform package, vertical, boundary, and Desktop CI gate", async () => {

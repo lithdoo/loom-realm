@@ -1,6 +1,6 @@
 # Realm State v1 Qualification
 
-> 状态：**Implemented / Qualified**  
+> 状态：**Implemented / Requalification Pending**
 > Normative SSOT：[Realm State v1](../15-contracts/realm-state-v1.md)  
 > Delivery plan：[Realm State v1 delivery plan](./realm-state-v1-delivery-plan.md)  
 > 日期：2026-10-05

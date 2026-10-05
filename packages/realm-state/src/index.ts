@@ -26,19 +26,7 @@ export type {
 } from "./model.js";
 export {
   REALM_STATE_LIMITS,
-  compareRealmStateKeys,
-  identityToken,
-  isUnicodeScalarString,
-  jsonValueMetrics,
   prepareRealmStateDefinition,
-  snapshotJsonValue,
-  validateAndSnapshotValue,
-  validateKeyList,
-  validateNamespace,
-  validateRealmStateKey,
-  validateTransaction,
-  type JsonValueMetrics,
-  type ValidatedRealmStateTransaction,
 } from "./validation.js";
 export {
   RealmStateAuthority,

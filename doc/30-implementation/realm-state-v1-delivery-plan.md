@@ -1,6 +1,6 @@
 # Realm State v1 Implementation Delivery Plan
 
-> 状态：**Implemented / Qualified / Closed**
+> 状态：**Implemented / Requalification Pending**
 > Normative SSOT：[Realm State v1 Contract](../15-contracts/realm-state-v1.md)  
 > 架构解释：[Realm State System](../10-architecture/realm-state-system.md)  
 > 最近复核：2026-10-05

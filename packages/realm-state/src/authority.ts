@@ -22,11 +22,11 @@ import {
   identityToken,
   prepareRealmStateDefinition,
   snapshotJsonValue,
-  subscriptionRecordPayloadBytes,
   validateKeyList,
   validateNamespace,
   validateTransaction,
 } from "./validation.js";
+import { RealmStateSubscriptionDelivery } from "./subscription-delivery.js";
 
 interface StoredRecord {
   readonly key: RealmStateKey;
@@ -69,107 +69,15 @@ function indexSnapshot(record: StoredRecord): RealmStateIndexRecord {
   return Object.freeze({ key: frozenKey(record.key), version: record.version });
 }
 
-class AuthoritySubscription implements RealmStateSubscription {
-  private readonly queue: RealmStateSubscriptionEvent[] = [];
-  private pendingChanges = 0;
-  private pendingBytes = 0;
-  private active = true;
-  private delivering = false;
-  private deliveryScheduled = false;
-  private terminalQueued = false;
-
+class AuthoritySubscription extends RealmStateSubscriptionDelivery {
   constructor(
     readonly tokens: ReadonlySet<string>,
     baseline: RealmStateSnapshot,
-    private readonly listener: (event: RealmStateSubscriptionEvent) => void,
-    private readonly onClose: () => void,
+    listener: (event: RealmStateSubscriptionEvent) => void,
+    onClose: () => void,
   ) {
-    this.queue.push(Object.freeze({ type: "baseline", snapshot: baseline }));
-  }
-
-  start(): void {
-    if (!this.active || this.deliveryScheduled || this.delivering) return;
-    this.deliveryScheduled = true;
-    setTimeout(() => {
-      this.deliveryScheduled = false;
-      void this.drain();
-    }, 0);
-  }
-
-  enqueueChange(revision: number, records: readonly RealmStateRecord[]): void {
-    if (!this.active || this.terminalQueued || records.length === 0) return;
-    const bytes = records.reduce(
-      (total, record) => total + subscriptionRecordPayloadBytes(record),
-      0,
-    );
-    if (
-      this.pendingChanges + 1 > REALM_STATE_LIMITS.subscriptionPendingEvents ||
-      this.pendingBytes + bytes > REALM_STATE_LIMITS.subscriptionPendingPayloadBytes
-    ) {
-      const firstChange = this.queue.findIndex((event) => event.type === "change");
-      if (firstChange >= 0) this.queue.splice(firstChange, this.queue.length);
-      this.pendingChanges = 0;
-      this.pendingBytes = 0;
-      this.terminalQueued = true;
-      this.queue.push(Object.freeze({ type: "terminal", reason: "overflow" }));
-      this.start();
-      return;
-    }
-    this.pendingChanges += 1;
-    this.pendingBytes += bytes;
-    this.queue.push(Object.freeze({ type: "change", revision, records }));
-    this.start();
-  }
-
-  terminal(reason: "binding-terminal" | "authority-terminal"): void {
-    if (!this.active || this.terminalQueued) return;
-    this.terminalQueued = true;
-    this.queue.push(Object.freeze({ type: "terminal", reason }));
-    this.start();
-  }
-
-  close(): void {
-    if (!this.active) return;
-    this.active = false;
-    this.queue.length = 0;
-    this.onClose();
-  }
-
-  private async drain(): Promise<void> {
-    if (this.delivering || !this.active) return;
-    this.delivering = true;
-    try {
-      while (this.active) {
-        const event = this.queue.shift();
-        if (event === undefined) break;
-        if (event.type === "change") {
-          this.pendingChanges -= 1;
-          this.pendingBytes -= event.records.reduce(
-            (total, record) => total + subscriptionRecordPayloadBytes(record),
-            0,
-          );
-        }
-        try {
-          const returned = this.listener(event) as unknown;
-          if (
-            returned !== null &&
-            (typeof returned === "object" || typeof returned === "function") &&
-            typeof (returned as { then?: unknown }).then === "function"
-          ) {
-            await Promise.resolve(returned).catch(() => undefined);
-          }
-        } catch {
-          // Listener failures are local and never affect the authority.
-        }
-        if (event.type === "terminal") {
-          this.close();
-          break;
-        }
-      }
-    } finally {
-      this.delivering = false;
-      if (this.active && this.queue.length > 0) this.start();
-    }
+    super(listener, onClose);
+    this.enqueue(Object.freeze({ type: "baseline", snapshot: baseline }));
   }
 }
 
@@ -339,7 +247,13 @@ export class RealmStateAuthority implements RealmStateClient {
     const frozenChanged = Object.freeze(changed);
     for (const subscription of this.subscriptions) {
       const relevant = frozenChanged.filter((record) => subscription.tokens.has(identityToken(record.key)));
-      if (relevant.length > 0) subscription.enqueueChange(revision, Object.freeze(relevant));
+      if (relevant.length > 0) {
+        subscription.enqueue(Object.freeze({
+          type: "change",
+          revision,
+          records: Object.freeze(relevant),
+        }));
+      }
     }
     const records = frozenChanged.map(({ key, version }) => Object.freeze({ key, version }));
     return Object.freeze({ revision, records: Object.freeze(records) });
@@ -369,7 +283,6 @@ export class RealmStateAuthority implements RealmStateClient {
       () => this.subscriptions.delete(subscription),
     );
     this.subscriptions.add(subscription);
-    subscription.start();
     return subscription;
   }
 
@@ -397,7 +310,7 @@ export class RealmStateAuthority implements RealmStateClient {
     this.settleTerminated();
     if (notifySubscriptions) {
       for (const subscription of [...this.subscriptions]) {
-        subscription.terminal("authority-terminal");
+        subscription.enqueue(Object.freeze({ type: "terminal", reason: "authority-terminal" }));
       }
     } else {
       for (const subscription of [...this.subscriptions]) subscription.close();
