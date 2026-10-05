@@ -1,18 +1,18 @@
 # Realm State：Session 级共享业务状态系统
 
 > 层级：系统架构  
-> 状态：Proposal / **Core Architecture Semantics Closed**  
-> 稳定程度：**Not Implemented / Formal Contract Candidate / Not Qualified**  
+> 状态：Active / **Core Architecture Semantics Closed / Implemented**
+> 稳定程度：**Implemented / Formal Contract Active / Qualified**
 > 主要定义：Session 级共享业务状态 authority、Namespace Record Collection、Game Entry 初始状态、immutable initial value、materialized Record discovery index、consistent snapshot、optimistic transaction、subscription linearization、commit evidence、validation ownership、生命周期与平台边界  
 > 依赖：[系统架构总览](./system-overview.md)、[模块子系统模型](./subsystem-model.md)、[栈式运行系统](./stack-runtime-system.md)、[存储与内容系统](./storage-system.md)、[通信系统](./communication-system.md)、[Game Package v1](../15-contracts/game-package-v1.md)  
 > 正式化：[Realm State v1](../15-contracts/realm-state-v1.md)  
 > 最近复核：2026-10-05
 
-本文定义 LoomRealm 的候选 **Realm State**：位于 `Main` 控制 authority 与各 `Subsystem Runtime` 局部业务状态之间的 **Session 级、跨 Subsystem、可变业务状态唯一 authority**。
+本文定义 LoomRealm 的 **Realm State**：位于 `Main` 控制 authority 与各 `Subsystem Runtime` 局部业务状态之间的 **Session 级、跨 Subsystem、可变业务状态唯一 authority**。
 
-本文冻结的是 **core architecture semantics**：authority、lifetime、Collection/Record/Transaction 粒度、initial/current、materialization、consistent read/scan、OCC mutation、commit evidence、subscription linearization、validation ownership 与 persistence boundary。后续仍需把这些语义落实到 Game Package、Realm State logical protocol、Subsystem author API、Launcher、Hostra/PWA realization、实现与 qualification。
+这些冻结语义已落实到 Game Package、Realm State logical protocol、Subsystem author API、Hostra Launcher/Desktop 独立 State plane，以及 browser/Worker-compatible MessagePort realization；对应资格证据见 [Realm State v1 qualification](../30-implementation/realm-state-v1-qualification.md)。
 
-以下内容仍属于 **formal contract closure**，不代表 Realm State 核心架构仍开放：API empty/duplicate input 规则、部分返回数组的 canonical ordering、revision/version 数值 representation bound、JsonValue encoded-size/depth 的精确计算规则、wire error serialization 等。
+Formal contract 已冻结并实现 API empty/duplicate input、canonical ordering、revision/version safe-integer bound、JsonValue encoded-size/depth 与 wire error semantics；这些规则仍由 formal contract 单一持有。
 
 ---
 
@@ -2043,7 +2043,7 @@ Transport/profile realization
 - bounded subscription queue profile
 ```
 
-Load current-seed resource bound 不再是 blocker，因为 Realm State 不再拥有 Load bootstrap。Logical client / replaceable physical binding 的 authority/lifetime semantics 已关闭；剩余只是 wire error/profile representation。`scan()` 被明确视为 potentially expensive exceptional operation，不增加 aggregate live-State limit/pagination blocker。
+Load current-seed resource bound 不再是 blocker，因为 Realm State 不拥有 Load bootstrap。Logical client / replaceable physical binding 的 authority/lifetime semantics 与 wire error/profile representation 均已由 v1 contract 和实现关闭。`scan()` 被明确视为 potentially expensive exceptional operation，不增加 aggregate live-State limit/pagination blocker。
 
 这些项目属于 formal contract / profile / qualification closure，不应被重新解释为需要扩张 Realm State authority model 的架构缺口。
 
@@ -2509,4 +2509,4 @@ Subscription
     fresh-binding/fresh-subscribe/fresh-baseline recovery
 ```
 
-至此 Realm State v1 的 **core architecture semantics** 已闭合，并明确保持与 Main/Frame、Renderer/Data、Content、Platform、Subsystem-local state、Persistence workflow 的 authority 边界。下一阶段应转向 **formal contract closure、reference authority、Game Package/Subsystem contract synchronization、Launcher projection、Desktop binding 与 qualification**，而不是继续向 core 增加未被真实 consumer 证明必要的机制。
+Realm State v1 的 **core architecture semantics 与实现闭环** 已完成，并保持与 Main/Frame、Renderer/Data、Content、Platform、Subsystem-local state、Persistence workflow 的 authority 边界。后续版本演进不得把未被真实 consumer 证明必要的机制重新塞入 v1 core。

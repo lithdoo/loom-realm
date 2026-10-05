@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M9/M12/M13 closed baseline；M14/M15 design frozen and implemented / current subject Requalification Pending；Realm State core semantics closed / not implemented / not qualified
+> 稳定程度：M9/M12/M13 closed baseline；M14/M15 design frozen and implemented / current subject Requalification Pending；Realm State v1 implemented / qualified
 > 主要定义：跨平台 physical composition、Launcher PREPARE、Runtime/Renderer/Data/Content/Realm State/Web presentation placement  
 > 依赖：[系统架构总览](./system-overview.md)、[Realm State](./realm-state-system.md)、[渲染系统](./rendering-system.md)  
 > 正式化：[Realm State v1](../15-contracts/realm-state-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
@@ -345,14 +345,14 @@ Hostra shell
      ↓
 LoomRealm Desktop plain Node process
 ├─ Main
-├─ RealmStateAuthority             (planned Realm State realization)
+├─ RealmStateAuthority             (Session-owned live authority)
 ├─ RuntimeHosting
 │   └─ Runner
 ├─ Desktop Data Broker
 ├─ Content + trusted shell
 ├─ Renderer Control loopback carrier
 ├─ Data settlement loopback carrier
-└─ Realm State Runtime bindings    (physical form not yet frozen)
+└─ Realm State Runtime bindings    (dedicated Hostra WS / Worker MessagePort)
 ```
 
 Frozen M15 external host baseline由 current recomposition SSOT拥有：
@@ -364,7 +364,7 @@ bundled Electron 44.1.1
 shutdown grace 1000 ms
 ```
 
-Realm State placement shown here is a **future realization target**，不把历史 M15 implementation/qualification claim扩张为 Realm State 已实现。
+Realm State placement shown here is the current v1 realization；其 implementation/qualification 由独立 Realm State ledger 证明，不扩张历史 M15 evidence。
 
 Hostra RPC只用于 existing host-control operations：
 
@@ -540,7 +540,7 @@ M12 Content
 → M17 PWA Full E2E / Equivalence
 ```
 
-Realm State 当前是独立 pre-implementation contract track；实现/qualification 应拥有自己的 subject/evidence，不 retroactively 修改既有 M10–M15 claims。
+Realm State 是独立 implementation/qualification track；当前 subject/evidence 见 Realm State v1 ledger，且不 retroactively 修改既有 M10–M15 claims。
 
 Current status summary见 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md)。M15 physical composition remains frozen, while its current-subject formal status is Requalification Pending；historical direct-Electron evidence does not own the claim。
 

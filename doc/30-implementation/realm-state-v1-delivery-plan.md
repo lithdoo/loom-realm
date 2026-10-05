@@ -1,9 +1,11 @@
 # Realm State v1 Implementation Delivery Plan
 
-> 状态：**Ready for Implementation**  
+> 状态：**Implemented / Qualified / Closed**
 > Normative SSOT：[Realm State v1 Contract](../15-contracts/realm-state-v1.md)  
 > 架构解释：[Realm State System](../10-architecture/realm-state-system.md)  
 > 最近复核：2026-10-05
+
+> 完成证据：[Realm State v1 qualification](./realm-state-v1-qualification.md)。本文保留为已执行工作包与 gate 的追溯，不再表示待办。
 
 本文不是第二份 Realm State contract。它只把已冻结 contract 映射为可由实现 Agent 顺序执行的工程工作包、qualification gate 与完成定义。
 

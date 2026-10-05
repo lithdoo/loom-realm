@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M10–M15 closed baseline；M15 physical realization remains ADR 0034 + recomposition SSOT；Realm State core semantics closed / not implemented / not qualified  
+> 稳定程度：M10–M15 closed baseline；M15 physical realization remains ADR 0034 + recomposition SSOT；Realm State v1 implemented / qualified
 > 主要定义：logical roles、bootstrap boundary、authority/currentness、Realm State placement、Render/Web presentation placement、Platform composition  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
 > 细化：[平台组合系统](./platform-composition-system.md)、[Realm State](./realm-state-system.md)、[渲染系统](./rendering-system.md)  
@@ -336,7 +336,7 @@ game-libs/map
 
 M14只 materialize当前消费者需要的 RMXP/Essentials Map/Tileset facts到 prepared Content；Runtime只通过 M12 ContentClient读取普通 JsonValue，不依赖 importer/Marshal/tooling representation。
 
-Realm State 是后续 shared mutable business-state capability，不改变 M14 Content definition boundary，也不吸收 imported immutable Content facts。
+Realm State 是已实现的 shared mutable business-state capability，不改变 M14 Content definition boundary，也不吸收 imported immutable Content facts。
 
 M14 qualification可使用 test-owned composition harness + real Chromium；完整 Hostra-owned Desktop composition属于 M15。
 
@@ -367,7 +367,7 @@ Subsystem Runtime
 
 RealmStateAuthority 与 Main MAY 同进程，但 logical owner/API 必须分离；同进程 placement不产生 Main-owned business state。LoomRealm Desktop/Session composition只做 physical assembly、binding 与 disposal，不解释 State value，也不建立第三份 Session authority。
 
-M15只纠正 outer physical owner，不改变 Main/Renderer/Subsystem、M9–M14 logical semantics。Realm State 尚未因本文 placement 被解释为 M15 已实现/qualified。
+M15只纠正 outer physical owner，不改变 Main/Renderer/Subsystem、M9–M14 logical semantics。Realm State 的实现与资格由独立 v1 evidence 持有，不从历史 M15 evidence 推导。
 
 Document reload保持同一 Hostra physical Window但产生 fresh Renderer logical participant；same-generation Data-only reconnect保持当前 Renderer identity，只替换 Data physical pair。Realm State Session authority不因 Renderer reload/Data reconnect重置。
 
@@ -390,7 +390,7 @@ M10 Input
 → M17 PWA Full E2E / Equivalence
 ```
 
-Realm State 作为独立 pre-implementation architecture/contract track，不 retroactively 改写 M10–M15 qualification claims；实现时必须分别 qualification。
+Realm State 作为独立 implementation/qualification track，不 retroactively 改写 M10–M15 qualification claims；其当前证据由独立 ledger 持有。
 
 M15–M17只 materialize各自 physical platform职责，不复制 business semantics。
 

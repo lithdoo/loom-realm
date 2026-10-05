@@ -686,7 +686,7 @@ no privileged Save/Load bootstrap input is projected from Game Package
 
 Pre-release versioning qualification SHOULD additionally lock：historical draft v1 compatibility is not promised；current validator implements only the current pre-release v1 schema。After formal v1 release, versioning qualification MUST prevent silent structural schema drift under `formatVersion: 1`。
 
-Realm State exact encoded-size/depth accounting 的 qualification 依赖 Realm State v1 freeze；在该 blocker 关闭前不得把 Realm State implementation slice 标为 qualified。
+Realm State exact encoded-size/depth accounting 已由 Realm State v1 implementation/qualification 关闭；Game Package State document vectors复用相同逻辑规则。
 
 ---
 
