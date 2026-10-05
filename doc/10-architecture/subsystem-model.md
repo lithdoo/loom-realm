@@ -2,14 +2,15 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving overall / **M10 Input closed + M11 Render surface frozen/current subject requalification pending / M12 Content author slice frozen**；Viewport v1 **Core Docs Frozen / not implemented / not qualified**  
-> 主要定义：Subsystem logical role、Definition Module ABI、Runtime/Frame local context、FrameOutcome、Input/Render/Content author projections与 error/lifetime boundary  
-> 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[渲染系统](./rendering-system.md)、[存储与内容系统](./storage-system.md)、[ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
+> 稳定程度：Evolving overall / **M10 Input closed + M11 Render surface frozen/current subject requalification pending / M12 Content author slice frozen**；Viewport v1 **Core Docs Frozen / not implemented / not qualified**；Realm State v1 **Core Semantics Closed / contract candidate / not implemented / not qualified**  
+> 主要定义：Subsystem logical role、Definition Module ABI、Runtime/Frame local context、FrameOutcome、Input/Render/Content/Viewport/Realm State author projections与 error/lifetime boundary  
+> 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[渲染系统](./rendering-system.md)、[存储与内容系统](./storage-system.md)、[Realm State](./realm-state-system.md)、[ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
 > 正式 Input：[User Input v1](../15-contracts/user-input-v1.md) · [ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > 正式 Render：[Render Update v1](../15-contracts/render-update-v1.md)  
 > 正式 Content：[Content API v1](../15-contracts/content-api-v1.md)  
 > Viewport 候选：[Viewport State v1](../15-contracts/viewport-state-v1.md) · [ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) · [唯一 Core ledger](../30-implementation/viewport-profile-v1-qualification.md)  
-> 最近复核：2026-09-16（仅新增 Viewport seam；历史 Input/Render/Content 原文保留）
+> Realm State 候选：[Realm State v1](../15-contracts/realm-state-v1.md)  
+> 最近复核：2026-10-05
 
 ---
 
@@ -18,7 +19,7 @@
 Subsystem Runtime负责：
 
 ```text
-business state
+business-local state
 Runtime-level business initialization/cleanup
 local Frame Context + mutation gate
 Frame-scoped Desired Input Interest
@@ -26,11 +27,23 @@ retained author-safe Input State + business delivery
 outbound Frame call/return role
 business Render Domain authoritative state + transient Event intent
 readonly ContentClient usage
+Runtime-scoped RealmStateClient usage for Session shared mutable business facts
 ```
 
-新增的**待实施**角色能力：Runtime-scoped retained readonly `scope.viewport`；只保留当前 Renderer 经修订四-child `/1` 发布的最后合法 CSS logical size，不拥有物理 Window、Map camera 或 Frame/Input authority。精确 API 与 terminal 行为以[Viewport v1](../15-contracts/viewport-state-v1.md)为准，不将此能力误写成已实现。
+新增的**待实施**角色能力：
 
-Subsystem不负责 Game/Platform manifest、executable selection、Process/Worker、Main public authority、Renderer hosting、DataConnectionBroker、Content physical service/credential/storage。
+```text
+scope.viewport
+    Runtime-scoped retained readonly Viewport observation
+
+scope.state
+    Runtime-scoped Realm State capability
+    current read / initial read / discovery / OCC commit / subscription
+```
+
+Viewport 精确 API 与 terminal 行为以 [Viewport v1](../15-contracts/viewport-state-v1.md) 为准。Realm State 精确 logical semantics 以 [Realm State v1](../15-contracts/realm-state-v1.md) 为准。两者均不得被误写成已实现/已 qualified。
+
+Subsystem不负责 Game/Platform manifest、executable selection、Process/Worker、Main public authority、Renderer hosting、DataConnectionBroker、Content physical service/credential/storage、RealmStateAuthority hosting/transport/persistence policy。
 
 ---
 
@@ -59,6 +72,7 @@ Business Definition source只依赖：
 @loomrealm/fsdb / fsdb-http
 platform-ports
 game-package / launcher
+RealmStateAuthority implementation / Realm State carrier
 Node/Browser transport
 ```
 
@@ -75,41 +89,55 @@ Main
     transaction/failure unwind
     DataAuthority
 
+Realm State
+    Session shared mutable business facts
+    Record version / OCC / commit revision
+
 Subsystem
-    business state
+    business-local state
     local Frame Context + mutation gate
     Desired Interest[F]
     retained Input State / delivery
     business Render Domains
+    RealmStateClient consumer
 
 Platform
     executable + physical hosting/provisioning
     Content service/binding/credential
+    Realm State physical binding/composition
 ```
 
-Runner/module/transport/Content ownership都不能产生第二份 Frame/Input/Render authority。
+Runner/module/transport/Content/Realm State physical ownership都不能产生第二份 Frame/Input/Render/Realm State authority。
 
-Viewport observation独立 InputTarget/Activation/Frame gate；收到尺寸本身不授权 ordinary business mutation，也不直接写 Renderer Store/Projector 或创建新的 Render authority。业务有权在现有 mutation gate 内按自身规则使用 observation 更新 RenderDomain；Core 不规定地图策略。
+Viewport observation独立 InputTarget/Activation/Frame gate；收到尺寸本身不授权 ordinary business mutation，也不直接写 Renderer Store/Projector 或创建新的 Render authority。
+
+Realm State observation (`read` / `readInitial` / `list`) 同样不授予 business mutation permit。`state.commit()` 是 ordinary shared business mutation；当它从 Frame-scoped business execution 发起时，MUST respect 既有 local mutation admission/gate，不能因为 client 是 Runtime-scoped 就绕过 pending call/return、administrative suspend、closing/closed 或 Runtime terminal 的 mutation 禁止语义。
+
+Realm State OCC 解决的是 shared Record concurrency，不替代 Main/Subsystem 的 control-flow mutation gate。
 
 ---
 
 ## 4. Runtime / Frame
 
-Startup：
+Startup 概念顺序：
 
 ```text
-Runner loads planned module
+Realm State READY at Session level
+→ Runner loads planned module
 → validates ABI
-→ constructs required role capabilities including M12 ContentClient
+→ constructs required role capabilities
+    ContentClient
+    RealmStateClient
+    Viewport / Data bindings as applicable
 → acquire Runtime Control
 → hello / identified
 → definition.initialize
 → ready
 ```
 
-如果 required ContentClient在 business initialize前无法构造，属于 Runtime bootstrap failure。
+如果 required ContentClient 或 RealmStateClient 在 business initialize 前无法构造，属于 Runtime bootstrap failure。Realm State Authority 自身 fatal 属 Session terminal owner chain，不是 ordinary Runtime-local read error。
 
-`ready != Data exists != Renderer exists != Input/Render baseline exists`。
+`ready != Data exists != Renderer exists != Input/Render baseline exists`。Realm State READY 是 **business Runtime side effect 的前置条件**，而不是 `ready` 推导出的后置事实。
 
 Frame author capability只暴露：
 
@@ -120,7 +148,7 @@ signal
 call(subsystem, params)
 ```
 
-Author不见 activationId/generation/platform material。
+Author不见 activationId/generation/platform material 或 Realm State physical binding material。
 
 ---
 
@@ -139,6 +167,8 @@ Accepted child call会 suspend/revoke caller Activation，child完成后 survivi
 只有明确 pre-commit recoverable rejection可以 typed reject并确认 same current Activation继续；timeout/loss/divergence等 ambiguous/fatal绝不重新进入业务 continuation。
 
 M10已冻结：known-no-commit + same Activation reopen时 retained Input State synchronous local convergence先于 recoverable `frame.call` rejection observable。
+
+`frame.call()` 是 control-flow composition；Realm State commit 是 shared-state coordination。业务 MUST NOT 用 `frame.call()` 模拟普通共享状态修改，也 MUST NOT 用 Realm State mutation模拟 child Frame 控制流。
 
 ---
 
@@ -159,6 +189,24 @@ known-no-commit reopen
 ```
 
 Render Domain lifecycle不由 mutation gate/Frame自动创建或销毁。
+
+Realm State：
+
+```text
+read / readInitial / list
+    observation only
+    do not create mutation permission
+
+commit from Frame-scoped business execution
+    ordinary business mutation
+    subject to existing local mutation admission/gate before dispatch
+
+commit already dispatched to RealmStateAuthority
+    not remotely cancellable by later local gate transition
+    definitive result may be success / known-no-commit / OUTCOME_UNKNOWN
+```
+
+因此 local gate 必须在 dispatch 前决定是否允许业务 mutation；一旦 mutation dispatch，Realm State evidence semantics 由 Realm State contract拥有。
 
 ---
 
@@ -220,7 +268,7 @@ interface RenderDomain {
 }
 ```
 
-Accepted target 的 Current 实现已包含 `RenderDomainUpdate` root type 与 `RenderDomain.update(update)`；它覆盖 Domain zIndex 和 existing-node attrs/data 顶层 members，结构变化仍 `replace()`。它不暴露 domainId/revision/Patch/carrier，不改变下述 authority/lifetime，也不把 Map camera/tiles/motion带入 architecture contract。
+Accepted target 的 Current 实现已包含 `RenderDomainUpdate` root type 与 `RenderDomain.update(update)`；它覆盖 Domain zIndex 和 existing-node attrs/data 顶层 members，结构变化仍 `replace()`。它不暴露 domainId/revision/Patch/carrier，不改变 authority/lifetime，也不把 Map camera/tiles/motion带入 architecture contract。
 
 所有 author operations synchronous local-only：
 
@@ -272,11 +320,7 @@ URL builder / bearer
 filesystem path / FSDB handle
 ```
 
-返回 `contentVersion` 精确为：
-
-```text
-sha256:<64 lowercase hex>
-```
+返回 `contentVersion` 精确为 `sha256:<64 lowercase hex>`。
 
 Local arguments在 HTTP前同步验证；invalid usage → `TypeError` + zero HTTP。Already-aborted valid signal → returned Promise rejects `ContentReadError("CONTENT_CANCELLED")` + zero HTTP。
 
@@ -307,7 +351,46 @@ interface Viewport {
 interface SubsystemScope { readonly viewport: Viewport }
 ```
 
-Object 与 Scope 同 Runtime lifetime，初始 `current=null`，存活期订阅同步交付最新值（含 null）；值先更新再调用；同步 throw/返回 rejected thenable 局部隔离；取消订阅幂等。Runtime terminal 后既有 callback inert，旧引用再次 `subscribe` 只返回 inert unsubscribe，**不首发**。Data loss保留历史值不等于当前画面可用；fresh carrier独立 baseline，old authority/source fenced。尺寸观察绝不创建 Frame mutation permit、InputTarget 或 Render commit；业务仅通过既有 author API 渲染。[完整边界](../15-contracts/viewport-state-v1.md)与[可执行断言](../15-contracts/viewport-state-conformance-v1.md)拥有精确行为。
+Object 与 Scope 同 Runtime lifetime，初始 `current=null`，存活期订阅同步交付最新值（含 null）；值先更新再调用；同步 throw/返回 rejected thenable 局部隔离；取消订阅幂等。Runtime terminal 后既有 callback inert，旧引用再次 `subscribe` 只返回 inert unsubscribe，**不首发**。Data loss保留历史值不等于当前画面可用；fresh carrier独立 baseline，old authority/source fenced。尺寸观察绝不创建 Frame mutation permit、InputTarget 或 Render commit；业务仅通过既有 author API渲染。[完整边界](../15-contracts/viewport-state-v1.md)与[可执行断言](../15-contracts/viewport-state-conformance-v1.md)拥有精确行为。
+
+---
+
+## 9b. Realm State Author Projection — v1 candidate, not implemented
+
+`SubsystemScope` 计划 add-only 暴露：
+
+```ts
+interface SubsystemScope {
+  readonly state: RealmStateClient;
+}
+```
+
+RealmStateClient exact logical surface 由 [Realm State v1](../15-contracts/realm-state-v1.md) 拥有，当前为：
+
+```text
+read(keys,{signal?})
+    current values + Record versions at one revision
+
+readInitial(keys,{signal?})
+    immutable current-Game baseline only
+
+list({namespace?,signal?})
+    flat materialized RealmStateKey + version discovery snapshot
+
+commit(transaction)
+    Record-version OCC + atomic whole-Record replacement
+    no AbortSignal / no remote cancellation
+
+subscribe(keys,listener)
+    explicit Record identities
+    atomic baseline + ordered committed changes
+```
+
+Realm State current read / subscription 不重复携带 `initialValue`；initial baseline 只通过 `readInitial()` 按需读取。Commit success 只返回 commit revision + written Record identities/new versions，不 echo value。
+
+RealmStateClient 是 Runtime-scoped capability，不是 repository/service locator。它不暴露 RealmStateAuthority、transport、Session ID、platform path、carrier、transaction coordinator、ACL registry 或 persistence handle。
+
+Ordinary Realm State rejection/conflict 是 caller-visible business coordination结果，不自动 fail Frame/Runtime。`OUTCOME_UNKNOWN` 要求业务 fresh-read reconciliation，MUST NOT 自动 retry。RealmStateAuthority fatal 则属于 Session terminal，不降级为普通 caller-local error。
 
 ---
 
@@ -321,39 +404,52 @@ Activation lifetime
     owns effective Input lease facts
 
 Runtime lifetime
-    owns SubsystemScope / ContentClient / business RenderDomain registry
+    owns SubsystemScope
+    owns ContentClient / RealmStateClient / Viewport object
+    owns business RenderDomain registry
+    owns Realm State subscriptions created by this client
 
 Data carrier lifetime
-    owns connection-local Input/Render publication baseline
+    owns connection-local Input/Render/Viewport publication baseline
 ```
-
-Viewport object/retained last value属 Runtime lifetime；Viewport 的 outbound publication cursor属各 current Data carrier，二者不得混同。
 
 因此：
 
 ```text
 Frame suspend/close != ContentClient replacement
-Activation change   != ContentClient replacement
-Data reconnect       != ContentClient replacement
+Frame suspend/close != RealmStateClient replacement
+Activation change    != RealmStateClient replacement
+Data reconnect       != RealmStateClient replacement
+Renderer reload      != Realm State changed
 Frame close          != RenderDomain close
 Data retire          != business RenderDomain destroy
 ```
 
-Runtime terminal最终 settle/abort owned work并清理 live author resources。
+Runtime terminal最终 settle/abort owned work、terminal/inert RealmStateClient/subscriptions，并清理 live author resources。
 
 ---
 
-## 11. Data Plane
+## 11. Data / Realm State Planes
 
-Subsystem SDK只有一个 connection-wide Data peer/reader：
+Subsystem SDK只有一个 connection-wide Renderer Data peer/reader：
 
 ```text
 SubsystemDataBinding
 → @loomrealm/data peer
-→ InputManager / RenderManager role behavior
+→ InputManager / RenderManager / Viewport role behavior
 ```
 
-修订后 `/1` 仅在相同 reader/peer 后追加 Viewport retained role handler；见[Data add-only exact seam](../../packages/data/VIEWPORT_V1_IMPLEMENTATION_DELTA.md)。Input/Render managers不得竞争 raw carrier。Content不是 Data application protocol，也不复用 M9 Data provisioning IPC。
+Input/Render/Viewport managers不得竞争 raw Data carrier。Content不是 Data application protocol，也不复用 M9 Data provisioning IPC。
+
+Realm State 也 **不是 Renderer Data application protocol**：
+
+```text
+RealmStateClient
+→ dedicated Realm State logical binding
+→ RealmStateAuthority
+```
+
+Desktop MAY 使用同进程 direct binding；PWA MAY 使用 Worker/MessagePort 等 physical binding。无论 physical realization，Realm State MUST NOT 进入 `loomrealm.renderer-data/1`、Runtime Control 或 `frame.call()`。
 
 ---
 
@@ -368,32 +464,37 @@ Business portability target：
 错误分域：
 
 ```text
-business validation            → FrameOutcome.failed
-pre-commit call rejection      → typed local error
-Input handler failure          → local containment
-Render author misuse/limit     → TypeError / RangeError
-Content author misuse          → synchronous TypeError
-Content ordinary read failure  → ContentReadError, caller-local
-Control ambiguity/fatal        → Runtime failure
-Data protocol fatal            → Data retirement
-module/capability bootstrap     → Runtime bootstrap failure
+business validation                 → FrameOutcome.failed
+pre-commit frame.call rejection     → typed local error
+Input handler failure               → local containment
+Render author misuse/limit          → TypeError / RangeError
+Content author misuse               → synchronous TypeError
+Content ordinary read failure       → ContentReadError, caller-local
+Realm State invalid/limit/conflict  → Realm State caller-visible error/evidence
+Realm State OUTCOME_UNKNOWN         → caller reconciliation, no automatic retry
+Realm State Authority fatal         → Session terminal
+Control ambiguity/fatal             → Runtime failure
+Data protocol fatal                 → Data retirement
+module/capability bootstrap          → Runtime bootstrap failure
 ```
 
-Platform path/token/ticket/internal stack不得泄漏给业务。
+Platform path/token/ticket/internal stack与 Realm State carrier material不得泄漏给业务。
 
 ---
 
 ## 13. Final Invariants
 
 1. Subsystem role platform-neutral；
-2. Main独占 public Frame/Activation/InputTarget/DataAuthority；
+2. Main独占 public Frame/Activation/InputTarget/DataAuthority；RealmStateAuthority独占 Session shared mutable business facts；
 3. Business Definition只依赖 `@loomrealm/subsystem`；
-4. M10 Input、M11 Render、M12 Content使用不同但清晰的 lifetime/ownership；
-5. ContentClient是 Runtime-scoped readonly capability，不是 Repository/service locator；
-6. Content与 executable/FSDB/HTTP physical capability分离；
+4. Input、Render、Content、Viewport、Realm State使用不同且清晰的 authority/lifetime；
+5. ContentClient是 Runtime-scoped readonly capability；RealmStateClient是 Runtime-scoped shared-state capability；二者都不是 service locator；
+6. Content/Realm State logical capability与 executable/FSDB/HTTP/transport physical capability分离；
 7. Render authoritative Domain独立于 Frame/Data carrier；
-8. ordinary Input callback/Render author/Content read failure不自动升级 Runtime/Frame；
-9. Hostra/PWA physical差异不得改变 author-visible semantics；
-10. M13作为真实业务 consumer验证这些冻结边界，而不是重新定义它们。
+8. Realm State observation不授予 mutation permit；Frame-scoped `state.commit()` 不绕过既有 mutation gate；
+9. Realm State OCC 不替代 control-flow mutation gate；commit dispatch 后也不提供 remote cancellation；
+10. ordinary Input callback/Render author/Content read/Realm State conflict failure不自动升级 Runtime/Frame；RealmStateAuthority fatal → Session terminal；
+11. Hostra/PWA physical差异不得改变 author-visible Realm State semantics；
+12. Renderer Data plane 与 Realm State logical plane保持分离。
 
-Viewport v1 是另行候选的 Runtime readonly 增量，不改变以上十项或将历史 M10–M13 PASS 解释为修订后四-child `/1` 合格。
+Viewport v1 与 Realm State v1 都是另行 formalized 的 Runtime capability 增量；它们不得把历史 M10–M13 PASS 误解释为新 capability 已实现/qualified。
