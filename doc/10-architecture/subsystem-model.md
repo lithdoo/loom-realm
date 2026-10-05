@@ -109,11 +109,23 @@ Platform
 
 Runner/module/transport/Content/Realm State physical ownership都不能产生第二份 Frame/Input/Render/Realm State authority。
 
-Viewport observation独立 InputTarget/Activation/Frame gate；收到尺寸本身不授权 ordinary business mutation，也不直接写 Renderer Store/Projector 或创建新的 Render authority。
+Viewport observation独立 InputTarget/Activation/Frame gate；收到尺寸本身不授权 ordinary Frame-scoped mutation，也不直接写 Renderer Store/Projector 或创建新的 Render authority。
 
-Realm State observation (`read` / `readInitial` / `list`) 同样不授予 business mutation permit。`state.commit()` 是 ordinary shared business mutation；当它从 Frame-scoped business execution 发起时，MUST respect 既有 local mutation admission/gate，不能因为 client 是 Runtime-scoped 就绕过 pending call/return、administrative suspend、closing/closed 或 Runtime terminal 的 mutation 禁止语义。
+Realm State 是独立的 Runtime-scoped shared-state capability。`read` / `readInitial` / `list` / `commit` / `subscribe` 均不创建、消费或验证 Main 的 Frame / Activation / InputTarget authority。`state.commit()` 不因为调用点恰好位于某个 Frame handler 中，就自动受该 Frame 的 local mutation gate 支配。
 
-Realm State OCC 解决的是 shared Record concurrency，不替代 Main/Subsystem 的 control-flow mutation gate。
+必须保持：
+
+```text
+Frame suspend / close
+Activation replacement
+pending frame.call / return
+    != RealmStateClient revoked
+    != Realm State transaction admission condition
+```
+
+Realm State OCC 只解决 shared Record concurrency；Main/Subsystem control-flow mutation gate 只解决明确属于 Frame/Activation authority 的操作。两者正交，任何一方都不得隐式升级为另一方的 authority。
+
+Runtime terminal 仍会终止该 Runtime 的 RealmStateClient / subscriptions；RealmStateAuthority fatal 则上报 Session-fatal condition，由 Session/Main lifecycle owner 提交 Session terminal 与 failure unwind。
 
 ---
 
@@ -135,7 +147,7 @@ Realm State READY at Session level
 → ready
 ```
 
-如果 required ContentClient 或 RealmStateClient 在 business initialize 前无法构造，属于 Runtime bootstrap failure。Realm State Authority 自身 fatal 属 Session terminal owner chain，不是 ordinary Runtime-local read error。
+如果 required ContentClient 或 RealmStateClient 在 business initialize 前无法构造，属于 Runtime bootstrap failure。Realm State Authority 自身 fatal 是 Session-fatal condition，由 Session/Main lifecycle owner 收敛，不是 ordinary Runtime-local read error，也不由 RealmStateAuthority 直接执行 Runtime/Frame unwind。
 
 `ready != Data exists != Renderer exists != Input/Render baseline exists`。Realm State READY 是 **business Runtime side effect 的前置条件**，而不是 `ready` 推导出的后置事实。
 
@@ -174,7 +186,7 @@ M10已冻结：known-no-commit + same Activation reopen时 retained Input State 
 
 ## 6. Mutation Gate
 
-每个 local Frame Context有 commit-sensitive mutation gate。pending call/return、administrative suspend、closing/closed、Runtime terminal阻止 ordinary business mutation。
+每个 local Frame Context有 commit-sensitive mutation gate。pending call/return、administrative suspend、closing/closed、Runtime terminal阻止**其契约明确要求 current Frame/Activation authority** 的 ordinary business mutation。
 
 Input：
 
@@ -190,23 +202,23 @@ known-no-commit reopen
 
 Render Domain lifecycle不由 mutation gate/Frame自动创建或销毁。
 
-Realm State：
+Realm State **不属于这个 Frame mutation gate**：
 
 ```text
-read / readInitial / list
-    observation only
-    do not create mutation permission
+RealmStateClient lifetime
+    Runtime-scoped
 
-commit from Frame-scoped business execution
-    ordinary business mutation
-    subject to existing local mutation admission/gate before dispatch
+Realm State transaction admission
+    client live
+    request valid / within limits
+    Record versions current
+    Authority live
 
-commit already dispatched to RealmStateAuthority
-    not remotely cancellable by later local gate transition
-    definitive result may be success / known-no-commit / OUTCOME_UNKNOWN
+Frame state / Activation
+    not a Realm State commit condition
 ```
 
-因此 local gate 必须在 dispatch 前决定是否允许业务 mutation；一旦 mutation dispatch，Realm State evidence semantics 由 Realm State contract拥有。
+因此 Subsystem SDK MUST NOT 为了调用 `state.commit()` 要求 `Frame`、`activationId`、ambient Frame context 或 mutation permit。已经 dispatch 的 Realm State commit 继续遵循 Realm State 自己的 commit-evidence / no-remote-cancellation 规则。
 
 ---
 
@@ -380,6 +392,7 @@ list({namespace?,signal?})
 commit(transaction)
     Record-version OCC + atomic whole-Record replacement
     no AbortSignal / no remote cancellation
+    no Frame / Activation argument or gate
 
 subscribe(keys,listener)
     explicit Record identities
@@ -388,9 +401,11 @@ subscribe(keys,listener)
 
 Realm State current read / subscription 不重复携带 `initialValue`；initial baseline 只通过 `readInitial()` 按需读取。Commit success 只返回 commit revision + written Record identities/new versions，不 echo value。
 
-RealmStateClient 是 Runtime-scoped capability，不是 repository/service locator。它不暴露 RealmStateAuthority、transport、Session ID、platform path、carrier、transaction coordinator、ACL registry 或 persistence handle。
+RealmStateClient 是 Runtime-scoped capability，不是 repository/service locator。它不暴露 RealmStateAuthority、transport、Session ID、platform path、carrier、Frame/Activation identity、transaction coordinator、ACL registry 或 persistence handle。
 
-Ordinary Realm State rejection/conflict 是 caller-visible business coordination结果，不自动 fail Frame/Runtime。`OUTCOME_UNKNOWN` 要求业务 fresh-read reconciliation，MUST NOT 自动 retry。RealmStateAuthority fatal 则属于 Session terminal，不降级为普通 caller-local error。
+Subscription listener 是 Runtime-local business callback，而不是 Authority execution step：listener delivery MUST 在 RealmStateAuthority serialized lane 外；同步 throw 或 returned rejected thenable MUST 被本地隔离/诊断，MUST NOT 反向使 subscription protocol fatal、RealmStateAuthority fatal 或 Session terminal。Listener MAY reenter `read` / `readInitial` / `list` / `commit` / `subscribe` / `close`，binding MUST NOT 因此 deadlock Authority。
+
+Ordinary Realm State rejection/conflict 是 caller-visible business coordination结果，不自动 fail Frame/Runtime。`OUTCOME_UNKNOWN` 要求业务 fresh-read reconciliation，MUST NOT 自动 retry。RealmStateAuthority fatal 是 Session-fatal condition；Authority 报告该 condition，由 Session/Main lifecycle owner 提交 Session terminal 与 failure unwind。
 
 ---
 
@@ -471,8 +486,9 @@ Render author misuse/limit          → TypeError / RangeError
 Content author misuse               → synchronous TypeError
 Content ordinary read failure       → ContentReadError, caller-local
 Realm State invalid/limit/conflict  → Realm State caller-visible error/evidence
+Realm State listener failure        → Runtime-local containment / diagnostics
 Realm State OUTCOME_UNKNOWN         → caller reconciliation, no automatic retry
-Realm State Authority fatal         → Session terminal
+Realm State Authority fatal         → report Session-fatal condition to Main/Session owner
 Control ambiguity/fatal             → Runtime failure
 Data protocol fatal                 → Data retirement
 module/capability bootstrap          → Runtime bootstrap failure
@@ -491,9 +507,9 @@ Platform path/token/ticket/internal stack与 Realm State carrier material不得�
 5. ContentClient是 Runtime-scoped readonly capability；RealmStateClient是 Runtime-scoped shared-state capability；二者都不是 service locator；
 6. Content/Realm State logical capability与 executable/FSDB/HTTP/transport physical capability分离；
 7. Render authoritative Domain独立于 Frame/Data carrier；
-8. Realm State observation不授予 mutation permit；Frame-scoped `state.commit()` 不绕过既有 mutation gate；
-9. Realm State OCC 不替代 control-flow mutation gate；commit dispatch 后也不提供 remote cancellation；
-10. ordinary Input callback/Render author/Content read/Realm State conflict failure不自动升级 Runtime/Frame；RealmStateAuthority fatal → Session terminal；
+8. Realm State operations不创建或消费 Frame/Activation authority；`state.commit()` 不受 Frame mutation gate支配，也不接受 Frame/Activation参数；
+9. Realm State OCC 与 control-flow mutation gate 正交；commit dispatch 后不提供 remote cancellation；
+10. ordinary Input callback/Render author/Content read/Realm State conflict/listener failure不自动升级 Runtime/Frame/Session；RealmStateAuthority fatal 只报告 Session-fatal condition，由 Main/Session owner 提交 terminal/unwind；
 11. Hostra/PWA physical差异不得改变 author-visible Realm State semantics；
 12. Renderer Data plane 与 Realm State logical plane保持分离。
 
