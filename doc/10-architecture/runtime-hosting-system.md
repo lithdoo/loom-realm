@@ -55,12 +55,12 @@ RealmStateAuthority 也不属于单个 Runtime Container。它是 Session-scoped
 
 ## 2. Launcher PREPARE Before Hosting
 
-`RuntimeHosting` 不解析 raw Game Entry / ValidatedGameEntryV1 / Platform Launch Manifest / Realm State initial definition。
+`RuntimeHosting` 不解析 raw Game Entry / ValidatedGameEntryV1 / Platform Launch Manifest / PreparedRealmStateDefinition。
 
 任何 business Runtime side effect 前，matching Launcher/launch profile + Session composition MUST 已完成：
 
 ```text
-Game Entry validation including optional state
+Game Entry validation including optional state document
 → Platform Launch Manifest validation
 → exact Subsystem key-set join
 → required executable binding resolution
@@ -68,7 +68,7 @@ Game Entry validation including optional state
 → current hosting capability preflight
 → immutable PlatformLaunchPlan
 → immutable LogicalGameBootstrap
-→ immutable Realm State initial definition
+→ immutable PreparedRealmStateDefinition
 → fresh RealmStateAuthority bootstrap
 → Realm State READY
 ```
@@ -81,7 +81,7 @@ business Definition Module import = 0
 Runtime Control establishment = 0
 ```
 
-`LogicalGameBootstrap`只给 Main；`PlatformLaunchPlan`由 concrete product/runtime composition私有持有；Realm State definition由 Session/Realm State bootstrap owner消费，MUST NOT 通过 RuntimeHosting launch request传给 Main/Runner。
+`LogicalGameBootstrap`只给 Main；`PlatformLaunchPlan`由 concrete product/runtime composition私有持有；`PreparedRealmStateDefinition`由 Realm State bootstrap path消费，MUST NOT 通过 RuntimeHosting launch request传给 Main/Runner。
 
 ---
 
@@ -134,9 +134,9 @@ invoke runSubsystem(...) with current capabilities
 platform-local diagnostics/cleanup
 ```
 
-Runner不拥有 Main Frame/Activation/InputTarget/DataAuthority authority，也不拥有 RealmStateAuthority，不重新解释 manifests/state definition。
+Runner不拥有 Main Frame/Activation/InputTarget/DataAuthority authority，也不拥有 RealmStateAuthority，不重新解释 manifests/prepared State definition。
 
-RealmStateClient physical binding MAY 是 same-process object、MessagePort/IPC-backed client 或其他 platform-private realization；Runner只安装 role-local capability，不重新实现 OCC/lifetime/evidence semantics。
+RealmStateClient physical binding MAY 是 same-process object、MessagePort/IPC-backed client 或其他 platform-private realization；Runner只安装 role-local capability，不重新实现 OCC/lifetime/evidence semantics，也不通过 Frame/Activation gate 为 Realm State mutation授权。
 
 ---
 
@@ -179,7 +179,7 @@ Main MUST NOT pass：
 
 ```text
 Game Entry
-Realm State initial definition
+PreparedRealmStateDefinition
 Realm State business values
 PlatformLaunchPlan
 module/path/URL
@@ -220,10 +220,10 @@ Realm State bootstrap顺序：
 
 ```text
 PREPARE complete
-→ Session creates fresh RealmStateAuthority
-→ install Game initial baseline + optional Load overrides
+→ composition constructs fresh RealmStateAuthority from PreparedRealmStateDefinition
+→ install prepared Game baseline + optional Load overrides
 → Realm State READY
-→ composition can create per-Runtime RealmStateClient binding
+→ composition creates per-Runtime RealmStateClient binding
 → Runtime Container / business Definition may start
 ```
 
@@ -234,6 +234,8 @@ business Definition import/initialize side effect
     ⇒ Realm State READY
 ```
 
+这里的 composition 只负责 physical construction/binding/disposal，不拥有 Record values/version/OCC，也不成为第三 Session authority。
+
 RealmStateClient lifetime：
 
 ```text
@@ -241,7 +243,10 @@ Runtime live
     → client live
 
 Frame suspend/close
+Activation replacement
+pending frame.call/return
     → client unchanged
+    → no Realm State admission effect
 
 Data carrier retire/reconnect
     → client unchanged
@@ -249,14 +254,18 @@ Data carrier retire/reconnect
 Renderer reload
     → client unchanged
 
+Realm State physical binding loss
+    → affected State binding/client/subscriptions terminal according to State profile
+    → no automatic Runtime/Session failure
+
 Runtime terminal
     → this Runtime's client/subscriptions terminal/inert
 
 RealmStateAuthority fatal
-    → Session terminal
+    → report Session-fatal condition to Main/Session lifecycle owner
 ```
 
-RuntimeHosting 不拥有 Realm State Record namespace/value/version，也不定义 subscription/retry/OCC policy。
+RuntimeHosting 不拥有 Realm State Record namespace/value/version，也不定义 subscription/retry/OCC/Frame-admission/Session-terminal policy。
 
 ---
 
@@ -316,6 +325,8 @@ Main interprets physical facts as Runtime lifecycle；Platform cannot choose Fra
 
 Runtime terminal MUST trigger owned RealmStateClient/subscription teardown; it MUST NOT terminate shared RealmStateAuthority while other Session participants remain live。
 
+RealmStateAuthority fatal report不等于 HostedRuntime physical termination fact；Main/Session owner先提交 Session terminal policy，concrete composition再统一清理 RuntimeHosting。
+
 ---
 
 ## 10. Runtime Control Carrier
@@ -334,7 +345,7 @@ starting
 
 Same-attempt Control reconnect does not exist。Unexpected Control loss without shutdown intent → Runtime failure path。
 
-Realm State client binding is independent of Runtime Control message namespace；Control loss may eventually terminal the Runtime/client through owner chain, but Realm State requests MUST NOT be multiplexed as Control RPC。
+Realm State client binding is independent of Runtime Control message namespace；Control loss may eventually terminal the Runtime/client through Main owner chain, but Realm State requests MUST NOT be multiplexed as Control RPC。
 
 ---
 
@@ -360,6 +371,8 @@ Runtime may host multiple local Frame/Input Contexts and `0..N` authoritative Re
 Frame close != Render Domain close
 Frame suspend != Render hide
 Frame close != RealmStateClient close
+Activation replacement != RealmStateClient replacement
+pending frame.call/return != Realm State transaction gate
 Data carrier loss != authoritative Render destroy
 Data carrier loss != Realm State loss
 fresh Activation != reuse old Input State/Event
@@ -367,7 +380,7 @@ fresh Activation != reuse old Input State/Event
 
 Public Stack/Activation/InputTarget authority remains Main-owned。
 
-Realm State `commit()` from Frame-scoped business execution仍受 Subsystem existing mutation admission/gate；Realm State OCC 不替代该 control-flow gate。
+Realm State `commit(transaction)` is Runtime-scoped shared-state coordination。It MUST NOT require `Frame`、`activationId`、ambient Frame context or local Frame mutation permit；Realm State OCC 与 Main/Subsystem control-flow gate正交。
 
 Fresh Data carrier eventually rebuilds Renderer replica through M11 semantics；M9 only manages physical candidate/current carrier replacement。
 
@@ -458,7 +471,7 @@ Main shutdown intent
 
 Unexpected Runtime exit / Control loss / self-reported failed / fatal protocol invariant enters Main Runtime failure path。No automatic restart；fresh Runtime requires fresh Launch Attempt + credential + Container + Control lifetime + fresh Runtime-scoped RealmStateClient binding。
 
-Any provisioner/client binding bound to old HostedRuntime becomes unusable when that child terminates；Data retirement remains independently owned by Data path。Shared RealmStateAuthority remains Session-owned unless Session itself terminals。
+Any provisioner/client binding bound to old HostedRuntime becomes unusable when that child terminates；Data retirement remains independently owned by Data path。Shared RealmStateAuthority remains Session-owned unless Main/Session lifecycle owner commits Session terminal。
 
 M15 product-level `SIGTERM/window/RPC` funnel lives **outside** RuntimeHosting and converges into this existing Main/RuntimeHosting chain；Desktop must not add a second direct Runner-kill authority。
 
@@ -527,21 +540,24 @@ Hostra shell RPC、Window lifecycle、loopback trusted-shell bootstrap、OS-sign
 ## 19. Final Invariants
 
 1. one logical subsystemKey has at most one active Runtime Container；
-2. Game Package/raw manifests/Realm State initial definition are not RuntimeHosting launch input；
+2. Game Package/raw manifests/PreparedRealmStateDefinition are not RuntimeHosting launch input；
 3. PlatformLaunchPlan + Main/Realm State prepared projections close before business Runtime side effects；Realm State READY before Runtime business side effects；
 4. Runtime Container hosts trusted Runner + one selected business Definition instance；
-5. Runner installs role-local RealmStateClient but does not own RealmStateAuthority；
+5. Runner installs role-local RealmStateClient but does not own RealmStateAuthority、Frame gate或 Session terminal policy；
 6. Main-facing RuntimeHosting remains `{subsystemKey,bootstrapToken} → HostedRuntime`；
 7. Main launch request不携 Realm State business/transport material；
 8. HostedRuntime may correlate M9 physical Data target without exposing PID/Worker identity；
 9. Game/manifest cannot override host executable/security/credential/Realm State physical policy；
 10. Runtime has at most one current Control carrier, no same-attempt reconnect；
-11. `stopped` comes only from actual termination observation；
-12. Frame/Activation/InputTarget/DataAuthority remain Main-owned；RealmStateAuthority remains Session-owned；
-13. Runtime ready does not imply Data current；Realm State client is independent of Data current；
-14. Runtime owner may expose concrete child-scoped Data provisioner handoff, not public registry/Broker policy；
-15. Data provisioning/loss/delivery failure does not equal Runtime failure/Frame unwind/Realm State reset；
-16. same-generation Data reconnect keeps the same Renderer logical participant and Realm State client；
-17. Runtime terminal terminals its RealmStateClient/subscriptions but does not independently destroy Session authority；
-18. Hostra/PWA physical hosting may differ while shared Realm State logical semantics remain stable；
-19. M15 product termination converges through Main/RuntimeHosting rather than creating a second Runner kill authority。
+11. `stopped` comes only from actual Runtime termination observation；
+12. Frame/Activation/InputTarget/DataAuthority remain Main-owned；RealmStateAuthority remains Session sibling business-state authority；
+13. Realm State operations不需要 Frame/Activation/InputTarget，Frame transitions不构成 State admission condition；
+14. Runtime ready does not imply Data current；Realm State client is independent of Data current；
+15. Runtime owner may expose concrete child-scoped Data provisioner handoff, not public registry/Broker policy；
+16. Data provisioning/loss/delivery failure does not equal Runtime failure/Frame unwind/Realm State reset；
+17. Realm State physical binding loss terminals affected State binding only，不自动 fail Runtime/Session；
+18. RealmStateAuthority fatal只报告 Session-fatal condition，由 Main/Session owner提交 terminal/unwind；
+19. same-generation Data reconnect keeps the same Renderer logical participant and Realm State client；
+20. Runtime terminal terminals its RealmStateClient/subscriptions but does not independently destroy Session authority；
+21. Hostra/PWA physical hosting may differ while shared Realm State logical semantics remain stable；
+22. M15 product termination converges through Main/RuntimeHosting rather than creating a second Runner kill authority。
