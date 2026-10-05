@@ -2,12 +2,12 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M10–M15 closed baseline；M15 physical realization remains ADR 0034 + recomposition SSOT  
-> 主要定义：logical roles、bootstrap boundary、authority/currentness、Render/Web presentation placement、Platform composition  
+> 稳定程度：M10–M15 closed baseline；M15 physical realization remains ADR 0034 + recomposition SSOT；Realm State core semantics closed / not implemented / not qualified  
+> 主要定义：logical roles、bootstrap boundary、authority/currentness、Realm State placement、Render/Web presentation placement、Platform composition  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
-> 细化：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)  
-> 相关：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
-> 最近复核：2026-09-11
+> 细化：[平台组合系统](./platform-composition-system.md)、[Realm State](./realm-state-system.md)、[渲染系统](./rendering-system.md)  
+> 相关：[Realm State v1](../15-contracts/realm-state-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
+> 最近复核：2026-10-05
 
 本文只描述 system-level responsibility / authority / topology。精确 browser/ABI/error/qualification semantics由 formal contracts与 milestone closure拥有。M15 exact Desktop physical realization由 `M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md` + ADR 0034拥有。
 
@@ -18,20 +18,30 @@
 ```text
 Game Package
     logical Game Entry
+    optional Realm State initial definition
 
 Platform Launcher / launch profile
     executable binding + PREPARE
-    PlatformLaunchPlan + LogicalGameBootstrap
+    PlatformLaunchPlan
+    PreparedLogicalGame
+        ├─ LogicalGameBootstrap
+        └─ Realm State Initial Definition
 
 Main
     Session / Runtime / Frame / Stack / Activation
     InputTarget / DataAuthority / failure unwind
 
+Realm State
+    Session shared mutable business-state authority
+    immutable Game baseline
+    mutable current Records
+    Record version OCC / global commit revision
+
 Subsystem Runtime
-    business state
+    business-local state
     Input Interest
     authoritative Render Domains
-    author-facing ContentClient
+    author-facing ContentClient / RealmStateClient
 
 Renderer
     read-only Main authority mirror
@@ -51,10 +61,33 @@ Reusable game libraries
     consumers of public Subsystem author APIs
 
 Concrete games
-    compose game libraries + game-specific Subsystems/content/config
+    compose game libraries + game-specific Subsystems/content/config/state
 ```
 
 一个 application authority只有一个 owner；physical Platform/Host/DOM ownership不会产生第二份 application authority。
+
+核心 owner distinction：
+
+```text
+Main
+    Control Authority
+    “谁正在运行 / 当前 Frame/Activation/InputTarget 是什么”
+
+Realm State
+    Session Business State Authority
+    “跨 Subsystem 的共享业务事实现在是什么”
+
+Subsystem
+    Domain Execution / Local State Authority
+
+Renderer
+    Readonly presentation replica
+
+Content
+    Readonly installation definition authority
+```
+
+Realm State MUST NOT 被实现为 Main 内部 business field collection；Main 也 MUST NOT 解释 Realm State namespace/value。
 
 ---
 
@@ -65,11 +98,27 @@ Runtime executable bootstrap：
 ```text
 installation/source
 → matching Platform Launcher / launch-profile PREPARE
-→ Game Entry + Platform manifest join
+→ Game Entry validation including optional state
+→ Platform manifest join
 → executable/capability preflight
 → PlatformLaunchPlan
-→ LogicalGameBootstrap
-→ RuntimeHosting
+→ PreparedLogicalGame
+    ├─ LogicalGameBootstrap
+    └─ Realm State Initial Definition
+→ Session composition creates RealmStateAuthority
+→ installs Game baseline / optional Load current overrides
+→ Realm State READY
+→ RuntimeHosting / business Runtime side effects
+```
+
+`LogicalGameBootstrap` 只包含 Main-required logical topology/initial Frame input。Realm State definition 与它平级，MUST NOT 塞进 Main bootstrap。
+
+必须保持：
+
+```text
+first business Runtime side effect
+    ⇒ PREPARE complete
+    ∧ Realm State READY
 ```
 
 Web presentation bootstrap独立：
@@ -84,18 +133,37 @@ product/platform-private Config source
 因此：
 
 ```text
-Game topology != executable binding != Window/document bootstrap != Web presentation bootstrap
+Game topology
+!= Realm State business baseline
+!= executable binding
+!= Window/document bootstrap
+!= Web presentation bootstrap
 ```
 
 Config source、prepared Content selection、private browser binding、Window/document lifecycle属于 concrete platform composition，不进入 Main/Frame/RenderNode/Launcher logical ABI。
 
 ---
 
-## 3. Main / Renderer Authority
+## 3. Main / Realm State / Renderer Authority
 
-Main唯一拥有 Session、Runtime/Frame/Stack/Activation、InputTarget、DataAuthority generation/profile 与 failure unwind，并向 Renderer发布 committed authority snapshot。
+Main唯一拥有 Session、Runtime/Frame/Stack/Activation、InputTarget、DataAuthority generation/profile 与 failure unwind，并向 Renderer发布 committed control authority snapshot。
 
-Web presentation currentness仍由 current Control snapshot + current Renderer Store决定；Platform/Host不得复制第二份 presentation topology authority。
+Realm State唯一拥有 Session shared mutable business Records。Subsystem 通过 Runtime-scoped `RealmStateClient` 读取/发现/订阅/提交；Renderer v1 不直接成为 Realm State client。
+
+```text
+Main                         Realm State
+Control authority            Business-state authority
+Session/Runtime/Frame        initial/current Records
+Activation/InputTarget       Record versions / OCC
+DataAuthority                global commit revision
+failure unwind               committed subscriptions
+          \                   /
+                 Session
+```
+
+Realm State observation不创造 Main mutation/control permit；Realm State OCC 也不替代 Frame/Activation control semantics。
+
+Web presentation currentness仍由 current Control snapshot + current Renderer Store决定；Platform/Host不得复制第二份 presentation topology authority，也不得把 Realm State变成第二份 Renderer Store。
 
 ---
 
@@ -132,6 +200,18 @@ Subsystem authoritative Render Domains
 
 Wire node identity包含 `(Session, subsystemKey, generation, domainId, key)`。
 
+Realm State 不属于 Renderer Data profile：
+
+```text
+Renderer Data
+    connection-local Input / Render / Viewport replica traffic
+
+Realm State
+    Session-level shared business-state authority
+```
+
+两者 MAY 共享某些 physical transport primitives，但 MUST NOT 共享 authority/currentness/lifetime semantics。
+
 ---
 
 ## 5. M13 Web Presentation Placement
@@ -150,6 +230,8 @@ Window/document bootstrap
 
 Same-generation transport loss不等于 authority removal；fresh Session/generation结束旧 identity universe。
 
+Realm State current values只有经过 Subsystem business logic → RenderDomain → Renderer Store 才成为 presentation input；DOM/Web Presentation不得反向成为 Realm State authority。
+
 ---
 
 ## 6. Projection / Business Boundary
@@ -158,11 +240,15 @@ Same full live wire-node identity保持 same HTMLElement。Business WC 对 manag
 
 Projector只注入 Web Presentation API 定义的 narrow context/data/resource capability，不创建 component library、AssetManager、dynamic loader、global service locator或 RenderEvent WC ABI。
 
+Business Definition 可通过 `@loomrealm/subsystem` 使用 Runtime-scoped RealmStateClient，但不得接触 RealmStateAuthority implementation、carrier 或 persistence internals。
+
 ---
 
 ## 7. Failure / Lifetime Boundary
 
-Presentation/bootstrap runtime failure保持 Window-local，不 rollback Store、不 mutate Main/Subsystem、不自动 fail Runtime/Frame。
+Presentation/bootstrap runtime failure保持 Window-local，不 rollback Store、不 mutate Main/Subsystem/Realm State、不自动 fail Runtime/Frame。
+
+Realm State ordinary invalid/limit/conflict 是 caller-visible coordination result；RealmStateAuthority fatal → Session terminal。Runtime terminal → 该 Runtime 的 RealmStateClient/subscriptions terminal/inert。
 
 Desktop physical terminal trigger必须由 concrete platform composition映射到 existing Main/RuntimeHosting owner chain；System layer不定义第二份 Runtime failure/kill authority。
 
@@ -173,7 +259,7 @@ Desktop physical terminal trigger必须由 concrete platform composition映射�
 Repository taxonomy：
 
 ```text
-packages/      framework/runtime
+packages/      framework/runtime/protocol/platform seams
 game-libs/     reusable game-domain libraries
 examples/      concrete games
 apps/          product/platform compositions
@@ -190,8 +276,10 @@ examples → game-libs → public author APIs
 
 ```text
 Business Definition → renderer/browser/platform/protocol authority
-Business WC → Store/Data carrier/Content credential
+Business Definition → RealmStateAuthority / Realm State physical carrier
+Business WC → Store/Data carrier/Content credential/Realm State authority
 Renderer → DOM reverse-sync Store
+Renderer → direct Realm State authority
 public PresentationState / second Store/topology
 component registry / AssetManager / dynamic loader
 layout/layer authority / global service locator
@@ -213,6 +301,8 @@ game-libs/map
 
 M14只 materialize当前消费者需要的 RMXP/Essentials Map/Tileset facts到 prepared Content；Runtime只通过 M12 ContentClient读取普通 JsonValue，不依赖 importer/Marshal/tooling representation。
 
+Realm State 是后续 shared mutable business-state capability，不改变 M14 Content definition boundary。
+
 M14 qualification可使用 test-owned composition harness + real Chromium；完整 Hostra-owned Desktop composition属于 M15。
 
 ---
@@ -227,6 +317,11 @@ Hostra shell
         ↓ HOSTRA_SUBCMD
 LoomRealm Desktop process
     plain Node physical composition
+    ├─ MainSessionRuntime
+    ├─ RealmStateAuthority          (Realm State realization target)
+    ├─ RuntimeHosting
+    ├─ Content Service
+    └─ Data / Renderer bindings
         ↓ RuntimeHosting
 Runner
         ↓
@@ -235,9 +330,13 @@ Subsystem Runtime
 
 `@loomrealm/game-launcher-hostra` 在文档中称为 **Hostra launch profile**，表示 PREPARE + Runner realization；它不等于 external Hostra shell。
 
-M15只纠正 outer physical owner，不改变 Main/Renderer/Subsystem、M9–M14 logical semantics。
+RealmStateAuthority 与 Main MAY 同进程，但逻辑 owner/API 必须分离；同进程 placement不产生 Main-owned business state。
 
-Document reload保持同一 Hostra physical Window但产生 fresh Renderer logical participant；same-generation Data-only reconnect保持当前 Renderer identity，只替换 Data physical pair。Hostra window/RPC/OS-signal/failure终态汇入一个 LoomRealm Desktop cancellation/cleanup owner chain。精确 rendezvous/navigation-only bootstrap/shutdown sequence与 frozen Hostra baseline由 M15 physical SSOT拥有。
+M15只纠正 outer physical owner，不改变 Main/Renderer/Subsystem、M9–M14 logical semantics。Realm State 尚未因本文 placement 被解释为 M15 已实现/qualified。
+
+Document reload保持同一 Hostra physical Window但产生 fresh Renderer logical participant；same-generation Data-only reconnect保持当前 Renderer identity，只替换 Data physical pair。Realm State Session authority不因 Renderer reload/Data reconnect重置。
+
+Hostra window/RPC/OS-signal/failure终态汇入一个 LoomRealm Desktop cancellation/cleanup owner chain。精确 rendezvous/navigation-only bootstrap/shutdown sequence与 frozen Hostra baseline由 M15 physical SSOT拥有。
 
 ADR 0033只保留 historical direct-Electron compatibility relevance；canonical M15 composition由 ADR 0034决定。
 
@@ -256,6 +355,27 @@ M10 Input
 → M17 PWA Full E2E / Equivalence
 ```
 
-M15–M17只 materialize各自 physical platform职责，不复制 M14 business semantics。
+Realm State 作为独立 pre-implementation architecture/contract track，不 retroactively 改写 M10–M15 qualification claims；实现时必须分别 qualification。
 
-当前 milestone/evidence 状态由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总。M14/M15 architecture/design 保持冻结，current-subject formal status 为 Requalification Pending；Architecture docs不独立发布 milestone evidence。
+M15–M17只 materialize各自 physical platform职责，不复制 business semantics。
+
+当前 milestone/evidence 状态由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总。Architecture docs不独立发布 milestone evidence。
+
+---
+
+## 12. Final Invariants
+
+1. Launcher/launch profile拥有 Game Entry + Runtime executable preparation；presentation startup独立；
+2. PREPARE 产出 PlatformLaunchPlan + 平级 Main/Realm State logical projections；
+3. Main 是唯一 Control Authority；RealmStateAuthority 是唯一 Session shared mutable business-state authority；
+4. Realm State必须在第一项 business Runtime side effect前 READY；
+5. `LogicalGameBootstrap` 不包含 Realm State payload；Main不解释 Realm State business data；
+6. Subsystem通过 Runtime-scoped RealmStateClient消费 State；Renderer/Web Presentation v1不直接成为 State client；
+7. Platform 是 physical composition boundary，不是 Main/Render/Realm State/business authority；
+8. Hostra shell是 canonical Desktop Electron/BrowserWindow/direct-subprocess owner；
+9. LoomRealm Desktop是 plain Node HOSTRA_SUBCMD，只拥有 LoomRealm physical services/realizations；
+10. Control、Renderer Data、Realm State、Content保持 authority/lifetime separation；
+11. reload replaces Renderer identity；Data-only reconnect preserves Renderer identity；二者都不重置 Realm State；
+12. RealmStateAuthority fatal → Session terminal；ordinary State conflict不自动 fail Runtime/Frame；
+13. Hostra/PWA允许不同 physical realization，但保持 Realm State logical/business outcome；
+14. 不为 Realm State引入 UniversalPlatform、StateManager、NamespaceRegistry、generic transaction coordinator 或第二份 Main authority。
