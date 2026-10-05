@@ -131,7 +131,7 @@ export interface RealmStateSnapshot {
 }
 ```
 
-Current `read()` / subscription projection MUST NOT 重复携带 immutable `initialValue`。
+Current `read()` / `scan()` / subscription projection MUST NOT 重复携带 immutable `initialValue`。
 
 ### 2.3 Initial Record
 
@@ -500,6 +500,13 @@ export interface RealmStateClient {
     }
   ): Promise<RealmStateIndexSnapshot>;
 
+  scan(
+    options?: {
+      readonly namespace?: string;
+      readonly signal?: AbortSignal;
+    }
+  ): Promise<RealmStateSnapshot>;
+
   commit(
     transaction: RealmStateTransaction
   ): Promise<RealmStateCommit>;
@@ -527,7 +534,7 @@ state.commit(transaction)
 
 Frame suspend/close、Activation replacement、pending `frame.call()` MUST NOT by themselves reject an otherwise valid Realm State operation or revoke the Runtime-scoped client。
 
-`read()` / `readInitial()` / `list()` 无 authoritative mutation side effect，因此 MAY 接受 `AbortSignal`。
+`read()` / `readInitial()` / `list()` / `scan()` 无 authoritative mutation side effect，因此 MAY 接受 `AbortSignal`。
 
 `commit()` MUST NOT 接受 `AbortSignal` 或 remote mutation cancellation capability。
 
@@ -580,13 +587,31 @@ return detached / immutable projections
 
 ### 11.3 Returned Ordering — Freeze Blocker
 
-正式 freeze 前 MUST 决定 `RealmStateSnapshot.records` 与 `RealmStateInitialSnapshot.records` order。
+正式 freeze 前 MUST 决定 `RealmStateSnapshot.records` 与 `RealmStateInitialSnapshot.records` order for key-addressed `read()` / `readInitial()`。
 
 当前 candidate direction：按 §4 canonical `(namespace,key)` order 返回，而不是 caller input order。
 
+`scan()` ordering 不属于该 blocker；`scan()` 因为没有 caller-provided key order，MUST 使用 canonical `(namespace,key)` order。
+
 ---
 
-## 12. Discovery Index / `list()`
+## 12. Discovery / `list()` / `scan()`
+
+`list()` 与 `scan()` 都观察当前 materialized Record membership，但职责不同：
+
+```text
+list(namespace?)
+    discovery/index only
+    → key + version
+
+scan(namespace?)
+    consistent current snapshot
+    → key + value + version
+```
+
+两者都不创建独立 Collection authority，也不把 membership 提升成 OCC predicate。
+
+### 12.1 `list()`
 
 `list()` 是 materialized Record discovery API；Collection 仍是 organization/discovery concept，但 public result 不创建 Collection wrapper object。
 
@@ -628,7 +653,58 @@ list(namespace) @ N
 
 是合法行为。
 
-因此 `list(namespace) + read(discoveredKeys)` MUST NOT 被解释为 atomic Collection key-set + value snapshot。
+因此 `list(namespace) + read(discoveredKeys)` MUST NOT 被解释为 atomic Collection key-set + value snapshot。需要当前动态 membership 与对应 values 来自同一个 revision 时，caller SHOULD 使用 `scan()`。
+
+### 12.2 `scan()`
+
+`scan()` 是 materialized current Record snapshot API。
+
+```ts
+scan(
+  options?: {
+    readonly namespace?: string;
+    readonly signal?: AbortSignal;
+  }
+): Promise<RealmStateSnapshot>;
+```
+
+`scan()` MUST 在一个 logical authority snapshot 中同时确定：
+
+```text
+materialized Record membership
++
+each selected Record current value
++
+each selected Record version
++
+one RealmStateSnapshot.revision
+```
+
+`scan()` 无 `namespace` 时 MUST 返回当前全部 materialized Records；`scan({ namespace: "quest" })` MUST 只返回该 namespace 当前 materialized Records。
+
+所有返回 Record 的 key、value、version MUST 来自同一个 logical revision。并发 commit 可以发生在 `scan()` 完成之后，但 MUST NOT 使同一个 `scan()` result 混合不同 revision 的 membership 或 values。
+
+不存在匹配的 materialized Record 时 MUST 返回：
+
+```ts
+{
+  revision: N,
+  records: []
+}
+```
+
+`scan()` MUST：
+
+```text
+not materialize unknown Records
+not return initialValue
+return detached / immutable current JsonValue projections
+return records in canonical (namespace,key) UTF-8 byte order
+```
+
+`scan()` 是 point-in-time observation，不是 Collection lock、predicate 或 transaction condition。之后新的 Record materialization、Record mutation 或 Collection membership change 都是合法的；如果业务 correctness 依赖未来 commit 时 membership 仍未变化，业务仍 MUST 将该 invariant 显式建模为普通 versioned Record 并参与 OCC。
+
+v1 public `scan()` 不暴露 pagination/cursor 或 long-lived snapshot handle。Physical binding MAY 对一个 logical `scan()` result 做内部 chunking/streaming，但 MUST 对 caller 保持一个 revision 的单一 logical snapshot semantics。
 
 ---
 
@@ -798,6 +874,8 @@ transaction total payload             <= 2 MiB
 
 `list()` v1 不要求 pagination/cursor，因为 materialized Record count 与 identity lengths 已有 hard bound。
 
+`scan()` v1 同样不暴露 pagination/cursor；它的 logical result 是一个 revision 的完整 snapshot。Physical binding MAY chunk/stream 单次 logical result，但 scan result 的 exact physical resource bound/profile 在正式 freeze 前仍需关闭。
+
 ### 15.1 Size / Depth Accounting — Freeze Blocker
 
 正式 freeze 前 MUST 定义跨 Hostra/PWA 一致的 single-value encoded-size、transaction total payload-size 与 nesting-depth exact accounting rule。
@@ -853,7 +931,7 @@ subscription established
 
 即使 post-baseline commit 在 baseline 物理 delivery 前发生，binding MUST preserve/buffer relevant change，并先交付 baseline。
 
-每个 successful commit 对一个 subscription 至多产生一个 `change` event；同一 transaction 修改多个 subscribed Records时 MUST 聚合在该 event 中。
+每个 successful commit 对一个 subscription 至多产生一个 `change` event；同一 transaction 修改多个 subscribed Records 时 MUST 聚合在该 event 中。
 
 Failed/conflicted/invalid transaction MUST NOT 产生 change。Successful deep-equal write MUST 产生 relevant change。
 
@@ -877,7 +955,7 @@ not act as delivery ACK/backpressure flow control
 Listener MAY reenter：
 
 ```text
-read / readInitial / list / commit / subscribe / close
+read / readInitial / list / scan / commit / subscribe / close
 ```
 
 Binding/SDK MUST NOT hold an Authority lock while invoking listener and MUST NOT deadlock on such reentrancy。
@@ -938,21 +1016,23 @@ Main/Session lifecycle owner remains the sole owner of Session terminal and Runt
 
 RealmStateAuthority 不是 Save Game policy owner。
 
-典型 flow：
+Persistence SHOULD 根据 key-set 的来源选择读取方式：
 
 ```text
-list()
-→ discover materialized RealmStateKeys
-→ Save policy selects subset
-→ read(selected keys)
-→ persist selected current values
+Save policy already knows exact keys
+→ read(keys)
+→ one-revision current snapshot
+
+Save policy needs current dynamic materialized membership
+→ scan() / scan({ namespace })
+→ membership + current values + versions from one revision
 ```
 
-`list()` revision 与随后 `read()` revision MAY 不同。
+`list()` 仍可用于轻量 discovery、工具、调试或先观察 key/version index；但 `list() + read()` 不提供 atomic membership + value snapshot，因此不应在需要 exact dynamic snapshot correctness 时替代 `scan()`。
 
-Realm State v1 MUST NOT 把普通 `list()` 提升成 long-lived MVCC snapshot handle，也 MUST NOT expose save-slot/storage-path/persistence-format policy。
+Save policy MAY 在取得 `read()` / `scan()` 的一致 current snapshot 后选择持久化其中全部或部分 Records。Realm State 仍 MUST NOT interpret save-slot、storage path、autosave/cloud policy、persistence format 或业务上的“哪些 Record 应该保存”。
 
-如果未来 persistence consumer 必须 capture exact key-set + values at one revision，应基于真实需求增加独立 snapshot/capture contract。
+Realm State v1 MUST NOT 把 `list()` / `scan()` 提升成 long-lived MVCC snapshot handle，也 MUST NOT expose save-slot/storage-path/persistence-format policy。
 
 ---
 
@@ -970,6 +1050,7 @@ loomrealm.realm-state/1
 current read request / result
 initial read request / result
 flat list request / result
+current scan request / result
 conditional commit request / result
 subscription establish / baseline / change / terminal / close
 INVALID_REQUEST / LIMIT_EXCEEDED / CONFLICT / TERMINAL / OUTCOME_UNKNOWN
@@ -1059,11 +1140,14 @@ Current / Initial Read
 - readInitial returns immutable prepared-Game baseline only
 - unknown current/initial read does not materialize
 
-Materialization / Discovery
+Materialization / Discovery / Scan
 - initial / Load seed / successful first write materialize
 - put(null) does not dematerialize
 - flat list full/filter snapshot is one revision
 - list canonical ordering
+- scan full/filter returns materialized membership + current value + version from one revision
+- scan excludes initialValue and does not materialize unknown Records
+- scan canonical ordering
 - Collection membership not accepted as OCC condition
 - list()+read not treated as atomic Collection scan
 
@@ -1121,7 +1205,7 @@ Lifetime
 2. read([]) / duplicate read identities final rule
 3. readInitial([]) / duplicate readInitial identities final rule
 4. subscribe([]) / duplicate subscription identities final rule
-5. RealmStateSnapshot.records canonical ordering
+5. RealmStateSnapshot.records ordering for key-addressed read()
 6. RealmStateInitialSnapshot.records canonical ordering
 7. RealmStateCommit.records canonical ordering
 8. subscription baseline/change record ordering
@@ -1132,6 +1216,7 @@ Lifetime
 13. bounded subscription queue physical profile
 14. Load current-seed total resource bound
 15. physical client/binding terminal mapping while preserving no Runtime/Session supervision ownership
+16. scan result exact physical resource bound/profile while preserving one-revision logical snapshot semantics
 ```
 
 这些 blocker 不重新打开 Realm State authority / OCC / Collection / subscription core architecture；它们是 formal deterministic surface / representation / profile closure。
@@ -1154,18 +1239,20 @@ Lifetime
 12. RealmStateAuthority 不依赖 GameEntryV1/formatVersion/game.json/Platform manifest；
 13. Runtime-scoped RealmStateClient 不需要 Frame/Activation/InputTarget；Frame transitions 不构成 State admission condition；
 14. Unknown read/readInitial 不 materialize；`put(null)` 不 dematerialize；
-15. `list()` 是 flat deterministic discovery snapshot，不是 transactional Collection scan；
-16. revision 是 global State commit sequence；version 是 per-Record OCC generation；
-17. every write target has exactly one version condition；stale condition → CONFLICT + zero write；
-18. deep-equal successful put advances revision/version；
-19. successful commit returns revision + written versions only；
-20. no remote mutation cancellation；post-dispatch ambiguity → OUTCOME_UNKNOWN；no automatic retry；
-21. semantic validation has one owner per trust boundary；trusted internal representations may be reused；
-22. Authority serialized step excludes avoidable deep validation/serialization/listener delivery；
-23. subscription establishment atomically binds baseline + subsequent observer；
-24. listener delivery is outside Authority lane；listener failure is Runtime-local and reentrant-safe；
-25. overflow/binding loss terminal old observation binding without silently dropping or changing Main lifecycle；
-26. old client/subscription identities are never transparently reattached；
-27. Realm State does not own Save policy、Renderer/Data/Input/Render、Content、Platform configuration or local caches/tasks；
-28. Realm State must be READY before first business Runtime side effect；
-29. Hostra/PWA physical realization may differ but observable logical semantics must match。
+15. `list()` 是 flat deterministic discovery/index snapshot，只返回 key/version，不是 transactional Collection predicate；
+16. `scan()` 是 materialized current Record 的 point-in-time consistent snapshot，membership + current value + version MUST 来自同一个 revision；
+17. `scan()` 不把 Collection membership 提升为 future transaction predicate；需要该 invariant 时业务必须显式建模 versioned Record；
+18. revision 是 global State commit sequence；version 是 per-Record OCC generation；
+19. every write target has exactly one version condition；stale condition → CONFLICT + zero write；
+20. deep-equal successful put advances revision/version；
+21. successful commit returns revision + written versions only；
+22. no remote mutation cancellation；post-dispatch ambiguity → OUTCOME_UNKNOWN；no automatic retry；
+23. semantic validation has one owner per trust boundary；trusted internal representations may be reused；
+24. Authority serialized step excludes avoidable deep validation/serialization/listener delivery；
+25. subscription establishment atomically binds baseline + subsequent observer；
+26. listener delivery is outside Authority lane；listener failure is Runtime-local and reentrant-safe；
+27. overflow/binding loss terminal old observation binding without silently dropping or changing Main lifecycle；
+28. old client/subscription identities are never transparently reattached；
+29. Realm State does not own Save policy、Renderer/Data/Input/Render、Content、Platform configuration or local caches/tasks；
+30. Realm State must be READY before first business Runtime side effect；
+31. Hostra/PWA physical realization may differ but observable logical semantics must match。
