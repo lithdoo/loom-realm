@@ -3,13 +3,13 @@
 > 层级：系统架构  
 > 状态：Proposal / **Core Architecture Semantics Closed**  
 > 稳定程度：**Not Implemented / Formal Contract Pending / Not Qualified**  
-> 主要定义：Session 级共享业务状态 authority、Namespace Record Collection、Game Entry 初始状态、immutable initial value、materialized Collection index、consistent snapshot、optimistic transaction、subscription linearization、commit evidence、生命周期与平台边界  
+> 主要定义：Session 级共享业务状态 authority、Namespace Record Collection、Game Entry 初始状态、immutable initial value、materialized Collection index、consistent snapshot、optimistic transaction、subscription linearization、commit evidence、validation ownership、生命周期与平台边界  
 > 依赖：[系统架构总览](./system-overview.md)、[模块子系统模型](./subsystem-model.md)、[栈式运行系统](./stack-runtime-system.md)、[存储与内容系统](./storage-system.md)、[通信系统](./communication-system.md)、[Game Package v1](../15-contracts/game-package-v1.md)  
 > 最近复核：2026-10-05
 
 本文定义 LoomRealm 的候选 **Realm State**：位于 `Main` 控制 authority 与各 `Subsystem Runtime` 局部业务状态之间的 **Session 级、跨 Subsystem、可变业务状态唯一 authority**。
 
-本文冻结的是 **core architecture semantics**：authority、lifetime、Collection/Record/Transaction 粒度、initial/current、materialization、consistent read、OCC mutation、commit evidence、subscription linearization 与 persistence boundary。后续仍需把这些语义落实到 Game Package、Realm State logical protocol、Subsystem author API、Launcher、Hostra/PWA realization、实现与 qualification。
+本文冻结的是 **core architecture semantics**：authority、lifetime、Collection/Record/Transaction 粒度、initial/current、materialization、consistent read、OCC mutation、commit evidence、subscription linearization、validation ownership 与 persistence boundary。后续仍需把这些语义落实到 Game Package、Realm State logical protocol、Subsystem author API、Launcher、Hostra/PWA realization、实现与 qualification。
 
 以下内容仍属于 **formal contract closure**，不代表 Realm State 核心架构仍开放：API empty/duplicate input 规则、部分返回数组的 canonical ordering、revision/version 数值 representation bound、JsonValue encoded-size/depth 的精确计算规则、wire error serialization 等。
 
@@ -44,9 +44,11 @@
 25. Save 可以只保存部分 current values；Load Game 使用 sparse current-value override；
 26. RealmStateAuthority fatal → Session terminal；
 27. Key grammar、capacity limits、transaction shape、deep-equal write、Collection/index ordering 均为已确定架构方向；
-28. Subscription 采用 authority 原子 baseline + observer registration；断线/overflow 后 fresh subscribe，不提供 replay cursor；
-29. `commit()` 不支持 remote cancellation；一旦 dispatch，结果丢失时使用 `OUTCOME_UNKNOWN`，不得自动 retry；
-30. v1 不引入 transaction ID、dedup journal、status query 或 generic transaction coordinator。
+28. 一个 logical request 的 semantic validation MUST 有明确 owner；实现 MAY 将已验证 key/value/request 投影为 trusted internal representation，并避免在 SDK / transport adapter / Authority 间重复执行等价 deep validation；
+29. Authority serialized commit step SHOULD 保持为 Record lookup、version comparison、atomic reference replacement、revision/version allocation、materialization/index metadata update 等短路径；serialization、deep clone、canonical sorting 与 listener delivery SHOULD 在该 serialized step 外完成；
+30. Subscription 采用 authority 原子 baseline + observer registration；断线/overflow 后 fresh subscribe，不提供 replay cursor；
+31. `commit()` 不支持 remote cancellation；一旦 dispatch，结果丢失时使用 `OUTCOME_UNKNOWN`，不得自动 retry；
+32. v1 不引入 transaction ID、dedup journal、status query 或 generic transaction coordinator。
 
 ---
 
@@ -369,6 +371,10 @@ no locale-sensitive comparison
 
 `namespace/key` 是 canonical human-readable Record notation；禁止 `/` 避免 Collection name 或 Record key 被误读为额外层级。
 
+上述 grammar 是 logical contract，不要求每次 `read()` / `commit()` / `subscribe()` 都重新 UTF-8 encode 与扫描同一个已验证字符串。实现 MAY intern/cache 已验证的 `RealmStateKey` identity，或投影为内部 canonical token / RecordId；只要 author-visible identity 与跨 trust boundary validation semantics 保持不变即可。
+
+跨越不可信 carrier / process boundary 时，接收侧仍 MUST 验证 wire representation；但在同一 trusted implementation 内，已验证 representation MAY 被复用，MUST NOT 因分层而强制重复执行等价 key grammar validation。
+
 ---
 
 ## 6. Record Value Model
@@ -555,6 +561,8 @@ transaction total payload             <= 2 MiB
 
 `encoded JSON size` 按 logical protocol 的 UTF-8 JSON payload 计算；物理 carrier 不得绕过限制。精确 canonical encoding/size accounting 与 nesting-depth accounting 由 formal protocol contract 冻结。
 
+正式 size/depth contract SHOULD 定义可由 streaming / one-pass traversal 等价计算的 logical byte/depth semantics；MUST NOT 把“先构造完整 canonical JSON string / byte buffer”本身规定为 correctness requirement。实现 MAY 在遍历期间累计 encoded size，并在超过 hard limit 后立即停止。
+
 `list()` v1 不分页。materialized Record 数和 namespace/key size 已有 hard bound，因此全量 Collection index 响应天然有界。
 
 达到 materialized Record 上限后：
@@ -734,6 +742,8 @@ interface RealmStateSnapshot {
 多 key `read()` MUST 来自一个 logical revision。返回的 `JsonValue` MUST detached / immutable。
 
 Collection 只组织 Records，不改变 `read()` 的 snapshot/Record semantics。
+
+Authority 内部 MAY 通过 immutable authoritative value references 构造 logical snapshot，而不是在 serialized authority step 内 deep-clone 每个 value。Author-visible / cross-boundary representation 仍 MUST 满足 detached / immutable semantics；物理 binding MAY 在 authority step 外完成必要 clone/encoding。
 
 ---
 
@@ -953,10 +963,78 @@ Authority validation order：
 
 非法请求 MUST 在 version comparison 前 reject，不得映射成 `CONFLICT`。
 
+### 16.1 Validation Ownership / Trusted Internal Representation
+
+上述 validation order 定义的是 **logical admission requirements**，不是要求 SDK、transport adapter、Host binding 与 RealmStateAuthority 对同一可信对象各自完整重跑一遍等价 validation。
+
+每个 physical trust boundary MUST 有明确 validation owner：
+
+```text
+untrusted / author-owned input
+    ↓
+validation owner
+    ↓
+trusted validated representation
+    ↓
+Authority admission / execution
+```
+
+实现 MAY 将合法输入投影成内部表示，例如：
+
+```text
+ValidatedRealmStateKey / interned RecordId
+ValidatedJsonValue
+ValidatedRealmStateTransaction
+```
+
+只要该 representation 不能被未经验证的 caller mutation 篡改，并且跨不可信 carrier 后由接收侧重新建立 trust，Authority MAY 直接消费它，而不重新执行同一套 Unicode scan、UTF-8 length calculation、JsonValue deep validation、size/depth traversal 或 detachment。
+
+对于 transaction write value，JsonValue validity、nesting depth、encoded-size accounting 与 detached immutable representation construction SHOULD 在一个 bounded traversal 中融合完成；contract 不应要求：
+
+```text
+validate JsonValue
+→ second pass calculate depth
+→ third pass calculate size
+→ fourth pass clone
+→ fifth pass freeze
+```
+
+只要 observable validation result 等价，实现 MAY one-pass validate + count + detach，并在发现 invalid / over-limit 后提前终止。
+
+### 16.2 Authority Serialized Fast Path
+
+RealmStateAuthority 必须线性化 condition check + all writes，但该 serialized logical step SHOULD 尽量只包含 authority-sensitive metadata/reference work：
+
+```text
+lookup validated Record identities
+compare observed versions
+atomically replace immutable value references
+materialize Record / update derived Collection membership
+allocate revision / Record versions
+capture result / subscription notification references
+```
+
+以下工作 SHOULD 在进入该 serialized step 前或离开后完成，只要不改变 observable semantics：
+
+```text
+Unicode / key grammar scanning
+JsonValue deep validation
+size / depth accounting
+detach / immutable representation construction
+JSON / wire serialization
+canonical result sorting
+physical transport copy
+subscription listener delivery
+```
+
+尤其 MUST NOT 因“分层实现”而把同一个已经验证、不可变的 JsonValue 在 SDK → binding → Authority 每一层重复 deep-clone / deep-validate。
+
+Authority serialized step 的短路径要求是实现/qualification 性能约束，不改变 invalid request MUST 在 mutation admission 前被拒绝的 correctness rule。
+
 Atomic authority step：
 
 ```text
-validate complete request
+validated request
 → compare every condition.version against one current authority state
 → any mismatch: CONFLICT / zero write
 → atomically replace every write target current value
@@ -1115,6 +1193,8 @@ Authority MUST 在同一个 serialized logical step 内：
 4. release authority serialization
 ```
 
+这里的 `validate subscription Record keys` 同样遵守 §16.1 validation ownership：若 binding 已从可信 validated representation 建立 subscription request，Authority 不需要重新执行等价 grammar scan；serialized step 只需确认 authority-local lifecycle/identity/state 条件。
+
 这定义 subscription establishment linearization point。
 
 即使 revision `N+1` 在 baseline 物理传输完成前就已 commit，binding 也必须保存/缓冲该 relevant change；author API 必须先使 subscription handle 可观察，再交付 baseline，然后才按顺序交付这些 post-baseline changes。
@@ -1236,6 +1316,8 @@ ordered subscription changes / terminal
 client / authority terminal
 ```
 
+Logical protocol MUST 定义 validation semantics，但 MUST NOT 要求每一层 carrier adapter 重复执行同一 semantic deep validation。每个不可信边界的接收侧负责建立新的 trusted representation；之后可沿 trusted internal path 复用。
+
 不得塞进 renderer-data、Runtime Control 或 `frame.call()`。
 
 ---
@@ -1304,10 +1386,13 @@ Collection discovery semantics
 snapshot consistency
 OCC semantics
 hard limits
+validation ownership / trusted representation semantics
 commit evidence
 subscription linearization
 subscription terminal / fresh-resubscribe semantics
 ```
+
+同进程 realization MAY 复用 validated immutable references / interned Record identities；跨 Worker/Process realization MAY 在 carrier decode boundary 重新验证并 detach。二者不要求拥有相同 validation pass 数量，只要求 observable validity、limits 与 authority semantics 等价。
 
 ---
 
@@ -1329,6 +1414,9 @@ Collection existence derived from materialized Records
 Collection membership observational, not transactional
 no NamespaceRegistry / createNamespace / deleteNamespace
 explicit namespace/key grammar / hard limits
+validated key intern/cache allowed
+one-pass JsonValue validate + size/depth + detach allowed
+trusted validated request representation across internal layers
 one RealmStateAuthority per Session
 bootstrap-before-runtime barrier
 materialized Record index
@@ -1343,6 +1431,7 @@ strict transaction shape validation
 OCC read-set Record-version conditions
 write-set ⊆ read-set
 atomic multi-record / cross-Collection commit
+short serialized authority commit path
 explicit INVALID_REQUEST / LIMIT_EXCEEDED / CONFLICT / TERMINAL / OUTCOME_UNKNOWN
 commit() without AbortSignal / remote cancellation
 no automatic mutation retry
@@ -1418,6 +1507,16 @@ Key / Limits
 - exact grammar behaves identically across platforms
 - no hidden trim/case-fold/Unicode normalization
 - value/request/session hard limits are enforced
+- repeated use of an already validated key may use intern/cache without changing identity semantics
+
+Validation / Hot Path
+- each untrusted boundary has a clear validation owner
+- trusted internal representation cannot be mutated by the original caller after validation
+- implementation is not required to repeat equivalent key/JsonValue deep validation at SDK, binding and Authority layers
+- JsonValue validity + depth + size + detach may be implemented in one bounded traversal
+- size accounting can be performed without materializing a full canonical JSON byte buffer
+- Authority serialized commit step does not perform avoidable JSON serialization / listener delivery
+- same-process immutable stored values may be snapshot by reference internally while preserving detached author semantics
 
 Initial / Load
 - new game current = initialValue
@@ -1492,11 +1591,18 @@ JsonValue bound accounting
 - single-value encoded-size canonical calculation
 - transaction total payload-size canonical calculation
 - nesting-depth exact counting rule
+- accounting semantics MUST allow equivalent streaming/one-pass implementation
 
 Wire/API errors
 - public error object shape
 - stable category serialization
 - structural path / diagnostics boundary
+
+Validation / trusted representation
+- each carrier/trust boundary 的 validation owner
+- validated key/value/request internal representation ownership
+- caller mutation isolation / detachment point
+- equivalent semantic validation MUST NOT be required repeatedly inside one trusted path
 
 Transport/profile realization
 - bounded subscription queue profile
@@ -1522,6 +1628,7 @@ Subsystem author contract
 
 Realm State logical protocol
     read / list / commit / subscribe / terminal / evidence
+    validation owner / validated internal representation seam
 
 Launcher / Platform Composition
     prepared State projection
@@ -1529,6 +1636,7 @@ Launcher / Platform Composition
 
 Hostra / PWA
     equivalent logical semantics + limits + failure behavior
+    platform-appropriate validation/copy strategy
 ```
 
 在这些 normative contract 完成前，本文仍不得被解释为“功能已经实现”。
@@ -1622,6 +1730,18 @@ Collection/Record index order unspecified
 protocol limits implementation-defined/unbounded
     = no
 
+validation must be repeated independently in SDK/binding/Authority
+    = no; one owner per trust boundary + trusted internal representation
+
+key grammar requires UTF-8 re-encoding on every operation
+    = no; validated identity may be interned/cached
+
+JsonValue validity/size/depth/detach require separate traversals
+    = no; equivalent one-pass implementation allowed
+
+Authority serialized commit step should include serialization/listener delivery
+    = no
+
 commit supports AbortSignal / remote cancellation
     = no
 
@@ -1666,7 +1786,7 @@ business Runtime may start before Realm State initialization
 4. Collection existence 由 materialized Record membership 派生；v1 不存在 NamespaceRegistry、`createNamespace()` 或 `deleteNamespace()`；
 5. Collection membership 是 observational discovery metadata，不参与 OCC，也不提供“成员集合未变化”的 transactional predicate；
 6. `(namespace,key)` Record 是 replacement/version/conflict unit；Transaction 是 atomicity unit，并可跨 Collection；
-7. RealmStateKey 使用 exact、case-sensitive、no-normalization identity，并受明确 UTF-8 hard bounds；
+7. RealmStateKey 使用 exact、case-sensitive、no-normalization identity，并受明确 UTF-8 hard bounds；validated identity MAY 被 intern/cache，不要求每次操作重新编码/扫描；
 8. 每个 key 有 immutable `initialValue` 与 mutable current value；缺失 initial key → `initialValue = null`；
 9. GameEntryV1 `state` optional，不因 Realm State 升级 document version；
 10. 每个新 Session 的 revision/version 从 0 开始；Load 不继承旧 Session concurrency metadata；
@@ -1674,22 +1794,24 @@ business Runtime may start before Realm State initialization
 12. `put(null)` 不 dematerialize Record，也不移除 Collection membership；
 13. `list()` 返回一致 revision 的 Collection → Record key/version discovery index，可选择 namespace filter，并按 canonical UTF-8 byte order 排序；
 14. `list()` 不是 transactional Collection scan；`list()` + 后续 `read()` 不保证 key-set 与 values 同 revision；
-15. 所有 key/value/request/session resource 均受明确 hard limits；精确 wire size/depth accounting 属 formal contract closure；
-16. `read(keys)` 使用完整 Record identities，并返回一致 logical snapshot；
+15. 所有 key/value/request/session resource 均受明确 hard limits；精确 wire size/depth accounting 属 formal contract closure，并必须允许等价 streaming/one-pass counting；
+16. `read(keys)` 使用完整 Record identities，并返回一致 logical snapshot；内部 MAY capture immutable refs，author-visible representation 仍须 detached/immutable；
 17. 每个 write target 必须且只能有一个 caller-observed Record version condition；Authority 原子执行 condition check + all writes；
-18. stale condition → `CONFLICT` + zero write；successful deep-equal put 仍推进 version/revision；
-19. `commit()` 不提供 remote cancellation；dispatch 后失去确定结果 → `OUTCOME_UNKNOWN`；不得自动 retry；
-20. v1 不提供 mutation ID/dedup/status journal；
-21. Subscription establishment 原子绑定 baseline revision 与后续 observer；author handle 必须先于第一条 callback 可观察；
-22. Subscription 只观察显式 Record identities，不隐式观察 Collection membership；
-23. Subscription 只交付 ordered committed Record changes；revision 可因 unrelated commits 跳号；
-24. Overflow/disconnect 必须 terminal subscription，不得 silent drop；恢复使用 fresh subscribe + fresh baseline；
-25. `subscription.close()` idempotent；返回后不得再次调用 listener；主动 close 不产生 terminal("closed")；
-26. Realm State v1 不提供业务 ACL；live Runtime-scoped client 可 read/list/commit/subscribe；
-27. Runtime terminal 终止其 client/subscriptions；RealmStateAuthority fatal → Session terminal；
-28. Realm State 必须在第一项 business Runtime side effect 前 READY；
-29. Hostra/PWA physical realization 可不同，但上述 Collection/Record semantics、hard limits、commit evidence 与 subscription semantics 必须一致；
-30. Formal contract checklist 中的 API/wire edge rules 必须在实现前冻结，但不得因此引入第二套 Collection authority/version/transaction model。
+18. semantic validation 在每个不可信边界必须有明确 owner；trusted validated representation MAY 沿内部路径复用，不要求 SDK/binding/Authority 重复等价 deep validation；
+19. JsonValue validity、depth、size accounting 与 detach SHOULD 可融合为 bounded traversal；Authority serialized mutation path SHOULD 只承担 authority-sensitive metadata/reference work；
+20. stale condition → `CONFLICT` + zero write；successful deep-equal put 仍推进 version/revision；
+21. `commit()` 不提供 remote cancellation；dispatch 后失去确定结果 → `OUTCOME_UNKNOWN`；不得自动 retry；
+22. v1 不提供 mutation ID/dedup/status journal；
+23. Subscription establishment 原子绑定 baseline revision 与后续 observer；author handle 必须先于第一条 callback 可观察；
+24. Subscription 只观察显式 Record identities，不隐式观察 Collection membership；
+25. Subscription 只交付 ordered committed Record changes；revision 可因 unrelated commits 跳号；
+26. Overflow/disconnect 必须 terminal subscription，不得 silent drop；恢复使用 fresh subscribe + fresh baseline；
+27. `subscription.close()` idempotent；返回后不得再次调用 listener；主动 close 不产生 terminal("closed")；
+28. Realm State v1 不提供业务 ACL；live Runtime-scoped client 可 read/list/commit/subscribe；
+29. Runtime terminal 终止其 client/subscriptions；RealmStateAuthority fatal → Session terminal；
+30. Realm State 必须在第一项 business Runtime side effect 前 READY；
+31. Hostra/PWA physical realization 可不同，包括 validation/copy pass 数量不同，但上述 Collection/Record semantics、hard limits、validation outcome、commit evidence 与 subscription semantics 必须一致；
+32. Formal contract checklist 中的 API/wire edge rules 必须在实现前冻结，但不得因此引入第二套 Collection authority/version/transaction model。
 
 ---
 
@@ -1733,6 +1855,21 @@ Collection membership
     observational discovery metadata
     no version / OCC predicate / wildcard subscription
 
+Author / carrier input
+    │
+    ▼
+validation owner
+    │  one-pass key/value/request validation
+    │  detach + size/depth accounting
+    ▼
+trusted validated representation
+    │
+    ▼
+RealmStateAuthority fast path
+    lookup → version check → ref swap → revision/version
+    │
+    └→ serialization / delivery outside serialized authority step
+
                     local business computation
                               │
                    Record-version conditions
@@ -1761,6 +1898,7 @@ Namespace / Collection
 
 Record key
     identifier inside one Collection
+    may be validated/interned into trusted internal identity
 
 Record (namespace,key)
     initialValue + current value + version
@@ -1775,9 +1913,15 @@ Materialized Collection Index
 Read Snapshot
     one revision + selected Record values + versions
 
+Validation Boundary
+    one semantic validation owner per trust boundary
+    validated immutable representation reusable inside trusted path
+    no required repeated deep validation across implementation layers
+
 Transaction
     validated Record-version conditions + write-set
     multi-record / cross-Collection atomicity
+    short serialized authority step
 
 Subscription
     explicit Record identities only
