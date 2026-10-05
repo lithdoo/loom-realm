@@ -2,16 +2,16 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving  
-> 主要定义：Control Plane、Renderer Data Plane、Content Plane、carrier/application mapping、authority/recovery 与 communication-facing Platform responsibilities  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)  
+> 稳定程度：Evolving；Realm State logical plane core semantics closed / physical profile pending  
+> 主要定义：Control Plane、Renderer Data Plane、Realm State Plane、Content Plane、carrier/application mapping、authority/recovery 与 communication-facing Platform responsibilities  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Realm State](./realm-state-system.md)  
 > 被以下文档细化：[渲染系统](./rendering-system.md)、[Subsystem 模型](./subsystem-model.md)、[运行时启动系统](./runtime-bootstrap-system.md)  
-> 正式化：`doc/15-contracts` 对应协议/Profile  
-> 最近复核：2026-08-19
+> 正式化：`doc/15-contracts` 对应协议/Profile；Realm State：[Realm State v1](../15-contracts/realm-state-v1.md)  
+> 最近复核：2026-10-05
 
 ---
 
-## 1. 三类通信平面
+## 1. 四类 Logical Communication Planes
 
 ```text
 Control Plane
@@ -29,18 +29,37 @@ Renderer Data Plane
             Data Connection v1
             User Input v1
             Render Update v1
+            Viewport role when current profile revision includes it
+
+Realm State Plane
+    RealmStateAuthority ⇄ Subsystem Runtime
+        loomrealm.realm-state/1
+        read / readInitial / list / commit / subscribe
 
 Content Plane
     Main/Renderer/Subsystem ⇄ Readonly Content Service
 ```
 
-这些平面共享某些 transport primitives，但 authority/lifecycle/recovery完全独立。
+这些 planes MAY 共享某些 physical transport primitives，但 authority、lifecycle、failure/recovery 与 retry semantics独立。
+
+尤其：
+
+```text
+Renderer Data reconnect
+    != Realm State reconnect/reset
+
+Runtime Control loss
+    != ordinary Realm State conflict
+
+Realm State Authority fatal
+    != Data carrier retirement
+```
 
 ---
 
 ## 2. MessageCarrier Boundary
 
-所有 message-oriented Control/Data role implementation消费：
+现有 message-oriented Control/Data role implementation消费：
 
 ```text
 MessageCarrier
@@ -52,7 +71,7 @@ Carrier只保证：
 message boundary
 per-direction order
 observable close/loss
-production adapter avoids unbounded physical buffering（threshold/config 不属于 Foundation contract）
+production adapter avoids unbounded physical buffering
 no adapter-created duplicate/retry
 ```
 
@@ -64,11 +83,24 @@ establishment
 reconnect policy
 Runtime failure
 Data generation/profile
+Realm State authority / commit semantics
 ```
+
+Realm State logical contract **不要求** 一个统一 physical MessageCarrier：
+
+```text
+Desktop same-process
+    MAY use direct in-process binding
+
+PWA / cross-process realization
+    MAY use MessagePort / IPC / another bounded private carrier
+```
+
+如果 Realm State realization 使用 message-oriented carrier，carrier仍只负责 transport facts；MUST NOT 自己 retry/duplicate mutation，也 MUST NOT 把 transport loss擅自解释为 `CONFLICT` 或 known no-commit。
 
 ---
 
-## 3. Unified Application Unit
+## 3. Application Unit / Encoding Boundary
 
 当前 Runtime Control / Renderer Control / Renderer Data Profile统一：
 
@@ -85,7 +117,9 @@ MessagePort    postMessage(string)
 MemoryCarrier  string
 ```
 
-Structured Clone只用于 Platform bootstrap/Port transfer；application payload不允许出现第二套 structured-object model。
+Structured Clone只用于 Platform bootstrap/Port transfer；existing Control/Data application payload不允许出现第二套 structured-object model。
+
+Realm State physical profile尚未冻结，因此本文不强迫它复用上述 JSON-text unit。无论选择 direct call、JSON text 或 private structured clone，必须保持 [Realm State v1](../15-contracts/realm-state-v1.md) 的 logical validation/size/evidence semantics；物理 carrier不能成为绕过 logical limits 的第二套数据模型。
 
 ---
 
@@ -102,6 +136,8 @@ Subsystem Control + Frame / Call
 Control loss在无 shutdown intent时 Runtime-fatal；same-attempt无 reconnect。
 
 Platform只建立 carrier，不改变 hello/Frame transaction semantics。
+
+Realm State request MUST NOT 塞进 Runtime Control / Frame Call message namespace；`frame.call()` 继续只表达 control-flow composition。
 
 ---
 
@@ -123,20 +159,23 @@ Data endpoint/ticket/Port
 Interest Registry
 Render State
 Content credential
+Realm State value / Realm State carrier material
 ```
 
-Control loss使 Renderer失去 current Main authority，并 retire旧 Data connections。
+Control loss使 Renderer失去 current Main authority，并 retire旧 Data connections；MUST NOT 因此 reset RealmStateAuthority。
 
 ---
 
 ## 6. Renderer Data Application Profile
 
-当前：
+当前 baseline：
 
 ```text
 loomrealm.renderer-data/1
 = Connection 1 + User Input 1 + Render Update 1
 ```
+
+后续已设计的 Viewport retained role仍属于相同 Renderer↔Subsystem Data plane revision/profile演进。
 
 Profile负责：
 
@@ -144,11 +183,13 @@ Profile负责：
 child protocol version binding
 JSON text mapping
 single connection-wide Data dispatcher
-input.* / render.* demux
+input.* / render.* / profile child demux
 fresh-carrier child baseline
 ```
 
 Connection Core本身 zero application messages。
+
+Realm State MUST NOT 成为 Renderer Data child protocol：它是 Session business-state authority，不是 current Renderer replica traffic。
 
 ---
 
@@ -181,9 +222,11 @@ P
 
 同 generation/profile顺序 reconnect允许；profile change必须 fresh generation。
 
+Realm State Record identity/version/revision MUST NOT 使用 Data generation/profile 作为业务 identity 或 OCC metadata。
+
 ---
 
-## 8. Dynamic Provisioning
+## 8. Dynamic Data Provisioning
 
 已经运行的 Subsystem Runtime需要后续取得 Data carrier。
 
@@ -200,6 +243,8 @@ Hostra：Runner IPC/equivalent + endpoint/ticket + WebSocket。
 PWA：Worker provisioning path + transferred MessagePort。
 
 Provisioning material不进入 Runtime Control / Renderer Control / business payload。
+
+RealmStateClient binding属于 Runtime-scoped Session capability bootstrap，不由 Renderer DataAuthority 动态授权，也不通过 Data Broker candidate/current机制建立。
 
 ---
 
@@ -218,6 +263,8 @@ same-generation reconnect failure
 fail Runtime
 unwind Frame
 change Main DataAuthority
+reset Realm State
+terminal RealmStateClient
 ```
 
 Data current→retired；仍授权时可以 later fresh carrier。
@@ -247,6 +294,8 @@ Authority first → no send until Interest
 
 不建立 cross-plane ACK/revision join/barrier。
 
+Realm State revision不是 Input/Render cross-plane barrier；Subsystem业务可在其既有 mutation gate内使用 observed State 计算 Render，但 core不建立 `Realm State revision == Render revision` 之类全局序列。
+
 ---
 
 ## 11. Render Communication
@@ -265,11 +314,92 @@ render.domains
 → patch/event
 ```
 
-Data carrier loss只丢 replica transport baseline，不销毁 Subsystem authoritative Domain。
+Data carrier loss只丢 replica transport baseline，不销毁 Subsystem authoritative Domain，也不影响 Realm State authority。
 
 ---
 
-## 12. Content Plane
+## 12. Realm State Plane
+
+Logical protocol：
+
+```text
+loomrealm.realm-state/1
+```
+
+至少表达：
+
+```text
+current read
+initial read
+flat materialized Record discovery
+Record-version conditional atomic commit
+commit evidence
+explicit-Record subscription baseline/change/terminal/close
+client / authority terminal
+```
+
+Authority semantics：
+
+```text
+one Session
+→ one logical RealmStateAuthority
+→ many Runtime-scoped RealmStateClient bindings
+```
+
+Realm State plane不建立：
+
+```text
+Renderer identity/generation
+DataAuthority profile
+namespace ACL
+Collection version
+transaction ID / dedup journal
+replay cursor
+remote commit cancellation
+```
+
+### Validation / Trust Boundary
+
+每个不可信 physical boundary的接收侧必须建立 trusted validated representation；同一 trusted internal path 不要求 SDK/binding/Authority重复执行等价 deep validation。
+
+```text
+untrusted input
+→ validate key/value/request + limits
+→ trusted detached/immutable representation
+→ Authority short serialized step
+```
+
+### Mutation Evidence
+
+```text
+explicit invalid/limit/conflict/pre-admission terminal
+    → known no-commit
+
+successful response
+    → known committed
+
+dispatched mutation + definitive result lost
+    → OUTCOME_UNKNOWN
+```
+
+Transport/adapter MUST NOT 自动 retry `OUTCOME_UNKNOWN`；否则可能 duplicate business mutation。
+
+### Subscription Failure
+
+Subscription delivery MUST bounded。无法继续保证 ordered relevant changes时：
+
+```text
+MUST terminal overflow
+MUST NOT silently drop
+```
+
+Binding loss → old subscription terminal `binding-terminal`；恢复 = fresh subscribe + fresh baseline，不 replay history。
+
+RealmStateAuthority fatal → Session terminal；这不是普通 carrier reconnect event。
+
+---
+
+## 13. Content Plane
 
 Content使用 HTTP/Fetch logical API，而不是 MessageCarrier协议。
 
@@ -280,9 +410,11 @@ PWA     → same-origin Fetch/SW
 
 Content credential/bootstrap mechanism属于 Platform implementation；logical route/cache/error/integrity由 Content API定义。
 
+Content 是 readonly definition authority；Realm State 是 mutable Session business-state authority。两者不得因都使用 `(namespace,key)` 风格命名而合并成一个 generic repository protocol。
+
 ---
 
-## 13. Backpressure
+## 14. Backpressure
 
 所有 plane必须 bounded，但 policy由对应协议域负责：
 
@@ -290,21 +422,24 @@ Content credential/bootstrap mechanism属于 Platform implementation；logical r
 Renderer Control → latest full snapshot
 User Input       → state coalesce + bounded event queue
 Render Update    → protocol revision/commit rules
+Realm State      → bounded request/subscription physical profile; commit lane never blocked by listener delivery
 Content          → HTTP request/concurrency policy
 ```
 
 Transport不得为了缓解 backpressure重试/duplicate application mutation。
 
+Realm State subscription queue exact physical bound仍属于 Realm State profile freeze blocker；在冻结前不得实现 unbounded queue。
+
 ---
 
-## 14. No Cross-plane Global Order
+## 15. No Cross-plane Global Order
 
 不存在整个 LoomRealm Session 的单一 network sequence。
 
 只依赖：
 
 ```text
-per-connection per-direction order
+per-connection/per-binding order
 protocol-defined causal barriers
 current authority conjunction
 ```
@@ -313,24 +448,31 @@ current authority conjunction
 
 ```text
 Runtime Control ↛ total order with Renderer Control
-Renderer Control ↛ total order with Data
+Renderer Control ↛ total order with Renderer Data
 Input ↛ shared revision with Render
+Realm State revision ↛ Main Control revision
+Realm State revision ↛ Renderer Data revision
+Content version ↛ Realm State revision
 ```
+
+Realm State global revision只在该 RealmStateAuthority 内定义 successful commit order，不升级成整个 Session 的 universal clock。
 
 ---
 
-## 15. Final Invariants
+## 16. Final Invariants
 
-1. Control/Data/Content是独立通信平面；
-2. current message-oriented profiles统一 UTF-8 JSON text string；
-3. Carrier只描述已建立 pipe，不描述 authority/establishment；
-4. Runtime Control使用 one dispatcher + shared sender ID namespace；
-5. Renderer Control只复制 logical authority；
-6. DataAuthority = S/G/dataProfile，不携物理 material；
-7. Renderer Data Profile v1静态绑定 Connection/Input/Render v1；
-8. Data Broker/provisioning属于 Platform；
-9. Data provisioning/loss不等于 Runtime failure；
-10. Control/Data无跨连接 total order；
-11. User Input使用 authority×Interest×Producer交集；
-12. Render/Data/Frame lifecycles相互独立；
-13. Transport Adapter不拥有 application retry/recovery。
+1. Control、Renderer Data、Realm State、Content是独立 logical communication planes；
+2. current Control/Data message-oriented profiles继续统一 UTF-8 JSON text string；Realm State physical encoding尚未冻结；
+3. Carrier只描述已建立 pipe，不描述 application authority/establishment；
+4. Runtime Control使用 one dispatcher + shared sender ID namespace；Realm State不复用该 dispatcher；
+5. Renderer Control只复制 Main logical authority，不携 Realm State business values；
+6. DataAuthority = S/G/dataProfile，不携物理 material，也不拥有 Realm State binding；
+7. Renderer Data Profile只拥有 Renderer↔Subsystem connection-local application roles；
+8. Data Broker/provisioning属于 Platform；Realm State binding不使用 Data candidate/current authority；
+9. Data provisioning/loss不等于 Runtime failure/Frame unwind/Realm State reset；
+10. Realm State mutation使用 Record-version OCC + explicit evidence；transport不得 retry/duplicate；
+11. Realm State subscription overflow/disconnect使用 terminal + fresh baseline recovery；
+12. Control/Data/Realm State之间无跨连接 global total order；
+13. User Input使用 authority×Interest×Producer交集；Realm State observation不创建 Input/Frame mutation permit；
+14. Render/Data/Frame/Realm State lifecycles相互独立但都受 Session terminal上界约束；
+15. Transport Adapter不拥有 application retry/recovery authority。
