@@ -5,6 +5,7 @@ on:
     paths:
       - "packages/game-package/**"
       - "packages/wire/**"
+      - "packages/realm-state/**"
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
@@ -15,6 +16,7 @@ on:
     paths:
       - "packages/game-package/**"
       - "packages/wire/**"
+      - "packages/realm-state/**"
       - "package.json"
       - "package-lock.json"
       - ".npmrc"

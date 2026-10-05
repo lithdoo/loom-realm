@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain, type MainSessionResult } from "@loomrealm/main";
+import { createRealmStateAuthority, type RealmStateAuthority } from "@loomrealm/realm-state";
 import { createDesktopContentService, prepareDesktopContentView, type DesktopContentGrant, type PreparedDesktopContentView } from "./content-service.js";
 import { DesktopDataConnectionBroker } from "./data-broker.js";
 import { DESKTOP_BOOTSTRAP_CHANNEL, type DesktopRendererBootstrapEnvelope } from "./desktop-bootstrap.js";
@@ -49,6 +50,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
   let broker: DesktopDataConnectionBroker | null = null;
   let rendererControl: LoopbackRendererControlBinding | null = null;
   let main: Promise<MainSessionResult> | null = null;
+  let realmState: RealmStateAuthority | null = null;
   let windowId: string | null = null;
   let termination: Promise<void> | null = null;
   let resolveClosed!: () => void;
@@ -78,6 +80,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
         try { await main; } catch (cause) { mainFailure = cause; }
         observe({ type: "termination-main-finished" });
       }
+      realmState?.terminate();
       retireDocument(reason);
       rendererControl?.close();
       observe({ type: "renderer-control-closed" });
@@ -126,6 +129,22 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
     observe({ type: "startup-stage", stage: "prepare" });
     const installationRoot = options.installationRoot ?? fileURLToPath(new URL("../../../examples/essentials-v21.1/", import.meta.url));
     const prepared = await prepareHostraGame({ source: { installationRoot }, runnerPolicy });
+    let fatalListener: (() => void) | null = null;
+    let fatalLatched = false;
+    realmState = createRealmStateAuthority(prepared.state, {
+      onFatal() {
+        fatalLatched = true;
+        fatalListener?.();
+      },
+    });
+    observe({ type: "startup-stage", stage: "realm-state" });
+    const realmStateFatal = Object.freeze({
+      subscribe(listener: () => void) {
+        fatalListener = listener;
+        if (fatalLatched) queueMicrotask(listener);
+        return () => { if (fatalListener === listener) fatalListener = null; };
+      },
+    });
     const view = await prepareDesktopContentView(prepared);
     preparedView = view;
     assertStarting();
@@ -178,6 +197,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
       launchPlan: prepared.launchPlan,
       contentAccess: { origin: runtimeAccess.origin.href, installationId: runtimeAccess.installationId, token: runtimeAccess.token },
       onRuntimeDataProvisioner: broker.onRuntimeDataProvisioner,
+      realmStateAuthority: realmState,
     });
     main = runMain({
       bootstrap: prepared.logicalBootstrap,
@@ -189,6 +209,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
         runtimeHosting,
         rendererControl: rendererControl.binding,
         dataConnections: broker.sink,
+        realmStateFatal,
       }),
     });
     observe({ type: "startup-stage", stage: "main" });

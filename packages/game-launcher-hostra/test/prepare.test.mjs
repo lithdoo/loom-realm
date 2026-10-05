@@ -55,6 +55,8 @@ test("PREPARE validates, joins, resolves, and deeply freezes the plan", async (t
     subsystemKeys: ["root"],
     initial: { subsystemKey: "root", input: { value: 1 } },
   });
+  assert.deepEqual(prepared.state, { records: [] });
+  assert.ok(Object.isFrozen(prepared.state.records));
   assert.equal(prepared.launchPlan.runtimes[0].logicalModule, "subsystems/root.mjs");
   assert.equal(prepared.launchPlan.canonicalNodeExecutable, await import("node:fs/promises").then(({ realpath }) => realpath(process.execPath)));
   assert.ok(Object.isFrozen(prepared));

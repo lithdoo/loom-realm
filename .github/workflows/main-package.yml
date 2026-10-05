@@ -6,6 +6,7 @@ on:
       - "packages/main/**"
       - "packages/foundation/**"
       - "packages/wire/**"
+      - "packages/realm-state/**"
       - "packages/platform-ports/**"
       - "packages/runtime-control/**"
       - "packages/renderer-control/**"
@@ -24,6 +25,7 @@ on:
       - "packages/main/**"
       - "packages/foundation/**"
       - "packages/wire/**"
+      - "packages/realm-state/**"
       - "packages/platform-ports/**"
       - "packages/runtime-control/**"
       - "packages/renderer-control/**"
@@ -63,6 +65,7 @@ jobs:
           npm run build
           -w @loomrealm/foundation
           -w @loomrealm/wire
+          -w @loomrealm/realm-state
           -w @loomrealm/platform-ports
           -w @loomrealm/runtime-control
           -w @loomrealm/renderer-control
