@@ -51,8 +51,13 @@ Renderer Data reconnect
 Runtime Control loss
     != ordinary Realm State conflict
 
-Realm State Authority fatal
-    != Data carrier retirement
+Realm State binding loss
+    != Runtime/Session failure
+
+RealmStateAuthority fatal
+    = Session-fatal condition report
+    != binding reconnect event
+    != direct Session unwind ownership
 ```
 
 ---
@@ -84,6 +89,7 @@ reconnect policy
 Runtime failure
 Data generation/profile
 Realm State authority / commit semantics
+Session terminal policy
 ```
 
 Realm State logical contract **不要求** 一个统一 physical MessageCarrier：
@@ -96,7 +102,7 @@ PWA / cross-process realization
     MAY use MessagePort / IPC / another bounded private carrier
 ```
 
-如果 Realm State realization 使用 message-oriented carrier，carrier仍只负责 transport facts；MUST NOT 自己 retry/duplicate mutation，也 MUST NOT 把 transport loss擅自解释为 `CONFLICT` 或 known no-commit。
+如果 Realm State realization 使用 message-oriented carrier，carrier仍只负责 transport facts；MUST NOT 自己 retry/duplicate mutation，也 MUST NOT 把 transport loss擅自解释为 `CONFLICT`、known no-commit、Runtime failure 或 Session terminal。
 
 ---
 
@@ -138,6 +144,8 @@ Control loss在无 shutdown intent时 Runtime-fatal；same-attempt无 reconnect�
 Platform只建立 carrier，不改变 hello/Frame transaction semantics。
 
 Realm State request MUST NOT 塞进 Runtime Control / Frame Call message namespace；`frame.call()` 继续只表达 control-flow composition。
+
+Realm State request也 MUST NOT 携带或依赖 `frameId` / `activationId` / InputTarget 来建立 State mutation authority。
 
 ---
 
@@ -294,7 +302,7 @@ Authority first → no send until Interest
 
 不建立 cross-plane ACK/revision join/barrier。
 
-Realm State revision不是 Input/Render cross-plane barrier；Subsystem业务可在其既有 mutation gate内使用 observed State 计算 Render，但 core不建立 `Realm State revision == Render revision` 之类全局序列。
+Realm State revision不是 Input/Render cross-plane barrier。Subsystem业务可以读取 State 后更新其 local/Render authority，但 Realm State `commit()` 本身不消费 Frame/Activation mutation permit，core也不建立 `Realm State revision == Render revision` 之类全局序列。
 
 ---
 
@@ -336,6 +344,7 @@ Record-version conditional atomic commit
 commit evidence
 explicit-Record subscription baseline/change/terminal/close
 client / authority terminal
+Session-fatal report to Main/Session lifecycle owner
 ```
 
 Authority semantics：
@@ -349,6 +358,7 @@ one Session
 Realm State plane不建立：
 
 ```text
+Frame / Activation / InputTarget mutation authority
 Renderer identity/generation
 DataAuthority profile
 namespace ACL
@@ -356,6 +366,7 @@ Collection version
 transaction ID / dedup journal
 replay cursor
 remote commit cancellation
+Runtime/Session supervision policy in carrier/binding
 ```
 
 ### Validation / Trust Boundary
@@ -384,7 +395,19 @@ dispatched mutation + definitive result lost
 
 Transport/adapter MUST NOT 自动 retry `OUTCOME_UNKNOWN`；否则可能 duplicate business mutation。
 
-### Subscription Failure
+### Subscription Delivery / Callback Boundary
+
+Subscription establishment 的 baseline capture + observer registration 属 Authority linearization；business listener invocation 不属于 Authority lane。
+
+```text
+Authority captures notification
+→ leaves serialized lane
+→ binding/SDK delivers callback
+```
+
+Listener sync throw / returned rejected thenable MUST 本地隔离/诊断；MUST NOT retroactively fail commit、make Authority fatal、terminate Session 或作为 backpressure ACK。
+
+Listener MAY reenter RealmStateClient operations；binding MUST NOT 持有 Authority lock 调用 listener。
 
 Subscription delivery MUST bounded。无法继续保证 ordered relevant changes时：
 
@@ -393,9 +416,28 @@ MUST terminal overflow
 MUST NOT silently drop
 ```
 
-Binding loss → old subscription terminal `binding-terminal`；恢复 = fresh subscribe + fresh baseline，不 replay history。
+### Binding Loss / Recovery
 
-RealmStateAuthority fatal → Session terminal；这不是普通 carrier reconnect event。
+```text
+binding loss
+→ old subscription terminal(binding-terminal)
+→ affected old client/binding terminal according to profile
+→ old identity not reattached
+```
+
+Binding loss本身 MUST NOT：
+
+```text
+fail Main Runtime
+unwind Frame
+terminate Session
+reset RealmStateAuthority
+change DataAuthority
+```
+
+如果 profile 支持后续恢复，必须建立 fresh logical binding，再 fresh subscribe + fresh baseline；不 replay history。
+
+RealmStateAuthority fatal 则不同：它报告 Session-fatal condition，由 Main/Session lifecycle owner提交 terminal/unwind；Authority/carrier本身不直接拥有该 transition。
 
 ---
 
@@ -463,16 +505,19 @@ Realm State global revision只在该 RealmStateAuthority 内定义 successful co
 
 1. Control、Renderer Data、Realm State、Content是独立 logical communication planes；
 2. current Control/Data message-oriented profiles继续统一 UTF-8 JSON text string；Realm State physical encoding尚未冻结；
-3. Carrier只描述已建立 pipe，不描述 application authority/establishment；
+3. Carrier只描述已建立 pipe，不描述 application authority/establishment/Session supervision；
 4. Runtime Control使用 one dispatcher + shared sender ID namespace；Realm State不复用该 dispatcher；
 5. Renderer Control只复制 Main logical authority，不携 Realm State business values；
 6. DataAuthority = S/G/dataProfile，不携物理 material，也不拥有 Realm State binding；
 7. Renderer Data Profile只拥有 Renderer↔Subsystem connection-local application roles；
 8. Data Broker/provisioning属于 Platform；Realm State binding不使用 Data candidate/current authority；
 9. Data provisioning/loss不等于 Runtime failure/Frame unwind/Realm State reset；
-10. Realm State mutation使用 Record-version OCC + explicit evidence；transport不得 retry/duplicate；
-11. Realm State subscription overflow/disconnect使用 terminal + fresh baseline recovery；
-12. Control/Data/Realm State之间无跨连接 global total order；
-13. User Input使用 authority×Interest×Producer交集；Realm State observation不创建 Input/Frame mutation permit；
-14. Render/Data/Frame/Realm State lifecycles相互独立但都受 Session terminal上界约束；
-15. Transport Adapter不拥有 application retry/recovery authority。
+10. Realm State operations不消费 Frame/Activation/InputTarget authority；
+11. Realm State mutation使用 Record-version OCC + explicit evidence；transport不得 retry/duplicate；
+12. Realm State listener delivery在 Authority lane外，callback failure局部隔离且允许安全 reentrancy；
+13. Realm State subscription/binding loss只终止该 State binding，不自动改变 Main Runtime/Session；
+14. RealmStateAuthority fatal只报告 Session-fatal condition，由 Main/Session lifecycle owner提交 terminal/unwind；
+15. Control/Data/Realm State之间无跨连接 global total order；
+16. User Input使用 authority×Interest×Producer交集；Realm State不创建 Input/Frame mutation permit；
+17. Render/Data/Frame/Realm State lifecycles相互独立但都受 Session terminal上界约束；
+18. Transport Adapter不拥有 application retry/recovery 或 Runtime/Session authority。
