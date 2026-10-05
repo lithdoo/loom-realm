@@ -23,14 +23,14 @@ RealmStateAuthority
 Matching Platform Launcher
     owns Game Entry consumption + current executable PREPARE
 
-Platform Composition
-    creates one session-scoped concrete Platform instance
+Platform / Session Composition
     realizes physical Runner/Renderer/connection/content/state bindings
+    owns construction order / wiring / disposal only
 ```
 
 Main 不直接依赖 Node/Worker/WebSocket/MessagePort/module resolver，也不依赖 `@loomrealm/game-package`、concrete launcher 或 Realm State business document。
 
-RealmStateAuthority MAY 与 Main 同进程/Worker，但不是 Main-owned business fields。
+RealmStateAuthority MAY 与 Main 同进程/Worker，但不是 Main-owned business fields。Platform/Session composition 即使 physically owns both components，也不得成为第三 application authority。
 
 ---
 
@@ -45,7 +45,7 @@ Game source / installation
 → session-scoped concrete Platform.prepareGame(...)
     → matching Launcher component
         → @loomrealm/game-package parse/validate
-        → validate optional Realm State state.records
+        → validate optional Realm State state.records document
         → current Platform Launch Manifest parse/validate
 ```
 
@@ -68,6 +68,8 @@ RealmStateKey = shared business Record identity
 
 Game Entry不声明 executable module、Realm State physical endpoint 或 runtime version/revision metadata。
 
+Game Package 的 `state` 是 document representation，不是 RealmStateAuthority runtime bootstrap ABI。
+
 ---
 
 ## 3. Complete PREPARE Closure
@@ -76,14 +78,14 @@ Session physical/business bootstrap前，concrete Platform `prepareGame()` MUST 
 
 ```text
 Launcher component
-    Game Entry validation including optional state
+    Game Entry validation including optional state document
     → current Platform Launch Manifest validation
     → exact Game↔Platform Subsystem key-set join
     → resolve every required platform implementation
     → validate current Platform hosting/security capability
     → freeze immutable PlatformLaunchPlan
     → project/freeze LogicalGameBootstrap
-    → project/freeze Realm State Initial Definition
+    → project/freeze PreparedRealmStateDefinition
 
 Concrete Platform
     → install/freeze PlatformLaunchPlan internally
@@ -110,8 +112,8 @@ Prepared current-platform result 概念上包含三个正交 pieces：
 LogicalGameBootstrap
     → Main-visible logical topology / initial Frame input
 
-Realm State Initial Definition
-    → Session RealmStateAuthority bootstrap baseline
+PreparedRealmStateDefinition
+    → detached/immutable RealmStateAuthority bootstrap baseline
 
 prepared concrete Platform instance
     → owns PlatformLaunchPlan privately
@@ -124,9 +126,18 @@ prepared concrete Platform instance
 ```ts
 interface PreparedLogicalGame {
   readonly main: LogicalGameBootstrap;
-  readonly state: RealmStateGameDefinitionV1;
+  readonly state: PreparedRealmStateDefinition;
 }
 ```
+
+Launcher owns the projection：
+
+```text
+ValidatedGameEntryV1.state
+→ PreparedRealmStateDefinition
+```
+
+RealmStateAuthority MUST NOT consume `GameEntryV1` / `RealmStateGameDefinitionV1` as its runtime bootstrap ABI。
 
 Composition sequence：
 
@@ -137,8 +148,8 @@ platform.prepareGame(source)
 → returns PreparedLogicalGame {main,state}
 
 select New Game or validated Load sparse current seed
-→ create fresh RealmStateAuthority
-→ install prepared.state immutable baseline
+→ physically construct fresh RealmStateAuthority from prepared.state
+→ install prepared State immutable baseline
 → apply sparse current overrides
 → revision/version = 0
 → Realm State READY
@@ -164,7 +175,8 @@ Main 不接收：
 ```text
 GameEntryV1 / ValidatedGameEntryV1
 formatVersion
-RealmStateGameDefinitionV1 / initial Records
+RealmStateGameDefinitionV1
+PreparedRealmStateDefinition / initial Records
 PlatformLaunchPlan
 module/path/URL
 raw Platform manifest
@@ -177,6 +189,8 @@ first business Runtime side effect
     ⇒ PREPARE complete
     ∧ Realm State READY
 ```
+
+Session/Platform composition 在此只拥有 physical construction/order/binding/disposal，不拥有 Main control state 或 Realm State Record/OCC semantics。
 
 ---
 
@@ -230,7 +244,7 @@ Hostra Node Runner / PWA Worker Runner
 M6 RuntimeControlBinding
 M8+ SubsystemDataBinding
 M12+ ContentClient
-Realm State RealmStateClient      (planned candidate)
+RealmStateClient                  (planned candidate)
         │
         ▼
 @loomrealm/subsystem/host
@@ -239,9 +253,11 @@ Realm State RealmStateClient      (planned candidate)
 Platform-planned Definition Module
 ```
 
-Runner不创建 RealmStateAuthority，也不读取 Realm State Game definition。它只接收/构造 concrete composition 已绑定到当前 Session authority 的 Runtime-scoped client capability。
+Runner不创建 RealmStateAuthority，也不读取 Game Entry State document或 `PreparedRealmStateDefinition`。它只接收/构造 concrete composition 已绑定到当前 Session authority 的 Runtime-scoped client capability。
 
 Definition Module 不读取 Game Entry/Launch Manifest，不接触 physical bootstrap material，也不创建第二 Runtime/State authority。
+
+Runner/Subsystem host MUST NOT require Frame/Activation identity to install or authorize RealmStateClient operations。
 
 ---
 
@@ -310,7 +326,7 @@ Realm State Record version/global revision也不是 Runtime lifecycle identity�
 
 ```text
 Runner/container creation failure
-required Runtime-scoped RealmStateClient binding unavailable
+required Runtime-scoped RealmStateClient binding unavailable before business bootstrap
 planned module load/default-export ABI failure
 Control carrier/hello failure
 Runtime cannot become ready
@@ -319,7 +335,7 @@ unexpected Runtime termination
 
 Phase 1 all-required → whole Game Bootstrap失败并统一 cleanup。
 
-RealmStateAuthority fatal 是 Session terminal，不作为“仅重启一个 Runtime”恢复点。
+RealmStateAuthority fatal 是 Session-fatal condition，不作为“仅重启一个 Runtime”恢复点。Authority报告该 condition；Main/Session lifecycle owner提交 Session terminal/unwind。
 
 Platform MUST NOT automatic restart。新 Runtime必须 fresh Launch Attempt/token/Runner/Control lifetime + fresh Runtime-scoped State client binding。
 
@@ -474,7 +490,7 @@ Render
 
 Data reconnect不重建 business capability objects，包括 ContentClient / RealmStateClient / Viewport object。
 
-Realm State subscription reconnect是独立机制：binding loss terminals old subscription → fresh subscribe → fresh Realm State baseline；它不由 Data reconnect触发。
+Realm State subscription recovery是独立机制：old State binding/subscription terminal → 如果 profile 支持恢复则建立 fresh logical client binding → fresh subscribe → fresh Realm State baseline；它不由 Data reconnect触发，也不 transparent reattach old identity。
 
 ---
 
@@ -493,11 +509,11 @@ Realm State READY
 → publish InputTarget
 ```
 
-Main 不回读 Game Entry document或 Realm State definition。
+Main 不回读 Game Entry document、PreparedRealmStateDefinition 或 Realm State business data。
 
 Data current不是 Frame activate前置条件；active Frame + no Data/Interest 可以合法暂时没有 ordinary input。
 
-Realm State则已经是 business Runtime/Frame side effect前置条件，Frame业务可以通过 `scope.state` 观察 current/initial Shared State。
+Realm State 已经是 business Runtime side effect前置条件；Frame handler 可以通过 Runtime-scoped `scope.state` 使用 Shared State，但 `state.commit()` 不消费该 Frame/Activation authority。
 
 ---
 
@@ -532,19 +548,32 @@ OUTCOME_UNKNOWN
     no automatic retry
 ```
 
-Subscription binding loss：
+Physical State binding loss：
 
 ```text
-old subscription terminal(binding-terminal)
-→ fresh subscription
+→ affected old client/binding terminal according to profile
+→ old subscriptions terminal(binding-terminal)
+→ no automatic Runtime failure
+→ no Frame unwind
+→ no Session terminal
+→ no Authority reset
+→ no transparent old-client reattach
+```
+
+如果 profile 支持恢复：
+
+```text
+fresh logical client binding
+→ fresh subscribe
 → fresh baseline
 ```
 
 RealmStateAuthority fatal：
 
 ```text
-→ Session terminal
-→ Main/Runtime/Renderer cleanup through existing Session owner chain
+→ report Session-fatal condition
+→ Main / Session lifecycle owner commits Session terminal
+→ existing Main/Runtime/Renderer cleanup owner chain converges
 ```
 
 v1 不设计 transparent Authority restart / old-client reattach / journal replay。
@@ -562,9 +591,9 @@ Main establishes shutdown intent
 → only HostedRuntime.terminated resolution is physical stopped evidence
 ```
 
-如果 Runtime先进入 fatal failure，则走 failure terminal path。
+如果 Runtime先进入 fatal failure，则走 Main-owned failure terminal path。
 
-Session terminal同时使 RealmStateAuthority terminal；individual Runtime terminal只终止该 Runtime client/subscriptions，不单独销毁 shared Session authority。
+Main/Session owner提交 Session terminal 后同时使 RealmStateAuthority terminal；individual Runtime terminal只终止该 Runtime client/subscriptions，不单独销毁 shared Session authority。
 
 ---
 
@@ -573,16 +602,16 @@ Session terminal同时使 RealmStateAuthority terminal；individual Runtime term
 ```text
 1  create session-scoped concrete HostraPlatform / PwaPlatform
 2  platform.prepareGame(source) delegates to matching Launcher component
-3  Launcher validates Game Entry including optional Realm State state
+3  Launcher validates Game Entry including optional Realm State state document
 4  validate current Platform Launch Manifest
 5  exact Game↔Platform Subsystem key-set join
 6  resolve/preflight all required executable/security capabilities
 7  freeze immutable PlatformLaunchPlan
-8  platform installs PlatformLaunchPlan privately
-9  return PreparedLogicalGame {main,state}
+8  project/freeze LogicalGameBootstrap + PreparedRealmStateDefinition
+9  platform installs PlatformLaunchPlan privately; return PreparedLogicalGame {main,state}
 10 select New Game or validated Load sparse current seed
-11 create fresh RealmStateAuthority
-12 install Game baseline + sparse current overrides; revision/version=0
+11 composition constructs fresh RealmStateAuthority from prepared.state
+12 install prepared Game baseline + sparse current overrides; revision/version=0
 13 Realm State READY; install private Runtime State binding factory
 14 runMain({bootstrap:prepared.main, platform, policy})
 15 Main installs logical registry / initial input
@@ -594,8 +623,8 @@ Session terminal同时使 RealmStateAuthority terminal；individual Runtime term
 21 M7+ realize Renderer and publish Renderer Control authority
 22 M8/M9+ publish DataAuthority / provision Data carriers
 23 M10/M11+ establish Input/Render fresh baselines
-24 Realm State subscriptions/commits proceed independently of Renderer Data currentness
-25 Session terminal performs State terminal + graceful Runtime shutdown then physical escalation if needed
+24 Realm State reads/commits/subscriptions proceed independently of Renderer Data and Frame/Activation currentness
+25 Main/Session terminal owner commits terminal; State terminal + graceful Runtime shutdown + physical escalation converge
 ```
 
 具体 physical creation order 可不同，只要满足 causal/authority/PREPARE/State-READY boundary。
@@ -606,22 +635,25 @@ Session terminal同时使 RealmStateAuthority terminal；individual Runtime term
 
 1. Game Package validation由 matching Launcher在 Runtime-product path 内调用；
 2. Main不读取 Game Entry、不依赖 Game Package/Realm State document；
-3. PREPARE返回平级 `LogicalGameBootstrap` + Realm State initial definition；
+3. PREPARE返回平级 `LogicalGameBootstrap` + `PreparedRealmStateDefinition`；Game Package document State不是 Authority bootstrap ABI；
 4. executable binding由 current Platform Launch Manifest拥有；
 5. Game/current-platform Subsystem key set严格相等；State Records不参与 executable join；
-6. complete PlatformLaunchPlan + Main/State projections在 Runtime side effect前闭合；
+6. complete PlatformLaunchPlan + Main/State prepared projections在 Runtime side effect前闭合；
 7. RealmStateAuthority fresh bootstrap + READY在任何 business Runtime side effect前完成；
-8. Main Runtime launch request仍只携 logical key + bootstrapToken，不携 State payload/transport；
-9. Host-owned Runner加载 plan-selected Definition Module并安装 composition-bound RealmStateClient；
-10. launch != loaded != connected != identified != ready；
-11. ready不要求/携带 Renderer Data，但 business Runtime bootstrap要求 State READY；
-12. Runtime identity由 `subsystem.hello` key绑定；Realm State Record identity独立；
-13. stopped只来自 actual termination；no automatic Runtime restart；
-14. Data Broker负责 actual Renderer Data carrier，不拥有 Realm State；
-15. provisioning不污染 Runtime/Renderer Control或 Realm State binding；
-16. same S/G/P可以 sequential Data reconnect；RealmStateClient保持；
-17. Data failure不等于 Runtime/Frame/Realm State failure；
-18. Realm State ordinary conflict不等于 Runtime failure；Authority fatal → Session terminal；
-19. fresh Data child state重新 baseline；Realm State subscription recovery使用自己的 fresh baseline；
-20. Frame/Input/Render/Data/Realm State lifecycles相互独立但受 Session terminal上界约束；
-21. Hostra/PWA Definition artifact/physical mechanism可不同，但 Realm State logical/business trace语义等价。
+8. Session/Platform composition只拥有 physical assembly/binding/disposal，不成为第三 application authority；
+9. Main Runtime launch request仍只携 logical key + bootstrapToken，不携 State payload/transport；
+10. Host-owned Runner加载 plan-selected Definition Module并安装 composition-bound RealmStateClient；它不读取 PreparedRealmStateDefinition；
+11. launch != loaded != connected != identified != ready；
+12. ready不要求/携带 Renderer Data，但 business Runtime bootstrap要求 State READY；
+13. Runtime identity由 `subsystem.hello` key绑定；Realm State Record identity独立；
+14. Realm State operations不依赖 Frame/Activation/InputTarget，Frame transitions不构成 State admission condition；
+15. stopped只来自 actual Runtime termination；no automatic Runtime restart；
+16. Data Broker负责 actual Renderer Data carrier，不拥有 Realm State；
+17. provisioning不污染 Runtime/Renderer Control或 Realm State binding；
+18. same S/G/P可以 sequential Data reconnect；RealmStateClient保持；
+19. Data failure不等于 Runtime/Frame/Realm State failure；
+20. Realm State ordinary conflict/listener failure/binding loss不等于 Runtime/Session failure；
+21. RealmStateAuthority fatal只报告 Session-fatal condition，由 Main/Session lifecycle owner提交 terminal/unwind；
+22. fresh Data child state重新 baseline；Realm State recovery使用 fresh logical binding/subscription/baseline，不 reattach old identity；
+23. Frame/Input/Render/Data/Realm State lifecycles相互独立但受 Main-owned Session terminal上界约束；
+24. Hostra/PWA Definition artifact/physical mechanism可不同，但 Realm State logical/business trace语义等价。
