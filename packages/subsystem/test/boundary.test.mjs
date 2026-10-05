@@ -47,11 +47,15 @@ test("trusted host keeps the exact M8 protocol and port dependency direction", a
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), [
     "@loomrealm/data",
     "@loomrealm/platform-ports",
+    "@loomrealm/realm-state",
     "@loomrealm/runtime-control",
     "@loomrealm/wire",
   ]);
   const declaration = await readFile(new URL("../dist/host/run-subsystem.d.ts", import.meta.url), "utf8");
   assert.match(declaration, /readonly data\?: SubsystemDataBinding/);
+  assert.match(declaration, /readonly state\?: RealmStateRuntimeCapability/);
+  const model = await readFile(new URL("../dist/model.d.ts", import.meta.url), "utf8");
+  assert.match(model, /readonly state: RealmStateClient/);
 });
 
 test("M10 author declarations expose the exact minimal Input surface", async () => {

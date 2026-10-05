@@ -5,6 +5,8 @@ export {
 export type {
   GameEntryV1,
   InitialFrameTargetV1,
+  RealmStateGameDefinitionV1,
+  RealmStateGameRecordV1,
   SubsystemDescriptorV1,
   ValidatedGameEntryV1,
 } from "./model.js";

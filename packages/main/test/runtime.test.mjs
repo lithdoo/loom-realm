@@ -168,6 +168,9 @@ function createFakePlatform(definitions, options = {}) {
     ...(options.dataConnections === undefined
       ? {}
       : { dataConnections: options.dataConnections }),
+    ...(options.realmStateFatal === undefined
+      ? {}
+      : { realmStateFatal: options.realmStateFatal }),
   };
 
   return {
@@ -181,6 +184,34 @@ function createFakePlatform(definitions, options = {}) {
     },
   };
 }
+
+test("Realm State fatal fact enters Main's sole Session terminal/unwind path", async () => {
+  let listener = null;
+  const source = Object.freeze({
+    subscribe(next) {
+      listener = next;
+      return () => { if (listener === next) listener = null; };
+    },
+  });
+  const never = new Promise(() => {});
+  const fake = createFakePlatform({
+    root: defineSubsystem(() => ({ frame: () => never })),
+  }, { realmStateFatal: source });
+  const result = runMain({
+    bootstrap: bootstrap(["root"], "root"),
+    platform: fake.platform,
+    policy,
+  });
+  await waitFor(() => fake.runtimes.has("root"), "root Runtime bootstrap");
+  listener();
+  await assert.rejects(result, (error) => {
+    assert.ok(error instanceof MainRuntimeFatalError);
+    assert.equal(error.failure.code, "REALM_STATE_AUTHORITY_FATAL");
+    return true;
+  });
+  assert.equal(fake.runtimes.get("root").terminated, true);
+  assert.equal(listener, null);
+});
 
 function bootstrap(keys, initialKey, input = null) {
   return Object.freeze({

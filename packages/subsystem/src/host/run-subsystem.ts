@@ -4,6 +4,10 @@ import type {
   SubsystemDataBinding,
 } from "@loomrealm/platform-ports";
 import {
+  createRealmStateClient,
+  type RealmStateClient,
+} from "@loomrealm/realm-state";
+import {
   createSubsystemDataPeer,
   RENDERER_DATA_PROFILE_V1,
   type SubsystemDataPeer,
@@ -51,6 +55,12 @@ export interface RunSubsystemOptions {
   readonly launch: SubsystemLaunchContext;
   readonly data?: SubsystemDataBinding;
   readonly content?: ContentClient;
+  readonly state?: RealmStateRuntimeCapability;
+}
+
+export interface RealmStateRuntimeCapability {
+  readonly client: RealmStateClient;
+  terminate(): void;
 }
 
 export class SubsystemRuntimeFatalError extends Error {
@@ -245,8 +255,16 @@ class SubsystemHost {
   private readonly input = new InputManager();
   private readonly render = new RenderManager();
   private readonly viewport = new ViewportManager();
+  private readonly runtimeState: RealmStateRuntimeCapability;
 
-  constructor(private readonly options: RunSubsystemOptions) {}
+  constructor(private readonly options: RunSubsystemOptions) {
+    if (options.state === undefined) {
+      const client = createRealmStateClient();
+      this.runtimeState = Object.freeze({ client, terminate: () => client.terminate() });
+    } else {
+      this.runtimeState = options.state;
+    }
+  }
 
   run(): Promise<void> {
     void this.bootstrap();
@@ -262,6 +280,7 @@ class SubsystemHost {
     });
     const scope: SubsystemScope = Object.freeze({
       signal: this.scopeController.signal,
+      state: this.runtimeState.client,
       content: this.options.content ?? unavailableContent,
       viewport: this.viewport,
       createInputListener: (options: CreateInputListenerOptions) =>
@@ -569,6 +588,7 @@ class SubsystemHost {
   private async finishGraceful(): Promise<void> {
     if (this.terminal?.kind !== "graceful") return;
     this.scopeController.abort();
+    this.runtimeState.terminate();
     this.frames?.abortAll();
     this.input.closeAll();
     this.render.closeAll();
@@ -585,6 +605,7 @@ class SubsystemHost {
   }
 
   private async finishFatal(primary: RuntimeFailure): Promise<void> {
+    this.runtimeState.terminate();
     await this.bounded(
       this.bestEffortStatus({ state: "failed", error: primary }),
     );

@@ -6,7 +6,10 @@ export type GamePackageErrorCode =
   | "SUBSYSTEM_KEY_INVALID"
   | "SUBSYSTEM_KEY_DUPLICATE"
   | "INITIAL_TARGET_UNDECLARED"
-  | "INITIAL_INPUT_INVALID";
+  | "INITIAL_INPUT_INVALID"
+  | "REALM_STATE_INITIAL_INVALID"
+  | "REALM_STATE_INITIAL_DUPLICATE"
+  | "REALM_STATE_INITIAL_LIMIT_EXCEEDED";
 
 export class GamePackageError extends Error {
   readonly code: GamePackageErrorCode;

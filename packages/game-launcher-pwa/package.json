@@ -1,0 +1,19 @@
+{
+  "name": "@loomrealm/game-launcher-pwa",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "description": "PWA Realm State prepare projection and Worker-compatible integration primitives.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "DESIGN.md"],
+  "scripts": { "build": "tsc -p tsconfig.json", "test": "npm run build && node --test" },
+  "dependencies": {
+    "@loomrealm/game-package": "0.1.0-alpha.0",
+    "@loomrealm/realm-state": "0.1.0-alpha.0"
+  },
+  "devDependencies": { "typescript": "^5.5.0" },
+  "engines": { "node": ">=20" },
+  "publishConfig": { "access": "public" }
+}

@@ -54,3 +54,4 @@ export type {
   ViewportListener,
   ViewportSize,
 } from "./viewport.js";
+export type { RealmStateClient } from "@loomrealm/realm-state";

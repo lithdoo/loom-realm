@@ -8,13 +8,20 @@ import {
   type JsonValue,
   type WirePathSegment,
 } from "@loomrealm/wire";
+import {
+  RealmStateError,
+  identityToken,
+  prepareRealmStateDefinition,
+} from "@loomrealm/realm-state";
 import { GamePackageError, type GamePackageErrorCode } from "./errors.js";
 import type { ValidatedGameEntryV1 } from "./model.js";
 import { createValidatedGameEntrySnapshot } from "./snapshot.js";
 
-const TOP_LEVEL_KEYS = ["formatVersion", "initial", "subsystems"] as const;
+const TOP_LEVEL_REQUIRED_KEYS = ["formatVersion", "initial", "subsystems"] as const;
+const TOP_LEVEL_KEYS = [...TOP_LEVEL_REQUIRED_KEYS, "state"] as const;
 const INITIAL_KEYS = ["subsystem", "input"] as const;
 const DESCRIPTOR_KEYS = ["key"] as const;
+const STATE_KEYS = ["records"] as const;
 const SUBSYSTEM_KEY_MAX_BYTES = 256;
 
 function fail(
@@ -77,6 +84,7 @@ function exactObject(
   value: JsonValue,
   requiredKeys: readonly string[],
   path: readonly WirePathSegment[],
+  allowedKeys: readonly string[] = requiredKeys,
 ): JsonObject {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     fail("GAME_ENTRY_INVALID", path);
@@ -88,7 +96,7 @@ function exactObject(
     }
   }
 
-  const allowed = new Set(requiredKeys);
+  const allowed = new Set(allowedKeys);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) fail("GAME_ENTRY_INVALID", [...path, key]);
   }
@@ -105,7 +113,7 @@ function member(object: JsonObject, key: string, path: readonly WirePathSegment[
 
 export function validateGameEntryV1(value: unknown): ValidatedGameEntryV1 {
   validateRepresentation(value);
-  const entry = exactObject(value, TOP_LEVEL_KEYS, []);
+  const entry = exactObject(value, TOP_LEVEL_REQUIRED_KEYS, [], TOP_LEVEL_KEYS);
 
   const version = ownValue(entry, "formatVersion");
   if (typeof version !== "number") {
@@ -152,7 +160,36 @@ export function validateGameEntryV1(value: unknown): ValidatedGameEntryV1 {
     fail("INITIAL_TARGET_UNDECLARED", ["initial", "subsystem"]);
   }
 
-  return createValidatedGameEntrySnapshot(1, initialSubsystem, initialInput, keys);
+
+  let stateRecords: readonly { readonly namespace: string; readonly key: string; readonly value: JsonValue }[] | undefined;
+  if (Object.prototype.hasOwnProperty.call(entry, "state")) {
+    const state = exactObject(member(entry, "state", []), STATE_KEYS, ["state"]);
+    const records = member(state, "records", ["state"]);
+    try {
+      const prepared = prepareRealmStateDefinition(records);
+      const byIdentity = new Map(prepared.records.map((record) => [identityToken(record.key), record] as const));
+      stateRecords = Object.freeze((records as readonly JsonValue[]).map((entry, index) => {
+        const record = entry as JsonObject;
+        const namespace = member(record, "namespace", ["state", "records", index]) as string;
+        const key = member(record, "key", ["state", "records", index]) as string;
+        const preparedRecord = byIdentity.get(identityToken({ namespace, key }))!;
+        return Object.freeze({ namespace, key, value: preparedRecord.value });
+      }));
+    } catch (error) {
+      if (error instanceof RealmStateError) {
+        const path = Object.freeze(["state", ...(error.path ?? [])] as WirePathSegment[]);
+        const code = error.code === "LIMIT_EXCEEDED"
+          ? "REALM_STATE_INITIAL_LIMIT_EXCEEDED"
+          : error.message.includes("Duplicate")
+            ? "REALM_STATE_INITIAL_DUPLICATE"
+            : "REALM_STATE_INITIAL_INVALID";
+        fail(code, path, error);
+      }
+      throw error;
+    }
+  }
+
+  return createValidatedGameEntrySnapshot(1, initialSubsystem, initialInput, keys, stateRecords);
 }
 
 export function parseGameEntryV1(text: string): ValidatedGameEntryV1 {

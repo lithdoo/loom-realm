@@ -21,6 +21,7 @@
     "test": "npm run build && node --test"
   },
   "dependencies": {
+    "@loomrealm/realm-state": "0.1.0-alpha.0",
     "@loomrealm/wire": "0.1.0-alpha.0"
   },
   "devDependencies": {
