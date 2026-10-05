@@ -36,7 +36,9 @@ Realm State READY
 → Main DataAuthority → Platform Data provisioning
 ```
 
-`Main` 只消费平台的窄 capability 与 `LogicalGameBootstrap`；不消费 Game Entry 文件/类型、Realm State prepared definition/values、模块 URL、Node/Worker 对象、浏览器 DOM 或 Hostra RPC 内容。
+Realm State bootstrap只消费 prepared Game baseline；Save/Load/restore 不进入 Main/Realm State bootstrap。具体游戏若实现持久化恢复，由 business Subsystem 在 Runtime 启动后通过普通 RealmStateClient read/commit 完成。
+
+`Main` 只消费平台的窄 capability 与 `LogicalGameBootstrap`；不消费 Game Entry 文件/类型、Realm State prepared definition/values、Save/Load document、模块 URL、Node/Worker 对象、浏览器 DOM 或 Hostra RPC 内容。
 
 `DataConnectionAuthoritySink` 仅向平台发布当前 DataAuthority 视图；Desktop Broker 负责物理候选连接，不接管 logical generation/profile 决策。Data carrier 丢失不自动制造新 Session/DataAuthority，也不影响 Realm State authority。
 
@@ -48,7 +50,8 @@ Session/Platform composition MAY physically construct Main 与 RealmStateAuthori
 - `RendererControlBinding.acquire` 只建立物理候选，当前 Renderer identity 只能在合法 hello transaction 后切换。
 - Main-owned control mutation 依照已有 causal barrier 提交；失败遵照固定点 unwind/terminal，Platform层不能额外维护重试、回滚或并行 control authority。
 - Realm State ordinary invalid/limit/conflict、subscription listener failure或 State binding loss不得自动触发 Main Runtime/Frame/Session transition。
-- 如果 RealmStateAuthority 无法继续维持自身 invariant，它只报告 Session-fatal condition；Main/Session lifecycle owner 才提交 Session terminal 与 Runtime/Frame unwind。
+- Runtime-scoped RealmStateClient logical lifetime不等于一个 physical State binding lifetime；binding丢失可以由平台替换 carrier，但 old subscription必须 terminal/fresh subscribe，ambiguous commit不得自动 replay。
+- 如果 RealmStateAuthority 无法继续维持自身 invariant，它只报告 Session-fatal fact；**Main 唯一提交 Session terminal 与 Runtime/Frame unwind**。Platform/Session composition只负责物理 wiring/cleanup，不是第二个 Session lifecycle owner。
 - `renderer-data/1` 的精确子项及当前兼容性见 [Renderer Data Profile](../../15-contracts/renderer-data-profile-v1.md) 和 [Viewport](../../15-contracts/viewport-state-v1.md)，不要引用旧三子项实现状态推断当前主线资格。
 
 ## 使用与验证
