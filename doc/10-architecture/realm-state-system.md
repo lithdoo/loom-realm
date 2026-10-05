@@ -42,14 +42,16 @@
 23. `list()` 返回一致 revision 的扁平 `(namespace,key,version)` discovery index，不返回业务 value，也不是 transactional Collection scan；
 24. Subscription 只观察显式已知 `RealmStateKey` Records；v1 不提供 namespace wildcard subscription；
 25. Save 可以只保存部分 current values；Load Game 使用 sparse current-value override；
-26. RealmStateAuthority fatal → Session terminal；
+26. RealmStateAuthority fatal 是 **Session-fatal condition**；Authority 只报告该 condition，由 Main/Session lifecycle owner 提交 Session terminal 与 failure unwind；
 27. Key grammar、capacity limits、transaction shape、deep-equal write、discovery index ordering 均为已确定架构方向；
 28. 一个 logical request 的 semantic validation MUST 有明确 owner；实现 MAY 将已验证 key/value/request 投影为 trusted internal representation，并避免在 SDK / transport adapter / Authority 间重复执行等价 deep validation；
 29. Authority serialized commit step SHOULD 保持为 Record lookup、version comparison、atomic reference replacement、revision/version allocation、materialization/index metadata update 等短路径；serialization、deep clone、canonical sorting 与 listener delivery SHOULD 在该 serialized step 外完成；
 30. 成功 `commit()` 只返回 commit evidence + 新 concurrency metadata，不重复回传 caller 已提交的 value；
-31. Subscription 采用 authority 原子 baseline + observer registration；断线/overflow 后 fresh subscribe，不提供 replay cursor；
+31. Subscription 采用 authority 原子 baseline + observer registration；断线/overflow 后 fresh subscribe，不提供 replay cursor；listener delivery 属 Runtime-local callback execution，不是 Authority execution；
 32. `commit()` 不支持 remote cancellation；一旦 dispatch，结果丢失时使用 `OUTCOME_UNKNOWN`，不得自动 retry；
-33. v1 不引入 transaction ID、dedup journal、status query 或 generic transaction coordinator。
+33. v1 不引入 transaction ID、dedup journal、status query 或 generic transaction coordinator；
+34. `RealmStateClient` 是 Runtime-scoped capability；Realm State operations 不创建、消费或验证 Frame / Activation / InputTarget authority，`state.commit()` 不受 Frame mutation gate 支配；
+35. Realm State 只承载真正需要成为 **Session 范围跨 Subsystem 唯一业务真相** 的事实，不作为 local task state、Render/Input cache、platform state、Content definition 或 universal Redux store。
 
 ---
 
@@ -110,6 +112,30 @@ Content
 
 Realm State MUST NOT 被实现为 Main 内部业务字段集合。
 
+Session composition 可以在物理上构造、持有和清理 Main 与 RealmStateAuthority，但它只是 **composition/lifetime containment owner**，不得成为第三份 application authority：
+
+```text
+Session composition
+    MAY construct sibling authorities
+    MAY wire fatal/terminal signals
+    MAY own physical disposal
+
+Session composition
+    MUST NOT interpret Main Frame/Activation state
+    MUST NOT interpret Realm State business values
+    MUST NOT create a second Session/business/control state machine
+```
+
+RealmStateAuthority 检测到无法继续维持自身 invariant 时：
+
+```text
+RealmStateAuthority detects fatal
+→ report Session-fatal condition
+→ Main / Session lifecycle owner commits terminal + failure unwind
+```
+
+Authority 本身 MUST NOT 直接拥有 Runtime/Frame unwind、Renderer currentness 或 Main Session transition。
+
 ---
 
 ## 3. Trust Model / Non-goals
@@ -130,6 +156,41 @@ commit evidence
 ```
 
 业务 ownership 由 game-lib API、共享 key constants/types、测试、代码审查与业务 invariant 保证。
+
+### 3.1 State Placement Rule
+
+一个事实进入 Realm State 的充分理由是：
+
+> **它需要成为同一 Session 内跨 Subsystem 共享、可变、authoritative 的业务真相，并且需要由 Record version / OCC / subscription 等 State semantics 协调。**
+
+典型适合：
+
+```text
+player global attributes
+party / inventory
+quest flags / progression
+world/session business flags
+economy
+cross-Subsystem business metadata
+```
+
+默认不应进入 Realm State：
+
+```text
+Frame / Stack / Activation / InputTarget
+Runtime lifecycle / failure state
+Renderer currentness / Data generation/profile
+Input retained state / Interest Registry
+RenderDomain state / animation / presentation state
+Subsystem-local task progress
+local caches / derived projections
+transport connectivity / endpoint / credential
+Platform configuration / executable binding
+immutable Content definitions/resources
+Save-slot / persistence policy
+```
+
+`Subsystem local state != automatically Realm State`。如果一个事实只被单个 Subsystem 的局部执行需要，或者可以从其他 authority 派生，就应保留在其原 owner，而不是为了“方便共享”升级进 Realm State。
 
 v1 不设计：
 
@@ -153,6 +214,7 @@ Renderer direct State access
 generic EventBus
 large external initial-state source
 transparent authority restart/recovery
+universal application store / service locator
 ```
 
 ---
@@ -384,7 +446,7 @@ RealmStateAuthority 对每个 logical Record 内部拥有：
 
 ```text
 initialValue
-    current Game Entry-defined immutable baseline
+    current Game-defined immutable baseline
 
 current value
     current Session mutable authoritative value
@@ -478,7 +540,7 @@ Record version 表达 successful authoritative writes，而不是“值的语义
 一个 Record 满足以下任一条件即 materialized：
 
 ```text
-1. Game Entry 显式声明 initial record；
+1. prepared Game baseline 显式声明该 record；
 2. Load Game sparse current seed 显式包含该 record；
 3. Runtime 至少一次成功 commit 写入该 record。
 ```
@@ -533,11 +595,13 @@ v1 只支持 Game Entry inline initial records；不支持 external file、Conte
 
 ```text
 state
-    Game-level shared business baseline
+    Game-level shared business baseline document
 
 initial.input
     initial Frame invocation parameters
 ```
+
+Game Package document representation **不是 RealmStateAuthority 的 bootstrap ABI**。Game Package 负责 document schema/validation；matching Launcher 在 PREPARE 中把 validated document State 投影为 Realm State-owned prepared bootstrap representation。Realm State core MUST NOT 依赖 `GameEntryV1`、`formatVersion`、`game.json` 或 Launcher manifest types。
 
 ---
 
@@ -611,39 +675,55 @@ PREPARE：
 read game.json
 → validate GameEntryV1 including optional state
 → validate namespace/key grammar / JsonValue / capacity limits
-→ detach/freeze initial Realm State records
+→ detach/freeze validated Game Package State document
 → validate Platform Launch Manifest
 → exact subsystem key-set join
 → executable/content/capability preflight
 → freeze PlatformLaunchPlan
 → freeze LogicalGameBootstrap
-→ freeze Realm State game definition
+→ project/freeze PreparedRealmStateDefinition
 ──────────────────────────────────────── PREPARE complete
 ```
 
-Prepared output 概念上是平级 projection：
+Realm State-owned prepared bootstrap representation：
 
 ```ts
+interface PreparedRealmStateDefinition {
+  readonly records: readonly PreparedRealmStateInitialRecord[];
+}
+
+interface PreparedRealmStateInitialRecord {
+  readonly key: RealmStateKey;
+  readonly value: JsonValue;
+}
+
 interface PreparedLogicalGame {
   readonly main: LogicalGameBootstrap;
-  readonly state: RealmStateGameDefinitionV1;
+  readonly state: PreparedRealmStateDefinition;
 }
 ```
 
-State payload MUST NOT 塞进 `LogicalGameBootstrap`。
+这里的 `PreparedRealmStateDefinition` 是 platform-neutral、detached/immutable 的 Authority bootstrap input；它不是 Game Package document type。Launcher owns the projection：
+
+```text
+Validated GameEntryV1.state
+→ PreparedRealmStateDefinition
+```
+
+State payload MUST NOT 塞进 `LogicalGameBootstrap`；RealmStateAuthority 也 MUST NOT 反向解析 Game Entry document。
 
 Session bootstrap：
 
 ```text
 PREPARE complete
 → select New Game or validated Load Game sparse current seed
-→ create RealmStateAuthority
+→ composition constructs RealmStateAuthority from PreparedRealmStateDefinition
 → install immutable Game initial baseline
 → apply sparse current overrides
 → derive materialized Collection membership
 → initialize revision/version = 0
 → Realm State READY
-→ create Runtime-scoped RealmStateClient
+→ create Runtime-scoped RealmStateClient bindings
 → run Main / RuntimeHosting
 → Subsystem initialize
 → initial Frame
@@ -656,6 +736,8 @@ first business Runtime side effect
     ⇒ Realm State READY
 ```
 
+Session composition 在这里拥有 physical assembly/order/disposal，不因此获得 Realm State business authority 或 Main control authority。
+
 ---
 
 ## 12. New Game / Load Game
@@ -663,7 +745,7 @@ first business Runtime side effect
 ### New Game
 
 ```text
-Game initial
+prepared Game baseline
 → initialValue
 → current value = initialValue
 ```
@@ -688,7 +770,7 @@ Save record present, value = null
     → explicit current null
 ```
 
-Save MUST NOT redefine `initialValue`。因此 `readInitial()` 在 loaded Session 中仍返回 current Game Entry baseline，而不是 Save current override。
+Save MUST NOT redefine `initialValue`。因此 `readInitial()` 在 loaded Session 中仍返回 current prepared Game baseline，而不是 Save current override。
 
 Save 不要求持久化所有 materialized Records；persistence selection 属于 Save System policy。
 
@@ -740,6 +822,18 @@ interface RealmStateSubscription {
 
 `commit()` **不接受 `AbortSignal`**。Mutation 一旦 dispatch，就不提供 remote cancellation；调用方不得把本地“停止等待”解释成“transaction 未提交”。
 
+`RealmStateClient` 与 Subsystem Runtime 同 lifetime，不与 Frame/Activation 绑定：
+
+```text
+state.commit(transaction)
+    no Frame argument
+    no activationId
+    no ambient Frame context requirement
+    no Frame mutation permit
+```
+
+Frame suspend/close、Activation replacement、pending `frame.call()` 不构成 Realm State request admission condition。Runtime terminal 才终止该 Runtime 的 client/subscriptions。
+
 所有 live Runtime-scoped clients 可访问任意 valid Collection/Record；v1 没有业务 ACL。
 
 ### 13.1 Subscription Handle Visibility
@@ -778,7 +872,7 @@ Authority 内部 MAY 通过 immutable authoritative value references 构造 logi
 
 ### 14.2 Initial Snapshot
 
-`readInitial(keys)` 返回这些 logical Records 的 immutable Game Entry baseline：
+`readInitial(keys)` 返回这些 logical Records 的 immutable prepared Game baseline：
 
 ```ts
 interface RealmStateInitialSnapshot {
@@ -1091,6 +1185,8 @@ validated request
 
 普通 transaction 使用 per-record version 做 conflict detection；global revision 不作为默认全局条件；Namespace/Collection membership 不参与 OCC。
 
+Realm State transaction admission **不读取 Main Frame/Activation authority**。调用者是否当前位于某个 Frame handler、该 Frame 是否 suspended、是否存在 pending `frame.call()`，都不是本 transaction 的 condition。
+
 ---
 
 ## 17. Commit Result / Evidence / Ambiguity
@@ -1255,7 +1351,40 @@ all relevant commits after N MUST be delivered unless subscription terminals/clo
 unrelated commits MAY cause revision gaps
 ```
 
-### 18.3 Backpressure / Overflow
+### 18.3 Listener Execution Boundary
+
+Listener 是 **Runtime-local business callback**，不是 RealmStateAuthority serialized execution，也不拥有 Session/Runtime/Frame lifecycle authority。
+
+必须保持：
+
+```text
+Authority captures/buffers committed notification data
+→ leaves Authority serialized lane
+→ binding/SDK schedules listener delivery
+```
+
+Listener synchronous throw 或 returned rejected thenable：
+
+```text
+MUST be locally contained / diagnostic
+MUST NOT retroactively fail the committed transaction
+MUST NOT make RealmStateAuthority fatal
+MUST NOT make Session terminal
+MUST NOT become subscription protocol backpressure acknowledgement
+```
+
+Listener MAY reenter：
+
+```text
+read / readInitial / list
+commit
+subscribe
+subscription.close()
+```
+
+binding/SDK MUST NOT 因 reentrancy 持有 Authority lock 或形成 callback→Authority deadlock。
+
+### 18.4 Backpressure / Overflow
 
 Subscription delivery MUST NOT 阻塞 RealmStateAuthority commit lane。
 
@@ -1268,21 +1397,34 @@ MUST terminal the subscription with reason = overflow
 
 consumer 之后通过 fresh subscribe 恢复。
 
-### 18.4 Disconnect / Reconnect
+### 18.5 Disconnect / Reconnect
 
 v1 不提供 replay journal、resume cursor 或 `resumeFromRevision`。
 
 ```text
 binding / connection lost
+→ affected client/binding becomes terminal according to profile
 → old subscription terminal(reason = binding-terminal)
-→ reconnect
-→ fresh subscribe
-→ fresh baseline @ current revision
+→ no transparent reattach of old client/subscription
 ```
 
-因此 v1 的恢复模型是 **state resynchronization**，不是 event replay。
+若 platform/profile 后续提供新的 logical client binding，它必须以 fresh client/fresh subscribe/fresh baseline 建立；旧 binding identity 不复活。
 
-### 18.5 Close
+**Physical Realm State binding loss 本身不得：**
+
+```text
+fail Main Runtime
+unwind Frame
+terminate Session
+reset RealmStateAuthority
+change Main DataAuthority
+```
+
+它只产生 Realm State binding/client-local terminal facts；业务或更高层 policy 可以基于这些事实决定后续行为，但 transport/binding 不能自行成为 Runtime/Session supervisor。
+
+因此 v1 的 subscription 恢复模型是 **state resynchronization**，不是 event replay。
+
+### 18.6 Close
 
 `subscription.close()` 是 author-initiated observation teardown，不影响 Realm State authority。
 
@@ -1314,7 +1456,7 @@ state admin role
 
 Namespace/Collection 是 discovery/organization boundary，不是 security boundary。
 
-Runtime/binding terminal 后既有 RealmStateClient 必须 terminal/inert。
+Runtime terminal 后既有 RealmStateClient 必须 terminal/inert。
 
 这是 capability lifetime correctness，不是业务 ACL。
 
@@ -1324,20 +1466,23 @@ Runtime/binding terminal 后既有 RealmStateClient 必须 terminal/inert。
 
 ```text
 Frame suspend        != State unavailable
-Frame close          != State deleted
-Activation change    != State reset
+Frame close          != State unavailable / deleted
+Activation change    != State reset / client replacement
 Renderer reload      != State changed
 Data reconnect       != State changed
 put(null)            != Record identity forgotten
 put(null)            != Collection membership removed
+Realm State binding loss → affected client/subscriptions terminal; no Main/Session transition
 Runtime terminal     → its RealmStateClient terminal
 Session terminal     → RealmStateAuthority terminal
-RealmStateAuthority fatal → Session terminal
+RealmStateAuthority fatal → report Session-fatal condition to Main/Session lifecycle owner
 ```
 
 Collection 没有独立 lifetime；其可见存在性由 Session 内 materialized Records 派生。
 
-v1 不设计 transparent authority restart / journal replay / client reattach。
+v1 不设计 transparent authority restart / journal replay / old client reattach。
+
+Main/Session lifecycle owner 是 Session terminal / Runtime/Frame unwind 的唯一提交者；RealmStateAuthority、binding、Runner 或 Platform 都只能报告其拥有的 terminal/fatal facts。
 
 ---
 
@@ -1366,11 +1511,15 @@ Logical protocol MUST 定义 validation semantics，但 MUST NOT 要求每一层
 
 不得塞进 renderer-data、Runtime Control 或 `frame.call()`。
 
+Realm State binding loss 只产生该 logical plane 的 terminal facts；MUST NOT 自行改变 Main Runtime/Frame/Session state。RealmStateAuthority fatal 则通过显式 Session-fatal report seam 交给 Main/Session lifecycle owner。
+
 ---
 
 ## 22. Interaction with Main / Renderer / Content
 
 Main 不持有具体 State Collections/Records，也不解释 namespace/value/initial baseline。
+
+RealmStateAuthority 不读取 Frame/Activation/InputTarget，也不把这些 Main facts 作为 read/commit/subscription admission 条件。
 
 Renderer v1 不直接成为 Realm State client：
 
@@ -1392,6 +1541,8 @@ Realm State transaction
     shared-state coordination
 ```
 
+Realm State 不存储 Content cache、Renderer projection、Input retained state 或 Platform execution facts；这些数据继续由各自 owner 管理。
+
 ---
 
 ## 23. Persistence / Save Boundary
@@ -1409,7 +1560,7 @@ list()
 Load：
 
 ```text
-current Game initialValue baseline
+current prepared Game initialValue baseline
 +
 Save-present current values
 ```
@@ -1417,6 +1568,8 @@ Save-present current values
 Save missing key fallback 到当前 Game initialValue；Save explicit null 是真正 current null。
 
 Save 不应把旧 Session runtime revision/version 当作新 Session concurrency metadata。
+
+Realm State MUST NOT 提供 `saveSlot()` / `loadSlot()` / storage path / persistence format policy；这些属于独立 persistence/application policy owner。
 
 ---
 
@@ -1441,6 +1594,16 @@ subscription terminal / fresh-resubscribe semantics
 
 同进程 realization MAY 复用 validated immutable references / interned Record identities；跨 Worker/Process realization MAY 在 carrier decode boundary 重新验证并 detach。二者不要求拥有相同 validation pass 数量，只要求 observable validity、limits 与 authority semantics 等价。
 
+Platform / Session composition 可以 physically construct/bind/dispose RealmStateAuthority，但 MUST NOT：
+
+```text
+interpret namespace/value business semantics
+own Record versions/revision
+own OCC/retry policy
+turn binding loss into Runtime/Session transition
+become a generic Session coordinator/service locator
+```
+
 ---
 
 ## 25. v1 Initial Implementation Scope
@@ -1448,7 +1611,9 @@ subscription terminal / fresh-resubscribe semantics
 实现：
 
 ```text
-optional GameEntryV1 state.records
+optional GameEntryV1 state.records document input
+Launcher projection to PreparedRealmStateDefinition
+RealmStateAuthority consumes prepared State bootstrap representation, not GameEntryV1
 inline initial records only
 omitted state/key → default null semantics
 immutable internal initialValue
@@ -1481,6 +1646,7 @@ strict transaction shape validation
 OCC read-set Record-version conditions
 write-set ⊆ read-set
 atomic multi-record / cross-Collection commit
+commit independent from Frame/Activation authority
 commit result contains revision + written Record versions only
 short serialized authority commit path
 explicit INVALID_REQUEST / LIMIT_EXCEEDED / CONFLICT / TERMINAL / OUTCOME_UNKNOWN
@@ -1488,13 +1654,16 @@ commit() without AbortSignal / remote cancellation
 no automatic mutation retry
 atomic subscription baseline + observer establishment
 subscription handle observable before baseline callback
+listener delivery outside authority serialized lane
+listener failure locally contained; callback reentrancy supported
 ordered relevant current Record changes
 no namespace wildcard subscription
 subscription overflow/disconnect → terminal
+binding loss does not fail Main Runtime/Session or reset Authority
 close() idempotent, no post-close callback
-fresh subscribe + fresh baseline recovery
+fresh logical binding + fresh subscribe + fresh baseline recovery
 Runtime-scoped RealmStateClient
-RealmStateAuthority fatal → Session terminal
+RealmStateAuthority fatal reports Session-fatal condition to Main/Session owner
 Desktop in-process authority + explicit transport seam
 ```
 
@@ -1527,6 +1696,8 @@ Renderer direct access
 query language / secondary indexes
 generic events
 transparent authority restart/recovery
+Frame/Activation-gated Realm State mutation
+universal application state store
 ```
 
 ---
@@ -1540,7 +1711,17 @@ Game Entry / Bootstrap
 - existing GameEntryV1 without state remains valid after formal contract update
 - optional state validates as part of GameEntryV1 after formal contract update
 - invalid/duplicate/oversized initial Records reject during PREPARE
+- Launcher projects validated Game document State to detached PreparedRealmStateDefinition
+- RealmStateAuthority bootstrap does not depend on GameEntryV1/formatVersion/game.json
 - State is READY before first business Runtime side effect
+
+Authority Boundaries
+- Session composition only wires/owns physical lifetime; it cannot inspect/modify Main or Realm State application authority
+- state.commit requires no Frame / activationId / ambient Frame context
+- Frame suspend/close/Activation replacement does not revoke RealmStateClient or reject an otherwise valid Realm State request
+- RealmStateAuthority fatal reports Session-fatal condition; Main/Session owner performs terminal/unwind
+- Realm State binding loss does not fail Runtime/Session or reset Authority
+- local/cache/render/input/platform/content facts are not stored by framework in Realm State
 
 Namespace Collection / Discovery
 - namespace is a Collection identifier, not merely an opaque repeated field
@@ -1584,7 +1765,7 @@ Initial / Load
 - new loaded Session revision/version start at 0
 
 Materialization
-- Game initial / Load seed / successful first write materialize Records
+- Game baseline / Load seed / successful first write materialize Records
 - read/readInitial unknown key does not materialize
 - put(null) does not dematerialize
 
@@ -1599,7 +1780,7 @@ Read / Transaction
 - commit result contains all written keys/new versions but does not echo values
 
 Commit Evidence
-- commit API exposes no remote cancellation
+- commit API exposes no Frame/Activation dependency and no remote cancellation
 - explicit pre-commit rejection is known no-commit
 - dispatch followed by lost definitive result produces OUTCOME_UNKNOWN
 - neither CONFLICT nor OUTCOME_UNKNOWN is automatically retried
@@ -1614,15 +1795,18 @@ Subscription
 - change revisions are monotonically increasing
 - one transaction maps to at most one change event per subscription
 - unrelated commits may create revision gaps
+- listener delivery occurs outside Authority serialized lane
+- listener sync throw / rejected thenable is locally contained and does not affect Authority/Session
+- listener may reenter RealmStateClient without deadlock
 - slow-consumer overflow terminals instead of dropping changes
-- disconnect terminals old subscription
+- disconnect terminals old subscription/client binding without failing Main Runtime/Session
 - close() is idempotent and prevents future listener invocation after return
-- reconnect uses fresh subscribe + fresh baseline
+- reconnect uses fresh logical binding/subscribe/baseline; old identity not reattached
 - no replay/cursor is required for v1
 
 Lifetime / Failure
 - Runtime terminal terminates its client/subscriptions
-- RealmStateAuthority fatal terminates Session
+- RealmStateAuthority fatal reports Session-fatal condition to Main/Session lifecycle owner
 ```
 
 ---
@@ -1671,6 +1855,7 @@ Validation / trusted representation
 Transport/profile realization
 - bounded subscription queue profile
 - Load current-seed total resource bound
+- client/binding terminal physical mapping while preserving no Main/Session supervision ownership
 ```
 
 这些项目属于 formal contract / profile / qualification closure，不应被重新解释为需要扩张 Realm State authority model 的架构缺口。
@@ -1685,22 +1870,27 @@ Transport/profile realization
 Game Package v1
     closed schema 增加 optional state
     RealmStateGameDefinitionV1 / initial Record validation
+    document layer does not become Realm State runtime bootstrap ABI
 
 Subsystem author contract
     SubsystemScope.state
     RealmStateClient read/readInitial/list/commit/subscribe surface
+    no Frame/Activation dependency
 
 Realm State logical protocol
     current read / initial read / flat list / commit / subscribe / terminal / evidence
     validation owner / validated internal representation seam
+    listener-failure isolation + binding terminal boundary
 
 Launcher / Platform Composition
-    prepared State projection
+    project Validated Game State → PreparedRealmStateDefinition
     State bootstrap barrier
+    composition remains physical owner, not third application authority
 
 Hostra / PWA
     equivalent logical semantics + limits + failure behavior
     platform-appropriate validation/copy strategy
+    binding loss does not become Runtime/Session supervision
 ```
 
 在这些 normative contract 完成前，本文仍不得被解释为“功能已经实现”。
@@ -1758,6 +1948,12 @@ readInitial has current revision/version
 commit result echoes written value
     = no
 
+state.commit consumes Frame / Activation authority
+    = no
+
+Frame suspend/close gates Realm State commit
+    = no
+
 namespace wildcard subscription
     = no
 
@@ -1767,6 +1963,24 @@ Game Entry state requires v2
 GameEntryV1 state required
     = no; optional
 
+RealmStateAuthority directly owns Session terminal/unwind
+    = no; it reports Session-fatal condition to Main/Session owner
+
+Session composition is third application authority
+    = no; physical assembly/lifetime only
+
+Realm State core runtime bootstrap type is GameEntryV1 document type
+    = no; Launcher projects to PreparedRealmStateDefinition
+
+subscription listener failure can fail Authority/Session
+    = no; Runtime-local containment
+
+subscription listener may reenter RealmStateClient
+    = yes; delivery outside authority lock
+
+physical State binding loss fails Runtime/Session
+    = no
+
 revision/version bootstrap baseline
     = 0
 
@@ -1775,9 +1989,6 @@ Save missing key
 
 Save explicit null
     = explicit current null
-
-RealmStateAuthority fatal
-    = Session terminal
 
 namespace is permission unit / State has business ACL
     = no
@@ -1851,9 +2062,6 @@ close() may continue invoking listener after return
 v1 subscription reconnect replays history
     = no
 
-reconnect uses fresh baseline
-    = yes
-
 business Runtime may start before Realm State initialization
     = no
 ```
@@ -1863,61 +2071,76 @@ business Runtime may start before Realm State initialization
 ## 30. Final Invariants
 
 1. Main 唯一拥有 Control Authority；Realm State 唯一拥有 Session shared mutable business facts；
-2. Namespace 是一等的 **Record Collection / organization + discovery boundary**；Key 是该 Collection 内的 Record identifier；
-3. Namespace/Collection 不拥有 value、version、conflict、replacement、transaction、ACL 或独立 lifecycle；
-4. Collection existence 由 materialized Record membership 派生；v1 不存在 NamespaceRegistry、`createNamespace()` 或 `deleteNamespace()`；
-5. Collection membership 是 observational discovery metadata，不参与 OCC，也不提供“成员集合未变化”的 transactional predicate；
-6. `(namespace,key)` Record 是 replacement/version/conflict unit；Transaction 是 atomicity unit，并可跨 Collection；
-7. RealmStateKey 使用 exact、case-sensitive、no-normalization identity，并受明确 UTF-8 hard bounds；validated identity MAY 被 intern/cache，不要求每次操作重新编码/扫描；
-8. Authority 为每个 key 持有 immutable `initialValue` 与 mutable current value；普通 current read/subscription 不重复携带 baseline，author 通过独立 `readInitial()` 按需读取；缺失 initial key → `null`；
-9. `readInitial()` 不携带 current revision/version，不 materialize unknown Record，Load sparse current override 不改变它返回的 current-Game baseline；
-10. GameEntryV1 `state` optional，不因 Realm State 升级 document version；
-11. 每个新 Session 的 revision/version 从 0 开始；Load 不继承旧 Session concurrency metadata；
-12. Materialization 只来自 explicit initial、explicit load seed 或 successful write；read/readInitial unknown key 不 materialize Record/Collection；
-13. `put(null)` 不 dematerialize Record，也不移除 Collection membership；
-14. `list()` 返回一致 revision 的扁平 `RealmStateKey + version` discovery index，可选择 namespace filter，并按 canonical `(namespace,key)` UTF-8 byte order 排序；不建立无 metadata 的 public Collection wrapper；
-15. `list()` 不是 transactional Collection scan；`list()` + 后续 `read()` 不保证 key-set 与 values 同 revision；
-16. 所有 key/value/request/session resource 均受明确 hard limits；精确 wire size/depth accounting 属 formal contract closure，并必须允许等价 streaming/one-pass counting；
-17. `read(keys)` 使用完整 Record identities，并返回一致 logical current snapshot；内部 MAY capture immutable refs，author-visible representation 仍须 detached/immutable；
-18. 每个 write target 必须且只能有一个 caller-observed Record version condition；Authority 原子执行 condition check + all writes；
-19. semantic validation 在每个不可信边界必须有明确 owner；trusted validated representation MAY 沿内部路径复用，不要求 SDK/binding/Authority 重复等价 deep validation；
-20. JsonValue validity、depth、size accounting 与 detach SHOULD 可融合为 bounded traversal；Authority serialized mutation path SHOULD 只承担 authority-sensitive metadata/reference work；
-21. stale condition → `CONFLICT` + zero write；successful deep-equal put 仍推进 version/revision；
-22. successful commit result 只返回 global revision + write-target new versions，不重复回传 caller 已知的 value；
-23. `commit()` 不提供 remote cancellation；dispatch 后失去确定结果 → `OUTCOME_UNKNOWN`；不得自动 retry；
-24. v1 不提供 mutation ID/dedup/status journal；
-25. Subscription establishment 原子绑定 baseline revision 与后续 observer；author handle 必须先于第一条 callback 可观察；
-26. Subscription 只观察显式 Record identities，不隐式观察 Collection membership，也不重复携带 initial baseline；
-27. Subscription 只交付 ordered committed current Record changes；revision 可因 unrelated commits 跳号；
-28. Overflow/disconnect 必须 terminal subscription，不得 silent drop；恢复使用 fresh subscribe + fresh baseline；
-29. `subscription.close()` idempotent；返回后不得再次调用 listener；主动 close 不产生 terminal("closed")；
-30. Realm State v1 不提供业务 ACL；live Runtime-scoped client 可 read/readInitial/list/commit/subscribe；
-31. Runtime terminal 终止其 client/subscriptions；RealmStateAuthority fatal → Session terminal；
-32. Realm State 必须在第一项 business Runtime side effect 前 READY；
-33. Hostra/PWA physical realization 可不同，包括 validation/copy pass 数量不同，但上述 Collection/Record semantics、hard limits、validation outcome、commit evidence 与 subscription semantics 必须一致；
-34. Formal contract checklist 中的 API/wire edge rules 必须在实现前冻结，但不得因此引入第二套 Collection authority/version/transaction model。
+2. Session composition只负责 sibling authority 的 physical assembly/order/disposal，不成为第三 application authority；
+3. RealmStateAuthority fatal 只报告 Session-fatal condition；Main/Session lifecycle owner 唯一提交 Session terminal、Runtime/Frame unwind；
+4. Namespace 是一等的 **Record Collection / organization + discovery boundary**；Key 是该 Collection 内的 Record identifier；
+5. Namespace/Collection 不拥有 value、version、conflict、replacement、transaction、ACL 或独立 lifecycle；
+6. Collection existence 由 materialized Record membership 派生；v1 不存在 NamespaceRegistry、`createNamespace()` 或 `deleteNamespace()`；
+7. Collection membership 是 observational discovery metadata，不参与 OCC，也不提供“成员集合未变化”的 transactional predicate；
+8. `(namespace,key)` Record 是 replacement/version/conflict unit；Transaction 是 atomicity unit，并可跨 Collection；
+9. RealmStateKey 使用 exact、case-sensitive、no-normalization identity，并受明确 UTF-8 hard bounds；validated identity MAY 被 intern/cache，不要求每次操作重新编码/扫描；
+10. Authority 为每个 key 持有 immutable `initialValue` 与 mutable current value；普通 current read/subscription 不重复携带 baseline，author 通过独立 `readInitial()` 按需读取；缺失 initial key → `null`；
+11. `readInitial()` 不携带 current revision/version，不 materialize unknown Record，Load sparse current override 不改变它返回的 current-Game baseline；
+12. GameEntryV1 `state` optional，不因 Realm State 升级 document version；Game Package document type 不成为 Realm State runtime bootstrap ABI；
+13. Launcher 将 validated Game State 投影成 `PreparedRealmStateDefinition`；RealmStateAuthority 不依赖 GameEntryV1/formatVersion/game.json；
+14. 每个新 Session 的 revision/version 从 0 开始；Load 不继承旧 Session concurrency metadata；
+15. Materialization 只来自 explicit prepared baseline、explicit load seed 或 successful write；read/readInitial unknown key 不 materialize Record/Collection；
+16. `put(null)` 不 dematerialize Record，也不移除 Collection membership；
+17. `list()` 返回一致 revision 的扁平 `RealmStateKey + version` discovery index，可选择 namespace filter，并按 canonical `(namespace,key)` UTF-8 byte order 排序；不建立无 metadata 的 public Collection wrapper；
+18. `list()` 不是 transactional Collection scan；`list()` + 后续 `read()` 不保证 key-set 与 values 同 revision；
+19. 所有 key/value/request/session resource 均受明确 hard limits；精确 wire size/depth accounting 属 formal contract closure，并必须允许等价 streaming/one-pass counting；
+20. `read(keys)` 使用完整 Record identities，并返回一致 logical current snapshot；内部 MAY capture immutable refs，author-visible representation 仍须 detached/immutable；
+21. 每个 write target 必须且只能有一个 caller-observed Record version condition；Authority 原子执行 condition check + all writes；
+22. Realm State request/transaction admission 不依赖 Frame/Activation/InputTarget；`state.commit()` 不受 Frame mutation gate支配；
+23. semantic validation 在每个不可信边界必须有明确 owner；trusted validated representation MAY 沿内部路径复用，不要求 SDK/binding/Authority 重复等价 deep validation；
+24. JsonValue validity、depth、size accounting 与 detach SHOULD 可融合为 bounded traversal；Authority serialized mutation path SHOULD 只承担 authority-sensitive metadata/reference work；
+25. stale condition → `CONFLICT` + zero write；successful deep-equal put 仍推进 version/revision；
+26. successful commit result 只返回 global revision + write-target new versions，不重复回传 caller 已知的 value；
+27. `commit()` 不提供 remote cancellation；dispatch 后失去确定结果 → `OUTCOME_UNKNOWN`；不得自动 retry；
+28. v1 不提供 mutation ID/dedup/status journal；
+29. Subscription establishment 原子绑定 baseline revision 与后续 observer；author handle 必须先于第一条 callback 可观察；
+30. Subscription listener delivery 在 Authority serialized lane 外；listener failure Runtime-local隔离，listener reentrancy 不得 deadlock Authority；
+31. Subscription 只观察显式 Record identities，不隐式观察 Collection membership，也不重复携带 initial baseline；
+32. Subscription 只交付 ordered committed current Record changes；revision 可因 unrelated commits 跳号；
+33. Overflow/disconnect 必须 terminal subscription/client binding，不得 silent drop；physical binding loss 不自动改变 Main Runtime/Session/Authority；恢复使用 fresh logical binding + fresh subscribe + fresh baseline；
+34. `subscription.close()` idempotent；返回后不得再次调用 listener；主动 close 不产生 terminal("closed")；
+35. Realm State v1 不提供业务 ACL；live Runtime-scoped client 可 read/readInitial/list/commit/subscribe；
+36. Runtime terminal 终止其 client/subscriptions；Session terminal 终止 RealmStateAuthority；
+37. Realm State 只承载 Session 跨 Subsystem authoritative mutable business facts，不吸收 Main/Frame、Renderer/Data、Input/Render、Content、Platform、local cache/task 或 Save policy；
+38. Realm State 必须在第一项 business Runtime side effect 前 READY；
+39. Hostra/PWA physical realization 可不同，包括 validation/copy pass 数量不同，但上述 Collection/Record semantics、hard limits、validation outcome、commit evidence 与 subscription semantics 必须一致；
+40. Formal contract checklist 中的 API/wire edge rules 必须在实现前冻结，但不得因此引入第二套 Collection authority/version/transaction model。
 
 ---
 
 ## 31. Architectural Summary
 
 ```text
-                     GameEntryV1
-                 state? + initial
+                     GameEntryV1 document
+                 state? + initial + topology
                        │
+                Game Package validation
+                       │
+                 Launcher PREPARE
            ┌───────────┴───────────┐
            │                       │
            ▼                       ▼
-LogicalGameBootstrap      Realm State Initial Definition
+LogicalGameBootstrap      PreparedRealmStateDefinition
            │                       │
            ▼                       ▼
           Main               RealmStateAuthority
-    Control Authority         revision = 0
+    Control Authority         Business-state Authority
+                              revision = 0
                               versions = 0
                               initial baseline
                                   ▲
                                   │ sparse current overrides
-                              Save (optional)
+                              Load seed (optional)
+
+Session composition
+    physical assembly/order/disposal only
+    Main fatal/unwind owner remains Main/Session lifecycle
+    State fatal → report Session-fatal condition
 
                     Realm State Collections
                     ───────────────────────
@@ -1955,7 +2178,9 @@ trusted validated representation
 RealmStateAuthority fast path
     lookup → version check → ref swap → revision/version
     │
-    └→ serialization / delivery outside serialized authority step
+    └→ serialization / listener delivery outside serialized authority step
+             listener failure locally contained
+             listener may reenter RealmStateClient
 
                     local business computation
                               │
@@ -1965,6 +2190,7 @@ RealmStateAuthority fast path
                               ▼
                     atomic OCC commit
                     MAY span Collections
+                    no Frame/Activation condition
                               │
                 ┌─────────────┴─────────────┐
                 ▼                           ▼
@@ -2017,6 +2243,7 @@ Transaction
     validated Record-version conditions + write-set
     multi-record / cross-Collection atomicity
     short serialized authority step
+    independent from Frame/Activation authority
 
 Commit Result
     global revision + write-target new versions
@@ -2026,8 +2253,9 @@ Subscription
     explicit Record identities only
     atomic current baseline + observer registration
     handle-before-callback ordering
+    callback outside Authority lane; failure local; reentrant-safe
     ordered relevant committed current Record changes
-    fresh-baseline recovery
+    fresh-binding/fresh-baseline recovery
 ```
 
-至此 Realm State v1 的 **core architecture semantics** 已闭合。下一阶段应转向 **formal contract closure、reference authority、Game Package/Subsystem contract synchronization、Launcher projection、Desktop binding 与 qualification**，而不是继续向 core 增加未被真实 consumer 证明必要的机制。
+至此 Realm State v1 的 **core architecture semantics** 已闭合，并明确保持与 Main/Frame、Renderer/Data、Content、Platform、Subsystem-local state 的 authority 边界。下一阶段应转向 **formal contract closure、reference authority、Game Package/Subsystem contract synchronization、Launcher projection、Desktop binding 与 qualification**，而不是继续向 core 增加未被真实 consumer 证明必要的机制。
