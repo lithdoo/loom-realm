@@ -8,28 +8,30 @@
 > 目标：保留现有 `RPGMapBuilder / RPGMapHandler` 模块化接口，删除 `mapDefinition`、default export 与 Frame-keyed bridge，让 Handler 直接执行唯一的 package-internal Map runtime。
 > 相关：[地图模块](../20-modules/loom-map/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[M14 qualification](./m14-qualification.md)、[路线图](./roadmap.md)
 
-本文是冻结实施规格。实现 agent 应直接按本文执行，不重新设计 Map 架构，不扩大 scope；只有 checked-in source 证明某条冻结假设不成立时，才允许停下并记录偏差。
+本文保留冻结实施规格，并记录其实施结果。下文标注为“实施前基线”的内容描述 executable subject 落地前的状态，不代表当前代码；方案边界仍用于审计本次实现是否偏离冻结设计。
 
 ## 实施结果（2026-10-06）
 
 冻结方案已在 executable subject `488f8713a23158e736153677ec68e449879a8a1d` 实施：`RPGMapHandler.run()` 直接调用 package-internal `runMapRuntime()`，Frame-keyed `WeakMap`、direct-definition dual-mode、`mapDefinition` named/default export 均已删除；Builder/Handler、`RuntimeBridge` 语义及 Essentials 业务 topology 保持不变。
 
-实现审计还发现三个冻结清单未列出的 active consumer：`test/m14-boundary.test.mjs`、`test/terrain-behavior-live-product.test.mjs`、`scripts/m14-essentials-local.mjs`。它们只迁移到相同 Builder/Handler 启动路径，未修改业务断言或 fixture。
+实现审计还发现三个冻结清单未列出的 active consumer：`test/m14-boundary.test.mjs`、`test/terrain-behavior-live-product.test.mjs`、`scripts/m14-essentials-local.mjs`。它们只迁移到相同 Builder/Handler 启动路径，未修改业务断言或 fixture；这是删除 `mapDefinition` 后完成必要引用闭环，不是架构 scope expansion，也未引入新功能。
 
 当前 subject 的本地结果：Map package 106/106 PASS，`npm run test:m14` PASS，M15 Desktop 15/15 PASS。M14 exact-local 因现有本地 source-view indirection / source-copy 非法 `.desc.meta` 在 source preflight 失败；本地 M15 Hostra 因冻结 Hostra 缺少 bundled `electron.exe`，10 项非窗口检查 PASS、6 项真实窗口检查 FAIL。Hosted PR run `37449945940` 的 M14 Node 20/24 与 M15 delta 均 PASS；正式资格状态仍以 M14/M15 ledger 的完整同-subject closure rule 为准。
 
 ---
 
-## 1. 当前事实
+## 1. 实施前基线
 
-当前 `@loomrealm-game/map` 同时公开两类执行入口：
+以下描述为 executable subject 实施前的冻结基线。
+
+实施前 `@loomrealm-game/map` 同时公开两类执行入口：
 
 ```text
 RPGMapBuilder / RPGMapHandler
 mapDefinition（同时作为 default export）
 ```
 
-当前 Essentials 业务代码已经使用模块化入口：
+实施前 Essentials 业务代码已经使用模块化入口：
 
 ```text
 Game-owned defineSubsystem(...)
@@ -37,7 +39,7 @@ Game-owned defineSubsystem(...)
     -> RPGMapHandler
 ```
 
-而 `RPGMapHandler.run()` 内部仍通过 Frame-keyed bridge 绕回 `mapDefinition`：
+而当时的 `RPGMapHandler.run()` 内部仍通过 Frame-keyed bridge 绕回 `mapDefinition`：
 
 ```text
 RPGMapBuilder
@@ -50,16 +52,16 @@ RPGMapBuilder
 
 `runtimeBridges: WeakMap<Frame, RuntimeBridge>` 的作用只是暂存 Handler 状态，再让 `mapDefinition.frame()` 取回；这里没有创建新的 Main Frame，也没有发生 `frame.call()`。
 
-当前还有两个直接依赖 `mapDefinition` 的重要测试入口：
+实施前还有两个直接依赖 `mapDefinition` 的重要测试入口：
 
 ```text
 game-libs/map/test/runtime.test.mjs
 test/m14-vertical.test.mjs
 ```
 
-`package.test.mjs` 还显式验证 named/default `mapDefinition` export。
+实施前的 `package.test.mjs` 还显式验证 named/default `mapDefinition` export。
 
-最新 `main` 已实现 Realm State v1，并把 `SubsystemScope.state` 加入 author scope；M14 vertical harness 也已注入 Realm State client。Map 当前不消费 `scope.state`，因此该变化不改变本方案的 Map runtime 设计，只改变 M14 harness 的现行基线。
+冻结基线所在的 `main` 已实现 Realm State v1，并把 `SubsystemScope.state` 加入 author scope；当时的 M14 vertical harness 也已注入 Realm State client。Map 在该基线不消费 `scope.state`，因此该变化不改变本方案的 Map runtime 设计，只改变 M14 harness 的实施前基线。
 
 ---
 
@@ -199,7 +201,7 @@ mapDefinition
 mapDefinition as default
 ```
 
-这是明确的 Map package public API breaking change。当前 package 仍为 alpha；实现提交和 qualification 必须如实记录，不得写成完全兼容变更。
+这是明确的 Map package public API breaking change。实施时 package 仍为 alpha；实现提交和 qualification 必须如实记录，不得写成完全兼容变更。
 
 本次不新增任何替代 public execution API。
 
@@ -230,7 +232,7 @@ RPGMapHandler.run()
 
 ### 5.2 本轮保留 `RuntimeBridge` 现有语义
 
-本轮明确保留当前 internal `RuntimeBridge` 协作面及 `RPGMapHandlerImpl implements RuntimeBridge` 关系，只改变传递方式：
+本轮明确保留实施前已有的 internal `RuntimeBridge` 协作面及 `RPGMapHandlerImpl implements RuntimeBridge` 关系，只改变传递方式：
 
 ```text
 before
@@ -244,7 +246,7 @@ Handler -> runMapRuntime(scope, frame, this)
 
 ### 5.3 删除 dual-mode runtime
 
-当前 runtime 同时支持：
+实施前 runtime 同时支持：
 
 ```text
 Builder/Handler path
@@ -354,7 +356,7 @@ packages/* framework public ABI
 
 ### 8.1 `runtime.test.mjs`
 
-当前大量行为测试通过：
+实施前大量行为测试通过：
 
 ```ts
 const definition = mapDefinition(scope);
@@ -392,7 +394,7 @@ browser artifact 约束继续通过
 
 ### 8.3 `test/m14-vertical.test.mjs`
 
-最新 `main` 仍直接：
+实施前基线中的 `test/m14-vertical.test.mjs` 仍直接：
 
 ```text
 import mapDefinition from "@loomrealm-game/map"
@@ -416,7 +418,7 @@ const definition = defineSubsystem((scope) => ({
 }));
 ```
 
-不要改用 Essentials 的 `subsystems/map.mjs` 来顺便引入 guide NPC，因为那会改变当前 M14 vertical 的业务可观察结果，扩大本次重构语义范围。
+不要改用 Essentials 的 `subsystems/map.mjs` 来顺便引入 guide NPC，因为那会改变实施前 M14 vertical 的业务可观察结果，扩大本次重构语义范围。
 
 Realm State v1 合入后该 harness 已负责提供 `state` capability；本次保持其现有注入不变。
 
@@ -424,7 +426,7 @@ Realm State v1 合入后该 harness 已负责提供 `state` capability；本次�
 
 ## 9. Essentials compatibility
 
-当前 Essentials 已经是：
+实施前 Essentials 已经是：
 
 ```text
 Game-owned map Subsystem
