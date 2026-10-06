@@ -15,6 +15,8 @@ Foundation / Wire、Game Package、Runtime / Subsystem、Main、Realm State v1�
 
 Realm State v1 已完成从 Game Package document、Launcher PREPARE projection、Session Authority、Runtime-scoped client、dedicated Hostra State plane、`SubsystemScope.state` 到 Worker-compatible MessagePort realization 的闭环。该结果不宣称完整 PWA 产品（M16/M17）已完成，也不改变既有 M9–M15 ledger 的 subject。
 
+PWA 的当前产品组合与 Content 物理 realization 设计见 [PWA 产品组合设计](../20-modules/pwa-host/DESIGN.md)：M16 先关闭 PREPARE / Dedicated Worker Runner / Runtime Control MessagePort vertical；M17 再关闭 Window Renderer/Data/Input/Content/Presentation 与 Desktop 的 business-observable equivalence。PWA Content 保持现有 `ContentClient` 与 Content API HTTP/Fetch contract，same-origin Service Worker 作为 Content Service realization，persistent installation/index/object storage 位于其后；不把 OPFS/path/handle 暴露给 Subsystem。
+
 Map runtime composition 解耦已按 [冻结方案](./map-composition-refactor.md) 在 executable subject `488f8713a23158e736153677ec68e449879a8a1d` 实施。Map 现只有 Builder/Handler public execution model；M14 vertical 与其余 active consumer 已迁移，Essentials topology 未改。本地 Map package、`test:m14` 与 M15 Desktop 回归 PASS；hosted M14 Node 20/24 与 M15 delta PASS。正式 M14/M15 资格仍分别受 exact-local source blocker 与完整 closure rule 约束。
 
 [PR #43](https://github.com/lithdoo/loom-realm/pull/43) 已交付 Map21 Bridge、Map47 Ledge 及 held input、blocked/front、深度修复，**原版 RGSS 逐帧保真仍未签署**。[PR #44](https://github.com/lithdoo/loom-realm/pull/44) 实现了 PR CI 去重，不代表合并时所有 CI 都已结束。
@@ -33,8 +35,8 @@ Map runtime composition 解耦已按 [冻结方案](./map-composition-refactor.m
 | 4 · 运动延迟与性能 | 当前 SHA 重新实测 Renderer/Map 运动响应和 P95、像素遮挡、内存、回归；历史 42.9ms/96.3ms 不可冒充当前测量 | [性能规格及历史测量](./render-movement-latency-spec.md)与本次浏览器/桌面数据 |
 | 5 · 原版地形动态保真 | 合法获得 RGSS 后对照事件、持续输入、jump timing；由授权 reviewer 签署正式合同 | [FG 资格记录](../../game-libs/map/TERRAIN_BEHAVIOR_FREEZE_READINESS.md)、Issue #42；不阻塞已交付功能 |
 | 6 · Map runtime composition 解耦 | **Implemented / Local Regression PASS / Formal Qualification Pending**：subject `488f8713a23158e736153677ec68e449879a8a1d` 已提取唯一 `runMapRuntime()`，删除 WeakMap、direct-definition dual-mode、`mapDefinition` 与 default export，并迁移所有 active consumer；Essentials topology/业务代码不变；Map package 与 `test:m14` 本地 PASS | [Map Runtime Composition 解耦改造方案](./map-composition-refactor.md)、Map tests、M14/M15 ledger；Hosted 与外部环境证据仍不得由历史 PASS 代替 |
-| 7 · M16 PWA Runtime | PREPARE、Worker Runner、Runtime Control MessagePort 纵向闭环 | [PWA 模块](../20-modules/pwa-host/README.md)、实际 E2E |
-| 8 · M17 PWA 产品等价 | Window Renderer/Data/Input/Content/Presentation 与 Desktop 同一游戏结果 | 跨平台实际 E2E 及失败/恢复覆盖 |
+| 7 · M16 PWA Runtime | `PwaPlatform.prepareGame()` PREPARE、immutable `PwaLaunchPlan`、Dedicated Worker Runner、Runtime Control MessagePort、真实 Worker Realm State binding 与 shutdown/failure vertical；PREPARE failure 必须保持 zero Worker side effect | [PWA 产品组合设计](../20-modules/pwa-host/DESIGN.md)、[PWA Launcher](../../packages/game-launcher-pwa/DESIGN.md)、实际 Worker E2E |
+| 8 · M17 PWA 产品等价 | Window Renderer/Data/Input/Viewport/Content/Presentation 与 Desktop 同一游戏结果；Content 保持现有 HTTP/Fetch route/status/header/version/integrity contract，Service Worker + persistent installation/index/object storage 只是 PWA physical realization，Subsystem Content 调用不变 | [PWA 产品组合设计](../20-modules/pwa-host/DESIGN.md)、[Content API](../15-contracts/content-api-v1.md)、跨平台实际 E2E 及失败/恢复覆盖 |
 | 9 · 剩余全仓文档收敛 | 审计 `examples/essentials-v21.1-local` 的视口 PR0–PR3 证据与仍有效的格式/运动规格，保全不可替代性能记录；合并 `fsdb-http` 的仍有效 M12 amendment 而不改变 API；逐篇核对 `doc/30-implementation` Viewport 兼容占位页及引用，能安全删除的才退役。消除遗留旧状态、完成引用迁移与引用守卫扩展 | [地图模块](../20-modules/loom-map/README.md)、[Content 模块](../20-modules/fsdb-content-service/README.md)、本[路线图](./roadmap.md)；不得删除冻结签署/ledger/ADR/测试/fixture 或把旧历史变当前 PASS |
 
 **文档完成判据：** 当前模块拥有产品事实、正式契约拥有 ABI、一个路线图拥有待办、资格 ledger 持有精确结果；已完成过程文档从活跃目录退役，历史只在安全的固定 Git 快照追溯。每批删除均核对站内和全仓引用、VitePress 构建及最终 HEAD CI，不靠把文件挪入另一个活跃目录冒充清理。
