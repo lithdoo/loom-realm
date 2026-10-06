@@ -363,10 +363,16 @@ export function createRealmStateCarrierBinding(
     commit(transaction) {
       const validated = validateTransaction(transaction);
       const operation = request("commit", { transaction: validated });
+      const result = operation.result.then((value) =>
+        decodeProtocolResult(() => decodeCommit(value)));
+      // `dispatched` and the decoded result are independent evidence. The
+      // transport may terminalize between them, so observe this derived
+      // Promise immediately while the logical client is still awaiting the
+      // dispatch boundary.
+      void result.catch(() => undefined);
       return Object.freeze({
         dispatched: operation.dispatched,
-        result: operation.result.then((value) =>
-          decodeProtocolResult(() => decodeCommit(value))),
+        result,
       });
     },
     async subscribe(keys, listener) {
