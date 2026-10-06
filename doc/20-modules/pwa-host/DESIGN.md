@@ -19,11 +19,13 @@ Content 继续遵守另一条硬约束：
 
 > **Subsystem 在 Desktop/PWA 都只通过 `ContentClient.record()` / `resource()` 使用 Content。PWA 保持现有 HTTP/Fetch contract，由 same-origin Service Worker + persistent browser storage 实现，不向业务 Runtime 暴露 OPFS/path/handle。**
 
-PWA v1 同时冻结三个 browser-specific closure：
+PWA v1 同时冻结 browser-specific closure：
 
 1. executable 通过 **private same-origin executable route + Executable Index** 被 Worker Runner import；不用 `blob:` URL 作为安装 executable identity；
-2. Session 创建前必须通过 **Service Worker READY + version handshake**；SW 更新只在下一 Session 生效；
-3. installation 使用 **staging → publish complete**、quota/persistence preflight、`complete/invalid` fail-closed 与 installation-local GC。
+2. Session 创建前必须通过 **Service Worker READY + version handshake**，Session/Subsystem Worker 再通过 private `runtime-info` probe 验证自己实际命中的 SW generation；SW 更新只在下一 Session 生效；
+3. installation 使用 **staging → publish complete**、quota/persistence preflight、`complete/invalid` fail-closed 与 installation-local GC；
+4. installed executable graph v1 必须是 **安装时可枚举、只使用 installation 内相对 ESM import 的完整 artifact graph**；不引入 import map/npm/runtime package resolver；
+5. top-level reload/navigation/BFCache restore 都不得复活旧 Session；恢复 document 必须重新 SW gate 并创建 fresh Session。
 
 ---
 
@@ -59,8 +61,10 @@ Session Worker (Dedicated Worker)
 Service Worker
 ├── public readonly Content Service
 │       /_lr/v1/games/...
-└── private executable serving boundary
-        /_lr/internal/executables/...
+├── private executable serving boundary
+│       /_lr/internal/executables/...
+└── private runtime-generation probe
+        /_lr/internal/runtime-info
         ↓
 Persistent Installation Registry
 ├── Content Index
@@ -181,6 +185,7 @@ Service Worker registration exists
 interface LoomRealmServiceWorkerHello {
   readonly protocolVersion: 1;
   readonly buildId: string;
+  readonly generation: string;
 }
 ```
 
@@ -203,12 +208,55 @@ Session A starts with SW generation G1
 
 因此 product update 不应使用“强制 `skipWaiting()` + `clients.claim()` 抢占当前运行 Session”作为默认升级语义。若未来引入 hot takeover，必须单独设计 generation/currentness 与 in-flight Content/executable safety；不属于 v1。
 
-Session Worker bootstrap SHOULD 同时携带 accepted SW build/generation fact；若 Worker 环境可读取 `WorkerNavigator.serviceWorker.controller`，qualification 应验证它与 Window 接受的 generation 一致。任何 mismatch 必须在 first business Runtime side effect 前 fail closed。
+### 4.3 Worker-side generation verification
+
+Window 接受某个 SW generation 后，不能只假设 Session Worker / Subsystem Worker 必然命中同一 generation，也不依赖 `WorkerNavigator.serviceWorker` 是否暴露 controller 信息。v1 使用 product-private 只读 probe：
+
+```text
+GET /_lr/internal/runtime-info
+```
+
+由当前实际拦截该 request 的 LoomRealm Service Worker 返回至少：
+
+```ts
+interface LoomRealmRuntimeInfoV1 {
+  readonly protocolVersion: 1;
+  readonly buildId: string;
+  readonly generation: string;
+}
+```
+
+流程：
+
+```text
+Window READY handshake accepts G1
+→ Session Worker bootstrap carries expected G1
+→ Session Worker fetch(runtime-info)
+→ require returned generation == G1
+→ only then PREPARE may continue
+
+RuntimeHosting creates Subsystem Worker
+→ Runner receives expected G1 as host-private bootstrap fact
+→ Runner fetch(runtime-info)
+→ require returned generation == G1
+→ only then private executable import may begin
+```
+
+任何 probe failure、unsupported protocol/build 或 generation mismatch：
+
+```text
+MUST fail closed
+MUST occur before first business Runtime side effect
+MUST NOT silently switch Session to another SW generation
+```
+
+`runtime-info` 是 PWA product-private health/currentness endpoint，不属于 Content API v1，不携带 Game/Realm State/business data，也不向业务代码暴露。
 
 Session Worker 内部：
 
 ```text
 receive/validate host bootstrap
+→ verify runtime-info generation
 → create session-scoped PwaPlatform core
 → PwaPlatform.prepareGame(source)
 → obtain PreparedPwaGame
@@ -221,6 +269,7 @@ receive/validate host bootstrap
 
 ```text
 Service Worker READY
+∧ Session Worker runtime-info generation == accepted Window generation
 ∧ accepted SW generation stable for this Session
 ∧ PWA PREPARE complete
 ∧ Realm State READY
@@ -283,6 +332,7 @@ Main
 → create Dedicated Worker(generic Worker Runner)
 → provision Runtime Control / Realm State / Data material
 → Runner validates bootstrap
+→ Runner verifies runtime-info generation
 → obtain exact private executable URL from frozen plan
 → import exact planned business Definition Module
 → validate SubsystemDefinitionFactory
@@ -620,18 +670,42 @@ PwaLaunchPlan private executable identity
 
 具体 route prefix 是 PWA product-private ABI；v1 baseline 使用 `/_lr/internal/executables/...` 表达边界。它 **不是 Content API v1**，不得由 `ContentClient` 暴露。
 
-### 10.2 Module graph / relative imports
+### 10.2 Frozen ESM graph rules
 
-Executable route MUST preserve stable same-origin hierarchical URL semantics，使安装内合法的相对 ESM import 可以继续落在同一 executable namespace：
+v1 installed executable 必须是安装时可验证、运行时不需要第二套 package resolver 的完整 browser artifact graph。
+
+允许的 business executable import specifier：
 
 ```text
-.../subsystems/map/subsystem.mjs
-    import "./runtime.mjs"
-            ↓
-.../subsystems/map/runtime.mjs
+./foo.mjs
+../shared/foo.mjs
 ```
 
-每个依赖 module 仍必须存在于当前 installation 的 Executable Index；相对 URL 解析不能变成 arbitrary same-origin script capability。
+前提是按浏览器 URL semantics 解析后仍落在**同一 installation 的 private executable namespace**，且目标 module 已存在于 Executable Index。
+
+v1 禁止 business executable 依赖：
+
+```text
+bare specifier                 @loomrealm/foo / some-package
+absolute application path     /scripts/foo.mjs
+external URL                  https://... / http://...
+opaque executable URL         blob:... / data:...
+arbitrary runtime-computed import target
+```
+
+安装/构建阶段必须把 npm/workspace/external package dependency bundle 或 materialize 成 installation 内可索引的 `.mjs` graph。PWA runtime 不引入 import map、npm resolver、package registry 或 fallback network module loader。
+
+Static import graph MUST 可枚举。若使用 dynamic `import()`，v1 只接受安装器可静态识别的 relative literal target，并必须把目标及其依赖纳入 Executable Index；无法在安装时枚举的 dynamic import 必须拒绝。
+
+因此 executable currentness 可以保持简单：
+
+```text
+one published installation generation
++ one complete Executable Index
+= exact allowed executable graph
+```
+
+相对 URL 解析不能变成 arbitrary same-origin script capability，也不能越出 installation executable namespace。
 
 ### 10.3 Capability isolation
 
@@ -708,7 +782,7 @@ window keydown → subsystemWorker.postMessage(business event)
 
 ---
 
-## 12. Session Lifecycle / Reload
+## 12. Session Lifecycle / Reload / BFCache
 
 v1 明确：
 
@@ -721,6 +795,33 @@ PWA top-level Window reload/navigation
 ```
 
 v1 **不承诺**像 Desktop BrowserWindow document reload 一样保持 Main/Runtime/Realm State Session 存活；不要为此提前引入 SharedWorker 或跨页面 Session daemon。
+
+### 12.1 BFCache never revives a Session
+
+Browser MAY 把 document 放入 back-forward cache 并在后续 back/forward 时恢复同一个 JS document。LoomRealm v1 不把这种 document restore 解释成旧 Session 可继续运行。
+
+Window lifecycle policy：
+
+```text
+pagehide / top-level departure
+→ mark current document Session epoch non-reusable
+→ close/revoke Window-owned Renderer Control/Data/lifecycle Ports
+→ request old Session Worker termination when possible
+
+pageshow with persisted == true
+→ MUST NOT reuse old Session Worker
+→ MUST NOT reuse old Renderer identity / Control/Data Ports
+→ ensure any surviving old Session material is fenced/terminated
+→ rerun SW READY + generation handshake
+→ create fresh Session Worker
+→ create fresh Renderer/session bindings
+```
+
+不能依赖 `pagehide` 时所有异步 cleanup 一定完成；正确性来自 **fresh Session identity + old material fencing**。任何旧 Session Worker/Port 即使物理上短暂存活，也不得重新成为 current。
+
+普通 reload/navigation 与 BFCache restore 因此共享一个简单规则：
+
+> **离开 current document Session 后，返回/恢复只能创建 fresh Session，不能复活旧 Main/RealmStateAuthority/Subsystem Runtime。**
 
 这不影响 logical business equivalence：跨平台要求相同 LoomRealm contract/result，而不是要求 host reload 的物理生命周期完全一致。
 
@@ -738,7 +839,7 @@ Main commits terminal
 
 Service Worker 与 installed game storage 是 origin/product-scoped resource，不属于单个 Session，不随 Session dispose 删除。
 
-SW update MAY 在 Session 存活期间进入 waiting/installing 状态，但不得改变当前 Session 已接受的 controller generation；新 generation 由下一 document 的 READY handshake 接受。
+SW update MAY 在 Session 存活期间进入 waiting/installing 状态，但不得改变当前 Session 已接受的 controller generation；新 generation 由下一 fresh Session 的 READY handshake 接受。
 
 ---
 
@@ -749,6 +850,7 @@ M16 从一开始使用独立 Session Worker baseline：
 ```text
 Window bootstrap
 → SW READY + version handshake
+→ Session Worker runtime-info generation verification
 → Session Worker
 → PwaPlatform.prepareGame
 → executable preflight through Executable Index/private resolver
@@ -756,6 +858,7 @@ Window bootstrap
 → Realm State READY
 → Main running in Session Worker
 → RuntimeHosting creates Subsystem Worker
+→ Runner runtime-info generation verification
 → private same-origin module import
 → Runtime Control MessagePort
 → Subsystem initializing/ready
@@ -767,11 +870,15 @@ Window bootstrap
 
 ```text
 no SW controller / incompatible SW generation → zero Session business side effect
+Session Worker runtime-info mismatch → zero business Runtime side effect
+Subsystem Runner runtime-info mismatch → no business module import
 Session Worker bootstrap failure
 PREPARE failure → zero Subsystem Worker side effect
 manifest/key-set/module preflight failure
 executable outside index / missing body / bad MIME / bad integrity rejection
 relative executable module dependency resolution
+bare/absolute/external/opaque module specifier rejection
+non-enumerable dynamic import rejection
 Subsystem Worker constructor/bootstrap failure
 planned module load/ABI failure
 Runtime Control hello/ready/loss
@@ -796,8 +903,10 @@ M16 MAY 使用最小 Renderer/ordinary Content fixture；这不代表完整 M17 
 fixture installation
 → storage estimate / persistence policy
 → staging Registry/Content Index/Executable Index/object bytes
+→ validate enumerable relative ESM graph
 → publish complete
 → SW READY/version handshake
+→ Window/Session/Runner runtime-info generation checks
 → public Content route + private executable route
 → real Window / Session Worker / Subsystem Worker consumer
 ```
@@ -828,11 +937,14 @@ logical module → indexed private URL
 same-origin module import
 Content-Type JavaScript
 relative module graph imports
+bare/absolute/external/blob/data specifier rejection
+non-enumerable dynamic import rejection
 module missing/outside installation rejection
 invalid/incomplete installation rejection
 body hash/currentness mismatch rejection
 ordinary Content cannot be promoted to executable
 SW restart still reconstructs executable serving from persistent facts
+runtime-info generation matches accepted Session generation
 ```
 
 Storage 至少覆盖：
@@ -862,6 +974,7 @@ Renderer Control Window↔Session Worker
 + Viewport
 + full Content vertical
 + Web Presentation
++ reload/navigation/BFCache fresh-Session lifecycle
 + real game-lib / concrete game
 ```
 
@@ -886,25 +999,34 @@ DOM timing bit-for-bit equal
 Desktop document reload == PWA top-level reload
 ```
 
+M17 lifecycle qualification至少证明：
+
+```text
+normal reload → fresh Session
+navigation away/back → old Session not revived
+BFCache pageshow(persisted) → fresh Session Worker + fresh Renderer/session bindings
+old Session Worker/Port late message cannot become current
+```
+
 ---
 
 ## 16. Implementation Slices
 
 ```text
 PWA-1 Browser bootstrap / SW gate / Session Worker
-    SW registration + READY/version handshake + Host-owned Session Worker + Window↔Session bootstrap
+    SW registration + READY/version handshake + runtime-info probe + Host-owned Session Worker + Window↔Session bootstrap
 
 PWA-2 Installation / executable resolver
-    staging/publish + Content/Executable Index + private same-origin executable route + import qualification
+    staging/publish + Content/Executable Index + private same-origin executable route + enumerable relative ESM graph qualification
 
 PWA-3 PREPARE / Session authorities
     PwaLaunchPlan + RealmStateAuthority + Main in Session Worker
 
 PWA-4 Worker Runtime
-    RuntimeHosting + generic nested Worker Runner + Runtime Control
+    RuntimeHosting + generic nested Worker Runner + runtime-info verification + Runtime Control
 
 PWA-5 State / lifecycle
-    real Realm State Worker binding + shutdown/replacement/failure closure
+    real Realm State Worker binding + shutdown/replacement/failure + reload/BFCache fresh-Session closure
 
 PWA-6 Content / storage vertical
     SW Content API + ContentClient + quota/persistence + invalidation/GC qualification
@@ -940,6 +1062,7 @@ OPFS-backed generic business repository
 automatic Runtime restart manager
 SharedWorker Session daemon only to mimic Desktop reload
 cross-installation global object GC/refcount before real need
+runtime npm/package resolver or import-map system for installed business artifacts
 ```
 
 `PwaPlatform` 是 logical product composition boundary，不要求所有代码位于同一 JS global：
@@ -956,7 +1079,7 @@ Service Worker Content/executable physical realization
 
 它们共同组成一个 PWA Platform realization，而不是多个 application authorities。
 
-Service Worker 同时物理提供 Content route 与 private executable route，不意味着两种 capability authority 合并；前者受 Content API v1 约束，后者只由 trusted installation / PwaLaunchPlan / Worker Runner 消费。
+Service Worker 同时物理提供 Content route、private executable route 与 runtime-info probe，不意味着 capability authority 合并；Content 受 Content API v1 约束，executable 只由 trusted installation / PwaLaunchPlan / Worker Runner 消费，runtime-info 只暴露 product build/generation currentness fact。
 
 ---
 
@@ -967,20 +1090,22 @@ Service Worker 同时物理提供 Content route 与 private executable route，�
 3. Main 与 RealmStateAuthority 只物理共置，logical authority 严格分离；
 4. 每个 Subsystem Runtime 位于独立 Dedicated Worker；
 5. Session 创建前必须完成 SW READY/controller/version handshake；未受控或版本不兼容时 fail closed；
-6. 一个 Session 绑定启动时接受的 SW generation；默认升级只在下一 Session 生效；
-7. Main 只按 `subsystemKey` launch，module/Worker/Port/storage material 不泄漏；
-8. Worker Runner 是 Host-owned constructor entry，business module由 frozen plan精确选择；
-9. installed executable 通过 Executable Index + private same-origin hierarchical route解析；v1 不用 blob URL 作为 executable identity；
-10. executable route 与 Content API route capability 隔离，即使底层复用 object store；
-11. Renderer Control、Runtime Control、Realm State、Renderer Data、provisioning 保持独立 plane；
-12. Renderer Control 明确跨 Session Worker ↔ Window MessagePort；
-13. Subsystem 在 Desktop/PWA 都只通过 `scope.content.record()` / `resource()` 使用 ordinary Content；
-14. PWA 保持 Content API v1 的 HTTP/Fetch semantics，SW 只是 physical Content Service；
-15. `@loomrealm/fsdb` 保持 Node-only；PWA 不为复用它发明 filesystem abstraction；
-16. Installation 使用 staging → atomic visibility publish；半安装不可运行；
-17. installation storage persistence 是 best-effort physical policy，不改变 logical correctness；body eviction/corruption 必须使 installation fail closed/invalid；
-18. v1 优先 installation-local object namespace 与简单 GC，不预造全局 dedup/refcount；
-19. Service Worker volatile memory/derived Cache Storage 不成为 installation authority；
-20. PWA top-level reload 在 v1 产生 fresh Session，不为模拟 Desktop reload 引入 SharedWorker；
-21. Window presentation stall 不得因 Main physical colocation直接冻结 Main control event loop；
-22. M16 证明 SW gate + Session Worker + executable resolver + Subsystem Worker Runtime vertical；M17 证明完整 Window product 与 Desktop business equivalence。
+6. Window、Session Worker 与 Subsystem Runner 必须通过 accepted generation + private runtime-info probe 收敛到同一 SW generation，mismatch 在 business side effect 前 fail closed；
+7. 一个 Session 绑定启动时接受的 SW generation；默认升级只在下一 fresh Session 生效；
+8. Main 只按 `subsystemKey` launch，module/Worker/Port/storage material 不泄漏；
+9. Worker Runner 是 Host-owned constructor entry，business module由 frozen plan精确选择；
+10. installed executable 通过 Executable Index + private same-origin hierarchical route解析；v1 不用 blob URL 作为 executable identity；
+11. v1 executable graph 必须安装时可枚举，仅允许仍落在 current installation executable namespace 的 relative ESM specifier；不建立 runtime package/import-map resolver；
+12. executable route 与 Content API route capability 隔离，即使底层复用 object store；
+13. Renderer Control、Runtime Control、Realm State、Renderer Data、provisioning 保持独立 plane；
+14. Renderer Control 明确跨 Session Worker ↔ Window MessagePort；
+15. Subsystem 在 Desktop/PWA 都只通过 `scope.content.record()` / `resource()` 使用 ordinary Content；
+16. PWA 保持 Content API v1 的 HTTP/Fetch semantics，SW 只是 physical Content Service；
+17. `@loomrealm/fsdb` 保持 Node-only；PWA 不为复用它发明 filesystem abstraction；
+18. Installation 使用 staging → atomic visibility publish；半安装不可运行；
+19. installation storage persistence 是 best-effort physical policy，不改变 logical correctness；body eviction/corruption 必须使 installation fail closed/invalid；
+20. v1 优先 installation-local object namespace 与简单 GC，不预造全局 dedup/refcount；
+21. Service Worker volatile memory/derived Cache Storage 不成为 installation authority；
+22. PWA top-level reload/navigation/BFCache restore 在 v1 都产生 fresh Session；旧 Session material 永远不能因 document restore 重新成为 current；
+23. Window presentation stall 不得因 Main physical colocation直接冻结 Main control event loop；
+24. M16 证明 SW gate/runtime-info + Session Worker + executable resolver/graph + Subsystem Worker Runtime vertical；M17 证明完整 Window product、fresh-Session lifecycle 与 Desktop business equivalence。
