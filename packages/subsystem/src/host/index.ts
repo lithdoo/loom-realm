@@ -8,5 +8,11 @@ export type {
   SubsystemRuntimeControlPolicy,
   RealmStateRuntimeCapability,
 } from "./run-subsystem.js";
-export { createBoundContentClient } from "./content-client.js";
-export type { BoundContentAccess } from "./content-client.js";
+export {
+  createBoundContentClient,
+  createSameOriginContentClient,
+} from "./content-client.js";
+export type {
+  BoundContentAccess,
+  SameOriginContentAccess,
+} from "./content-client.js";

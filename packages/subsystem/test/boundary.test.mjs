@@ -19,6 +19,7 @@ test("author root and trusted host surface stay separated", () => {
   assert.deepEqual(Object.keys(host).sort(), [
     "SubsystemRuntimeFatalError",
     "createBoundContentClient",
+    "createSameOriginContentClient",
     "runSubsystem",
   ]);
 
