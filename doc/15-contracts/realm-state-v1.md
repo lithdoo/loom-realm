@@ -1,13 +1,13 @@
 # LoomRealm Realm State v1 Contract
 
 > 层级：正式契约  
-> 状态：**Active / Normative / Implemented / Requalification Pending**
+> 状态：**Active / Normative / Implemented / Qualified**
 > 契约版本：1  
 > 逻辑协议：`loomrealm.realm-state/1`  
-> 稳定程度：**Architecture + Logical Semantics + Deterministic Surface Frozen / Implemented / Requalification Pending**
+> 稳定程度：**Architecture + Logical Semantics + Deterministic Surface Frozen / Implemented / Qualified**
 > 架构来源：[Realm State：Session 级共享业务状态系统](../10-architecture/realm-state-system.md)  
 > 相关契约：[Game Package v1](./game-package-v1.md)  
-> 最近复核：2026-10-05
+> 最近复核：2026-10-06
 
 > 实现：`packages/realm-state`；集成：Game Package、Hostra/PWA Launcher projection、Subsystem、Main、Desktop；资格证据：[Realm State v1 qualification](../30-implementation/realm-state-v1-qualification.md)。
 

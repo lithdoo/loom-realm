@@ -1,9 +1,10 @@
 # Realm State v1 Qualification
 
-> 状态：**Implemented / Requalification Pending**
+> 状态：**Implemented / Qualified**
 > Normative SSOT：[Realm State v1](../15-contracts/realm-state-v1.md)  
 > Delivery plan：[Realm State v1 delivery plan](./realm-state-v1-delivery-plan.md)  
-> 日期：2026-10-05
+> 日期：2026-10-06
+> 已验证实现 SHA：`7f7cab27a6478921eec4c441fb7cea2e0d53a53c`
 
 ## Subject
 
@@ -54,15 +55,21 @@ materialization / null / deep-equal writes
 whole-record cross-Collection OCC and concurrency
 safe-integer revision/version exhaustion
 subscription baseline/order/aggregation/reentrancy/failure containment
-64-event and 8-MiB backpressure profiles
+slow listener and slow physical carrier pressure
+exact 64-event / 65th-overflow and 8-MiB backpressure profiles
+terminal ordering after previously accepted events
 Authority fatal vs pre-READY bootstrap failure
 Runtime-scoped client / unbound fail-fast / rebind / terminal
+required production State capability before business side effects
 pre-dispatch no-commit / post-dispatch OUTCOME_UNKNOWN / no replay
 generation fencing and old-subscription terminal
-Game Package closed schema and Launcher sibling projection
+request-local invalidity vs binding-local framing/response corruption
+serialized consecutive large multi-frame subscription events
+bounded MessagePort/WebSocket receive queues and framed-stream bookkeeping
+Game Package structured duplicate classification and Launcher sibling projection
 Main fatal ownership and Subsystem lifetime
 real multi-process Hostra vertical
-Worker + MessagePort logical equivalence
+Worker + MessagePort logical/evidence/backpressure equivalence
 transparent physical framing for logical requests/snapshots above one carrier unit
 Desktop product startup/cleanup regression
 Renderer direct-State boundary exclusion
@@ -76,9 +83,10 @@ The following commands are the canonical local gates for this subject：
 ```text
 npm run test:realm-state
 npm run test:realm-state:qualification
+npm run test:game-package
 npm run test:m9
 npm run test:m12
-npm run test:m13
+npm run test:m13:pr
 npm run test:m14:pr
 npm run test:m15:pr
 npm run build:packages
@@ -89,10 +97,10 @@ npm run docs:build
 
 `.github/workflows/realm-state.yml` runs the package/vertical suite, frozen-contract qualification, Desktop composition tests, and package-surface checks on Ubuntu and Windows with Node 20 and 24.
 
-Final command results and the exact head SHA are reported in the PR handoff after the final-tip run。
+The implementation subject SHA above passed every local command in this section。Its pull-request CI completed 20/20 workflows successfully, including the dedicated Realm State matrix on Ubuntu/Windows with Node 20/24。The final documentation-only status commit is rechecked on its exact HEAD before PR handoff。
 
 ## Result
 
-Realm State v1 implementation is closed-loop and qualified against the frozen contract.
+Realm State v1 implementation is closed-loop and qualified against the frozen contract。Physical delivery/backpressure、commit evidence、request-vs-binding failure classification、Runtime bootstrap、recovery fencing and cross-boundary validation now have executable behavioral evidence rather than boundary-string evidence alone。
 
 No remaining architecture/product decision is required for this v1 implementation.
