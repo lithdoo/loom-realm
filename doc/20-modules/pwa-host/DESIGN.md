@@ -1,9 +1,9 @@
 # PWA 产品组合设计
 
 > 层级：产品组合 / 实施设计  
-> 状态：Implementation Frozen / Agent-Ready；M16/M17 尚未实现或签署 qualification  
+> 状态：Implementation Frozen / M16+M17 Implemented；same-HEAD qualification 由根命令判定  
 > 最近复核：2026-10-07  
-> 路线图：[M16 / M17 PWA](../../30-implementation/roadmap.md)  
+> 路线图：[M16 / M17 PWA](../../30-implementation/roadmap.md)；资格说明：[M16/M17 PWA 资格](../../30-implementation/pwa-m16-m17-qualification.md)  
 > 正式契约：[PWA Launcher Profile v1](../../15-contracts/pwa-launcher-profile-v1.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[正式契约目录](../../15-contracts/README.md)  
 > 相关设计：[平台组合架构](../../10-architecture/platform-composition-system.md)、[存储与内容系统](../../10-architecture/storage-system.md)、[`@loomrealm/game-launcher-pwa` 设计](../../../packages/game-launcher-pwa/DESIGN.md)
 

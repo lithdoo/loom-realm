@@ -1,6 +1,6 @@
 # `@loomrealm/game-launcher-pwa` 设计
 
-> 状态：Implementation Boundary Frozen；仅已实现 Realm State projection，完整 M16/M17 尚未交付  
+> 状态：Implemented / Implementation Boundary Frozen；PREPARE、Executable Index/graph、immutable LaunchPlan 与 Runner integration 已闭环  
 > 最近复核：2026-10-07  
 > 正式契约：[PWA Game Launcher / Worker Subsystem Runner Profile v1](../../doc/15-contracts/pwa-launcher-profile-v1.md)  
 > 产品组合：[PWA 产品组合设计](../../doc/20-modules/pwa-host/DESIGN.md)  

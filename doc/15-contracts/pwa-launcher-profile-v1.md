@@ -1,14 +1,14 @@
 # PWA Game Launcher / Worker Subsystem Runner Profile v1
 
 > 层级：正式契约 / PWA Platform Profile  
-> 状态：Active / Normative / Implementation Frozen；尚未完成 M16/M17 qualification  
+> 状态：Active / Normative / Implementation Frozen；M16/M17 implemented，same-HEAD qualification 由仓库根命令判定  
 > Profile Version：1  
 > 最近复核：2026-10-07  
 > 依赖：[Game Package v1](./game-package-v1.md)、[Realm State v1](./realm-state-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)、[Renderer Data Profile v1](./renderer-data-profile-v1.md)、[Content API v1](./content-api-v1.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
-本 Profile 已冻结 PWA v1 的 runtime-product physical profile。它不表示实现或资格已经完成；实现状态唯一由路线图和 exact-SHA qualification evidence 判定。
+本 Profile 已冻结 PWA v1 的 runtime-product physical profile。当前实现入口与自动资格范围见路线图及 PWA 资格说明；任何 PASS 仍只对实际执行根命令的 exact HEAD 成立。
 
 核心原则：
 
