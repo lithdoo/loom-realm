@@ -51,6 +51,80 @@ function createGatedCarrier(carrier) {
   };
 }
 
+function createEventGatedCarrier(carrier) {
+  let release;
+  let observed;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const blockedSend = new Promise((resolve) => { observed = resolve; });
+  return {
+    carrier: Object.freeze({
+      async send(message) {
+        let decoded;
+        try { decoded = JSON.parse(message); } catch {}
+        if (decoded?.type === "event") {
+          observed();
+          await gate;
+        }
+        await carrier.send(message);
+      },
+      messages: () => carrier.messages(),
+      closed: carrier.closed,
+      close: () => carrier.close(),
+    }),
+    blockedSend,
+    release() { release(); },
+  };
+}
+
+async function nextRequest(iterator) {
+  const next = await iterator.next();
+  assert.equal(next.done, false);
+  const request = JSON.parse(next.value);
+  assert.equal(request.protocol, "loomrealm.realm-state/1");
+  assert.equal(request.type, "request");
+  return request;
+}
+
+function sendResponse(carrier, id, response) {
+  return sendRealmStateMessage(carrier, JSON.stringify({
+    protocol: "loomrealm.realm-state/1",
+    type: "response",
+    id,
+    ...response,
+  }));
+}
+
+function sendEvent(carrier, subscriptionId, event) {
+  return sendRealmStateMessage(carrier, JSON.stringify({
+    protocol: "loomrealm.realm-state/1",
+    type: "event",
+    subscriptionId,
+    event,
+  }));
+}
+
+function snapshotRecord(key, value = null, version = 0) {
+  return { key, value, version };
+}
+
+function indexRecord(key, version = 1) {
+  return { key, version };
+}
+
+async function withTimeout(promise, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 2_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 test("carrier realization preserves observation, commit, subscription, and cleanup semantics", async () => {
   const target = { namespace: "worker", key: "record" };
   const authority = createRealmStateAuthority(prepareRealmStateDefinition([
@@ -68,9 +142,7 @@ test("carrier realization preserves observation, commit, subscription, and clean
     writes: [{ type: "put", key: target, value: { value: 1 } }],
   });
   assert.equal(committed.revision, 1);
-  for (let attempt = 0; events.length < 2 && attempt < 100; attempt += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
+  await waitFor(() => events.length === 2, "baseline and committed change");
   assert.deepEqual(events.map((event) => event.type), ["baseline", "change"]);
   assert.deepEqual((await client.scan()).records[0].value, { value: 1 });
   await server.close();
@@ -365,4 +437,361 @@ test("framing rejects interleaved, oversized-count, and truncated physical strea
       frame(1, 0, 2),
     ]))) void _;
   }, /Truncated/u);
+});
+
+test("local close suppresses an already-accepted change without corrupting the binding", async () => {
+  const target = { namespace: "close-race", key: "target" };
+  const authority = createRealmStateAuthority(prepareRealmStateDefinition([
+    { ...target, value: 0 },
+  ]));
+  const pair = createMemoryCarrierPair();
+  const gated = createGatedCarrier(pair.left);
+  const server = serveRealmStateCarrier(authority, gated.carrier);
+  const binding = createRealmStateCarrierBinding(pair.right);
+  const client = createRealmStateClient(binding);
+  const events = [];
+  const subscription = await client.subscribe([target], (event) => events.push(event));
+  await waitFor(() => events[0]?.type === "baseline", "close-race baseline");
+
+  gated.block();
+  await authority.commit({
+    conditions: [{ key: target, version: 0 }],
+    writes: [{ type: "put", key: target, value: 1 }],
+  });
+  await gated.blockedSend;
+  subscription.close();
+  gated.release();
+
+  assert.equal((await client.read([target])).records[0].value, 1);
+  await tick();
+  assert.deepEqual(events.map((event) => event.type), ["baseline"]);
+  await server.close();
+});
+
+test("local close before a gated baseline suppresses delivery and preserves the binding", async () => {
+  const target = { namespace: "close-race", key: "baseline" };
+  const authority = createRealmStateAuthority(prepareRealmStateDefinition([
+    { ...target, value: "initial" },
+  ]));
+  const pair = createMemoryCarrierPair();
+  const gated = createEventGatedCarrier(pair.left);
+  const server = serveRealmStateCarrier(authority, gated.carrier);
+  const binding = createRealmStateCarrierBinding(pair.right);
+  const client = createRealmStateClient(binding);
+  const events = [];
+  const subscription = await client.subscribe([target], (event) => events.push(event));
+  await gated.blockedSend;
+
+  subscription.close();
+  gated.release();
+
+  assert.equal((await client.read([target])).records[0].value, "initial");
+  await tick();
+  assert.deepEqual(events, []);
+  await server.close();
+});
+
+test("malformed failure responses atomically terminal read and commit correlations", async () => {
+  const target = { namespace: "corrupt", key: "failure" };
+  for (const operation of ["read", "commit"]) {
+    const pair = createMemoryCarrierPair();
+    const binding = createRealmStateCarrierBinding(pair.right);
+    const client = createRealmStateClient(binding);
+    const peer = receiveRealmStateMessages(pair.left)[Symbol.asyncIterator]();
+    const result = operation === "read"
+      ? client.read([target])
+      : client.commit({
+          conditions: [{ key: target, version: 0 }],
+          writes: [{ type: "put", key: target, value: 1 }],
+        });
+    const request = await nextRequest(peer);
+    await sendResponse(pair.left, request.id, {
+      ok: false,
+      failure: { code: "CONFLICT", message: 42 },
+    });
+    await assert.rejects(
+      withTimeout(result, `${operation} malformed failure rejection`),
+      fails(operation === "commit" ? "OUTCOME_UNKNOWN" : "BINDING_UNAVAILABLE"),
+    );
+    await binding.terminal;
+  }
+});
+
+test("one corrupt response drains every active correlation with operation-specific evidence", async () => {
+  const mutation = { namespace: "drain", key: "mutation" };
+  const observation = { namespace: "drain", key: "observation" };
+  const pair = createMemoryCarrierPair();
+  const binding = createRealmStateCarrierBinding(pair.right);
+  const client = createRealmStateClient(binding);
+  const peer = receiveRealmStateMessages(pair.left)[Symbol.asyncIterator]();
+  const commit = client.commit({
+    conditions: [{ key: mutation, version: 0 }],
+    writes: [{ type: "put", key: mutation, value: 1 }],
+  });
+  const read = client.read([observation]);
+  const requests = [await nextRequest(peer), await nextRequest(peer)];
+  const readRequest = requests.find((request) => request.method === "read");
+  assert.ok(readRequest);
+  await sendResponse(pair.left, readRequest.id, {
+    ok: true,
+    result: { revision: 0, records: "malformed" },
+  });
+  await Promise.all([
+    assert.rejects(withTimeout(read, "drained read"), fails("BINDING_UNAVAILABLE")),
+    assert.rejects(withTimeout(commit, "drained commit"), fails("OUTCOME_UNKNOWN")),
+  ]);
+  await binding.terminal;
+});
+
+test("read and readInitial require the exact requested identity set", async () => {
+  const requested = { namespace: "semantic", key: "a" };
+  const unexpected = { namespace: "semantic", key: "b" };
+  for (const method of ["read", "readInitial"]) {
+    const pair = createMemoryCarrierPair();
+    const binding = createRealmStateCarrierBinding(pair.right);
+    const client = createRealmStateClient(binding);
+    const peer = receiveRealmStateMessages(pair.left)[Symbol.asyncIterator]();
+    const result = client[method]([requested]);
+    const request = await nextRequest(peer);
+    await sendResponse(pair.left, request.id, {
+      ok: true,
+      result: method === "read"
+        ? { revision: 0, records: [snapshotRecord(unexpected)] }
+        : { records: [{ key: unexpected, value: null }] },
+    });
+    await assert.rejects(
+      withTimeout(result, `${method} identity rejection`),
+      fails("BINDING_UNAVAILABLE"),
+    );
+    await binding.terminal;
+  }
+});
+
+test("namespace-filtered list and scan reject records outside the requested namespace", async () => {
+  const unexpected = { namespace: "other", key: "record" };
+  for (const method of ["list", "scan"]) {
+    const pair = createMemoryCarrierPair();
+    const binding = createRealmStateCarrierBinding(pair.right);
+    const client = createRealmStateClient(binding);
+    const peer = receiveRealmStateMessages(pair.left)[Symbol.asyncIterator]();
+    const result = client[method]({ namespace: "requested" });
+    const request = await nextRequest(peer);
+    await sendResponse(pair.left, request.id, {
+      ok: true,
+      result: {
+        revision: 0,
+        records: method === "list"
+          ? [indexRecord(unexpected, 0)]
+          : [snapshotRecord(unexpected)],
+      },
+    });
+    await assert.rejects(
+      withTimeout(result, `${method} namespace rejection`),
+      fails("BINDING_UNAVAILABLE"),
+    );
+    await binding.terminal;
+  }
+});
+
+test("commit success evidence requires exactly the transaction write identities", async () => {
+  const a = { namespace: "commit-set", key: "a" };
+  const b = { namespace: "commit-set", key: "b" };
+  const c = { namespace: "commit-set", key: "c" };
+  for (const records of [
+    [indexRecord(a)],
+    [indexRecord(a), indexRecord(c)],
+  ]) {
+    const pair = createMemoryCarrierPair();
+    const binding = createRealmStateCarrierBinding(pair.right);
+    const client = createRealmStateClient(binding);
+    const peer = receiveRealmStateMessages(pair.left)[Symbol.asyncIterator]();
+    const result = client.commit({
+      conditions: [
+        { key: a, version: 0 },
+        { key: b, version: 0 },
+      ],
+      writes: [
+        { type: "put", key: a, value: 1 },
+        { type: "put", key: b, value: 2 },
+      ],
+    });
+    const request = await nextRequest(peer);
+    await sendResponse(pair.left, request.id, {
+      ok: true,
+      result: { revision: 1, records },
+    });
+    await assert.rejects(
+      withTimeout(result, "commit identity rejection"),
+      fails("OUTCOME_UNKNOWN"),
+    );
+    await binding.terminal;
+  }
+});
+
+test("subscription baseline requires the exact subscribed identity set", async () => {
+  const a = { namespace: "subscription-set", key: "a" };
+  const b = { namespace: "subscription-set", key: "b" };
+  const c = { namespace: "subscription-set", key: "c" };
+  const pair = createMemoryCarrierPair();
+  const binding = createRealmStateCarrierBinding(pair.right);
+  const peer = receiveRealmStateMessages(pair.left)[Symbol.asyncIterator]();
+  const events = [];
+  const pendingSubscription = binding.subscribe([a, b], (event) => events.push(event));
+  const request = await nextRequest(peer);
+  await sendResponse(pair.left, request.id, {
+    ok: true,
+    result: { subscriptionId: 7 },
+  });
+  await pendingSubscription;
+  await sendEvent(pair.left, 7, {
+    type: "baseline",
+    snapshot: {
+      revision: 0,
+      records: [snapshotRecord(a), snapshotRecord(c)],
+    },
+  });
+  await binding.terminal;
+  await tick();
+  assert.equal(events.some((event) => event.type === "baseline"), false);
+  assert.equal(events.some((event) => event.type === "change"), false);
+});
+
+test("subscription changes must be a non-empty subset of subscribed identities", async () => {
+  const a = { namespace: "subscription-set", key: "a" };
+  const b = { namespace: "subscription-set", key: "b" };
+  const c = { namespace: "subscription-set", key: "c" };
+  for (const records of [[], [snapshotRecord(c, 1, 1)]]) {
+    const pair = createMemoryCarrierPair();
+    const binding = createRealmStateCarrierBinding(pair.right);
+    const peer = receiveRealmStateMessages(pair.left)[Symbol.asyncIterator]();
+    const events = [];
+    const pendingSubscription = binding.subscribe([a, b], (event) => events.push(event));
+    const request = await nextRequest(peer);
+    await sendResponse(pair.left, request.id, {
+      ok: true,
+      result: { subscriptionId: 8 },
+    });
+    await pendingSubscription;
+    await sendEvent(pair.left, 8, {
+      type: "baseline",
+      snapshot: {
+        revision: 0,
+        records: [snapshotRecord(a), snapshotRecord(b)],
+      },
+    });
+    await waitFor(() => events[0]?.type === "baseline", "valid semantic baseline");
+    await sendEvent(pair.left, 8, { type: "change", revision: 1, records });
+    await binding.terminal;
+    await tick();
+    assert.deepEqual(events.filter((event) => event.type === "change"), []);
+  }
+});
+
+test("a subscription protocol terminal retires its identity and forbids later events", async () => {
+  const target = { namespace: "subscription-terminal", key: "target" };
+  const pair = createMemoryCarrierPair();
+  const binding = createRealmStateCarrierBinding(pair.right);
+  const peer = receiveRealmStateMessages(pair.left)[Symbol.asyncIterator]();
+  const events = [];
+  const pendingSubscription = binding.subscribe([target], (event) => events.push(event));
+  const request = await nextRequest(peer);
+  await sendResponse(pair.left, request.id, {
+    ok: true,
+    result: { subscriptionId: 10 },
+  });
+  await pendingSubscription;
+  await sendEvent(pair.left, 10, {
+    type: "baseline",
+    snapshot: { revision: 0, records: [snapshotRecord(target)] },
+  });
+  await waitFor(() => events[0]?.type === "baseline", "terminal lifecycle baseline");
+  await sendEvent(pair.left, 10, { type: "terminal", reason: "authority-terminal" });
+  await waitFor(() => events.at(-1)?.type === "terminal", "subscription terminal");
+  await sendEvent(pair.left, 10, {
+    type: "change",
+    revision: 1,
+    records: [snapshotRecord(target, 1, 1)],
+  });
+  await binding.terminal;
+  assert.deepEqual(events.map((event) => event.type), ["baseline", "terminal"]);
+});
+
+test("unsubscribe ACK retires one tombstone after valid in-flight events", async () => {
+  const target = { namespace: "unsubscribe", key: "target" };
+  const pair = createMemoryCarrierPair();
+  const binding = createRealmStateCarrierBinding(pair.right);
+  const peer = receiveRealmStateMessages(pair.left)[Symbol.asyncIterator]();
+  const events = [];
+  const pendingSubscription = binding.subscribe([target], (event) => events.push(event));
+  const subscribeRequest = await nextRequest(peer);
+  await sendResponse(pair.left, subscribeRequest.id, {
+    ok: true,
+    result: { subscriptionId: 9 },
+  });
+  const subscription = await pendingSubscription;
+  await sendEvent(pair.left, 9, {
+    type: "baseline",
+    snapshot: { revision: 0, records: [snapshotRecord(target)] },
+  });
+  await waitFor(() => events[0]?.type === "baseline", "ACK lifecycle baseline");
+
+  subscription.close();
+  subscription.close();
+  const unsubscribeRequest = await nextRequest(peer);
+  assert.equal(unsubscribeRequest.method, "unsubscribe");
+  assert.equal(unsubscribeRequest.params.subscriptionId, 9);
+  await sendEvent(pair.left, 9, {
+    type: "change",
+    revision: 1,
+    records: [snapshotRecord(target, 1, 1)],
+  });
+  await tick();
+  assert.deepEqual(events.map((event) => event.type), ["baseline"]);
+  await sendResponse(pair.left, unsubscribeRequest.id, { ok: true, result: {} });
+  await tick();
+
+  const read = binding.read([target]);
+  const readRequest = await nextRequest(peer);
+  assert.equal(readRequest.method, "read");
+  await sendResponse(pair.left, readRequest.id, {
+    ok: true,
+    result: { revision: 1, records: [snapshotRecord(target, 1, 1)] },
+  });
+  assert.equal((await read).records[0].value, 1);
+
+  await sendEvent(pair.left, 9, {
+    type: "change",
+    revision: 2,
+    records: [snapshotRecord(target, 2, 2)],
+  });
+  await binding.terminal;
+});
+
+test("locally aborted reads retain correlation until the remote response retires it", async () => {
+  const a = { namespace: "abort", key: "a" };
+  const b = { namespace: "abort", key: "b" };
+  const pair = createMemoryCarrierPair();
+  const binding = createRealmStateCarrierBinding(pair.right);
+  const peer = receiveRealmStateMessages(pair.left)[Symbol.asyncIterator]();
+  const controller = new AbortController();
+  const reason = new Error("caller stopped waiting");
+  const first = binding.read([a], { signal: controller.signal });
+  const firstRequest = await nextRequest(peer);
+  controller.abort(reason);
+  await assert.rejects(withTimeout(first, "local abort"), (error) => error === reason);
+
+  await sendResponse(pair.left, firstRequest.id, {
+    ok: true,
+    result: { revision: 0, records: [snapshotRecord(a)] },
+  });
+  await tick();
+  const second = binding.read([b]);
+  const secondRequest = await nextRequest(peer);
+  assert.equal(secondRequest.method, "read");
+  await sendResponse(pair.left, secondRequest.id, {
+    ok: true,
+    result: { revision: 0, records: [snapshotRecord(b, "still-live")] },
+  });
+  assert.equal((await second).records[0].value, "still-live");
+  await binding.close();
 });
