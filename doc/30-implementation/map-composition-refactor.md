@@ -1,13 +1,22 @@
 # Map Runtime Composition 解耦改造方案
 
 > 层级：实施方案  
-> 状态：**Frozen / Implementation Ready / Not Implemented / Not Qualified**  
+> 状态：**Frozen / Implemented / Local Regression PASS / Formal Qualification Pending**
 > 基线：`main@17de12435ad0b18c66fa771764ecb4225537aa64`  
+> 实施 subject：`488f8713a23158e736153677ec68e449879a8a1d`
 > 范围：`game-libs/map`、对应 Map tests、M14 vertical qualification harness  
 > 目标：保留现有 `RPGMapBuilder / RPGMapHandler` 模块化接口，删除 `mapDefinition`、default export 与 Frame-keyed bridge，让 Handler 直接执行唯一的 package-internal Map runtime。  
 > 相关：[地图模块](../20-modules/loom-map/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[M14 qualification](./m14-qualification.md)、[路线图](./roadmap.md)
 
 本文是冻结实施规格。实现 agent 应直接按本文执行，不重新设计 Map 架构，不扩大 scope；只有 checked-in source 证明某条冻结假设不成立时，才允许停下并记录偏差。
+
+## 实施结果（2026-10-06）
+
+冻结方案已在 executable subject `488f8713a23158e736153677ec68e449879a8a1d` 实施：`RPGMapHandler.run()` 直接调用 package-internal `runMapRuntime()`，Frame-keyed `WeakMap`、direct-definition dual-mode、`mapDefinition` named/default export 均已删除；Builder/Handler、`RuntimeBridge` 语义及 Essentials 业务 topology 保持不变。
+
+实现审计还发现三个冻结清单未列出的 active consumer：`test/m14-boundary.test.mjs`、`test/terrain-behavior-live-product.test.mjs`、`scripts/m14-essentials-local.mjs`。它们只迁移到相同 Builder/Handler 启动路径，未修改业务断言或 fixture。
+
+当前 subject 的本地结果：Map package 106/106 PASS，`npm run test:m14` PASS，M15 Desktop 15/15 PASS。M14 exact-local 因现有本地 source-view indirection / source-copy 非法 `.desc.meta` 在 source preflight 失败；M15 Hostra 因冻结 Hostra 缺少 bundled `electron.exe`，10 项非窗口检查 PASS、6 项真实窗口检查 FAIL。两者均作为 qualification input/environment blocker 记录，不属于本次 Map composition regression；Hosted Node 20/24 证据仍 PENDING。
 
 ---
 

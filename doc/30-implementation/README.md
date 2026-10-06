@@ -2,7 +2,7 @@
 
 **未完成事项唯一入口：[下一阶段路线图](./roadmap.md)。** 已实现功能见[核心模块](../20-modules/core/README.md)，正式跨角色协议见[契约目录](../15-contracts/README.md)。历史实施提示词、阶段报告和逐轮 review 不作为第二套状态或导航。
 
-Map 当前局部改造见 [Map Runtime Composition 解耦改造方案](./map-composition-refactor.md)。该方案已经冻结为 **Frozen / Implementation Ready / Not Implemented / Not Qualified**：删除 `mapDefinition` / default export 与 Frame-keyed bridge，让现有 `RPGMapBuilder / RPGMapHandler` 直接运行唯一 Map runtime；实施范围同时覆盖现有 Map tests 与 M14 vertical 中的 `mapDefinition` 迁移，不改变 Essentials 业务 topology。
+Map runtime composition 解耦已按 [冻结方案](./map-composition-refactor.md) 在 executable subject `488f8713a23158e736153677ec68e449879a8a1d` 实施：`mapDefinition` / default export、Frame-keyed bridge 与 direct-definition dual-mode 已删除，现有 `RPGMapBuilder / RPGMapHandler` 直接运行唯一 package-internal runtime；Map tests、M14 vertical 及其余 active consumer 已迁移，Essentials 业务 topology 未改。Map package 与本地 `test:m14` PASS；M14/M15 正式资格仍由各自 ledger 管理，不继承历史 PASS。
 
 持续有效的文档：[测试策略](./testing-strategy.md)、[分包边界](./package-architecture.md)、[仓库布局](./repository-layout.md)。精确的 M11/M14/M15/Viewport 资格证据分别由 [M11](./m11-qualification.md)、[M14](./m14-qualification.md)、[M15](./m15-qualification.md)、[Viewport](./viewport-profile-v1-qualification.md) ledger 负责；Realm State v1 的结果见其[独立资格记录](./realm-state-v1-qualification.md)。历史 PASS 不能自动迁移到新 SHA。
 
