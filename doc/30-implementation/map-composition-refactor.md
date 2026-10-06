@@ -1,11 +1,11 @@
 # Map Runtime Composition 解耦改造方案
 
-> 层级：实施方案  
+> 层级：实施方案
 > 状态：**Frozen / Implemented / Local Regression PASS / Formal Qualification Pending**
-> 基线：`main@17de12435ad0b18c66fa771764ecb4225537aa64`  
+> 基线：`main@17de12435ad0b18c66fa771764ecb4225537aa64`
 > 实施 subject：`488f8713a23158e736153677ec68e449879a8a1d`
-> 范围：`game-libs/map`、对应 Map tests、M14 vertical qualification harness  
-> 目标：保留现有 `RPGMapBuilder / RPGMapHandler` 模块化接口，删除 `mapDefinition`、default export 与 Frame-keyed bridge，让 Handler 直接执行唯一的 package-internal Map runtime。  
+> 范围：`game-libs/map`、对应 Map tests、M14 vertical qualification harness
+> 目标：保留现有 `RPGMapBuilder / RPGMapHandler` 模块化接口，删除 `mapDefinition`、default export 与 Frame-keyed bridge，让 Handler 直接执行唯一的 package-internal Map runtime。
 > 相关：[地图模块](../20-modules/loom-map/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[M14 qualification](./m14-qualification.md)、[路线图](./roadmap.md)
 
 本文是冻结实施规格。实现 agent 应直接按本文执行，不重新设计 Map 架构，不扩大 scope；只有 checked-in source 证明某条冻结假设不成立时，才允许停下并记录偏差。
