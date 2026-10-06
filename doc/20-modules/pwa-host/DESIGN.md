@@ -7,141 +7,173 @@
 > 正式契约：[PWA Launcher Profile v1](../../15-contracts/pwa-launcher-profile-v1.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[正式契约目录](../../15-contracts/README.md)  
 > 相关设计：[平台组合架构](../../10-architecture/platform-composition-system.md)、[存储与内容系统](../../10-architecture/storage-system.md)、[`@loomrealm/game-launcher-pwa` 设计](../../../packages/game-launcher-pwa/DESIGN.md)
 
-本文定义 LoomRealm PWA 产品从当前 Desktop/Hostra 体系迁移到 Browser Window + Dedicated Worker + MessagePort + Service Worker 时的产品组合边界与实施顺序。它不建立第二套 Main、Subsystem、Content 或 Renderer 语义；PWA 改变的是物理 hosting、transport 与 storage realization。
+本文定义 LoomRealm PWA 产品的 physical composition 与实施顺序。PWA 不建立第二套 Main、Subsystem、Realm State、Renderer 或 Content 语义；它只把 Desktop 的 process / loopback / filesystem realization 替换成 Browser Window / Dedicated Worker / MessagePort / Service Worker + browser persistent storage。
 
 核心原则：
 
-> **PWA 不是重写一套 LoomRealm。Main / Subsystem / Realm State / Renderer / Content 的逻辑契约继续成立；Desktop 的 Process / loopback / filesystem realization 替换为 Browser Window / Dedicated Worker / MessagePort / Service Worker + browser persistent storage realization。**
+> **Browser Window 只承载展示与用户交互；Main 与 RealmStateAuthority 从 M16 起共置于独立 Session Worker，不与 Window Renderer 共享 event loop；每个 Subsystem Runtime 继续运行在独立 Dedicated Worker。**
 
-特别地：
+这样 Desktop 与 PWA 都保持相同的物理隔离方向：Control Authority 不与 Presentation 主线程共阻塞，Renderer 卡顿不能直接冻结 Main 的 Runtime/Frame/lifecycle 控制。
 
-> **Subsystem 使用 Content 的方式必须保持不变。PWA MUST 继续通过现有 `ContentClient` 的 `record()` / `resource()` 逻辑能力读取素材；不得让业务 Runtime 直接获得 OPFS、physical path、filesystem handle 或任意 URL 能力。Content HTTP/Fetch contract 保持不变，变化只发生在请求背后的物理 Content Service。**
+Content 继续遵守另一条硬约束：
+
+> **Subsystem 在 Desktop/PWA 都只通过 `ContentClient.record()` / `resource()` 使用 Content。PWA 保持现有 HTTP/Fetch contract，由 same-origin Service Worker + persistent browser storage 实现，不向业务 Runtime 暴露 OPFS/path/handle。**
 
 ---
 
-## 1. Scope
+## 1. Frozen Physical Topology
 
-PWA 产品最终负责组装：
+PWA baseline：
 
 ```text
 Browser Window
 ├── product bootstrap
-├── PwaPlatform
-├── Main
-├── RealmStateAuthority
 ├── Renderer
-├── PWA Content installation/service
-└── Web Presentation
+├── Input source
+├── Viewport source
+├── Web Presentation / DOM
+├── Service Worker registration/readiness
+└── Window-side platform adapter
+        │
+        │ Renderer Control / Renderer Data / lifecycle MessagePorts
+        ▼
+
+Session Worker (Dedicated Worker)
+├── Main                         Control Authority
+├── RealmStateAuthority          Session business-state authority
+├── session-scoped PwaPlatform core
+├── PwaLaunchPlan
+├── RuntimeHosting
+└── Data/Control provisioning
         │
         ├── Dedicated Worker #1 → Subsystem Runtime
         ├── Dedicated Worker #2 → Subsystem Runtime
         └── ...
+
+Service Worker
+└── readonly Content Service
+        ↓
+Persistent Installation Registry / Content Index / object storage
 ```
 
-M16 先关闭最小 Runtime vertical：
-
-```text
-Game source
-→ PWA PREPARE
-→ PwaLaunchPlan + LogicalGameBootstrap + PreparedRealmStateDefinition
-→ Main
-→ PwaPlatform.runtimeHosting.launch(subsystemKey)
-→ Dedicated Worker Runner
-→ Runtime Control over MessagePort
-→ Subsystem READY
-→ initial Frame
-```
-
-M17 再关闭完整产品等价：
-
-```text
-Window Renderer
-+ Data
-+ Input
-+ Viewport
-+ Content
-+ Web Presentation
-+ failure/recovery
-+ Desktop ↔ PWA business-observable equivalence
-```
-
-本文不把 Service Worker installation prompt、浏览器 UI、manifest icon、push notification 等普通 Web/PWA 产品能力提升为 LoomRealm application authority。
-
----
-
-## 2. Authority 与平台映射
-
-跨平台 authority 不变：
+`Main` 与 `RealmStateAuthority` **物理共置、逻辑分离**：
 
 ```text
 Main
-    Control Authority
+    owns Session/Runtime/Frame/Activation/InputTarget control
 
-Realm State
-    Session shared mutable business-state authority
-
-Subsystem
-    Domain execution / local-state authority
-
-Renderer
-    read-only presentation replica
-
-Content
-    readonly installation definition/resource authority
+RealmStateAuthority
+    owns shared mutable business facts / revision / OCC / subscriptions
 ```
 
-PWA 只替换物理 owner：
+共置不允许 Main 直接解释 Realm State business values，也不允许 RealmStateAuthority 取得 Runtime/Frame/Session terminal authority。
 
-| Desktop / Hostra | PWA |
-| --- | --- |
-| Hostra BrowserWindow | Browser Window |
-| LoomRealm Desktop Node composition | session-scoped `PwaPlatform` composition |
-| Runner subprocess | Dedicated Worker Runner |
-| loopback WebSocket / process carrier | `MessagePort` carrier |
-| filesystem / FSDB | browser persistent installation storage |
-| localhost Content HTTP service | same-origin Service Worker Content service |
-| Hostra launch plan | `PwaLaunchPlan` |
+`Renderer` MUST remain in Window because DOM/Canvas/Web Components/Input/Viewport belong to browser presentation context。
 
-物理 colocate 不产生第二 authority。即使 Main、Renderer、RealmStateAuthority 和 PwaPlatform 同处一个 Window agent，它们仍必须按现有逻辑边界交互，不因“都在浏览器里”共享任意 mutable object 或绕过正式协议。
+Subsystem MUST remain outside Window in Dedicated Worker Runtime。
 
 ---
 
-## 3. Product Composition Root
+## 2. Why Main Is Not In Window
 
-`apps/pwa` 是预期的 product composition root。它负责创建一次 session-scoped `PwaPlatform`，完成 PREPARE 后再把同一个 platform 的 narrow Main-facing view 交给 Main。
-
-概念顺序：
+禁止采用以下长期 baseline：
 
 ```text
-apps/pwa
-→ create PwaPlatform
+Window
+├── Main
+├── RealmStateAuthority
+├── Renderer
+└── DOM
+```
+
+因为 Window event loop 上的同步 presentation workload：
+
+```text
+DOM mutation
+layout / style work
+Canvas/WebGL preparation
+business Web Component synchronous work
+input handler stall
+```
+
+会同时阻塞 Main 的 control/lifecycle/deadline processing，形成 Desktop/PWA 可观察差异。
+
+目标是：
+
+```text
+Window Renderer stall
+    MUST NOT by physical colocation directly stall
+Session Worker Main event loop
+```
+
+这里要求的是独立 Worker execution context，而不是规定浏览器必须提供独立 OS process；OS process placement 属于浏览器实现细节。
+
+---
+
+## 3. Cross-platform Mapping
+
+```text
+Desktop / Hostra                    PWA
+────────────────────────────────────────────────────────
+Desktop Node                        Session Worker
+├── Main                            ├── Main
+├── RealmStateAuthority             ├── RealmStateAuthority
+└── RuntimeHosting                  └── RuntimeHosting
+
+BrowserWindow                       Browser Window
+└── Renderer                        └── Renderer / DOM / Input
+
+Runner subprocess                   Dedicated Worker
+└── Subsystem                       └── Subsystem
+
+localhost Content HTTP              same-origin Content Fetch
+└── FSDB / filesystem               └── SW / persistent browser store
+```
+
+必须保持的是 logical authority / protocol / failure semantics，不要求 WebSocket bytes 与 MessagePort bytes、filesystem 与 OPFS、Node process 与 Worker 在物理上相同。
+
+---
+
+## 4. Product Bootstrap / Composition Root
+
+`apps/pwa` 的 Window bootstrap 只负责 browser-only startup：
+
+```text
+ensure Service Worker registration/readiness
+→ acquire/select validated installation source
+→ create Session Worker at Host-owned entry
+→ create Window↔Session bootstrap/control channels
+→ transfer bootstrap material/Ports
+→ install Window Renderer/Input/Viewport/Presentation adapters
+```
+
+Session Worker 内部：
+
+```text
+receive/validate host bootstrap
+→ create session-scoped PwaPlatform core
 → PwaPlatform.prepareGame(source)
 → obtain PreparedPwaGame
-→ construct fresh RealmStateAuthority from prepared state
-→ install platform/session bindings
-→ run Main(logicalBootstrap, platform)
-→ attach Window Renderer / Presentation
+→ construct fresh RealmStateAuthority from PreparedRealmStateDefinition
+→ Realm State READY
+→ run Main(LogicalGameBootstrap, Main-facing platform view)
 ```
 
-`apps/pwa` / `PwaPlatform` MAY 负责 construct/bind/launch/dispose，但 MUST NOT 新建第二套：
+第一项 business Runtime side effect 必须满足：
 
 ```text
-Session authority
-Frame authority
-Realm State authority
-Renderer state authority
-Content business state authority
+PWA PREPARE complete
+∧ Realm State READY
+∧ Session Worker bootstrap valid
 ```
 
-不要为了 PWA 预造 `PwaGameEngine`、`PwaSessionManager`、`PwaRuntimeManager` 或 universal service locator。
+Window bootstrap 不是第二个 Session owner；Session/Runtime/Frame terminal 仍由 Main 决定。
 
 ---
 
-## 4. PREPARE 与 `PwaLaunchPlan`
+## 5. PREPARE / PwaLaunchPlan
 
-PWA Game acquisition 与 executable binding 由 `PwaPlatform.prepareGame()` 内部委托 [`@loomrealm/game-launcher-pwa`](../../../packages/game-launcher-pwa/DESIGN.md)。
-
-PREPARE 必须在 first business Runtime side effect 前闭合：
+`PwaPlatform.prepareGame()` 内部委托 `@loomrealm/game-launcher-pwa`：
 
 ```text
 obtain Game Entry
@@ -149,53 +181,55 @@ obtain Game Entry
 → project PreparedRealmStateDefinition
 → validate launch.pwa.json
 → exact Game ↔ PWA subsystem key-set join
-→ resolve / preflight every planned business module
+→ resolve/preflight every executable module
 → validate installation/origin/Worker capability
 → freeze PwaLaunchPlan
 → freeze LogicalGameBootstrap
 → freeze prepared Content installation view when required
-────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────
 PREPARE complete
-→ first Worker side effect may begin
 ```
 
-Main-facing `LogicalGameBootstrap` 继续只包含 logical topology 与 initial input。Main MUST NOT 看见：
+Main 只获得：
+
+```text
+LogicalGameBootstrap
+subsystemKey
+launch-attempt material
+```
+
+Main MUST NOT 获得：
 
 ```text
 module URL
 Worker constructor options
-MessagePort
 Service Worker route
 OPFS path
 Content storage identity
 PwaLaunchPlan
 ```
 
-Main 的 launch 仍然只表达：
-
-```text
-launch(subsystemKey, launch-attempt material)
-```
-
 ---
 
-## 5. Worker RuntimeHosting
+## 6. RuntimeHosting / Nested Subsystem Workers
 
-PWA `RuntimeHosting` 的物理工作是把 Desktop 的“创建 Runner process”替换为“创建 Dedicated Worker Runner”。
+`RuntimeHosting` 位于 Session Worker physical composition，负责把 Main 的 logical launch 投影成 Dedicated Worker Runtime：
 
 ```text
 Main
-→ PwaPlatform.runtimeHosting.launch(subsystemKey)
+→ RuntimeHosting.launch(subsystemKey)
 → lookup frozen PwaLaunchPlan
-→ create Dedicated Worker(generic runner entry)
-→ provision bootstrap material + transferred Ports
+→ create Dedicated Worker(generic Worker Runner)
+→ provision Runtime Control / Realm State / Data material
 → Runner validates bootstrap
-→ Runner imports exact planned business module
+→ import exact planned business Definition Module
 → validate SubsystemDefinitionFactory
 → runSubsystem(...)
 ```
 
-Business Definition Module 不是 Worker constructor entry。Generic Worker Runner 属于 Platform；它拥有 bootstrap validation、planned import、carrier provisioning、shutdown/supervision 等 platform mechanics。
+Browser Worker environment允许 Dedicated Worker 创建 same-origin nested workers；实现仍需 qualification 覆盖目标浏览器。Product 不依赖 Window 代 Main 创建每一个 Subsystem Worker，避免额外的 Window-host RPC authority。
+
+Generic Worker Runner 是 Host-owned constructor entry；business Definition Module 不是 Worker entry。
 
 禁止：
 
@@ -203,122 +237,139 @@ Business Definition Module 不是 Worker constructor entry。Generic Worker Runn
 new Worker(businessModuleUrl)
 Game config chooses arbitrary Worker entry/options
 Main receives module URL
-Subsystem searches global bootstrap Port
+Subsystem discovers bootstrap through ambient globals
 ```
 
-Unexpected Worker termination 是 hosting/runtime failure；PWA 不自动重启 Runtime，不得绕过 Main 的统一 terminal/unwind ownership。
+Unexpected Subsystem Worker termination → Runtime failure → Main-owned unwind；v1 不自动 restart。
 
 ---
 
-## 6. MessagePort Planes
+## 7. MessagePort Planes
 
-PWA 中 `MessageChannel` / `MessagePort` 是主要跨 agent carrier，但不同 logical plane 仍保持隔离。
-
-至少包括：
+不同 logical plane 即使都使用 `MessagePort` 也必须隔离：
 
 ```text
-Runtime Control Port
-Realm State Port
-Renderer Data Port
-Runner provisioning/bootstrap transfer
+Window ↔ Session Worker
+    Renderer Control
+    Renderer Data provisioning / Window endpoint transfer
+    browser lifecycle / host bootstrap
+
+Session Worker ↔ Subsystem Worker
+    Runtime Control
+    Realm State binding
+    Renderer Data
+    Runner provisioning/bootstrap
 ```
 
-它们不得因为都使用 MessagePort 而合并成一个 application mega-channel。
+禁止建立 single mega-channel 来混合 Control、State、Data 与 platform provisioning。
 
-### 6.1 Runtime Control
+### 7.1 Renderer Control
 
-M16 首先关闭：
+Main 与 Renderer 物理跨 Worker，因此 Renderer Control 明确采用 existing protocol + MessagePort carrier：
 
 ```text
-MainRuntimeControlPeer
-↕ MessagePort carrier
-SubsystemRuntimeControlPeer
+Session Worker / Main
+        ↕ Renderer Control MessagePort
+Window / Renderer
 ```
 
-并保留现有：
+Renderer Control loss/reconnect 继续服从现有 Renderer currentness/identity 规则；Window 不因 carrier loss自行取得 Session terminal authority。
+
+### 7.2 Runtime Control
 
 ```text
-created
-→ connected
-→ identified
-→ initializing
-→ ready
+Session Worker / MainRuntimeControlPeer
+        ↕ MessagePort
+Subsystem Worker / SubsystemRuntimeControlPeer
 ```
 
-语义及 terminal/failure mapping。
-
-### 6.2 Realm State
-
-Realm State v1 已有 browser/Worker-compatible MessagePort realization。PWA Runtime 直接复用该 logical client/authority 模型：
+保持：
 
 ```text
-Window RealmStateAuthority
-↕ MessagePort
-Worker ReplaceableRealmStateClient
-→ SubsystemScope.state
+created → connected → identified → initializing → ready
 ```
 
-旧 binding/subscription 的 terminal、replacement、generation fencing、`OUTCOME_UNKNOWN` 等现有语义不因 PWA 改变。
+以及现有 timeout/terminal/failure mapping。
 
-### 6.3 Renderer Data
+### 7.3 Realm State
 
-M17 中 PWA Data Broker 在 current Session/Renderer/subsystem/generation/profile 事实下创建 MessageChannel，并分别把两端 provision 给 Renderer 与目标 Worker。Broker 只负责物理 connection；不成为 DataAuthority，也不把 transfer failure解释成 Frame failure。
+RealmStateAuthority 与 Main 共置 Session Worker，但 Subsystem 仍只获得 Runtime-scoped RealmStateClient：
+
+```text
+Session Worker
+RealmStateAuthority
+        ↕ dedicated/private MessagePort binding
+Subsystem Worker
+Replaceable RealmStateClient
+        ↓
+SubsystemScope.state
+```
+
+State binding loss MUST NOT 自动成为 Runtime/Session failure；old subscription terminal、replacement fencing、`OUTCOME_UNKNOWN` 等 Realm State v1 语义不变。
+
+### 7.4 Renderer Data
+
+PWA Data Broker依据 Main current authority view创建 fresh MessageChannel：
+
+```text
+                    PWA Data Broker
+                         │
+                  MessageChannel
+                    /          \
+                   /            \
+Window Renderer port      Subsystem Worker port
+```
+
+Broker 只负责 physical connection，不 mint generation/profile，不成为 DataAuthority，不把 transfer failure解释成 Frame failure。
 
 ---
 
-## 7. Content：保持现有 HTTP/Fetch 接口
+## 8. Content: Keep Existing HTTP/Fetch Contract
 
-### 7.1 不改变 Subsystem 使用方式
+### 8.1 Business API unchanged
 
-Subsystem 继续只拿到：
-
-```ts
-interface ContentClient {
-  record(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentRecord>;
-  resource(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentResource>;
-}
-```
-
-业务代码在 Desktop 与 PWA 必须保持同形：
+Subsystem 继续：
 
 ```ts
 const map = await scope.content.record("Map", "21");
 const image = await scope.content.resource("Graphics", "Characters/player.png");
 ```
 
-PWA MUST NOT 要求 game-lib / Subsystem 改成：
+MUST NOT 改成：
 
 ```text
 navigator.storage.getDirectory()
 OPFS path lookup
-filesystem handle
-arbitrary fetch URL
+FileSystemHandle
+arbitrary physical URL
 postMessage({ type: "read-file", path })
 ```
 
-如果支持 PWA 需要修改业务侧 Content 使用方式，说明 platform Content boundary 已被破坏。
+### 8.2 Physical realization
 
-### 7.2 HTTP contract 保持不变
-
-PWA 继续实现 [Content API v1](../../15-contracts/content-api-v1.md) 的相同 route/method/status/header/body 语义：
-
-```http
-GET  /_lr/v1/games/{installationId}/manifest
-HEAD /_lr/v1/games/{installationId}/manifest
-
-GET  /_lr/v1/games/{installationId}/records/{namespace}/{key}
-HEAD /_lr/v1/games/{installationId}/records/{namespace}/{key}
-
-GET  /_lr/v1/games/{installationId}/groups/{namespace}/{key}
-HEAD /_lr/v1/games/{installationId}/groups/{namespace}/{key}
-
-GET  /_lr/v1/games/{installationId}/resources/{namespace}/{key...}
-HEAD /_lr/v1/games/{installationId}/resources/{namespace}/{key...}
-```
-
-成功与失败继续使用同一：
+Desktop：
 
 ```text
+ContentClient / ResourceClient
+→ localhost Fetch
+→ Desktop Content Service
+→ trusted index / FSDB / filesystem
+```
+
+PWA：
+
+```text
+Subsystem Worker / Window Renderer
+→ same-origin Fetch /_lr/v1/games/...
+→ Service Worker Content Service
+→ persistent Installation Registry / Content Index
+→ immutable body storage
+```
+
+PWA 保持 Content API v1：
+
+```text
+GET / HEAD routes
 status/error mapping
 Content-Type
 ETag
@@ -329,138 +380,65 @@ problem+json
 integrity semantics
 ```
 
-PWA 不需要真的启动一个 localhost listening HTTP server。保持的是 **HTTP/Fetch contract**，不是 Desktop 的 physical server topology。
+Desktop bearer 与 PWA same-origin/SW authority可以不同；不要为了表面对称给 PWA 发明 bearer distribution。
 
-### 7.3 Desktop 与 PWA 的 physical realization
+### 8.3 Persistent browser storage
 
-Desktop：
-
-```text
-Subsystem / Renderer
-→ ContentClient / ResourceClient
-→ fetch(http://127.0.0.1:.../_lr/v1/...)
-→ Desktop Content Service
-→ trusted Content Index
-→ @loomrealm/fsdb
-→ filesystem
-```
-
-PWA：
-
-```text
-Subsystem Worker / Renderer
-→ ContentClient / ResourceClient
-→ fetch(same-origin /_lr/v1/...)
-→ Service Worker fetch handler
-→ persistent Installation Registry / Content Index
-→ browser local object storage
-```
-
-`@loomrealm/fsdb` 保持 Node-only，不为 PWA 增加 filesystem-provider abstraction。PWA 实现相同 Content logical semantics，而不是把 FSDB scanner/safe-open 逻辑移植到浏览器。
-
-### 7.4 Service Worker 是 PWA Content Service
-
-Service Worker 对 `/_lr/v1/games/...` route 执行：
-
-```text
-parse + validate logical identity
-→ verify installation exists and is complete
-→ lookup trusted persistent Content Index
-→ locate immutable body object
-→ read bytes
-→ verify currentness/integrity when required
-→ construct standard Response
-```
-
-Service Worker MAY 随时被浏览器终止，因此它的内存 cache、open handle、temporary map 都不是 authority。每次重建后必须能从 persistent installation facts 恢复正确响应。
-
-Service Worker 不承担：
-
-```text
-Runtime Tick
-Frame Stack
-Renderer Control
-Realm State authority
-User Input
-business execution
-```
-
-### 7.5 Persistent installation layout
-
-第一版建议把职责分为：
-
-```text
-Installation Registry
-    installationId / state / metadata
-
-Content Index
-    logical identity → MIME / size / contentVersion / object identity
-
-Object Store
-    immutable response body bytes
-```
-
-Browser physical primitive 可采用：
+首版推荐：
 
 ```text
 IndexedDB
-    structured Installation Registry + Content Index
+    Installation Registry + Content Index
 
 OPFS
     immutable body objects
 
 Cache Storage
-    optional derived HTTP response cache
+    optional derived cache only
 ```
 
-这些是 implementation choices，不成为 Subsystem/Renderer observable API。
+`@loomrealm/fsdb` 保持 Node-only；不创建 generic filesystem provider 只为了复用 Desktop 实现。
 
-`Cache Storage` 若引入，只能是可丢弃的 derived cache；Installation Registry + Content Index + object bodies 才能恢复 Content Service。删除/失效 installation 后，残留 Cache response 不得继续成为 authority。
+Service Worker volatile memory不是 authority。SW 重启后必须能从 persistent facts 恢复 Content Service。
 
-### 7.6 Content-addressed body 是推荐布局，不是新 logical contract
+---
 
-Content API v1 已冻结：
+## 9. Installation Publish Atomicity
+
+浏览器无法把 OPFS 与 IndexedDB 当作一个跨存储事务，因此“atomic install”定义为 **visibility/publish atomicity**：
 
 ```text
-contentVersion = sha256:<64 lowercase hex>
+state = staging
+→ write immutable objects
+→ validate bodies / versions / executable bindings
+→ build complete Content/Executable indexes
+→ one persistent publish commit marks installation = complete
 ```
 
-并由 exact successful full-body representation bytes 计算。因此 PWA object store MAY 直接使用 hash/object identity 保存 immutable bytes，例如：
+只有 `complete` installation 对 PREPARE / Content Service 可见。
+
+如果浏览器中途退出：
 
 ```text
-Content logical identity
-→ Content Index
-→ sha256 object identity
-→ immutable bytes
+partial OPFS objects
++ no complete publish marker
+= orphan/staging material
 ```
 
-这只是物理 storage layout；业务仍只看 `resourceKey/contentVersion`，不获得 object path/hash file handle。
+不得成为可运行 installation；后续 cleanup/GC 可回收。
 
-### 7.7 Authorization
+若 persistent index仍存在但 required body 缺失/损坏，必须进入 installation integrity/currentness failure，不允许半坏游戏继续读取混合版本内容。
 
-Desktop 保持 loopback + scoped bearer。PWA 使用 same-origin + Service Worker installation authority。
+---
 
-PWA MUST NOT 仅为了与 Desktop request header 长得一样而制造额外 bearer distribution protocol。
+## 10. Executable Capability
 
-因此可以共享 ContentClient 的 route/response validation/JSON parse/error mapping 核心，但 platform binding MAY 不同：
-
-```text
-Desktop binding
-    origin + installationId + bearer
-
-PWA binding
-    same-origin + installationId
-```
-
-外部暴露的仍是相同 `ContentClient`。不要把 Desktop bearer 改成模糊的全平台 optional token 规则来削弱 Desktop invariant。
-
-### 7.8 Executable 与 ordinary Content 继续隔离
-
-浏览器中 executable module 与 resource 最终都可能具有 URL-like physical identity，但 capability MUST 分开：
+Executable 与 ordinary Content 始终是两条 capability：
 
 ```text
 PwaLaunchPlan
 → trusted executable resolver
+→ same-origin/trusted module identity
 → Worker Runner import
 ```
 
@@ -472,103 +450,96 @@ ContentClient
 → Service Worker readonly Content Service
 ```
 
-不得：
+不得把普通 Content resource 转成任意 executable import capability，也不得把 module URL 泄漏给 Main/Renderer/business state。
 
-```text
-Content resource → blob URL → arbitrary import
-Render State carry executable URL
-ContentClient expose installation internal module location
-```
-
-### 7.9 Renderer ResourceClient
-
-Render/business data 继续只携 logical resource reference：
-
-```text
-resourceKey + contentVersion
-```
-
-Renderer 再通过 Content API 读取 bytes。PWA Render state 不得携带 `blob:` URL、OPFS path、FileSystemHandle 或 Service Worker internal key。
+Executable bytes → trusted module URL 的具体 physical resolver 必须在 PWA executable vertical 中冻结并 qualification；它可以复用 installation/object storage primitive，但不能复用普通 Content capability authority。
 
 ---
 
-## 8. Installation Atomicity
+## 11. Window Renderer / Input / Viewport / Presentation
 
-PWA installation/import 是 Content/Platform PREPARE 之前的物理产品 workflow；它不得暴露半安装的 current installation。
-
-建议 installation state 至少区分：
+Window 负责：
 
 ```text
-installing
-complete
-failed / removable
+Renderer Store
+Web Projector
+business Custom Elements / Canvas / WebGL
+DOM / Pointer / Keyboard / Gamepad input source
+Viewport / DPR / resize source
 ```
 
-典型安装流程：
-
-```text
-acquire package/source
-→ validate Game Entry
-→ validate PWA launch manifest
-→ import/validate Content bodies
-→ calculate exact contentVersion / integrity facts
-→ write immutable objects
-→ build persistent Content Index
-→ preflight executable bindings
-→ atomically publish installation as complete
-```
-
-只有 `complete` installation 才能被 PWA PREPARE / Content Service 选为 current validated installation。
-
-浏览器/页面/Service Worker 中途终止后，未完成 installation 不能因部分 object 已存在而变成可运行游戏；应恢复为 incomplete/cleanup state，并按 Content API 映射为相应 installation conflict，而不是返回混合版本内容。
-
----
-
-## 9. Renderer / Input / Presentation
-
-M17 Window side继续复用当前逻辑：
+Render flow：
 
 ```text
 Subsystem RenderDomain
 → Renderer Data protocol
-→ Window Renderer current Store
-→ Web Presentation projector
-→ business Custom Elements / Canvas / WebGL
+→ Window Renderer Store
+→ Web Projector
+→ business presentation
 ```
 
-输入反向：
+Input flow：
 
 ```text
-DOM / Pointer / Keyboard / Gamepad
-→ RendererInputSource
-→ existing Input protocol/gate
-→ Main current InputTarget
-→ current Frame / Subsystem InputListener
+DOM/Input source
+→ Renderer Input protocol/gate
+→ current InputTarget semantics
+→ current Subsystem InputListener
 ```
 
-不得缩短为：
+不得缩短成：
 
 ```text
-window keydown → worker.postMessage(business event)
+window keydown → subsystemWorker.postMessage(business event)
 ```
 
-否则会绕过现有 Activation/InputTarget/Interest/currentness 语义。
+否则会绕过 Activation/InputTarget/Interest/currentness。
 
 ---
 
-## 10. M16 Definition of Done
+## 12. Session Lifecycle / Reload
 
-M16 只签署 PWA Runtime vertical，不冒充完整 PWA product：
+v1 明确：
 
 ```text
-Game source
+PWA top-level Window reload/navigation
+= current PWA Session terminal
++ old Session Worker / Subsystem Workers no longer current
++ next document creates a fresh Session
+```
+
+v1 **不承诺**像 Desktop BrowserWindow document reload 一样保持 Main/Runtime/Realm State Session 存活；不要为此提前引入 SharedWorker 或跨页面 Session daemon。
+
+这不影响 logical business equivalence：跨平台要求相同 LoomRealm contract/result，而不是要求 host reload 的物理生命周期完全一致。
+
+Session termination physical cleanup：
+
+```text
+Main commits terminal
+→ stop new Runtime/Data admission
+→ revoke/close Data/Control/State bindings
+→ request/observe Subsystem Worker termination
+→ dispose RealmStateAuthority
+→ terminate Session Worker
+→ Window disposes Renderer/Input/Presentation adapters
+```
+
+Service Worker 与 installed game storage 是 origin/product-scoped resource，不属于单个 Session，不随 Session dispose 删除。
+
+---
+
+## 13. M16 Definition of Done
+
+M16 从一开始使用独立 Session Worker baseline：
+
+```text
+Window bootstrap
+→ Session Worker
 → PwaPlatform.prepareGame
 → complete PREPARE
-→ PreparedPwaGame
 → Realm State READY
-→ Main
-→ Pwa RuntimeHosting
-→ Dedicated Worker Runner
+→ Main running in Session Worker
+→ RuntimeHosting creates Subsystem Worker
 → planned business module
 → Runtime Control MessagePort
 → Subsystem initializing/ready
@@ -579,26 +550,28 @@ Game source
 至少覆盖：
 
 ```text
-PREPARE failure → zero Worker side effect
+Session Worker bootstrap failure
+PREPARE failure → zero Subsystem Worker side effect
 manifest/key-set/module preflight failure
-Worker constructor/bootstrap failure
+Subsystem Worker constructor/bootstrap failure
 planned module load/ABI failure
-Runtime Control hello/ready path
-Runtime Control loss
-unexpected Worker terminate
+Runtime Control hello/ready/loss
+unexpected Subsystem Worker termination
 Main shutdown → Worker cleanup
-Realm State MessagePort client works in real Worker
-old/replaced Port cannot mutate current Runtime
-no automatic Worker restart
+real Worker Realm State client
+old/replaced State Port cannot mutate current Runtime
+Renderer Control carrier can be established Window↔Session Worker
+Window presentation stall test does not execute Main on Window event loop
+no automatic Runtime restart
 ```
 
-M16 MAY 使用不依赖完整 Renderer/Content 的最小 fixture；这不代表 M17 Content 产品能力已交付。
+M16 MAY 使用最小 Renderer/Content fixture；这不代表完整 M17 product 已交付。
 
 ---
 
-## 11. PWA Content Vertical
+## 14. PWA Content Vertical
 
-在 M17 完整 UI 前，可独立关闭一条 Content qualification vertical：
+可在完整 M17 UI 前独立资格：
 
 ```text
 fixture installation
@@ -606,47 +579,47 @@ fixture installation
 → Service Worker /_lr/v1 handler
 → same-origin fetch
 → PWA-bound ContentClient
-→ real browser / Worker consumer
+→ real Window / Dedicated Worker consumer
 ```
 
-至少复用/镜像 Content API conformance：
+至少覆盖：
 
 ```text
-manifest / record / group / resource success
-GET / HEAD equivalence
+manifest / record / group / resource
+GET / HEAD
 multi-segment ResourceKey
-segment traversal / malformed rejection
+traversal/malformed rejection
 exact sha256 contentVersion
-ETag exact mapping
-If-None-Match → 304
+ETag / If-None-Match 304
 MIME
-unknown installation/content
-incomplete installation → conflict
+unknown/incomplete installation
 schema/integrity failure
 Service Worker restart/reconstruction
-offline read from complete local installation
-abort/cancel behavior
+offline read from complete installation
+abort/cancel
+staging installation never visible
+missing/corrupt persistent body fails closed
 ```
 
-目标不是证明“OPFS 能读文件”，而是证明 PWA 与 Desktop 提供同一个 LoomRealm Content Service contract。
+目标是证明 PWA 与 Desktop 提供同一个 Content contract，而不是只证明 OPFS 能读文件。
 
 ---
 
-## 12. M17 Definition of Done
+## 15. M17 Definition of Done
 
-M17 在 M16 基础上关闭真实 product composition：
+M17 在 M16 Session Worker baseline 上关闭：
 
 ```text
-Window Renderer
-+ Data Broker
+Renderer Control Window↔Session Worker
++ Renderer Data Window↔Subsystem Worker
 + Input
 + Viewport
 + Content
 + Web Presentation
-+ current game-lib / concrete game
++ real game-lib / concrete game
 ```
 
-最终需要对同一 logical fixture / game scenario 做 Desktop ↔ PWA equivalence：
+Desktop ↔ PWA equivalence：
 
 ```text
 same logical input sequence
@@ -664,76 +637,93 @@ WebSocket bytes == MessagePort bytes
 Node process == Worker
 filesystem path == OPFS layout
 DOM timing bit-for-bit equal
+Desktop document reload == PWA top-level reload
 ```
-
-要证明的是 logical contract 与 business-observable result 等价，而不是 physical topology 相同。
 
 ---
 
-## 13. 推荐实施切片
-
-为降低一次性变更面，建议按真实 vertical 分批：
+## 16. Implementation Slices
 
 ```text
-PWA-1 PREPARE
-    finish PwaLaunchManifest / join / resolver / PreparedPwaGame
+PWA-1 Browser bootstrap / Session Worker
+    SW readiness + Host-owned Session Worker + Window↔Session bootstrap
 
-PWA-2 Worker Runtime
-    PwaPlatform + RuntimeHosting + generic Worker Runner + Runtime Control MessagePort
+PWA-2 PREPARE / Session authorities
+    PwaLaunchPlan + RealmStateAuthority + Main in Session Worker
 
-PWA-3 State / lifecycle
-    real Worker Realm State binding + shutdown/replacement/failure closure
+PWA-3 Worker Runtime
+    RuntimeHosting + generic nested Worker Runner + Runtime Control
 
-PWA-4 Content vertical
-    persistent installation view + Service Worker Content API + PWA ContentClient binding
+PWA-4 State / lifecycle
+    real Realm State Worker binding + shutdown/replacement/failure closure
 
-PWA-5 Renderer/Data
-    Window Renderer + Data Broker + MessageChannel provisioning
+PWA-5 Content vertical
+    persistent installation + SW Content API + ContentClient binding
 
-PWA-6 Input/Viewport/Presentation
-    real browser interaction and M13 projector
+PWA-6 Renderer Control / Data
+    Window Renderer + Control Port + Data Broker/MessageChannel provisioning
 
-PWA-7 Product equivalence
-    current real game/fixture Desktop ↔ PWA E2E
+PWA-7 Input / Viewport / Presentation
+    real browser interaction + M13 projector
+
+PWA-8 Product equivalence
+    current real game Desktop ↔ PWA E2E
 ```
 
-该切片是实施建议，不建立第二份 milestone 状态；当前完成状态仍唯一由[路线图](../../30-implementation/roadmap.md)与相应 qualification evidence 判定。
+当前完成状态仍唯一由 roadmap 与 qualification evidence 判定。
 
 ---
 
-## 14. Package / Ownership Guard
+## 17. Package / Ownership Guard
 
-不要因为 PWA 工作创建：
+不要因为 PWA 创建：
 
 ```text
-generic filesystem provider 只为复用 Node FSDB
+PwaMain
+PwaSubsystem
+generic filesystem provider only for Node FSDB reuse
 universal all-platform launcher
 TransportRegistry
 single mega MessagePort protocol
-PWA Renderer/Main/Content mega-package
+PWA application mega-package
 Service Worker application authority
 OPFS-backed generic business repository
 automatic Runtime restart manager
+SharedWorker Session daemon only to mimic Desktop reload
 ```
 
-允许复用的是已有 logical contracts、carrier codec、validation primitive 与经过真实第二 consumer 证明可共享的纯机制；不应为了 Desktop/PWA 表面“代码对称”提前抽象 physical backend。
+`PwaPlatform` 是 logical product composition boundary，不要求所有代码位于同一 JS global：
+
+```text
+Window-side adapters
++
+Session Worker platform core
++
+Subsystem Worker hosting
++
+Service Worker Content realization
+```
+
+它们共同组成一个 PWA Platform realization，而不是多个 application authorities。
 
 ---
 
-## 15. Final Invariants
+## 18. Final Invariants
 
-1. PWA 改变 physical hosting，不建立第二套 application authority；
-2. Product caller 面向 session-scoped `PwaPlatform`，Main 不直接消费 PWA launcher/Game Package；
-3. Main 只按 `subsystemKey` launch，module/Worker/Port/storage material 不泄漏给 Main；
-4. Generic Worker Runner 是 constructor entry，business module 由 frozen plan 精确选择；
-5. Runtime Control、Realm State、Data 即使都使用 MessagePort，也保持独立 logical plane；
-6. Subsystem 在 Desktop/PWA 都只通过 `scope.content.record()` / `resource()` 使用 Content；
-7. PWA 保持 Content API v1 的 HTTP/Fetch route、status、header、version、cache、integrity semantics；
-8. PWA Service Worker 是 Content Service 的 physical realization，不是 Runtime/Main/State authority；
-9. `@loomrealm/fsdb` 保持 Node-only；PWA 不为复用它而发明 generic filesystem provider；
-10. Persistent Installation Registry/Content Index/object bodies 可恢复 Service Worker 正确性；volatile worker memory/cache 不成为 authority；
-11. Cache Storage 若使用只作为 derived cache，不可绕过 installation currentness；
-12. executable capability 与 ordinary Content capability 始终隔离；
-13. Renderer/Render State 只携 logical resource reference，不携 physical URL/path/handle；
-14. M16 证明 Worker Runtime vertical；M17 证明 Window 产品组合及 Desktop↔PWA business equivalence；
-15. 如果 PWA 需要修改 game-lib/Subsystem 的 Content 调用方式，优先视为 platform boundary 设计错误，而不是业务适配需求。
+1. Browser Window 只承载 Renderer/Input/Viewport/Presentation 与 browser-only bootstrap；
+2. Main + RealmStateAuthority 从 M16 起位于独立 Session Worker，不与 Renderer 共 event loop；
+3. Main 与 RealmStateAuthority 只物理共置，logical authority 严格分离；
+4. 每个 Subsystem Runtime 位于独立 Dedicated Worker；
+5. Main 只按 `subsystemKey` launch，module/Worker/Port/storage material 不泄漏；
+6. Worker Runner 是 Host-owned constructor entry，business module由 frozen plan精确选择；
+7. Renderer Control、Runtime Control、Realm State、Renderer Data、provisioning 保持独立 plane；
+8. Renderer Control 明确跨 Session Worker ↔ Window MessagePort；
+9. Subsystem 在 Desktop/PWA 都只通过 `scope.content.record()` / `resource()` 使用 Content；
+10. PWA 保持 Content API v1 的 HTTP/Fetch semantics，SW 只是 physical Content Service；
+11. `@loomrealm/fsdb` 保持 Node-only；PWA 不为复用它发明 filesystem abstraction；
+12. Installation 使用 staging → atomic visibility publish；半安装不可运行；
+13. Service Worker volatile memory/cache 不成为 installation authority；
+14. executable capability 与 ordinary Content capability 始终隔离；
+15. PWA top-level reload 在 v1 产生 fresh Session，不为模拟 Desktop reload 引入 SharedWorker；
+16. Window presentation stall 不得因 Main physical colocation直接冻结 Main control event loop；
+17. M16 证明 Session Worker + Subsystem Worker Runtime vertical；M17 证明完整 Window product 与 Desktop business equivalence。
