@@ -6,10 +6,14 @@ import assert from "node:assert/strict";
 import { ChildProcess } from "node:child_process";
 import WebSocket, { WebSocketServer } from "ws";
 import {
-  createHostraRuntimeHosting,
+  createHostraRuntimeHosting as createProductionHostraRuntimeHosting,
   prepareHostraGame,
 } from "../dist/index.js";
 import { buildRunnerEnvironment } from "../dist/runtime-hosting.js";
+import {
+  createRealmStateAuthority,
+  prepareRealmStateDefinition,
+} from "@loomrealm/realm-state";
 
 const policy = Object.freeze({
   helloDeadlineMs: 30_000,
@@ -17,6 +21,15 @@ const policy = Object.freeze({
   terminalCleanupDeadlineMs: 100,
   terminationGraceMs: 100,
 });
+
+// These hosting-mechanics tests deliberately install an explicit empty State
+// Authority; production composition is not allowed to omit the capability.
+function createHostraRuntimeHosting(options) {
+  return createProductionHostraRuntimeHosting({
+    ...options,
+    realmStateAuthority: createRealmStateAuthority(prepareRealmStateDefinition([])),
+  });
+}
 
 function deferred() {
   let resolve;
@@ -68,6 +81,14 @@ test("Runner environment uses the exact allowlist and reserved bootstrap", () =>
   assert.equal(environment.NODE_PATH, undefined);
   assert.equal(environment.HOSTRA_RPC_TOKEN, undefined);
   assert.equal(environment.ELECTRON_RUN_AS_NODE, undefined);
+});
+
+test("production RuntimeHosting rejects a missing Realm State Authority", async (t) => {
+  const game = await prepared(t);
+  assert.throws(
+    () => createProductionHostraRuntimeHosting({ launchPlan: game.launchPlan }),
+    /Realm State Authority/u,
+  );
 });
 
 test("RuntimeHosting launches the package Runner, acquires once, and observes actual exit", async (t) => {
@@ -360,9 +381,11 @@ test("normal termination request failure still commits and runs force convergenc
 test("a post-listening WS server error fails inside the attempt without crashing the host", async (t) => {
   const game = await prepared(t);
   const originalEmit = WebSocketServer.prototype.emit;
+  let injected = false;
   WebSocketServer.prototype.emit = function(event, ...args) {
     const emitted = originalEmit.call(this, event, ...args);
-    if (event === "listening") {
+    if (event === "listening" && !injected) {
+      injected = true;
       queueMicrotask(() => this.emit("error", new Error("injected late server failure")));
     }
     return emitted;

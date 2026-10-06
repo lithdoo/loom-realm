@@ -49,6 +49,9 @@ test("programmatic product close uses the one cleanup funnel", async () => {
     for (const type of ["termination-began", "main-settled", "renderer-control-closed", "data-broker-closed", "content-closed", "product-closed"]) {
       assert.equal(observed.some((event) => event.type === type), true, type);
     }
+    const stages = observed.filter((event) => event.type === "startup-stage").map((event) => event.stage);
+    assert.ok(stages.indexOf("prepare") < stages.indexOf("realm-state"));
+    assert.ok(stages.indexOf("realm-state") < stages.indexOf("main"));
   } finally { await hostra.close(); }
 });
 

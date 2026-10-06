@@ -4,8 +4,9 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
+import { createHostraRuntimeHosting as createProductionHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
+import { createRealmStateAuthority, prepareRealmStateDefinition } from "@loomrealm/realm-state";
 import { createRendererResourceClient } from "@loomrealm/renderer/resource-client";
 import { createDesktopContentService, prepareDesktopContentView } from "../dist/index.js";
 
@@ -13,6 +14,10 @@ const runnerPolicy = Object.freeze({ helloDeadlineMs: 5_000, frameDeadlineMs: 5_
 const mainPolicy = Object.freeze({ runtimeBootstrapDeadlineMs: 5_000, frameDeadlineMs: 5_000, shutdownDeadlineMs: 5_000, terminationDeadlineMs: 2_000 });
 const scheduler = Object.freeze({ schedule(delayMs, callback) { const timer = setTimeout(callback, delayMs); return () => clearTimeout(timer); } });
 const sha256 = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+const createHostraRuntimeHosting = (options) => createProductionHostraRuntimeHosting({
+  ...options,
+  realmStateAuthority: createRealmStateAuthority(prepareRealmStateDefinition([])),
+});
 
 async function installation(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "loomrealm-m12-vertical-"));

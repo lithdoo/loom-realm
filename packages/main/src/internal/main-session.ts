@@ -189,6 +189,14 @@ function validateOptions(options: RunMainOptions): LogicalGameBootstrap {
   ) {
     throw new TypeError("Invalid Data Connection authority sink");
   }
+  if (
+    platform.realmStateFatal !== undefined &&
+    (platform.realmStateFatal === null ||
+      typeof platform.realmStateFatal !== "object" ||
+      typeof platform.realmStateFatal.subscribe !== "function")
+  ) {
+    throw new TypeError("Invalid Realm State fatal source");
+  }
 
   const policy = options.policy;
   if (policy === null || typeof policy !== "object") {
@@ -292,6 +300,7 @@ class MainSessionRuntime {
   private nextActivation = 1;
   private mutationTail: Promise<void> = Promise.resolve();
   private detachExternalAbort: () => void = () => {};
+  private detachRealmStateFatal: () => void = () => {};
 
   constructor(private readonly options: RunMainOptions) {
     this.bootstrap = validateOptions(options);
@@ -302,6 +311,14 @@ class MainSessionRuntime {
   }
 
   run(): Promise<MainSessionResult> {
+    if (this.options.platform.realmStateFatal !== undefined) {
+      this.detachRealmStateFatal = this.options.platform.realmStateFatal.subscribe(() => {
+        void this.mutate(() => this.beginFatal(failure(
+          "REALM_STATE_AUTHORITY_FATAL",
+          "Realm State Authority became terminal",
+        )));
+      });
+    }
     const external = this.options.signal;
     if (external !== undefined) {
       const onAbort = () => this.requestShutdown();
@@ -1599,6 +1616,7 @@ class MainSessionRuntime {
       terminal.kind === "fatal" ? "bootstrap-abort" : "session-end",
     );
     this.detachExternalAbort();
+    this.detachRealmStateFatal();
 
     if (terminal.kind === "fatal") {
       this.done.reject(new MainRuntimeFatalError(terminal.failure));

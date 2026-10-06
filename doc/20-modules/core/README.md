@@ -9,6 +9,7 @@ LoomRealm 分为 **框架逻辑（`packages/`）→ 可复用游戏业务（`gam
 | 边界 | 当前职责 | 源码/模块说明 | 验证入口 |
 | --- | --- | --- | --- |
 | Foundation、Wire、Game Package | 基础类型、消息格式、逻辑游戏拓扑与校验 | `packages/foundation`、`packages/wire`、[`Game Package`](../game-package/README.md) | 根 `package.json` 中对应 workspace 测试；`test:m12` 回归 |
+| Realm State | Session shared mutable business authority、OCC、subscription、Runtime client 与 Hostra/Worker binding | `packages/realm-state`；[Realm State architecture](../../10-architecture/realm-state-system.md) | `test:realm-state`、[Realm State qualification](../../30-implementation/realm-state-v1-qualification.md) |
 | Runtime Control / Subsystem | Runner 生命周期、Frame、业务定义、RenderDomain 与 Content 作者接口 | `packages/runtime-control`、`packages/subsystem`；[Subsystem 模型](../../10-architecture/subsystem-model.md) | `test:m10`、`test:m11`、`test:m12` |
 | Main | Session、Runtime、Frame、Activation、InputTarget、DataAuthority 唯一权威 | `packages/main`；[Main 模块](../main-system/README.md) | M9–M12 及相关集成测试 |
 | Renderer / Web Presentation | 当前控制镜像、Render Store、副本、资源客户端、Web Projector 与 DOM 投影；不反向拥有业务 | `packages/renderer`；[Renderer 模块](../web-renderer/README.md) | `test:m11`、`test:m13`、Chromium |
@@ -22,7 +23,7 @@ LoomRealm 分为 **框架逻辑（`packages/`）→ 可复用游戏业务（`gam
 
 ```text
 具体游戏 Game Entry → 平台 PREPARE / 逻辑 Game Package
-→ Main Session / RuntimeHosting / Runner → Subsystem business authority
+→ Main Session + RealmStateAuthority / RuntimeHosting / Runner → Subsystem business authority
 → Data + RenderDomain → Renderer current Store → Web Projector
 → game-owned Web Component → Browser
 ```

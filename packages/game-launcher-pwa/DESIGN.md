@@ -1,6 +1,6 @@
 # `@loomrealm/game-launcher-pwa` 设计
 
-> 状态：Implementation Planning / Boundary Frozen  
+> 状态：Implementation Planning / Boundary Frozen；Realm State v1 projection + MessagePort realization implemented/qualified
 > 阶段：M15 PWA launch planning / RuntimeHosting / Worker Runner integration  
 > 最近复核：2026-08-28  
 > 目标：成为 concrete PWA Platform 内部的 Game PREPARE / Worker Runner integration component：内部消费 `@loomrealm/game-package`，闭合 PWA Game + executable PREPARE，产出 immutable `PwaLaunchPlan` + Main-facing logical bootstrap；long-lived Main-facing capabilities 由 session-scoped PwaPlatform instance 暴露。  
@@ -92,6 +92,7 @@ Common Game schema仍由 `@loomrealm/game-package` 定义；本包只是其主�
 ```ts
 interface PreparedPwaGame {
   readonly logicalBootstrap: LogicalGameBootstrap;
+  readonly state: PreparedRealmStateDefinition;
   readonly launchPlan: PwaLaunchPlan;
 }
 
@@ -110,6 +111,8 @@ product caller does not orchestrate common validation or call Game Package manua
 ```
 
 不得为了 Hostra/PWA相似预建 universal `GameSource` / `PreparedPlatformGame` package。
+
+当前 Realm State v1 已提供 `projectPwaPreparedRealmState()` 与 browser/Worker-compatible MessagePort carrier。它关闭 State document → prepared definition 与 logical binding 的跨平台语义，不代表本节其余 PWA product/Worker Runner 工作已完成。
 
 ---
 

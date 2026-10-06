@@ -9,8 +9,19 @@ export interface InitialFrameTargetV1 {
   readonly input: JsonValue;
 }
 
+export interface RealmStateGameRecordV1 {
+  readonly namespace: string;
+  readonly key: string;
+  readonly value: JsonValue;
+}
+
+export interface RealmStateGameDefinitionV1 {
+  readonly records: readonly RealmStateGameRecordV1[];
+}
+
 export interface GameEntryV1 {
   readonly formatVersion: 1;
+  readonly state?: RealmStateGameDefinitionV1;
   readonly initial: InitialFrameTargetV1;
   readonly subsystems: readonly SubsystemDescriptorV1[];
 }

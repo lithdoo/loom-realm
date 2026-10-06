@@ -4,8 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
-import { createHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
+import { createHostraRuntimeHosting as createProductionHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
+import { createRealmStateAuthority, prepareRealmStateDefinition } from "@loomrealm/realm-state";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { inspectRendererRenderForQualification } from "../../../../packages/renderer/dist/internal/render-qualification.js";
 import { DesktopDataConnectionBroker } from "../../dist/index.js";
@@ -27,6 +28,10 @@ const scheduler = Object.freeze({
     const timer = setTimeout(callback, delayMs);
     return () => clearTimeout(timer);
   },
+});
+const createHostraRuntimeHosting = (options) => createProductionHostraRuntimeHosting({
+  ...options,
+  realmStateAuthority: createRealmStateAuthority(prepareRealmStateDefinition([])),
 });
 
 function deferred() {

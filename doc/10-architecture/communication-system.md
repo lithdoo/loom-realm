@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving；Realm State logical plane core semantics closed / physical profile pending  
+> 稳定程度：Evolving；Realm State v1 logical plane + Hostra WS / Worker MessagePort physical realizations implemented and qualified
 > 主要定义：Control Plane、Renderer Data Plane、Realm State Plane、Content Plane、carrier/application mapping、authority/recovery 与 communication-facing Platform responsibilities  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Realm State](./realm-state-system.md)  
 > 被以下文档细化：[渲染系统](./rendering-system.md)、[Subsystem 模型](./subsystem-model.md)、[运行时启动系统](./runtime-bootstrap-system.md)  
@@ -125,7 +125,7 @@ MemoryCarrier  string
 
 Structured Clone只用于 Platform bootstrap/Port transfer；existing Control/Data application payload不允许出现第二套 structured-object model。
 
-Realm State physical profile尚未冻结，因此本文不强迫它复用上述 JSON-text unit。无论选择 direct call、JSON text 或 private structured clone，必须保持 [Realm State v1](../15-contracts/realm-state-v1.md) 的 logical validation/size/evidence semantics；物理 carrier不能成为绕过 logical limits 的第二套数据模型。
+Realm State v1 当前 Hostra realization 使用独立 JSON-text WebSocket carrier，browser/Worker realization 使用 private MessagePort string units；两者共享 [Realm State v1](../15-contracts/realm-state-v1.md) validation/size/evidence semantics，物理 carrier不是第二套数据模型。合法的大型 logical result 使用 State 专用透明分帧 `loomrealm.realm-state.frame/1`，不会引入 transport-specific logical size limit。
 
 ---
 
@@ -470,7 +470,7 @@ Content          → HTTP request/concurrency policy
 
 Transport不得为了缓解 backpressure重试/duplicate application mutation。
 
-Realm State subscription queue exact physical bound仍属于 Realm State profile freeze blocker；在冻结前不得实现 unbounded queue。
+Realm State subscription queue 已按 v1 profile 实现 64 events / 8 MiB 双重上限；Authority 与 carrier delivery 均不得以 unbounded queue 取代该约束。
 
 ---
 
@@ -504,7 +504,7 @@ Realm State global revision只在该 RealmStateAuthority 内定义 successful co
 ## 16. Final Invariants
 
 1. Control、Renderer Data、Realm State、Content是独立 logical communication planes；
-2. current Control/Data message-oriented profiles继续统一 UTF-8 JSON text string；Realm State physical encoding尚未冻结；
+2. current Control/Data message-oriented profiles继续统一 UTF-8 JSON text string；Realm State 使用独立 Hostra JSON-text 与 Worker MessagePort realization；
 3. Carrier只描述已建立 pipe，不描述 application authority/establishment/Session supervision；
 4. Runtime Control使用 one dispatcher + shared sender ID namespace；Realm State不复用该 dispatcher；
 5. Renderer Control只复制 Main logical authority，不携 Realm State business values；

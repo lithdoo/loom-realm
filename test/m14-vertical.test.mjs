@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { parseGameEntryV1 } from "@loomrealm/game-package";
 import { runMain } from "@loomrealm/main";
+import { createRealmStateClient } from "@loomrealm/realm-state";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { runSubsystem } from "@loomrealm/subsystem/host";
 import mapDefinition from "@loomrealm-game/map";
@@ -167,6 +168,7 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
       const runtime = runSubsystem({
         definition: mapDefinition, runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
         runtimePolicy, launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] }, data: hub.subsystemBinding, content,
+        state: (() => { const client = createRealmStateClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
       });
       void runtime.catch(() => {});
       return Object.freeze({ runtimeControl: { acquire() { return Promise.resolve(pair.left); } }, terminated: runtime, async requestTermination() { await pair.left.close(); } });

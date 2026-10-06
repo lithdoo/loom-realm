@@ -8,6 +8,7 @@ function encoded(overrides = {}) {
     subsystemKey: "root",
     physicalModule: process.platform === "win32" ? "C:/game/root.mjs" : "/game/root.mjs",
     controlEndpoint: `ws://127.0.0.1:12345/${"a".repeat(43)}`,
+    realmStateEndpoint: `ws://127.0.0.1:12346/${"s".repeat(43)}`,
     bootstrapToken: "bootstrap-token",
     controlProtocolVersions: [1],
     helloDeadlineMs: 1,
@@ -23,6 +24,11 @@ test("Runner bootstrap validation is closed and deeply immutable", () => {
   assert.ok(Object.isFrozen(bootstrap.controlProtocolVersions));
   assert.throws(() => parseRunnerBootstrap(encoded({ extra: true })));
   assert.throws(() => parseRunnerBootstrap(encoded({ controlEndpoint: "ws://localhost:12345/x" })));
+  assert.throws(() => {
+    const value = JSON.parse(encoded());
+    delete value.realmStateEndpoint;
+    parseRunnerBootstrap(JSON.stringify(value));
+  });
   assert.throws(() => parseRunnerBootstrap(encoded({ frameDeadlineMs: 999 })));
   assert.throws(() => parseRunnerBootstrap("x".repeat(16_385)));
 });

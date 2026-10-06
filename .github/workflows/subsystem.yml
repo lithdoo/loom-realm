@@ -9,6 +9,7 @@ on:
       - "packages/data/**"
       - "packages/foundation/**"
       - "packages/wire/**"
+      - "packages/realm-state/**"
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
@@ -24,6 +25,7 @@ on:
       - "packages/data/**"
       - "packages/foundation/**"
       - "packages/wire/**"
+      - "packages/realm-state/**"
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
@@ -53,7 +55,7 @@ jobs:
           node-version: ${{ matrix.node }}
 
       - name: Build Subsystem dependencies
-        run: npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/data
+        run: npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/realm-state -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/data
 
       - name: Test Subsystem
         run: npm test -w @loomrealm/subsystem

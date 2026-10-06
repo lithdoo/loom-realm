@@ -4,6 +4,9 @@ import type {
   SubsystemDataBinding,
 } from "@loomrealm/platform-ports";
 import {
+  type RealmStateClient,
+} from "@loomrealm/realm-state";
+import {
   createSubsystemDataPeer,
   RENDERER_DATA_PROFILE_V1,
   type SubsystemDataPeer,
@@ -51,6 +54,12 @@ export interface RunSubsystemOptions {
   readonly launch: SubsystemLaunchContext;
   readonly data?: SubsystemDataBinding;
   readonly content?: ContentClient;
+  readonly state: RealmStateRuntimeCapability;
+}
+
+export interface RealmStateRuntimeCapability {
+  readonly client: RealmStateClient;
+  terminate(): void;
 }
 
 export class SubsystemRuntimeFatalError extends Error {
@@ -162,6 +171,21 @@ function validateOptions(options: RunSubsystemOptions): void {
   if (options.content !== undefined && (options.content === null || typeof options.content !== "object" || typeof options.content.record !== "function" || typeof options.content.resource !== "function")) {
     throw new TypeError("Invalid ContentClient");
   }
+  if (
+    options.state === null ||
+    typeof options.state !== "object" ||
+    options.state.client === null ||
+    typeof options.state.client !== "object" ||
+    typeof options.state.client.read !== "function" ||
+    typeof options.state.client.readInitial !== "function" ||
+    typeof options.state.client.list !== "function" ||
+    typeof options.state.client.scan !== "function" ||
+    typeof options.state.client.commit !== "function" ||
+    typeof options.state.client.subscribe !== "function" ||
+    typeof options.state.terminate !== "function"
+  ) {
+    throw new TypeError("Invalid Realm State Runtime capability");
+  }
   const policy = options.runtimePolicy;
   if (
     policy === null ||
@@ -245,8 +269,11 @@ class SubsystemHost {
   private readonly input = new InputManager();
   private readonly render = new RenderManager();
   private readonly viewport = new ViewportManager();
+  private readonly runtimeState: RealmStateRuntimeCapability;
 
-  constructor(private readonly options: RunSubsystemOptions) {}
+  constructor(private readonly options: RunSubsystemOptions) {
+    this.runtimeState = options.state;
+  }
 
   run(): Promise<void> {
     void this.bootstrap();
@@ -262,6 +289,7 @@ class SubsystemHost {
     });
     const scope: SubsystemScope = Object.freeze({
       signal: this.scopeController.signal,
+      state: this.runtimeState.client,
       content: this.options.content ?? unavailableContent,
       viewport: this.viewport,
       createInputListener: (options: CreateInputListenerOptions) =>
@@ -569,6 +597,7 @@ class SubsystemHost {
   private async finishGraceful(): Promise<void> {
     if (this.terminal?.kind !== "graceful") return;
     this.scopeController.abort();
+    this.runtimeState.terminate();
     this.frames?.abortAll();
     this.input.closeAll();
     this.render.closeAll();
@@ -585,6 +614,7 @@ class SubsystemHost {
   }
 
   private async finishFatal(primary: RuntimeFailure): Promise<void> {
+    this.runtimeState.terminate();
     await this.bounded(
       this.bestEffortStatus({ state: "failed", error: primary }),
     );

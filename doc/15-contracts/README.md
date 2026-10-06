@@ -5,6 +5,7 @@
 ## Runtime、控制、数据
 
 - [Game Package v1](./game-package-v1.md) · [Hostra Launcher / Node Runner](./nodejs-launcher-profile-v1.md) · [PWA Launcher / Worker Runner](./pwa-launcher-profile-v1.md)。
+- [Realm State v1](./realm-state-v1.md)定义 Session shared business State、OCC、subscription、binding 与 failure evidence；当前实现证据见[独立资格记录](../30-implementation/realm-state-v1-qualification.md)。
 - [Subsystem Control v1](./subsystem-control-protocol-v1.md) · [Runtime Control v1](./runtime-control-profile-v1.md) · [Frame / Call v1](./frame-call-protocol-v1.md)及[Conformance](./frame-call-conformance-v1.md)。
 - [Main ⇄ Renderer Control v1](./main-renderer-control-v1.md) · [Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)。
 - [Renderer Data Profile `/1`](./renderer-data-profile-v1.md)及[Conformance](./renderer-data-profile-conformance-v1.md) · [Viewport State v1](./viewport-state-v1.md)及[Conformance](./viewport-state-conformance-v1.md)。现行四子项实现的精确证据见[Viewport 资格记录](../30-implementation/viewport-profile-v1-qualification.md)；旧三子项原文仅作历史证据，不得部署混配。
@@ -18,7 +19,7 @@
 
 - **Contract Frozen：** 规范语义被冻结，不自动代表实现或 CI 通过。
 - **Implemented：** 以当前源码和产品测试判断；新功能不能被旧文档中的“not implemented”否决。
-- **Qualified：** 必须有同一 executable subject、适用 Node/浏览器/桌面环境和有效签核；详见[M11](../30-implementation/m11-qualification.md)、[M14](../30-implementation/m14-qualification.md)、[M15](../30-implementation/m15-qualification.md)及[Viewport](../30-implementation/viewport-profile-v1-qualification.md)记录。
+- **Qualified：** 必须有同一 executable subject、适用 Node/浏览器/桌面环境和有效签核；详见[Realm State](../30-implementation/realm-state-v1-qualification.md)、[M11](../30-implementation/m11-qualification.md)、[M14](../30-implementation/m14-qualification.md)、[M15](../30-implementation/m15-qualification.md)及[Viewport](../30-implementation/viewport-profile-v1-qualification.md)记录。
 - **历史设计：** [ADR 索引](../decisions/README.md)与 Git 历史保存原因；不将已取代草案当作接口规范。
 
 本目录仅收敛导航、不修改上述契约正文或放松兼容义务。

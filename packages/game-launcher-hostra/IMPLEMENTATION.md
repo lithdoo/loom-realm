@@ -743,6 +743,8 @@ consume + scrub bootstrap env
 → use default export as SubsystemDefinitionFactory candidate
 → connect exact attempt WS endpoint
 → wrap socket as MessageCarrier<string>
+→ connect the required private Realm State endpoint
+→ attach a usable Runtime-scoped RealmStateClient
 → create single-use RuntimeControlBinding
 → create setTimeout-backed DeadlineScheduler
 → runSubsystem(...)
@@ -754,6 +756,7 @@ Exact host call：
 await runSubsystem({
   definition,
   runtimeControl,
+  state: { client: realmStateClient, terminate: terminateRealmStateClient },
   runtimePolicy: {
     scheduler,
     helloDeadlineMs,

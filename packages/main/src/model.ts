@@ -22,6 +22,11 @@ export interface MainPlatform {
   readonly runtimeHosting: RuntimeHosting;
   readonly rendererControl?: RendererControlBinding;
   readonly dataConnections?: DataConnectionAuthoritySink;
+  readonly realmStateFatal?: MainRealmStateFatalSource;
+}
+
+export interface MainRealmStateFatalSource {
+  subscribe(listener: () => void): () => void;
 }
 
 export interface MainPolicy {

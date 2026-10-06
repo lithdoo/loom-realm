@@ -5,7 +5,7 @@
 > Profile Version：1  
 > M6 Runtime Slice：Frozen / Implemented / Qualified；conditional Electron-composition execution corrected by [ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
 > M8+ Data / M12+ Content slices：Implemented / qualified on their owner milestones  
-> Realm State slice：Pre-implementation synchronization / not frozen physically / not qualified  
+> Realm State slice：Implemented / dedicated Hostra binding / independently qualified
 > M6 冻结日期：2026-09-02  
 > 依赖：[Game Package v1](./game-package-v1.md)、[Realm State v1](./realm-state-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)、[Renderer Data Profile v1](./renderer-data-profile-v1.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
 > 相关：[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
@@ -13,7 +13,7 @@
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
-> **本 Profile 描述 `@loomrealm/game-launcher-hostra` 的 PREPARE + Node Runner contract。它不描述 external `lithdoo/hostra` Electron shell/window manager。Canonical M15 outer composition由 ADR0034 + M15 physical SSOT拥有。Realm State条款仅同步 future logical/ownership boundary；在 Realm State v1 formal freeze + 独立 qualification 前，不扩大历史 M6/M8/M12/M15 evidence。**
+> **本 Profile 描述 `@loomrealm/game-launcher-hostra` 的 PREPARE + Node Runner contract。它不描述 external `lithdoo/hostra` Electron shell/window manager。Canonical M15 outer composition由 ADR0034 + M15 physical SSOT拥有。Realm State v1 使用独立 binding 与 qualification，且不扩大历史 M6/M8/M12/M15 evidence。**
 
 核心原则：
 
@@ -42,7 +42,7 @@ M8+
 M12+
     ContentClient / Content integration
 
-Realm State future slice
+Realm State v1 slice
     validate Game Entry optional state through Game Package
     project PreparedRealmStateDefinition
     Session RealmStateAuthority READY barrier
@@ -457,7 +457,7 @@ Frame/Activation/InputTarget
 
 Prepared result MUST NOT be released until HostraLaunchPlan + both logical projections are complete and immutable。
 
-Realm State physical profile remains separately unfrozen；this projection rule does not select a universal transport。
+Realm State physical realization remains independent from projection：Hostra uses its dedicated private State WebSocket plane；this rule does not create a universal transport。
 
 ---
 
@@ -663,7 +663,7 @@ Realm State binding material MUST NOT reuse Content bearer、Data ticket、boots
 
 ---
 
-## 17. Host-owned Node Runner — M6 + Future Role Slice
+## 17. Host-owned Node Runner — M6 + Current Role Slices
 
 Only process entry remains the package-owned Runner：
 
@@ -698,7 +698,7 @@ consume/scrub Control bootstrap
 → runSubsystem(...)
 ```
 
-Future Realm State slice adds only role-local capability installation before business Definition can observe scope：
+Realm State v1 adds only role-local capability installation before business Definition can observe scope：
 
 ```text
 Realm State already READY at Session level
@@ -719,7 +719,7 @@ map State binding loss to Main Runtime/Session failure by itself
 
 Runner MUST NOT fallback to package main、directory index、CommonJS、alternate module or arbitrary argv。
 
-M6 `runSubsystem` receives Runtime Control capability only。Subsystem Data binding is M8+；Content integration is M12+；Realm State remains a separately implemented/qualified later slice。
+M6 historical `runSubsystem` received Runtime Control capability only。Subsystem Data binding is M8+；Content integration is M12+；Realm State v1 is now a separately implemented/qualified slice。
 
 ---
 
@@ -761,7 +761,7 @@ unexpected socket/error → {kind:"lost", cause}
 
 MUST NOT parse JSON/JSON-RPC、authenticate Runtime hello、retry、reconnect or own application deadlines。
 
-This M6 Runtime Control WS is not Realm State transport。Realm State physical binding may later use in-process/private IPC/another carrier without changing this Control profile。
+This M6 Runtime Control WS is not Realm State transport。Realm State uses a separate private WebSocket endpoint without changing this Control profile。
 
 ---
 
@@ -883,9 +883,9 @@ Content bearer MUST NOT be reused as Realm State credential/binding authority。
 
 ---
 
-## 24. Realm State Future Slice — Boundary Synchronization
+## 24. Realm State v1 Slice — Implemented Boundary
 
-This section is **not historical M6/M8/M12 evidence** and does not claim a frozen Hostra physical State profile。It freezes only the Hostra ownership compatibility required by the Realm State architecture/contract candidate。
+This section is **not historical M6/M8/M12 evidence**。The implemented Hostra State plane and its independent qualification preserve the ownership compatibility required by Realm State v1。
 
 Required logical flow：
 
@@ -923,7 +923,7 @@ Subscription callbacks MUST execute outside Authority serialized lane；listener
 
 RealmStateAuthority fatal only reports Session-fatal condition。Main/Session lifecycle owner commits terminal; concrete Hostra product then converges through its existing termination/cleanup chain。
 
-Exact same-process/client binding interface、queue bound、wire/error shape and remaining Realm State freeze blockers remain owned by Realm State v1/profile closure。
+Exact client/binding interface、queue bound、wire/error shape and qualification remain owned by Realm State v1 and its independent ledger。
 
 ---
 
@@ -1017,7 +1017,7 @@ The two evidence subjects must not be conflated；neither is Realm State qualifi
 17. launch abort cannot orphan a pending child/listener；
 18. physical termination is idempotent and bounded with force fallback；
 19. no automatic Runtime restart/reconnect；
-20. M8 Data、M12 Content、future Realm State extend the same Runner boundary without merging application authorities；
+20. M8 Data、M12 Content、Realm State v1 extend the same Runner boundary without merging application authorities；
 21. Realm State operations do not consume Frame/Activation authority；
 22. Realm State binding loss does not automatically fail Runtime/Session；Authority fatal reports to Main/Session owner；
 23. external Hostra shell Window/RPC/HOSTRA_SUBCMD ownership is outside this Profile and must not be folded into Launcher/Runner contracts；

@@ -4,6 +4,13 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createRendererDataPeer } from "@loomrealm/data";
 import { createMainRuntimeControlPeer } from "@loomrealm/runtime-control";
 import {
+  RealmStateError,
+  createInMemoryRealmStateBinding,
+  createRealmStateAuthority,
+  createRealmStateClient,
+  prepareRealmStateDefinition,
+} from "@loomrealm/realm-state";
+import {
   FrameCallRejectedError,
   completed,
   defineSubsystem,
@@ -52,7 +59,7 @@ async function waitFor(predicate, message = "condition") {
   assert.fail(`Timed out waiting for ${message}`);
 }
 
-async function createSession(factory, mainOverrides = {}, policy = defaultPolicy, data) {
+async function createSession(factory, mainOverrides = {}, policy = defaultPolicy, data, state) {
   const pair = createMemoryCarrierPair();
   const statuses = [];
   const calls = [];
@@ -102,6 +109,10 @@ async function createSession(factory, mainOverrides = {}, policy = defaultPolicy
       controlProtocolVersions: [1],
     },
     ...(data === undefined ? {} : { data }),
+    state: state ?? (() => {
+      const client = createRealmStateClient();
+      return Object.freeze({ client, terminate: () => client.terminate() });
+    })(),
   });
   void runtime.catch(() => {});
 
@@ -126,6 +137,59 @@ async function createSession(factory, mainOverrides = {}, policy = defaultPolicy
     },
   };
 }
+
+test("production runSubsystem rejects a missing State capability before business side effects", async () => {
+  let definitionCalls = 0;
+  let controlAcquires = 0;
+  await assert.rejects(runSubsystem({
+    definition: () => {
+      definitionCalls += 1;
+      return { frame: () => completed(null) };
+    },
+    runtimeControl: {
+      async acquire() {
+        controlAcquires += 1;
+        throw new Error("must not acquire");
+      },
+    },
+    runtimePolicy: defaultPolicy,
+    launch: {
+      subsystemKey: "demo",
+      bootstrapToken: "secret",
+      controlProtocolVersions: [1],
+    },
+  }), TypeError);
+  assert.equal(definitionCalls, 0);
+  assert.equal(controlAcquires, 0);
+});
+
+test("SubsystemScope.state is Runtime-scoped, Frame-independent, and terminal with the Runtime", async () => {
+  const authority = createRealmStateAuthority(prepareRealmStateDefinition([]));
+  const client = createRealmStateClient(createInMemoryRealmStateBinding(authority));
+  let scopeState;
+  const session = await createSession(
+    defineSubsystem((scope) => {
+      scopeState = scope.state;
+      return { frame: () => new Promise(() => {}) };
+    }),
+    {},
+    defaultPolicy,
+    undefined,
+    Object.freeze({ client, terminate: () => client.terminate() }),
+  );
+  const target = { namespace: "runtime", key: "stable" };
+  await scopeState.commit({
+    conditions: [{ key: target, version: 0 }],
+    writes: [{ type: "put", key: target, value: true }],
+  });
+  await session.main.frame.initialize({ frameId: "root", input: null });
+  await session.main.frame.activate({ frameId: "root", activationId: "a1" });
+  await session.main.frame.suspend({ frameId: "root", activationId: "a1" });
+  assert.equal(scopeState, client);
+  assert.equal((await scopeState.read([target])).records[0].value, true);
+  await shutdown(session);
+  await assert.rejects(scopeState.read([target]), (error) => error instanceof RealmStateError && error.code === "TERMINAL");
+});
 
 function rendererDataPeer(carrier) {
   const accept = () => ({ kind: "accepted" });
@@ -774,6 +838,10 @@ test("terminal cleanup is bounded and hook failure never replaces the primary ca
       bootstrapToken: "secret",
       controlProtocolVersions: [1],
     },
+    state: (() => {
+      const client = createRealmStateClient();
+      return Object.freeze({ client, terminate: () => client.terminate() });
+    })(),
   });
 
   await assert.rejects(

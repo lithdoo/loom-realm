@@ -30,6 +30,7 @@
     "@loomrealm/foundation": "0.1.0-alpha.0",
     "@loomrealm/game-package": "0.1.0-alpha.0",
     "@loomrealm/platform-ports": "0.1.0-alpha.0",
+    "@loomrealm/realm-state": "0.1.0-alpha.0",
     "@loomrealm/subsystem": "0.1.0-alpha.0",
     "@loomrealm/wire": "0.1.0-alpha.0",
     "ws": "8.21.3"

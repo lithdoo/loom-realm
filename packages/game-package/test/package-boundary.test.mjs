@@ -29,9 +29,12 @@ test("package has exactly the frozen runtime root exports", async () => {
   ]);
 });
 
-test("package has only the Wire runtime dependency and a root export", async () => {
+test("package has only platform-neutral validation dependencies and a root export", async () => {
   const manifest = JSON.parse(await readFile(join(packageDirectory, "package.json"), "utf8"));
-  assert.deepEqual(manifest.dependencies, { "@loomrealm/wire": "0.1.0-alpha.0" });
+  assert.deepEqual(manifest.dependencies, {
+    "@loomrealm/realm-state": "0.1.0-alpha.0",
+    "@loomrealm/wire": "0.1.0-alpha.0",
+  });
   assert.deepEqual(Object.keys(manifest.exports), ["."]);
   assert.equal(manifest.sideEffects, false);
   assert.equal(manifest.engines.node, ">=20");
@@ -54,6 +57,8 @@ test("declarations expose the complete frozen type surface", async () => {
     "GamePackageErrorCode",
     "GameEntryV1",
     "InitialFrameTargetV1",
+    "RealmStateGameDefinitionV1",
+    "RealmStateGameRecordV1",
     "SubsystemDescriptorV1",
     "ValidatedGameEntryV1",
     "parseGameEntryV1",

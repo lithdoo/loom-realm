@@ -8,6 +8,11 @@ import type {
   RuntimeLaunchRequest,
 } from "@loomrealm/platform-ports";
 import WebSocket, { WebSocketServer } from "ws";
+import {
+  serveRealmStateCarrier,
+  type RealmStateClient,
+  type RealmStateCarrierServer,
+} from "@loomrealm/realm-state";
 import { HostraLauncherError, launcherError } from "./errors.js";
 import type { HostraLaunchPlan, HostraResolvedRuntime } from "./launch-plan.js";
 import { BOOTSTRAP_ENV_KEY, type RunnerBootstrapV1 } from "./runner/bootstrap.js";
@@ -16,6 +21,7 @@ import {
   type HostraRuntimeDataProvisioner,
 } from "./data-provisioning.js";
 import { CONTENT_ACCESS_ENV_KEY, encodeHostraContentAccess, validateHostraContentAccess, type HostraContentAccess } from "./content-access.js";
+import { createRealmStateWebSocketCarrier } from "./realm-state-websocket-carrier.js";
 import { createWebSocketCarrier } from "./websocket-carrier.js";
 
 const ENV_ALLOWLIST = [
@@ -99,6 +105,7 @@ function encodeBootstrap(bootstrap: RunnerBootstrapV1): string {
 }
 
 async function listen(server: WebSocketServer): Promise<void> {
+  if (server.address() !== null) return;
   await new Promise<void>((resolve, reject) => {
     const onListening = () => {
       server.off("error", onError);
@@ -145,6 +152,7 @@ async function launchAttempt(
   runtimes: ReadonlyMap<string, HostraResolvedRuntime>,
   request: RuntimeLaunchRequest,
   signal: AbortSignal,
+  realmStateAuthority: RealmStateClient,
   onRuntimeDataProvisioner?: (
     runtime: HostedRuntime,
     provisioner: HostraRuntimeDataProvisioner,
@@ -171,24 +179,47 @@ async function launchAttempt(
       done(true);
     },
   });
+  const stateCapability = randomBytes(32).toString("base64url");
+  const stateCapabilityPath = `/${stateCapability}`;
+  const stateServer = new WebSocketServer({
+    host: "127.0.0.1",
+    port: 0,
+    path: stateCapabilityPath,
+    verifyClient: ({ req }, done) => done(req.url === stateCapabilityPath),
+  });
+  let realmStateCarrierServer: RealmStateCarrierServer | null = null;
+  const closeRealmStateCarrier = () => {
+    const active = realmStateCarrierServer;
+    if (active !== null) void active.close().catch(() => {});
+  };
   server.on("error", () => {
     pendingServerFailure = true;
     convergeServerFailure?.();
   });
   try {
     await listen(server);
+    await listen(stateServer);
   } catch (error) {
     closeServer(server);
+    closeServer(stateServer);
     void error;
     throw launcherError("LAUNCH_RUNTIME_UNAVAILABLE");
   }
   if (signal.aborted) {
     closeServer(server);
+    closeServer(stateServer);
     throw signal.reason;
   }
   const address = server.address();
   if (address === null || typeof address === "string") {
     closeServer(server);
+    closeServer(stateServer);
+    throw launcherError("LAUNCH_RUNTIME_UNAVAILABLE");
+  }
+  const stateAddress = stateServer.address();
+  if (stateAddress === null || typeof stateAddress === "string") {
+    closeServer(server);
+    closeServer(stateServer);
     throw launcherError("LAUNCH_RUNTIME_UNAVAILABLE");
   }
 
@@ -210,11 +241,13 @@ async function launchAttempt(
   const establishment = deferred<"spawned" | "exited">();
 
   const controlEndpoint = `ws://127.0.0.1:${address.port}${capabilityPath}`;
+  const realmStateEndpoint = `ws://127.0.0.1:${stateAddress.port}${stateCapabilityPath}`;
   const bootstrap: RunnerBootstrapV1 = Object.freeze({
     version: 1,
     subsystemKey: request.subsystemKey,
     physicalModule: runtime.physicalModule,
     controlEndpoint,
+    realmStateEndpoint,
     bootstrapToken: request.bootstrapToken,
     controlProtocolVersions: Object.freeze([1] as [1]),
     helloDeadlineMs: plan.runnerPolicy.helloDeadlineMs,
@@ -228,6 +261,7 @@ async function launchAttempt(
     encodedContentAccess = contentAccess === undefined ? undefined : encodeHostraContentAccess(contentAccess);
   } catch (error) {
     closeServer(server);
+    closeServer(stateServer);
     throw error;
   }
 
@@ -240,6 +274,24 @@ async function launchAttempt(
     closeServer(server);
     acquireWaiter?.resolve(controlCarrier);
     acquireWaiter = null;
+  });
+  stateServer.on("error", () => {
+    pendingServerFailure = true;
+    convergeServerFailure?.();
+  });
+  stateServer.on("connection", (socket: WebSocket) => {
+    if (realmStateCarrierServer !== null || exited || attempt.ownership === "abandoned") {
+      socket.terminate();
+      return;
+    }
+    const served = serveRealmStateCarrier(
+      realmStateAuthority,
+      createRealmStateWebSocketCarrier(socket),
+    );
+    realmStateCarrierServer = served;
+    void served.closed.then(() => {
+      if (realmStateCarrierServer === served) realmStateCarrierServer = null;
+    });
   });
 
   const forceTerminate = () => {
@@ -254,6 +306,7 @@ async function launchAttempt(
     if (attempt.ownership !== "pending") return;
     attempt.ownership = "abandoned";
     closeServer(server);
+    closeServer(stateServer);
     acquireWaiter?.reject(signal.reason);
     acquireWaiter = null;
     if (typeof child !== "undefined") forceTerminate();
@@ -264,6 +317,7 @@ async function launchAttempt(
     if (controlCarrier !== null || exited || serverFailure !== null) return;
     serverFailure = launcherError("LAUNCH_RUNTIME_UNAVAILABLE");
     closeServer(server);
+    closeServer(stateServer);
     acquireWaiter?.reject(serverFailure);
     acquireWaiter = null;
     if (attempt.ownership === "pending" && spawnStarted) {
@@ -290,6 +344,8 @@ async function launchAttempt(
   } catch (error) {
     signal.removeEventListener("abort", abandon);
     closeServer(server);
+    closeServer(stateServer);
+    closeRealmStateCarrier();
     void error;
     throw launcherError("PROCESS_SPAWN_FAILED");
   }
@@ -312,6 +368,8 @@ async function launchAttempt(
       forceTimer = null;
     }
     closeServer(server);
+    closeServer(stateServer);
+    closeRealmStateCarrier();
     void controlCarrier?.close().catch(() => {});
     acquireWaiter?.reject(launcherError("PROCESS_EXITED_DURING_BOOTSTRAP"));
     acquireWaiter = null;
@@ -325,6 +383,8 @@ async function launchAttempt(
   } catch (error) {
     signal.removeEventListener("abort", abandon);
     closeServer(server);
+    closeServer(stateServer);
+    closeRealmStateCarrier();
     throw error;
   }
   if (attempt.ownership === "abandoned") {
@@ -333,6 +393,7 @@ async function launchAttempt(
   }
   if (outcome === "exited" || exited) {
     signal.removeEventListener("abort", abandon);
+    closeServer(stateServer);
     throw launcherError("PROCESS_EXITED_DURING_BOOTSTRAP");
   }
   attempt.ownership = "returned";
@@ -407,6 +468,7 @@ export function createHostraRuntimeHosting(options: {
     runtime: HostedRuntime,
     provisioner: HostraRuntimeDataProvisioner,
   ) => void;
+  readonly realmStateAuthority: RealmStateClient;
 }): RuntimeHosting {
   if (options === null || typeof options !== "object" || options.launchPlan === null) {
     throw new TypeError("Invalid Hostra RuntimeHosting options");
@@ -418,6 +480,18 @@ export function createHostraRuntimeHosting(options: {
   ) {
     throw new TypeError("Invalid Runtime Data provisioner hook");
   }
+  if (
+    options.realmStateAuthority === null ||
+    typeof options.realmStateAuthority !== "object" ||
+    typeof options.realmStateAuthority.read !== "function" ||
+    typeof options.realmStateAuthority.readInitial !== "function" ||
+    typeof options.realmStateAuthority.list !== "function" ||
+    typeof options.realmStateAuthority.scan !== "function" ||
+    typeof options.realmStateAuthority.commit !== "function" ||
+    typeof options.realmStateAuthority.subscribe !== "function"
+  ) {
+    throw new TypeError("Invalid Realm State Authority capability");
+  }
   const contentAccess = options.contentAccess === undefined ? undefined : validateHostraContentAccess(options.contentAccess);
   const runtimes = new Map(plan.runtimes.map((runtime) => [runtime.subsystemKey, runtime] as const));
   return Object.freeze({
@@ -427,6 +501,7 @@ export function createHostraRuntimeHosting(options: {
         runtimes,
         request,
         signal,
+        options.realmStateAuthority,
         options.onRuntimeDataProvisioner,
         contentAccess,
       );
