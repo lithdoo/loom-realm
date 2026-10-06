@@ -15,6 +15,8 @@ Foundation / Wire、Game Package、Runtime / Subsystem、Main、Realm State v1�
 
 Realm State v1 已完成从 Game Package document、Launcher PREPARE projection、Session Authority、Runtime-scoped client、dedicated Hostra State plane、`SubsystemScope.state` 到 Worker-compatible MessagePort realization 的闭环。该结果不宣称完整 PWA 产品（M16/M17）已完成，也不改变既有 M9–M15 ledger 的 subject。
 
+Map 当前局部改造见 [Map Runtime Composition 解耦改造方案](./map-composition-refactor.md)。该方案已冻结为 **Frozen / Implementation Ready / Not Implemented / Not Qualified**。最新 `main` 的 Realm State 合入没有改变 Map runtime 设计，但 M14 vertical 仍直接消费 `mapDefinition`，因此实现时必须与 Map tests 一起迁移到 Builder/Handler 组合路径。
+
 [PR #43](https://github.com/lithdoo/loom-realm/pull/43) 已交付 Map21 Bridge、Map47 Ledge 及 held input、blocked/front、深度修复，**原版 RGSS 逐帧保真仍未签署**。[PR #44](https://github.com/lithdoo/loom-realm/pull/44) 实现了 PR CI 去重，不代表合并时所有 CI 都已结束。
 
 [PR #46](https://github.com/lithdoo/loom-realm/pull/46) 已将仓库根目录 Markdown 清至仅有 `README.md`：35 份完成过程记录只在固定历史、10 份 M14/M15 待核底稿存于[资格底稿](./milestone-evidence/README.md)，Hostra 现行规范归入[Desktop](../20-modules/desktop-host/hostra-composition.md)；原根目录运动延迟规格移至[实施规格](./render-movement-latency-spec.md)。
@@ -30,8 +32,9 @@ Realm State v1 已完成从 Game Package document、Launcher PREPARE projection�
 | 3 · M15 Desktop 资格 | Frozen Hostra 的真实产品验收，与 M14 为一致的代码 subject | [M15 ledger](./m15-qualification.md)；分别写 PASS/FAIL/SKIP |
 | 4 · 运动延迟与性能 | 当前 SHA 重新实测 Renderer/Map 运动响应和 P95、像素遮挡、内存、回归；历史 42.9ms/96.3ms 不可冒充当前测量 | [性能规格及历史测量](./render-movement-latency-spec.md)与本次浏览器/桌面数据 |
 | 5 · 原版地形动态保真 | 合法获得 RGSS 后对照事件、持续输入、jump timing；由授权 reviewer 签署正式合同 | [FG 资格记录](../../game-libs/map/TERRAIN_BEHAVIOR_FREEZE_READINESS.md)、Issue #42；不阻塞已交付功能 |
-| 6 · M16 PWA Runtime | PREPARE、Worker Runner、Runtime Control MessagePort 纵向闭环 | [PWA 模块](../20-modules/pwa-host/README.md)、实际 E2E |
-| 7 · M17 PWA 产品等价 | Window Renderer/Data/Input/Content/Presentation 与 Desktop 同一游戏结果 | 跨平台实际 E2E 及失败/恢复覆盖 |
-| 8 · 剩余全仓文档收敛 | 审计 `examples/essentials-v21.1-local` 的视口 PR0–PR3 证据与仍有效的格式/运动规格，保全不可替代性能记录；合并 `fsdb-http` 的仍有效 M12 amendment 而不改变 API；逐篇核对 `doc/30-implementation` Viewport 兼容占位页及引用，能安全删除的才退役。消除遗留旧状态、完成引用迁移与引用守卫扩展 | [地图模块](../20-modules/loom-map/README.md)、[Content 模块](../20-modules/fsdb-content-service/README.md)、本[路线图](./roadmap.md)；不得删除冻结签署/ledger/ADR/测试/fixture 或把旧历史变当前 PASS |
+| 6 · Map runtime composition 解耦 | **Frozen / Implementation Ready**：现有 `runtime.ts` 内提取唯一 `runMapRuntime()`；Handler 直接调用；保留本轮 `RuntimeBridge` 语义；删除 WeakMap、direct-definition dual-mode、`mapDefinition` 与 default export；迁移 `runtime.test.mjs`、`package.test.mjs`、`test/m14-vertical.test.mjs`；Essentials topology/业务代码不变；至少执行 Map package tests 与 `test:m14`，最终 SHA 如实记录资格结果 | [Map Runtime Composition 解耦改造方案](./map-composition-refactor.md)、Map tests、M14/M15 ledger；冻结不等于实现/资格 PASS |
+| 7 · M16 PWA Runtime | PREPARE、Worker Runner、Runtime Control MessagePort 纵向闭环 | [PWA 模块](../20-modules/pwa-host/README.md)、实际 E2E |
+| 8 · M17 PWA 产品等价 | Window Renderer/Data/Input/Content/Presentation 与 Desktop 同一游戏结果 | 跨平台实际 E2E 及失败/恢复覆盖 |
+| 9 · 剩余全仓文档收敛 | 审计 `examples/essentials-v21.1-local` 的视口 PR0–PR3 证据与仍有效的格式/运动规格，保全不可替代性能记录；合并 `fsdb-http` 的仍有效 M12 amendment 而不改变 API；逐篇核对 `doc/30-implementation` Viewport 兼容占位页及引用，能安全删除的才退役。消除遗留旧状态、完成引用迁移与引用守卫扩展 | [地图模块](../20-modules/loom-map/README.md)、[Content 模块](../20-modules/fsdb-content-service/README.md)、本[路线图](./roadmap.md)；不得删除冻结签署/ledger/ADR/测试/fixture 或把旧历史变当前 PASS |
 
 **文档完成判据：** 当前模块拥有产品事实、正式契约拥有 ABI、一个路线图拥有待办、资格 ledger 持有精确结果；已完成过程文档从活跃目录退役，历史只在安全的固定 Git 快照追溯。每批删除均核对站内和全仓引用、VitePress 构建及最终 HEAD CI，不靠把文件挪入另一个活跃目录冒充清理。

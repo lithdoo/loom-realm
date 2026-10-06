@@ -2,7 +2,9 @@
 
 **未完成事项唯一入口：[下一阶段路线图](./roadmap.md)。** 已实现功能见[核心模块](../20-modules/core/README.md)，正式跨角色协议见[契约目录](../15-contracts/README.md)。历史实施提示词、阶段报告和逐轮 review 不作为第二套状态或导航。
 
-持续有效的文档：[测试策略](./testing-strategy.md)、[分包边界](./package-architecture.md)、[仓库布局](./repository-layout.md)。精确的 M11/M14/M15/Viewport 资格证据分别由 [M11](./m11-qualification.md)、[M14](./m14-qualification.md)、[M15](./m15-qualification.md)、[Viewport](./viewport-profile-v1-qualification.md) ledger 负责；历史 PASS 不能自动迁移到新 SHA。
+Map 当前局部改造见 [Map Runtime Composition 解耦改造方案](./map-composition-refactor.md)。该方案已经冻结为 **Frozen / Implementation Ready / Not Implemented / Not Qualified**：删除 `mapDefinition` / default export 与 Frame-keyed bridge，让现有 `RPGMapBuilder / RPGMapHandler` 直接运行唯一 Map runtime；实施范围同时覆盖现有 Map tests 与 M14 vertical 中的 `mapDefinition` 迁移，不改变 Essentials 业务 topology。
+
+持续有效的文档：[测试策略](./testing-strategy.md)、[分包边界](./package-architecture.md)、[仓库布局](./repository-layout.md)。精确的 M11/M14/M15/Viewport 资格证据分别由 [M11](./m11-qualification.md)、[M14](./m14-qualification.md)、[M15](./m15-qualification.md)、[Viewport](./viewport-profile-v1-qualification.md) ledger 负责；Realm State v1 的结果见其[独立资格记录](./realm-state-v1-qualification.md)。历史 PASS 不能自动迁移到新 SHA。
 
 ## 过程文档清理
 
@@ -10,4 +12,4 @@
 
 后续全仓审计发现 `game-libs/map/` 又保留了与当前 main 相冲突的旧任务卡、实施计划和冻结执行说明；[PR #47](https://github.com/lithdoo/loom-realm/pull/47) 将其中六份过时过程文档从工作树退役，保留[当前地图模块](../20-modules/loom-map/README.md)、[产品交付边界](../../game-libs/map/TERRAIN_BEHAVIOR_DELIVERY_CONTRACT.md)、[原版资格](../../game-libs/map/TERRAIN_BEHAVIOR_FREEZE_READINESS.md)及[安全证据](../../game-libs/map/TERRAIN_BEHAVIOR_EVIDENCE.md)。历史文本只能使用[删除前已清理敏感附录的固定 main 快照](https://github.com/lithdoo/loom-realm/tree/c00fe76b20ab07aeebe18a8056e39a024a9f9859/game-libs/map)，不可把旧的 `NOT IMPLEMENTED` 或任务启动提示当作当前状态。
 
-原版地形保真、M11/M14/M15 当期资格、性能 P95 和 M16/M17 PWA 统一由[路线图](./roadmap.md)管理。合并前必须核对**最终 PR HEAD** 上的链接校验和 VitePress 构建；本页不预填 CI PASS，也不删除 ADR、正式协议、测试、fixture 或未核清的资格证据。
+原版地形保真、M11/M14/M15 当期资格、Map composition、性能 P95 和 M16/M17 PWA 统一由[路线图](./roadmap.md)管理。合并前必须核对**最终 PR HEAD** 上的链接校验和 VitePress 构建；本页不预填 CI PASS，也不删除 ADR、正式协议、测试、fixture 或未核清的资格证据。
