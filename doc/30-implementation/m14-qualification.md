@@ -2,7 +2,7 @@
 
 ## Status
 
-**Requalification Pending — executable subject `488f8713a23158e736153677ec68e449879a8a1d` has local Map/M14 PASS on Windows 2026-10-06; hosted Node 20/24 evidence remains PENDING.** Exact-local execution is FAIL at source preflight because the available source-view contains directory indirection and the available entity copy contains an invalid `.desc.meta` source member. This is a qualification-input blocker, not a Map runtime failure.
+**Requalification Pending — executable subject `488f8713a23158e736153677ec68e449879a8a1d` has local Map/M14 PASS and hosted Node 20/24 PASS on 2026-10-06.** Exact-local execution is FAIL at source preflight because the available source-view contains directory indirection and the available entity copy contains an invalid `.desc.meta` source member. This qualification-input blocker prevents Formal Closed despite the hosted PASS results.
 
 The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`; neither qualifies the changed executable subject. The latter had hosted `test:m14` Node 24 evidence, but its dedicated M14 Node 20 run was cancelled after a Chromium hang. Current-subject closure therefore requires a new complete same-subject evidence set.
 
@@ -29,8 +29,8 @@ Any later change to M14 Runtime/importer/browser behavior, prepared Content, fix
 | --- | --- | --- |
 | Local map/vertical/boundary/projection | `npm test -w @loomrealm-game/map`, `test:m14:vertical`, `test:m14:boundary`, `test:m14:projection` on `488f8713a23158e736153677ec68e449879a8a1d` | **PASS — local Windows `npm run test:m14`, 2026-10-06; Map package 106/106 and vertical 3/3** |
 | Exact Essentials v21.1 local | `npm run test:m14:essentials-local` against exact corpus | **FAIL — available source-view rejected as `SOURCE_INDIRECTION`; entity copy rejected as `INVALID_NAME_SEGMENT` for `Audio/.desc.meta`; gameplay not reached** |
-| Hosted Node 20 | `npm run test:m14` on the current subject | **PENDING** |
-| Hosted Node 24 | `npm run test:m14` on the current subject | **PENDING** |
+| Hosted Node 20 | `npm run test:m14` on the current subject | **PASS — PR run [37449945940](https://github.com/lithdoo/loom-realm/actions/runs/37449945940), 2026-10-06** |
+| Hosted Node 24 | `npm run test:m14` on the current subject | **PASS — PR run [37449945940](https://github.com/lithdoo/loom-realm/actions/runs/37449945940), 2026-10-06** |
 | Formal M14 closure | all required rows target the same qualification subject | **Requalification Pending** |
 
 Previous-subject hosted evidence remains historically valid only for `fd1df5872d4310e268857e700a067f4e0b9e75d1` ([M14 run 34621763706](https://github.com/lithdoo/loom-realm/actions/runs/34621763706)) and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` ([M14 run 34998417357](https://github.com/lithdoo/loom-realm/actions/runs/34998417357)); it must not be promoted to the current subject.
@@ -178,7 +178,7 @@ The resulting status is：
 architecture / contracts     frozen
 implementation               complete + hardened
 exact-local qualification    FAIL — available local corpus rejected at source preflight
-current hosted qualification PENDING — Node 20 + Node 24
+current hosted qualification PASS — Node 20 + Node 24
 formal M14 milestone         Requalification Pending
 ```
 

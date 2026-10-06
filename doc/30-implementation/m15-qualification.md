@@ -2,9 +2,9 @@
 
 ## Status
 
-**Requalification Pending for executable subject `488f8713a23158e736153677ec68e449879a8a1d`.** Local `npm run test:m14` and M15 Desktop 15/15 PASS on Windows 2026-10-06. `test:m15:pr` reaches the frozen Hostra `d863beab`, but 6 real-window tests FAIL before readiness because its bundled `electron_bin/electron.exe` is absent; 10 non-window checks PASS. Hosted evidence remains PENDING. PWA remains OUT OF SCOPE.
+**Requalification Pending for executable subject `488f8713a23158e736153677ec68e449879a8a1d`.** Local `npm run test:m14` and M15 Desktop 15/15 PASS on Windows 2026-10-06. Local `test:m15:pr` reaches frozen Hostra `d863beab`, but 6 real-window tests FAIL before readiness because its bundled `electron_bin/electron.exe` is absent; 10 non-window checks PASS. Hosted PR run [37449945940](https://github.com/lithdoo/loom-realm/actions/runs/37449945940) supplies the binary and passes M15 delta on the same executable subject. PWA remains OUT OF SCOPE.
 
-Hosted GitHub Actions `npm run test:m15` on this SHA is still **not** recorded. Exact Essentials qualification is also incomplete because the available local corpus forms fail frozen source preflight. Historical Product Closed evidence remains historical and is not promoted to the current subject.
+Dedicated hosted `npm run test:m15` on this SHA is still **not** recorded; the current PR delta runs `test:m15:pr` while M14 Node 20/24 runs separately on the same subject. Exact Essentials qualification is also incomplete because the available local corpus forms fail frozen source preflight. Historical Product Closed evidence remains historical and is not promoted to the current subject.
 
 The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`. Physical design, ADR 0034, and the frozen Hostra baseline are not reopened.
 
@@ -73,13 +73,13 @@ The Hostra identity is frozen above；any later behavior-affecting change to M15
 | Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PENDING — M14 is Requalification Pending** |
 | Frozen M15 design | ADR 0034 + recomposition SSOT + frozen Hostra baseline | **PASS / PREIMPLEMENTATION CLOSED** |
 | M15 boundary/build | no canonical LoomRealm Electron ownership | **PASS — current-subject build and M15 Desktop 15/15, local Windows 2026-10-06** |
-| Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **FAIL / ENVIRONMENT BLOCKED — Hostra exits before ready because bundled `electron.exe` is absent** |
-| Document bootstrap | acquire/document rendezvous + navigation-only route | **PENDING — real Window unavailable under the same Hostra binary blocker** |
-| Input/reload/reconnect | production Hostra Window path | **PENDING — real Window unavailable under the same Hostra binary blocker** |
-| Movement first-paint | 640/720/1080 ordinary P95 ≤50ms; refresh P95 ≤50/75/100 | **PASS — local 2026-09-17 Hostra table in MAP_VIEWPORT_PR3_EVIDENCE.md** |
-| Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **PENDING — real Window unavailable under the same Hostra binary blocker** |
-| Canonical aggregate | `npm run test:m15` | **FAIL / PARTIAL — local `test:m14` PASS; `test:m15:pr` Desktop 15/15 PASS and Hostra 10/16 PASS, with all 6 failures caused by missing bundled Electron** |
-| Hosted qualification | dedicated M15 workflow, same subject | **PENDING** |
+| Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **PASS — hosted PR run 37449945940; local environment blocked by absent bundled Electron** |
+| Document bootstrap | acquire/document rendezvous + navigation-only route | **PASS — hosted PR run 37449945940** |
+| Input/reload/reconnect | production Hostra Window path | **PASS — hosted PR run 37449945940** |
+| Movement first-paint | 640/720/1080 ordinary P95 ≤50ms; refresh P95 ≤50/75/100 | **PASS — hosted PR run 37449945940; historical local table remains in MAP_VIEWPORT_PR3_EVIDENCE.md** |
+| Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **PASS — hosted PR run 37449945940** |
+| Canonical aggregate | `npm run test:m15` | **PARTIAL PASS — local `test:m14` PASS; hosted same-subject M14 Node 20/24 and `test:m15:pr` PASS, but dedicated aggregate command was not run in one job** |
+| Hosted qualification | dedicated M15 workflow, same subject | **PENDING — PR delta PASS is recorded, dedicated `test:m15` workflow absent** |
 | Formal M15 closure | all rows above PASS for one subject | **Requalification Pending** |
 
 `getHostState/getAllWindows` may observe that a Window is Hostra-owned；they are not production authority/currentness mechanisms。

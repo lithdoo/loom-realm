@@ -16,7 +16,7 @@
 
 实现审计还发现三个冻结清单未列出的 active consumer：`test/m14-boundary.test.mjs`、`test/terrain-behavior-live-product.test.mjs`、`scripts/m14-essentials-local.mjs`。它们只迁移到相同 Builder/Handler 启动路径，未修改业务断言或 fixture。
 
-当前 subject 的本地结果：Map package 106/106 PASS，`npm run test:m14` PASS，M15 Desktop 15/15 PASS。M14 exact-local 因现有本地 source-view indirection / source-copy 非法 `.desc.meta` 在 source preflight 失败；M15 Hostra 因冻结 Hostra 缺少 bundled `electron.exe`，10 项非窗口检查 PASS、6 项真实窗口检查 FAIL。两者均作为 qualification input/environment blocker 记录，不属于本次 Map composition regression；Hosted Node 20/24 证据仍 PENDING。
+当前 subject 的本地结果：Map package 106/106 PASS，`npm run test:m14` PASS，M15 Desktop 15/15 PASS。M14 exact-local 因现有本地 source-view indirection / source-copy 非法 `.desc.meta` 在 source preflight 失败；本地 M15 Hostra 因冻结 Hostra 缺少 bundled `electron.exe`，10 项非窗口检查 PASS、6 项真实窗口检查 FAIL。Hosted PR run `37449945940` 的 M14 Node 20/24 与 M15 delta 均 PASS；正式资格状态仍以 M14/M15 ledger 的完整同-subject closure rule 为准。
 
 ---
 
