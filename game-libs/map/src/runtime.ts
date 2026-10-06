@@ -1,4 +1,4 @@
-import { cancelled, defineSubsystem, failed, type Frame, type FrameOutcome, type InputListener, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SubsystemDefinitionFactory, type SubsystemScope } from "@loomrealm/subsystem";
+import { cancelled, failed, type Frame, type FrameOutcome, type InputListener, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SubsystemScope } from "@loomrealm/subsystem";
 import {
   assertProjectable,
   boundsContain,
@@ -31,7 +31,6 @@ import {
 } from "./semantics.js";
 import { calculateLayout, type MapLayout } from "./layout.js";
 
-interface InitialInput { mapId: number; x: number; y: number; characterName: string }
 interface ResourceRef { readonly [name: string]: string; namespace: string; key: string; contentVersion: string }
 export type Pattern = 0 | 1 | 2 | 3;
 export type MapEntry = Readonly<{ mapId: number; x: number; y: number; direction?: Direction }>;
@@ -136,16 +135,6 @@ const codeByDirection: Record<Direction, string> = {
   8: "ArrowUp",
 };
 const fallbackCodes = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"] as const;
-
-function initialInput(value: unknown): InitialInput {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Map input must be an object");
-  const input = value as Record<string, unknown>;
-  if (Object.keys(input).some((key) => !["mapId", "x", "y", "characterName"].includes(key))) throw new TypeError("Map input contains unknown fields");
-  if (!Number.isSafeInteger(input.mapId) || Number(input.mapId) <= 0) throw new TypeError("mapId must be positive");
-  if (!Number.isSafeInteger(input.x) || Number(input.x) < 0 || !Number.isSafeInteger(input.y) || Number(input.y) < 0) throw new TypeError("x/y must be non-negative");
-  if (typeof input.characterName !== "string" || input.characterName.length === 0) throw new TypeError("characterName must be non-empty");
-  return { mapId: input.mapId as number, x: input.x as number, y: input.y as number, characterName: input.characterName };
-}
 
 function mapEntry(value: MapEntry, defaultDirection: Direction): Required<MapEntry> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new RPGMapError("MAP_INVALID_ARGUMENT");
@@ -399,8 +388,6 @@ interface RuntimeBridge {
   clear(): void;
 }
 
-const runtimeBridges = new WeakMap<Frame, RuntimeBridge>();
-
 export interface RPGMapHandler {
   onMapEntering(listener: (context: MapEnteringContext) => void | Promise<void>): () => void;
   onMapEntered(listener: (event: MapEnteredEvent) => void): () => void;
@@ -462,8 +449,7 @@ class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
   async run(initial: MapEntry): Promise<FrameOutcome> {
     if (this.runCalled) throw new RPGMapError("MAP_ALREADY_RUN");
     this.runCalled = true; this.running = true; this.initial = mapEntry(initial, 2);
-    runtimeBridges.set(this.frame, this);
-    try { return await mapDefinition(this.scope).frame(this.frame); } finally { runtimeBridges.delete(this.frame); this.clear(); }
+    try { return await runMapRuntime(this.scope, this.frame, this); } finally { this.clear(); }
   }
   enterMap(target: MapEntry): Promise<void> {
     if (!this.running || !this.commands) return Promise.reject(new RPGMapError("MAP_INVALID_STATE"));
@@ -489,8 +475,7 @@ export class RPGMapBuilder {
   }
 }
 
-export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope) => ({
-  async frame(frame: Frame) {
+async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBridge): Promise<FrameOutcome> {
     let listener: InputListener | undefined;
     let domain: RenderDomain | undefined;
     let stepTimer: ReturnType<typeof setTimeout> | null = null;
@@ -518,10 +503,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       domain?.close();
     };
     try {
-      const api = runtimeBridges.get(frame);
-      const input = api
-        ? { mapId: api.initial.mapId, x: api.initial.x, y: api.initial.y, characterName: api.characterName }
-        : initialInput(frame.params);
+      const input = { mapId: api.initial.mapId, x: api.initial.x, y: api.initial.y, characterName: api.characterName };
       let resolveTerminal!: (outcome: FrameOutcome) => void;
       let terminalSettled = false;
       const terminal = new Promise<FrameOutcome>((resolve) => {
@@ -624,7 +606,6 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
 
       const currentSnapshot = (): MapSnapshot => Object.freeze({ mapId: current.mapId, player: Object.freeze({ x, y, direction }), npcs: Object.freeze(npcs.map(({ instanceId, npcId, x, y, direction, pattern }) => Object.freeze({ instanceId, npcId, x, y, direction, pattern }))) });
       const publishSnapshot = (fromMapId: number | null) => {
-        if (!api) return;
         const snapshot = currentSnapshot();
         api.entered(Object.freeze({ mapId: current.mapId, fromMapId, player: snapshot.player }), snapshot);
       };
@@ -807,7 +788,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           }
           if (!inBounds(target.map, rule.targetX, rule.targetY)) throw new TypeError("Map transfer target lies outside the loaded Map");
           const nextDirection = "targetDirection" in rule ? rule.targetDirection ?? attemptedDirection : attemptedDirection;
-          const requestedNPCs = api ? await api.prepareNPC(target.mapId, current.mapId, frame.signal) : Object.freeze([]);
+          const requestedNPCs = await api.prepareNPC(target.mapId, current.mapId, frame.signal);
           const nextNPCs = await loadNPCs(requestedNPCs, target, rule.targetX, rule.targetY, false);
           if (runtimeEnded() || !transitioning) return;
           const nextScene = sceneEpoch + 1;
@@ -861,7 +842,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         }
       };
 
-      if (api) api.setCommands({
+      api.setCommands({
         enter: async (entry) => {
           assertCommandReady();
           const target = mapEntry(entry, direction);
@@ -916,7 +897,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         direction = nextDirection;
         window = nextWindow;
         activeMove = null;
-        if (api) api.updateSnapshot(currentSnapshot());
+        api.updateSnapshot(currentSnapshot());
       };
 
       const publishMovementUpdate = (nextX: number, nextY: number, nextDirection: Direction, nextMove: ActiveMove | null) => {
@@ -1000,7 +981,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         y = nextY;
         direction = nextDirection;
         activeMove = nextMove;
-        if (api) api.updateSnapshot(currentSnapshot());
+        api.updateSnapshot(currentSnapshot());
       };
 
       const behaviorKey = (action: MapBehavior) => action.occupied.map((point) => `${point.x},${point.y}`).join(";");
@@ -1164,8 +1145,8 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       acceptedLayout = latestLayout;
       const loaded = await loadMap(input.mapId);
       if (!inBounds(loaded.map, input.x, input.y)) throw new TypeError("Map spawn lies outside the loaded Map");
-      const initialDirection = api?.initial.direction ?? 2;
-      const requestedNPCs = api ? await api.prepareNPC(loaded.mapId, null, frame.signal) : Object.freeze([]);
+      const initialDirection = api.initial.direction;
+      const requestedNPCs = await api.prepareNPC(loaded.mapId, null, frame.signal);
       const initialNPCs = await loadNPCs(requestedNPCs, loaded, input.x, input.y, false);
       const playerResource = await scope.content.resource("resource.Graphics", `Characters/${input.characterName}`, { signal: frame.signal });
       playerRef = ref("resource.Graphics", `Characters/${input.characterName}`, playerResource.contentVersion);
@@ -1243,5 +1224,4 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       if (error instanceof RPGMapError && error.code === "MAP_COMMIT_FAILED") return failed({ code: error.code, message: error.message });
       return failed({ code: "MAP_ACTIVATION_FAILED", message: error instanceof Error ? error.message : "Map activation failed" });
     }
-  },
-}));
+}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
-import mapDefinition from "@loomrealm-game/map";
+import { RPGMapBuilder } from "@loomrealm-game/map";
 import { computeCamera, expandTileBounds, JUMP_DURATION_MS, projectTilesInBounds, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
 import { calculateLayout } from "../dist/layout.js";
 
@@ -208,7 +208,7 @@ describe("map runtime walking", { concurrency: false }, () => {
         },
       };
     })();
-    const definition = mapDefinition({
+    const scope = {
       signal: new AbortController().signal,
       viewport,
       content: {
@@ -253,14 +253,18 @@ describe("map runtime walking", { concurrency: false }, () => {
         }
         return handle;
       },
-    });
+    };
     const controller = new AbortController();
-    const pending = definition.frame({
+    const input = { mapId: 1, x: 10, y: 8, characterName: "m14_player", ...options.params };
+    const frame = {
       id: "f",
-      params: { mapId: 1, x: 10, y: 8, characterName: "m14_player", ...options.params },
+      params: input,
       signal: controller.signal,
       async call() { throw new Error("unused"); },
-    });
+    };
+    const handler = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
+    handler.onMapEntering((context) => { context.setNPC([]); });
+    const pending = handler.run({ mapId: input.mapId, x: input.x, y: input.y, ...(input.direction === undefined ? {} : { direction: input.direction }) });
     if (options.expectActivationFailure) {
       return { pending, reads, states, updates, replaces, listenerClosed: () => listenerClosed, domainClosed: () => domainClosed };
     }
@@ -1439,7 +1443,7 @@ describe("map runtime transfer", { concurrency: false }, () => {
         },
       };
     })();
-    const definition = mapDefinition({
+    const scope = {
       signal: new AbortController().signal,
       viewport,
       content: {
@@ -1479,14 +1483,18 @@ describe("map runtime transfer", { concurrency: false }, () => {
         }
         return handle;
       },
-    });
+    };
     const controller = new AbortController();
-    const pending = definition.frame({
+    const input = { mapId: 1, x: 10, y: 8, characterName: "m14_player", ...options.params };
+    const frame = {
       id: "f",
-      params: { mapId: 1, x: 10, y: 8, characterName: "m14_player", ...options.params },
+      params: input,
       signal: controller.signal,
       async call() { throw new Error("unused"); },
-    });
+    };
+    const handler = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
+    handler.onMapEntering((context) => { context.setNPC([]); });
+    const pending = handler.run({ mapId: input.mapId, x: input.x, y: input.y, ...(input.direction === undefined ? {} : { direction: input.direction }) });
     if (options.expectActivationFailure) {
       return { pending, reads, states, updates, replaces, listenerClosed: () => listenerClosed, domainClosed: () => domainClosed };
     }
