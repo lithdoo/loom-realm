@@ -12,8 +12,9 @@ import { parseGameEntryV1 } from "@loomrealm/game-package";
 import { runMain } from "@loomrealm/main";
 import { createRealmStateClient } from "@loomrealm/realm-state";
 import { createRendererControlHolder } from "@loomrealm/renderer";
+import { defineSubsystem } from "@loomrealm/subsystem";
 import { runSubsystem } from "@loomrealm/subsystem/host";
-import mapDefinition from "@loomrealm-game/map";
+import { RPGMapBuilder } from "@loomrealm-game/map";
 import { attachRendererPresentation } from "../packages/renderer/dist/internal/presentation-seam.js";
 import { prepareExamplePresentation } from "../examples/essentials-v21.1/test/prepare.mjs";
 
@@ -23,6 +24,14 @@ const scheduler = Object.freeze({ schedule(ms, callback) { const timer = setTime
 const runtimePolicy = Object.freeze({ scheduler, helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 100 });
 const mainPolicy = Object.freeze({ runtimeBootstrapDeadlineMs: 5_000, frameDeadlineMs: 5_000, shutdownDeadlineMs: 5_000, terminationDeadlineMs: 1_000 });
 const hash = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+const mapSubsystem = defineSubsystem((scope) => ({
+  frame(frame) {
+    const input = frame.params;
+    const map = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
+    map.onMapEntering((context) => { context.setNPC([]); });
+    return map.run({ mapId: input.mapId, x: input.x, y: input.y });
+  },
+}));
 
 function executablePath() {
   return [process.env.LOOMREALM_CHROMIUM_PATH, "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean).find(existsSync);
@@ -166,7 +175,7 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
       const pair = createMemoryCarrierPair();
       let acquired = false;
       const runtime = runSubsystem({
-        definition: mapDefinition, runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
+        definition: mapSubsystem, runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
         runtimePolicy, launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] }, data: hub.subsystemBinding, content,
         state: (() => { const client = createRealmStateClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
       });

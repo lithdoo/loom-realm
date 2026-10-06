@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { fileURLToPath } from "node:url";
-import mapDefinition from "@loomrealm-game/map";
+import { RPGMapBuilder } from "@loomrealm-game/map";
 import {
   JUMP_DURATION_MS,
   planMovement,
@@ -97,7 +97,7 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
     const handlers = new Map();
     const states = [];
     const timers = installTimers(t);
-    const definition = mapDefinition({
+    const scope = {
       signal: new AbortController().signal,
       viewport: {
         current: { width: 640, height: 480 },
@@ -137,14 +137,17 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
           close() {},
         };
       },
-    });
+    };
     const controller = new AbortController();
-    const pending = definition.frame({
+    const frame = {
       id: "live",
       params: options.params,
       signal: controller.signal,
       async call() { throw new Error("unused"); },
-    });
+    };
+    const map = new RPGMapBuilder(scope, frame).build({ player: { characterName: options.params.characterName } });
+    map.onMapEntering((context) => { context.setNPC([]); });
+    const pending = map.run({ mapId: options.params.mapId, x: options.params.x, y: options.params.y });
     for (let attempt = 0; attempt < 40 && (states.length === 0 || !handlers.has("keyboard.event")); attempt += 1) {
       await new Promise((resolve) => setImmediate(resolve));
     }

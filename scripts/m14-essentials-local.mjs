@@ -10,9 +10,10 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
 import { createRendererControlHolder } from "@loomrealm/renderer";
+import { defineSubsystem } from "@loomrealm/subsystem";
 import { createBoundContentClient, runSubsystem } from "@loomrealm/subsystem/host";
 import { createDesktopContentService, prepareDesktopContentView } from "../apps/desktop/dist/index.js";
-import mapDefinition from "@loomrealm-game/map";
+import { RPGMapBuilder } from "@loomrealm-game/map";
 import { attachRendererPresentation } from "../packages/renderer/dist/internal/presentation-seam.js";
 import { run as runImporter } from "../tools/fixtures/essentials-v21.1/import.mjs";
 import { buildSourceManifest } from "../tools/fixtures/essentials-v21.1/lib/source/manifest.mjs";
@@ -25,6 +26,14 @@ const scheduler = Object.freeze({ schedule(ms, callback) { const timer = setTime
 const runtimePolicy = Object.freeze({ scheduler, helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 100 });
 const mainPolicy = Object.freeze({ runtimeBootstrapDeadlineMs: 5_000, frameDeadlineMs: 5_000, shutdownDeadlineMs: 5_000, terminationDeadlineMs: 1_000 });
 const runnerPolicy = Object.freeze({ helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 1_000, terminationGraceMs: 100 });
+const mapSubsystem = defineSubsystem((scope) => ({
+  frame(frame) {
+    const input = frame.params;
+    const map = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
+    map.onMapEntering((context) => { context.setNPC([]); });
+    return map.run({ mapId: input.mapId, x: input.x, y: input.y });
+  },
+}));
 
 function argumentsOf(argv) {
   if (argv.length === 5 && argv.every((value) => !value.startsWith("--"))) {
@@ -203,7 +212,7 @@ try {
       const pair = createMemoryCarrierPair();
       let acquired = false;
       const runtime = runSubsystem({
-        definition: mapDefinition,
+        definition: mapSubsystem,
         runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
         runtimePolicy,
         launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] },

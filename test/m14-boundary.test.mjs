@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import mapDefinition from "@loomrealm-game/map";
+import { RPGMapBuilder, RPGMapError } from "@loomrealm-game/map";
 import {
   RESIZE_SETTLE_MS,
   TILE_SIZE_PX,
@@ -38,8 +38,9 @@ test("M14 workspace identity and dependency direction are explicit", async () =>
   assert.equal(tilePresentation.dependencies, undefined);
   const example = await json("examples/essentials-v21.1/package.json");
   assert.equal(example.private, true); assert.equal(example.type, "module");
-  assert.equal(typeof mapDefinition, "function");
-  assert.deepEqual(Object.keys(await import("@loomrealm-game/map")), ["RPGMapBuilder", "RPGMapError", "default", "mapDefinition"]);
+  assert.equal(typeof RPGMapBuilder, "function");
+  assert.equal(new RPGMapError("MAP_BUSY").code, "MAP_BUSY");
+  assert.deepEqual(Object.keys(await import("@loomrealm-game/map")), ["RPGMapBuilder", "RPGMapError"]);
   assert.equal(TILE_SIZE_PX, 32);
   assert.equal(RESIZE_SETTLE_MS, 100);
   assert.equal(typeof calculateTileViewportLayout, "function");

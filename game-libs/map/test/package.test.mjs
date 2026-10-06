@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import mapDefinition, { RPGMapBuilder, RPGMapError, mapDefinition as namedMapDefinition } from "@loomrealm-game/map";
+import { RPGMapBuilder, RPGMapError } from "@loomrealm-game/map";
 
-test("package root exports the map Subsystem definition factory", () => {
-  assert.equal(typeof mapDefinition, "function");
-  assert.equal(namedMapDefinition, mapDefinition);
+test("package root exports the Builder/Handler execution model only", async () => {
+  const api = await import("@loomrealm-game/map");
+  assert.deepEqual(Object.keys(api), ["RPGMapBuilder", "RPGMapError"]);
+  assert.equal("default" in api, false);
+  assert.equal("mapDefinition" in api, false);
   assert.equal(typeof RPGMapBuilder, "function");
   assert.equal(new RPGMapError("MAP_BUSY").code, "MAP_BUSY");
 });

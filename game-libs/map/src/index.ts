@@ -1,8 +1,6 @@
 export {
   RPGMapBuilder,
   RPGMapError,
-  mapDefinition,
-  mapDefinition as default,
   type MapEnteredEvent,
   type MapEnteringContext,
   type MapEntry,
