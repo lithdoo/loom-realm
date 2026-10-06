@@ -4,7 +4,7 @@
 > Normative SSOT：[Realm State v1](../15-contracts/realm-state-v1.md)  
 > Delivery plan：[Realm State v1 delivery plan](./realm-state-v1-delivery-plan.md)  
 > 日期：2026-10-06
-> 已验证实现 SHA：`7f7cab27a6478921eec4c441fb7cea2e0d53a53c`
+> 已验证实现 SHA：`1dba9857bb459218f626b29abee29d3c9fd08a8f`
 
 ## Subject
 
@@ -64,6 +64,13 @@ required production State capability before business side effects
 pre-dispatch no-commit / post-dispatch OUTCOME_UNKNOWN / no replay
 generation fencing and old-subscription terminal
 request-local invalidity vs binding-local framing/response corruption
+atomic request correlation settlement after request-specific semantic decode
+locally aborted request retention through definitive remote retirement
+subscription active/closing tombstone/terminal/retired correlation lifecycle
+close-before-baseline and close-with-in-flight-event races with ACK retirement
+exact read/readInitial/commit identity-set and list/scan namespace correlation
+subscription baseline exact-set and change non-empty-subset correlation
+malformed success/failure responses drain all in-flight operations without hanging
 serialized consecutive large multi-frame subscription events
 bounded MessagePort/WebSocket receive queues and framed-stream bookkeeping
 Game Package structured duplicate classification and Launcher sibling projection
@@ -101,6 +108,6 @@ The implementation subject SHA above passed every local command in this section�
 
 ## Result
 
-Realm State v1 implementation is closed-loop and qualified against the frozen contract。Physical delivery/backpressure、commit evidence、request-vs-binding failure classification、Runtime bootstrap、recovery fencing and cross-boundary validation now have executable behavioral evidence rather than boundary-string evidence alone。
+Realm State v1 implementation is closed-loop and qualified against the frozen contract。Physical delivery/backpressure、commit evidence、request/subscription correlation lifecycles、request-vs-binding failure classification、Runtime bootstrap、recovery fencing and cross-boundary validation now have executable behavioral evidence rather than boundary-string evidence alone。
 
 No remaining architecture/product decision is required for this v1 implementation.
