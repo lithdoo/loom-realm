@@ -1,8 +1,8 @@
-# PWA 产品组合（尚未交付）
+# PWA 产品组合
 
-> 本页是 PWA 产品入口，**不是已实现/已资格声明**；实际完成状态唯一见[路线图](../../30-implementation/roadmap.md)和未来 exact-SHA qualification evidence。`packages/game-launcher-pwa` 的存在不能代表 M16/M17 已完成。
+> 本页是 PWA 产品入口。实现位于 `apps/pwa`；同一 HEAD 的实际资格状态只由[路线图](../../30-implementation/roadmap.md)、[PWA 资格](../../30-implementation/pwa-m16-m17-qualification.md)与当前 GitHub Actions 判定，不能继承历史 PASS。
 
-PWA v1 的架构与实施规格已经冻结为 **Implementation Frozen / Agent-Ready**，见 [PWA 产品组合设计](./DESIGN.md) 与正式 [PWA Launcher / Worker Profile v1](../../15-contracts/pwa-launcher-profile-v1.md)。实现 agent 不应再自行改变 authority placement、bootstrap ABI、installation source、Content binding、产品入口 ownership 或 qualification target。
+PWA v1 的架构与实施规格为 **Implementation Frozen / Implemented**，见 [PWA 产品组合设计](./DESIGN.md) 与正式 [PWA Launcher / Worker Profile v1](../../15-contracts/pwa-launcher-profile-v1.md)。后续实现不应自行改变 authority placement、bootstrap ABI、installation source、Content binding、产品入口 ownership 或 qualification target。
 
 Frozen topology：Browser Window 只承载 Renderer / Input / Viewport / Web Presentation 与 browser-only bootstrap；Main + RealmStateAuthority 共置独立 Session Worker，不与 Renderer 共享 event loop；每个 Subsystem Runtime 位于独立 Dedicated Worker；same-origin Service Worker 只实现 Content、private executable 与 runtime-generation probe 的 physical serving boundary。
 

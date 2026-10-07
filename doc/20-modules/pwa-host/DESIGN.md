@@ -163,6 +163,17 @@ Only after READY may Window create the Session Worker。
 
 First installation MAY require one normal reload if the current document is not yet controlled。v1 does not start a Session on an uncontrolled document just to avoid that reload。
 
+An already-controlled document captures and handshakes
+`navigator.serviceWorker.controller` immediately. `registration.installing`
+and `registration.waiting` are update facts, not controller candidates, and
+are never awaited by that Session. Only the first uncontrolled installation
+may wait for install eligibility and take one normal reload.
+
+The emitted generation is derived from deterministic Window, Session Worker,
+Runner, and Service Worker artifacts (including transitive workspace
+dependencies), then injected in a second build phase. A source-only PWA
+directory hash is not the product identity.
+
 ### 4.1 Worker-side probe
 
 Private endpoint：
@@ -356,11 +367,38 @@ remove/make registry visibility unavailable first
 → clear derived cache
 ```
 
-If cleanup crashes, residual bytes are orphan garbage, not a visible installation。
+Uninstall first atomically retires a complete record to `invalid`, so it is no
+longer visible to PREPARE or Content. Physical objects are then deleted before
+the tombstone is removed. If cleanup fails, the non-publishable tombstone keeps
+the OPFS root identity available for a later maintenance retry; cleanup does
+not create anonymous, uncollectable bytes.
+
+A running Session is not an installation reference-count owner. It may finish
+work already loaded in memory, but Content/executable reads begun after retire
+fail closed. A normal product uninstall flow therefore stops the selected
+Session before retiring its installation; the qualification mutation surface
+may deliberately exercise the fail-closed behavior in place.
 
 v1 intentionally has no cross-installation global dedup/refcount GC。
 
 ---
+
+Implementation closure:
+
+- Game/launch/content validation and real ECMAScript module graph enumeration
+  occur before staging.
+- Once staging exists, every abort or write/publish failure removes its OPFS
+  namespace before removing the registry record. If physical deletion fails,
+  the staging record remains as a durable maintenance retry pointer.
+- Startup maintenance removes abandoned `staging` records and published
+  `invalid` records, again deleting objects before their retry pointer.
+- A complete installation that later fails integrity is first marked invalid
+  (the first request is 422 and later access is unavailable/409), then
+  maintenance deletes its registry record and OPFS namespace.
+- The concrete v1 deployment bounds one object at 64 MiB, one installation at
+  256 MiB, Content entries at 4,096, executable modules at 1,024, and active
+  Content requests at 32. Installer validation also establishes record/group
+  MIME, UTF-8, JSON, and JSON-Lines schema facts before staging.
 
 ## 8. Launcher PREPARE
 
@@ -532,6 +570,14 @@ Window never mints generation/profile and never becomes Session terminal authori
 
 ---
 
+Renderer Data provisioning is one transaction keyed by
+`requestId + subsystemKey + generation + dataProfile + runtime identity +
+connectionId`. Runner and Window acknowledge the same connection identity;
+the broker then rechecks the authority revision before commit. Reject, timeout,
+bridge loss, Runtime termination, authority replacement, or stale completion
+enters rollback and revokes both endpoints. A newer channel cannot commit until
+the prior connection is closed on both sides.
+
 ## 12. RuntimeHosting / Runner Bootstrap
 
 RuntimeHosting is inside Session Worker PwaPlatform。
@@ -687,6 +733,11 @@ window keydown → subsystemWorker.postMessage(business event)
 
 ---
 
+Desktop and PWA use the same browser Window Input/Viewport realization from
+`@loomrealm/renderer/browser-window`. Product-specific qualification
+observation is a narrow option; it does not fork Input v1 semantics. All
+keyboard, pointer, and gamepad changes pass the Data/Input v1 codecs.
+
 ## 16. Reload / Navigation / BFCache
 
 v1 policy：
@@ -751,9 +802,12 @@ apps/pwa/
 │   └── run-e2e.mjs
 ├── src/
 │   ├── window-entry.ts
+│   ├── qualification-window-entry.ts
+│   ├── window-product.ts
 │   ├── session-worker-entry.ts
 │   ├── worker-runner-entry.ts
 │   ├── service-worker.ts
+│   ├── service-worker-gate.ts
 │   ├── bootstrap-protocol.ts
 │   ├── window-bridge.ts
 │   ├── pwa-platform.ts
@@ -764,9 +818,7 @@ apps/pwa/
 │   ├── installer.ts
 │   ├── service-worker-content.ts
 │   ├── service-worker-executable.ts
-│   ├── renderer-host.ts
-│   ├── input-source.ts
-│   └── viewport-source.ts
+│   └── renderer-host.ts
 └── test/
     ├── m16-runtime.e2e.test.mjs
     ├── installation-content.e2e.test.mjs
@@ -785,7 +837,22 @@ service-worker.ts
 
 Internal files MAY be mechanically split/renamed during implementation only if ownership/protocol boundaries above do not change；agent MUST NOT move PWA product composition into `game-launcher-pwa` or another mega-package。
 
+The shared browser Window adapters are owned by
+`@loomrealm/renderer/browser-window`; both Desktop and PWA consume that one
+Input/Viewport realization instead of keeping product-local copies.
+
 ---
+
+Production and qualification compositions have separate Window entries.
+`window-entry.ts` exposes observation state only.
+`qualification-window-entry.ts` adds install/uninstall/fault-injection
+capabilities solely to qualification artifacts; those names and capabilities
+are absent from the production `window.js`.
+
+Verified presentation bootstrap scripts/styles are document-scoped. A fresh
+Session in the same BFCache-restored Window reuses their content-versioned
+bootstrap facts instead of evaluating one-shot browser modules twice; Session
+Renderer/Data/Input/Viewport bindings are still recreated.
 
 ## 19. Build Output
 
@@ -859,6 +926,10 @@ npm run test:regression
 all pass on the same HEAD, subject to environment-specific skips explicitly permitted by qualification docs。
 
 ---
+
+The dedicated `.github/workflows/pwa.yml` gate runs `npm run test:pwa` on
+Node 24 with the repository-pinned Playwright Chromium for relevant PWA and
+transitive dependency paths on pull requests and `main`.
 
 ## 21. Browser Qualification Baseline
 
@@ -982,6 +1053,17 @@ Desktop document reload == PWA top-level reload
 ```
 
 ---
+
+The real-game vertical bundles the existing
+`examples/essentials-v21.1/subsystems/map.mjs` and
+`@loomrealm-game/map` dependency graph into an installable browser ESM
+artifact. Qualification observes real map presentation and movement behavior;
+it does not substitute another demo framework.
+
+Navigation fresh-Session evidence is mandatory. BFCache is reported as PASS
+only when both `pagehide.persisted` and `pageshow.persisted` are true; when
+the pinned browser does not retain the page, the run records that environment
+limitation and does not label the navigation as a BFCache PASS.
 
 ## 25. Implementation Slices
 

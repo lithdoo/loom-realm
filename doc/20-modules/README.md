@@ -10,7 +10,7 @@
 | FSDB / Content | [当前 Content 模块](./fsdb-content-service/README.md) | `packages/fsdb`、`packages/fsdb-http`、`apps/desktop` |
 | Map Game Library | [含 Bridge/Ledge 的当前地图库](./loom-map/README.md) | `game-libs/map` + `examples/essentials-v21.1` |
 | Hostra Desktop | [Desktop composition](./desktop-host/README.md) | `apps/desktop`；Electron/Window 属 Hostra |
-| PWA（未实现完整产品） | [PWA 规划中的物理实现](./pwa-host/README.md) | M16/M17 路线图 |
+| PWA | [PWA 产品组合](./pwa-host/README.md) | `apps/pwa`、`packages/game-launcher-pwa` |
 
 依赖原则：`examples → game-libs → framework public author API`。Main 唯一拥有 Session/Runtime/InputTarget/DataAuthority，Subsystem 拥有业务状态和 RenderDomain；Renderer 维护当前副本并机械投影，Browser 的游戏组件不能重建权威。不能因为地图、桌面或未来 PWA 的单一需要引入通用地图框架、第二套 Store/运动协议、Hostra Manager 或泛化 AssetManager。
 

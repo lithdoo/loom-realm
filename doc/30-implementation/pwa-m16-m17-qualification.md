@@ -9,7 +9,7 @@
 
 ## 实现入口
 
-- `apps/pwa/src/window-entry.ts`：Service Worker gate、installation、fresh Session、Window Renderer lifecycle；
+- `apps/pwa/src/window-entry.ts` / `window-product.ts`：current-controller Service Worker gate、installation、fresh Session、Window Renderer lifecycle；
 - `apps/pwa/src/session-worker-entry.ts`：Main + RealmStateAuthority、PREPARE、session-scoped PwaPlatform；
 - `apps/pwa/src/worker-runner-entry.ts`：generation probe、Runtime Control、Realm State、Data、same-origin Content、business module import；
 - `apps/pwa/src/service-worker.ts`：runtime-info、Content API、private executable route；
@@ -34,6 +34,54 @@ npm run test:regression
 npm run docs:check-links
 npm run docs:build
 ```
+
+## 2026-10-07 merge-hardening matrix
+
+- Executable analysis uses `es-module-lexer@2.3.1`; adversarial coverage
+  includes comments/token gaps, strings/templates/regex false text, import
+  attributes, literal/non-literal dynamic import, forbidden URLs/bare/absolute
+  specifiers, namespace escape, missing edges, duplicates, and immutability.
+- Desktop and PWA share `@loomrealm/renderer/browser-window`. Every keyboard
+  code plus pointer and standard-gamepad state/event matrices are checked by
+  the real Data/Input codecs.
+- The product generation is a deterministic hash of canonical emitted Window,
+  Session Worker, Runner, and Service Worker artifacts before final injection.
+  Imported-dependency changes and deterministic rebuilds have regression tests.
+- Data provisioning is correlated by request and connection identity, commits
+  after both acknowledgements, and covers reject, timeout, bridge close,
+  authority replacement, Runtime termination, stale completion, replacement,
+  retry, rollback, and shutdown cleanup.
+- Content v1 browser qualification covers canonical public Manifest bytes;
+  record/group/multi-segment resource; GET/HEAD; 304 including weak/list/`*`
+  validators; MIME/version/ETag; 400/404/405+`Allow`; offline recovery;
+  pre-staging MIME/UTF-8/JSON/JSON-Lines validation; bounded deployment;
+  corruption invalidation; failed-install cleanup; invalid maintenance cleanup.
+- Current-document SW qualification covers the first-install reload, current
+  controller handshake, a concurrently waiting update, immutable Session
+  generation, and the next eligible document accepting the new controller.
+- Production `window.js` is checked to contain no qualification authority
+  surface. The qualification entry alone exposes storage/install fault tools.
+- The real-game vertical uses the existing essentials map example and
+  `@loomrealm-game/map`, including browser presentation assets and observable
+  ArrowRight movement through the PWA Worker/Data/Input pipeline. It also
+  restarts that game in the same Window to prove one-shot browser bootstrap
+  scripts are not evaluated twice.
+
+## BFCache evidence
+
+Fresh epochs for reload and ordinary navigation are mandatory. The test records
+both `pagehide.persisted` and `pageshow.persisted`. In the current
+repository-pinned Chromium run the history return was a fresh navigation
+(`false/false`), so it is documented as an environment limitation rather than
+reported as a BFCache PASS. Product code still handles a real
+`pageshow.persisted === true` by performing a fresh SW gate, epoch, Session
+Worker, and binding composition.
+
+## CI gate
+
+`.github/workflows/pwa.yml` runs `npm run test:pwa` on Node 24 with the
+repository-pinned Playwright Chromium for relevant pull-request and `main`
+paths. It is independent of the existing package and milestone workflows.
 
 ## Repository-pinned Chromium 覆盖
 

@@ -236,6 +236,19 @@ runtime import-map dependency required for business graph correctness
 
 Build/install tooling MUST materialize/bundle/resolve such dependencies before installation instead of creating a PWA runtime package resolver。
 
+Executable edge discovery is a security boundary and MUST use a real ECMAScript
+module lexer/parser. Text regular expressions are not conforming. The install
+pipeline MUST separately:
+
+```text
+parse module source
+→ enumerate static imports, export-from edges, and literal dynamic imports
+→ reject non-literal dynamic imports and forbidden specifier classes
+→ resolve relative logical modules
+→ require graph closure inside the installation namespace
+→ freeze the Executable Index
+```
+
 ---
 
 ## 8. Executable Resolution
@@ -332,6 +345,12 @@ interface PwaServiceWorkerGenerationV1 {
 
 `generation` is an opaque product-owned currentness value, not a Game/Session/Runtime identity。
 
+It MUST identify the emitted PWA product behavior, including every transitive
+source that can affect Window, Session Worker, Runner, or Service Worker
+artifacts. Hashing only `apps/pwa/src`, or using a mutable deployment label, is
+insufficient. A deterministic placeholder build followed by artifact hashing
+and final generation injection is one conforming realization.
+
 Private endpoint：
 
 ```http
@@ -420,7 +439,19 @@ interface PwaInstallRendererDataV1 {
   readonly subsystemKey: string;
   readonly generation: number;
   readonly dataProfile: string;
+  readonly connectionId: string;
   readonly port: MessagePort;
+}
+
+interface PwaRevokeRendererDataV1 {
+  readonly formatVersion: 1;
+  readonly type: "renderer-data/revoke";
+  readonly requestId: string;
+  readonly sessionEpoch: string;
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+  readonly connectionId: string;
 }
 ```
 
@@ -527,22 +558,40 @@ Session Worker → Runner：
 interface PwaInstallSubsystemDataV1 {
   readonly formatVersion: 1;
   readonly type: "data/install";
+  readonly requestId: string;
   readonly subsystemKey: string;
   readonly generation: number;
   readonly dataProfile: string;
+  readonly connectionId: string;
   readonly port: MessagePort;
 }
 
 interface PwaRevokeSubsystemDataV1 {
   readonly formatVersion: 1;
   readonly type: "data/revoke";
+  readonly requestId: string;
   readonly subsystemKey: string;
   readonly generation: number;
   readonly dataProfile: string;
+  readonly connectionId: string;
+}
+
+interface PwaRunnerDataResultV1 {
+  readonly formatVersion: 1;
+  readonly type: "data/result";
+  readonly requestId: string;
+  readonly subsystemKey: string;
+  readonly connectionId: string;
+  readonly ok: boolean;
 }
 ```
 
 Runner MUST fence stale S/G/P and MUST NOT mint generation/profile。
+
+The broker MUST treat provisioning as one transaction. Only matching
+acknowledgements for the same request/connection identity may commit current.
+Reject, timeout, bridge loss, Runtime termination, authority replacement, or a
+stale completion MUST revoke both endpoints before a newer channel may commit.
 
 Transfer/install failure：
 
@@ -664,6 +713,12 @@ v1 MUST NOT automatically restart a Runtime。A new Runtime means a fresh Launch
 
 One Session is pinned to the Service Worker generation accepted at bootstrap。
 
+The accepted worker is `navigator.serviceWorker.controller` captured for the
+current document. An installing or waiting worker is not a controller
+candidate, MUST NOT block the current Session, and MUST NOT replace its pinned
+generation. First installation may take exactly one normal reload path to
+obtain a controller.
+
 PWA v1 MUST NOT use product update hot takeover as normal semantics。
 
 ```text
@@ -743,6 +798,7 @@ same-origin ContentClient
 Content/integrity/storage failure paths
 Web Presentation
 reload/navigation/BFCache fresh Session
+existing real game-lib artifact through install/PREPARE/Runner/presentation
 Desktop ↔ PWA business-observable equivalence
 ```
 
