@@ -3,17 +3,8 @@ name: PWA M16-M17 qualification
 on:
   pull_request:
     paths:
-      - "apps/pwa/**"
-      - "packages/game-launcher-pwa/**"
-      - "packages/subsystem/**"
-      - "packages/main/**"
-      - "packages/realm-state/**"
-      - "packages/renderer/**"
-      - "packages/data/**"
-      - "packages/platform-ports/**"
-      - "packages/game-package/**"
-      - "packages/foundation/**"
-      - "packages/wire/**"
+      - "apps/**"
+      - "packages/**"
       - "game-libs/**"
       - "examples/**"
       - "package.json"
@@ -23,17 +14,8 @@ on:
   push:
     branches: [main]
     paths:
-      - "apps/pwa/**"
-      - "packages/game-launcher-pwa/**"
-      - "packages/subsystem/**"
-      - "packages/main/**"
-      - "packages/realm-state/**"
-      - "packages/renderer/**"
-      - "packages/data/**"
-      - "packages/platform-ports/**"
-      - "packages/game-package/**"
-      - "packages/foundation/**"
-      - "packages/wire/**"
+      - "apps/**"
+      - "packages/**"
       - "game-libs/**"
       - "examples/**"
       - "package.json"
