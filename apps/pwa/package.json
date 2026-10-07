@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "npm run build -w @loomrealm/game-launcher-pwa && tsc -p tsconfig.json && node scripts/build.mjs",
-    "build:qualification": "npm run build -w @loomrealm/game-launcher-pwa && tsc -p tsconfig.json && node scripts/build.mjs --qualification",
+    "build:qualification": "npm run build -w @loomrealm-game/tile-presentation -w @loomrealm-game/map -w @loomrealm/game-launcher-pwa && tsc -p tsconfig.json && node scripts/build.mjs --qualification",
     "test:unit": "node --test test/build-generation.test.mjs test/content-manifest.test.mjs test/data-broker.test.mjs test/provisioning-bridges.test.mjs test/service-worker-gate.test.mjs",
     "test": "npm run build:qualification && npm run test:unit && node scripts/run-e2e.mjs all",
     "test:m16": "npm run build:qualification && npm run test:unit && node scripts/run-e2e.mjs m16",
