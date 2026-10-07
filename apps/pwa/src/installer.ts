@@ -1,5 +1,6 @@
 import { parseGameEntryV1 } from "@loomrealm/game-package";
 import {
+  PwaLauncherError,
   buildPwaExecutableIndexV1,
   parsePwaLaunchManifestV1,
 } from "@loomrealm/game-launcher-pwa";
@@ -34,12 +35,6 @@ function segment(value: unknown): string {
   return value;
 }
 
-function stableJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
-}
-
 async function hash(bytes: Uint8Array): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes.slice().buffer as ArrayBuffer));
   return `sha256:${[...digest].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
@@ -69,58 +64,57 @@ export async function inspectInstallationStorage(requiredBytes = 0): Promise<Ins
   return Object.freeze({ estimate, persistence });
 }
 
-export async function installPwaBundle(bundle: PwaInstallationBundleV1): Promise<PwaInstallationRecord> {
-  const value = exact(bundle, ["formatVersion", "installationId", "gameEntry", "launchManifest", "presentation", "content", "executables"], "PWA installation bundle");
-  if (value.formatVersion !== 1 || typeof value.gameEntry !== "string" || typeof value.launchManifest !== "string" || !Array.isArray(value.content) || !Array.isArray(value.executables)) throw new TypeError("Invalid PWA installation bundle");
-  const installationId = segment(value.installationId);
-  const game = parseGameEntryV1(value.gameEntry);
-  const manifest = parsePwaLaunchManifestV1(value.launchManifest);
+async function installPwaBundleRecord(bundle: PwaInstallationBundleV1, signal?: AbortSignal): Promise<PwaInstallationRecord> {
+  if (signal?.aborted) throw signal.reason;
+  const value = exact(bundle, ["formatVersion", "gameEntryText", "launchManifestText", "content", "executables"], "PWA installation bundle");
+  if (value.formatVersion !== 1 || typeof value.gameEntryText !== "string" || typeof value.launchManifestText !== "string" || !Array.isArray(value.content) || !Array.isArray(value.executables)) throw new TypeError("Invalid PWA installation bundle");
+  const installationId = crypto.randomUUID();
+  const generation = crypto.randomUUID();
+  const game = parseGameEntryV1(value.gameEntryText);
+  const manifest = parsePwaLaunchManifestV1(value.launchManifestText);
   const gameKeys = new Set(game.subsystems.map(({ key }) => key));
-  if (manifest.subsystems.length !== gameKeys.size || manifest.subsystems.some(({ key }) => !gameKeys.has(key))) throw new TypeError("PWA installation key-set mismatch");
-  const executableSources = value.executables.map((candidate) => {
-    const entry = exact(candidate, ["logicalModule", "source"], "PWA executable");
-    if (typeof entry.logicalModule !== "string" || typeof entry.source !== "string") throw new TypeError("Invalid PWA executable");
-    return { logicalModule: entry.logicalModule, source: entry.source };
-  });
-  const contentBodies = value.content.map((candidate) => {
+  for (const { key } of game.subsystems) if (!manifest.subsystems.some((binding) => binding.key === key)) throw new PwaLauncherError("PLATFORM_BINDING_MISSING");
+  for (const { key } of manifest.subsystems) if (!gameKeys.has(key)) throw new PwaLauncherError("PLATFORM_BINDING_UNDECLARED");
+  const executableSources = await Promise.all(value.executables.map(async (candidate) => {
+    const entry = exact(candidate, ["logicalModule", "mime", "body"], "PWA executable");
+    if (typeof entry.logicalModule !== "string" || (entry.mime !== "text/javascript" && entry.mime !== "application/javascript") || !(entry.body instanceof Blob)) throw new TypeError("Invalid PWA executable");
+    return { logicalModule: entry.logicalModule, mime: entry.mime, source: await entry.body.text(), bytes: new Uint8Array(await entry.body.arrayBuffer()) };
+  }));
+  const contentBodies = await Promise.all(value.content.map(async (candidate) => {
     const entry = exact(candidate, ["kind", "namespace", "key", "mime", "body"], "PWA content entry");
     if ((entry.kind !== "record" && entry.kind !== "group" && entry.kind !== "resource") || typeof entry.mime !== "string") throw new TypeError("Invalid PWA content entry");
     const namespace = segment(entry.namespace);
     const key = String(entry.key).split("/").map(segment).join("/");
     if (entry.kind !== "resource" && key.includes("/")) throw new TypeError("Invalid PWA content key");
-    const bytes = typeof entry.body === "string" ? encoder.encode(entry.body) : entry.body instanceof Uint8Array ? Uint8Array.from(entry.body) : null;
-    if (bytes === null) throw new TypeError("Invalid PWA content body");
+    if (!(entry.body instanceof Blob)) throw new TypeError("Invalid PWA content body");
+    const bytes = new Uint8Array(await entry.body.arrayBuffer());
     return { kind: entry.kind, namespace, key, mime: entry.mime, bytes } as const;
-  });
-  const gameBytes = encoder.encode(stableJson(game));
-  const manifestBytes = encoder.encode(value.launchManifest);
-  const presentationBytes = encoder.encode(stableJson(value.presentation));
-  const executableBytes = executableSources.map((entry) => ({ ...entry, bytes: encoder.encode(entry.source) }));
-  const requiredBytes = gameBytes.byteLength + manifestBytes.byteLength + presentationBytes.byteLength + contentBodies.reduce((total, item) => total + item.bytes.byteLength, 0) + executableBytes.reduce((total, item) => total + item.bytes.byteLength, 0);
+  }));
+  const gameBytes = encoder.encode(value.gameEntryText);
+  const manifestBytes = encoder.encode(value.launchManifestText);
+  const requiredBytes = gameBytes.byteLength + manifestBytes.byteLength + contentBodies.reduce((total, item) => total + item.bytes.byteLength, 0) + executableSources.reduce((total, item) => total + item.bytes.byteLength, 0);
   const storage = await inspectInstallationStorage(requiredBytes);
-  const rootId = `${installationId}-${crypto.randomUUID()}`;
+  if (signal?.aborted) throw signal.reason;
+  const rootId = installationId;
   const placeholder: StoredObjectRef = Object.freeze({ contentVersion: `sha256:${"0".repeat(64)}`, size: 0, mime: "application/octet-stream" });
-  const staging: PwaInstallationRecord = Object.freeze({ installationId, state: "staging", rootId, createdAt: Date.now(), gameEntry: placeholder, launchManifest: placeholder, presentation: placeholder, contentIndex: Object.freeze([]), executableIndex: Object.freeze([]), persistence: storage.persistence });
-  const prior = await removeInstallationRecord(installationId);
-  if (prior !== null) await removeInstallationObjects(prior.rootId);
+  const staging: PwaInstallationRecord = Object.freeze({ installationId, generation, state: "staging", rootId, createdAt: Date.now(), gameEntryText: value.gameEntryText, launchManifestText: value.launchManifestText, gameEntry: placeholder, launchManifest: placeholder, contentIndex: Object.freeze([]), executableIndex: Object.freeze([]), persistence: storage.persistence });
   await putInstallation(staging);
   try {
     const gameEntry = await storeObject(rootId, gameBytes, "application/json; charset=utf-8");
     const launchManifest = await storeObject(rootId, manifestBytes, "application/json; charset=utf-8");
-    const presentation = await storeObject(rootId, presentationBytes, "application/json; charset=utf-8");
     const contentIndex: StoredContentIndexEntry[] = [Object.freeze({ kind: "manifest", ...gameEntry })];
     for (const entry of contentBodies) contentIndex.push(Object.freeze({ kind: entry.kind, namespace: entry.namespace, key: entry.key, ...await storeObject(rootId, entry.bytes, entry.mime) }));
     const modules = [];
     const storedExecutable = new Map<string, StoredObjectRef>();
-    for (const entry of executableBytes) {
-      const stored = await storeObject(rootId, entry.bytes, "text/javascript; charset=utf-8");
+    for (const entry of executableSources) {
+      const stored = await storeObject(rootId, entry.bytes, entry.mime);
       storedExecutable.set(entry.logicalModule, stored);
       modules.push({ logicalModule: entry.logicalModule, source: entry.source, contentVersion: stored.contentVersion });
     }
     const graph = buildPwaExecutableIndexV1(modules);
     const executableIndex = graph.map((entry) => Object.freeze({ ...entry, ...storedExecutable.get(entry.logicalModule)! }));
     for (const binding of manifest.subsystems) if (!executableIndex.some(({ logicalModule }) => logicalModule === binding.module)) throw new TypeError("Missing PWA subsystem executable");
-    const complete: PwaInstallationRecord = Object.freeze({ installationId, state: "complete", rootId, createdAt: staging.createdAt, gameEntry, launchManifest, presentation, contentIndex: Object.freeze(contentIndex), executableIndex: Object.freeze(executableIndex), persistence: storage.persistence });
+    const complete: PwaInstallationRecord = Object.freeze({ ...staging, state: "complete", gameEntry, launchManifest, contentIndex: Object.freeze(contentIndex), executableIndex: Object.freeze(executableIndex) });
     await publishInstallation(complete);
     return complete;
   } catch (cause) {
@@ -129,10 +123,19 @@ export async function installPwaBundle(bundle: PwaInstallationBundleV1): Promise
   }
 }
 
-export async function ensurePwaBundle(bundle: PwaInstallationBundleV1): Promise<PwaInstallationRecord> {
-  const existing = await getInstallation(bundle.installationId);
-  if (existing?.state === "complete") return existing;
-  return installPwaBundle(bundle);
+export interface PwaInstalledGameV1 { readonly installationId: string }
+
+export async function installPwaBundle(bundle: PwaInstallationBundleV1, signal?: AbortSignal): Promise<PwaInstalledGameV1> {
+  const installation = await installPwaBundleRecord(bundle, signal);
+  return Object.freeze({ installationId: installation.installationId });
+}
+
+export async function ensurePwaBundle(bundle: PwaInstallationBundleV1, knownInstallationId?: string | null): Promise<PwaInstallationRecord> {
+  if (knownInstallationId) {
+    const existing = await getInstallation(knownInstallationId);
+    if (existing?.state === "complete") return existing;
+  }
+  return installPwaBundleRecord(bundle);
 }
 
 export async function collectStagingOrphans(): Promise<number> {

@@ -36,7 +36,7 @@ export class PwaDataBroker {
     for (const [key, current] of [...this.current]) {
       const next = desired.get(key);
       if (next !== undefined && next.runtime === current.runtime && next.generation === current.generation && next.dataProfile === current.dataProfile) continue;
-      const revoke: PwaRevokeSubsystemDataV1 = Object.freeze({ type: "loomrealm.pwa.revoke-subsystem-data", version: 1, requestId: current.requestId, sessionEpoch: this.sessionEpoch, subsystemKey: current.subsystemKey, generation: current.generation, dataProfile: current.dataProfile });
+      const revoke: PwaRevokeSubsystemDataV1 = Object.freeze({ formatVersion: 1, type: "data/revoke", subsystemKey: current.subsystemKey, generation: current.generation, dataProfile: current.dataProfile });
       current.provisioner.revoke(revoke);
       this.current.delete(key);
     }
@@ -47,8 +47,8 @@ export class PwaDataBroker {
       if (provisioner === undefined) continue;
       const requestId = crypto.randomUUID();
       const pair = new MessageChannel();
-      const rendererMessage: PwaInstallRendererDataV1 = Object.freeze({ type: "loomrealm.pwa.install-renderer-data", version: 1, requestId, sessionEpoch: this.sessionEpoch, subsystemKey: entry.subsystemKey, generation: entry.generation, dataProfile: entry.dataProfile, port: pair.port1 });
-      const runnerMessage: Omit<PwaInstallSubsystemDataV1, "port"> = Object.freeze({ type: "loomrealm.pwa.install-subsystem-data", version: 1, requestId, sessionEpoch: this.sessionEpoch, subsystemKey: entry.subsystemKey, generation: entry.generation, dataProfile: entry.dataProfile });
+      const rendererMessage: PwaInstallRendererDataV1 = Object.freeze({ formatVersion: 1, type: "renderer-data/install", requestId, sessionEpoch: this.sessionEpoch, subsystemKey: entry.subsystemKey, generation: entry.generation, dataProfile: entry.dataProfile, port: pair.port1 });
+      const runnerMessage: Omit<PwaInstallSubsystemDataV1, "port"> = Object.freeze({ formatVersion: 1, type: "data/install", subsystemKey: entry.subsystemKey, generation: entry.generation, dataProfile: entry.dataProfile });
       provisioner.install(runnerMessage, pair.port2);
       await this.bridge.request(rendererMessage, [pair.port1]);
       this.current.set(entry.subsystemKey, Object.freeze({ runtime: entry.runtime, provisioner, subsystemKey: entry.subsystemKey, generation: entry.generation, dataProfile: entry.dataProfile, requestId }));
@@ -58,7 +58,7 @@ export class PwaDataBroker {
   close(): void {
     this.closed = true;
     this.authority = null;
-    for (const current of this.current.values()) current.provisioner.revoke(Object.freeze({ type: "loomrealm.pwa.revoke-subsystem-data", version: 1, requestId: current.requestId, sessionEpoch: this.sessionEpoch, subsystemKey: current.subsystemKey, generation: current.generation, dataProfile: current.dataProfile }));
+    for (const current of this.current.values()) current.provisioner.revoke(Object.freeze({ formatVersion: 1, type: "data/revoke", subsystemKey: current.subsystemKey, generation: current.generation, dataProfile: current.dataProfile }));
     this.current.clear();
   }
 }

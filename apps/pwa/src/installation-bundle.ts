@@ -1,30 +1,29 @@
-export interface PwaInstallationContentV1 {
+export interface PwaBundleContentEntryV1 {
   readonly kind: "record" | "group" | "resource";
   readonly namespace: string;
   readonly key: string;
   readonly mime: string;
-  readonly body: string | Uint8Array;
+  readonly body: Blob;
 }
 
-export interface PwaInstallationExecutableV1 {
+export interface PwaBundleExecutableEntryV1 {
   readonly logicalModule: string;
-  readonly source: string;
+  readonly mime: "text/javascript" | "application/javascript";
+  readonly body: Blob;
 }
 
 export interface PwaInstallationBundleV1 {
   readonly formatVersion: 1;
-  readonly installationId: string;
-  readonly gameEntry: string;
-  readonly launchManifest: string;
-  readonly presentation: unknown;
-  readonly content: readonly PwaInstallationContentV1[];
-  readonly executables: readonly PwaInstallationExecutableV1[];
+  readonly gameEntryText: string;
+  readonly launchManifestText: string;
+  readonly content: readonly PwaBundleContentEntryV1[];
+  readonly executables: readonly PwaBundleExecutableEntryV1[];
 }
 
-const DEMO_EXECUTABLE = `
+export const DEMO_EXECUTABLE = `
 export default (scope) => ({
   async frame(frame) {
-    const content = await scope.content.record("demo", "config");
+    const content = await scope.content.record("struct.demo", "config");
     const key = { namespace: "demo", key: "visits" };
     const snapshot = await scope.state.read([key]);
     const current = snapshot.records[0];
@@ -70,29 +69,27 @@ export default (scope) => ({
 });
 `.trim();
 
-export const DEMO_INSTALLATION_ID = "loomrealm-demo-v1";
+export const DEMO_PRESENTATION = Object.freeze({ formatVersion: 1, scripts: Object.freeze([]), styles: Object.freeze([]) });
 
 export function createDemoInstallationBundle(): PwaInstallationBundleV1 {
   return Object.freeze({
     formatVersion: 1,
-    installationId: DEMO_INSTALLATION_ID,
-    gameEntry: JSON.stringify({
+    gameEntryText: JSON.stringify({
       formatVersion: 1,
       state: { records: [{ namespace: "demo", key: "visits", value: 0 }] },
       initial: { subsystem: "demo", input: { source: "pwa" } },
       subsystems: [{ key: "demo" }],
     }),
-    launchManifest: JSON.stringify({
+    launchManifestText: JSON.stringify({
       formatVersion: 1,
       subsystems: [{ key: "demo", module: "subsystems/demo.mjs" }],
     }),
-    presentation: Object.freeze({ formatVersion: 1, scripts: Object.freeze([]), styles: Object.freeze([]) }),
     content: Object.freeze([
-      Object.freeze({ kind: "record", namespace: "demo", key: "config", mime: "application/json; charset=utf-8", body: JSON.stringify({ message: "ready" }) }),
-      Object.freeze({ kind: "resource", namespace: "demo", key: "hello.txt", mime: "text/plain; charset=utf-8", body: "LoomRealm PWA" }),
+      Object.freeze({ kind: "record", namespace: "struct.demo", key: "config", mime: "application/json; charset=utf-8", body: new Blob([JSON.stringify({ message: "ready" })], { type: "application/json; charset=utf-8" }) }),
+      Object.freeze({ kind: "resource", namespace: "resource.demo", key: "hello.txt", mime: "text/plain; charset=utf-8", body: new Blob(["LoomRealm PWA"], { type: "text/plain; charset=utf-8" }) }),
     ]),
     executables: Object.freeze([
-      Object.freeze({ logicalModule: "subsystems/demo.mjs", source: DEMO_EXECUTABLE }),
+      Object.freeze({ logicalModule: "subsystems/demo.mjs", mime: "text/javascript", body: new Blob([DEMO_EXECUTABLE], { type: "text/javascript" }) }),
     ]),
   });
 }

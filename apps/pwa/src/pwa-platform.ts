@@ -36,7 +36,7 @@ export class PwaPlatform {
         if (this.closed || signal.aborted) throw signal.reason ?? new Error("PWA Platform closed");
         const pair = new MessageChannel();
         const requestId = crypto.randomUUID();
-        const message: PwaInstallRendererControlV1 = Object.freeze({ type: "loomrealm.pwa.install-renderer-control", version: 1, requestId, sessionEpoch: options.sessionEpoch, rendererControlToken, port: pair.port2 });
+        const message: PwaInstallRendererControlV1 = Object.freeze({ formatVersion: 1, type: "renderer-control/install", requestId, sessionEpoch: options.sessionEpoch, rendererControlToken, port: pair.port2 });
         try { await this.bridge.request(message, [pair.port2]); }
         catch (cause) { pair.port1.close(); throw cause; }
         if (signal.aborted) { pair.port1.close(); throw signal.reason; }

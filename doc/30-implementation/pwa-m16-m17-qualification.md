@@ -39,14 +39,15 @@ npm run docs:build
 
 `playwright@1.63.0` 的 Chromium qualification 使用真实 Service Worker、Dedicated Session Worker、nested Dedicated Runtime Worker、MessagePort、IndexedDB 与 OPFS，覆盖：
 
-- SW controller/version handshake 与 Session/Runner generation probe；
+- 缺失 controller 时 fail-closed、SW controller/version handshake 与 Session/Runner generation probe；
 - invalid closed bootstrap、stale generation、PREPARE key/graph failure、module ABI failure、unexpected Worker failure与 no automatic restart；
 - Game Entry + `launch.pwa.json` exact join、Executable Index、private same-origin module route；
 - Realm State READY、Runtime Control ready、initial Frame 与确定性 root outcome；
 - Renderer Control/Data、Input、Viewport、same-origin Content 与 Web Presentation；
-- GET/HEAD、MIME、ETag、content version、304、offline read、private executable response；
+- GET/HEAD、MIME、ETag、content version、304、offline read、private executable response，以及停止/重启 SW 后从持久 authority 重建；
 - staging invisibility、visibility publish、orphan GC、persist granted/denied、quota、hash corruption invalidation、uninstall后不可由残留复活；
 - reload、top-level navigation与 history/BFCache restore 的 fresh epoch fencing；
 - Window main-thread stall不改变 Main/Runtime 的 Worker 物理隔离。
+- 同一份 concrete `SubsystemDefinition` 源码分别经过真实 Desktop/Hostra 与 PWA Worker 产品路径，比较 input、outcome、Realm State 业务事实、逻辑 Render 与 cleanup。
 
 Desktop 与 PWA 共享 Game/SubsystemDefinition/Frame/Call、Realm State、Renderer Data、ContentClient 与业务 outcome；它们不共享 Node child-process runner、WebSocket bytes、filesystem/OPFS layout 或 DOM timing。

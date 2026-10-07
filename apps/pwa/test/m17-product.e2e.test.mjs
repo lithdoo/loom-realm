@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { openProduct, waitForDemo } from "./helpers/browser.mjs";
+import { runDesktopEquivalenceReference } from "./helpers/desktop-equivalence.mjs";
 
-test("M17 composes Renderer Control/Data, same-origin Content, Input, Viewport, State and Web Presentation", async () => {
+test("M17 composes the browser product and matches a real Desktop/Hostra business run", { timeout: 30_000 }, async () => {
+  const desktop = await runDesktopEquivalenceReference();
   const product = await openProduct();
   try {
     const { page } = product;
@@ -24,7 +26,12 @@ test("M17 composes Renderer Control/Data, same-origin Content, Input, Viewport, 
     await page.keyboard.press("Enter");
     await page.waitForFunction(() => window.__loomrealmPwa.statuses.some((entry) => entry?.status === "settled"), null, { timeout: 20_000 });
     const result = await page.evaluate(() => window.__loomrealmPwa.statuses.find((entry) => entry?.status === "settled")?.result);
-    const desktopReference = Object.freeze({ kind: "root-outcome", outcome: { type: "completed", value: { result: "demo-complete", visits: 1, content: "ready" } } });
-    assert.deepEqual(result, desktopReference);
+    assert.deepEqual(result, desktop.outcome);
+    assert.equal(desktop.render.attrs["data-content"], render.content);
+    assert.equal(Number(desktop.render.attrs["data-visits"]), render.visits);
+    assert.equal(desktop.render.attrs["data-viewport"], render.viewport);
+    assert.deepEqual(desktop.state, [{ key: { namespace: "demo", key: "visits" }, value: render.visits }]);
+    assert.equal(desktop.rendererFailure, null);
+    assert.equal(desktop.rendererCleaned, true);
   } finally { await product.close(); }
 });

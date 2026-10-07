@@ -8,13 +8,14 @@ test("installation publishes atomically and Content/Executable routes preserve v
     const { page, context } = product;
     await waitForDemo(page);
     const first = await page.evaluate(async () => {
-      const url = "/_lr/v1/games/loomrealm-demo-v1/records/demo/config";
+      const installationId = window.__loomrealmPwa.installationId;
+      const url = `/_lr/v1/games/${encodeURIComponent(installationId)}/records/struct.demo/config`;
       const get = await fetch(url);
       const body = await get.text();
       const etag = get.headers.get("etag");
       const head = await fetch(url, { method: "HEAD" });
       const notModified = await fetch(url, { headers: { "If-None-Match": etag } });
-      const executable = await fetch("/_lr/internal/executables/loomrealm-demo-v1/subsystems/demo.mjs");
+      const executable = await fetch(`/_lr/internal/executables/${encodeURIComponent(installationId)}/subsystems/demo.mjs`);
       return {
         get: get.status, body, mime: get.headers.get("content-type"), version: get.headers.get("x-loom-content-version"), etag,
         head: head.status, headBody: await head.text(), headVersion: head.headers.get("x-loom-content-version"),
@@ -36,9 +37,19 @@ test("installation publishes atomically and Content/Executable routes preserve v
     assert.match(first.executableMime, /^text\/javascript/);
     assert.match(first.executableText, /export default/);
 
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("ServiceWorker.enable");
+    await cdp.send("ServiceWorker.stopAllWorkers");
+    const afterRestart = await page.evaluate(async () => {
+      const installationId = window.__loomrealmPwa.installationId;
+      const response = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/records/struct.demo/config`);
+      return { status: response.status, body: await response.text() };
+    });
+    assert.deepEqual(afterRestart, { status: 200, body: '{"message":"ready"}' });
+
     await context.setOffline(true);
     const offline = await page.evaluate(async () => {
-      const response = await fetch("/_lr/v1/games/loomrealm-demo-v1/resources/demo/hello.txt");
+      const response = await fetch(`/_lr/v1/games/${encodeURIComponent(window.__loomrealmPwa.installationId)}/resources/resource.demo/hello.txt`);
       return { status: response.status, body: await response.text() };
     });
     assert.deepEqual(offline, { status: 200, body: "LoomRealm PWA" });
@@ -60,8 +71,9 @@ test("persistence grant, denial and quota paths are explicit; uninstall cannot b
       try { await window.__loomrealmPwa.qualification.inspectStorage(Number.MAX_SAFE_INTEGER); }
       catch (error) { quota = error.name; }
       Object.defineProperty(storage, "persist", { configurable: true, value: original });
+      const installationId = window.__loomrealmPwa.installationId;
       await window.__loomrealmPwa.qualification.uninstall();
-      const after = await fetch("/_lr/v1/games/loomrealm-demo-v1/records/demo/config");
+      const after = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/records/struct.demo/config`);
       return { granted: granted.persistence, denied: denied.persistence, quota, after: after.status };
     });
     assert.deepEqual(outcomes, { granted: "granted", denied: "denied", quota: "QuotaExceededError", after: 404 });
@@ -75,7 +87,7 @@ test("staging stays invisible, orphan GC removes it, and object corruption inval
     const staging = await page.evaluate(async () => {
       const db = await new Promise((resolve, reject) => { const request = indexedDB.open("loomrealm-pwa-installations-v1", 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
       const placeholder = { contentVersion: `sha256:${"0".repeat(64)}`, size: 0, mime: "application/octet-stream" };
-      const record = { installationId: "orphan-test", state: "staging", rootId: "orphan-root", createdAt: Date.now(), gameEntry: placeholder, launchManifest: placeholder, presentation: placeholder, contentIndex: [], executableIndex: [], persistence: "denied" };
+      const record = { installationId: "orphan-test", generation: crypto.randomUUID(), state: "staging", rootId: "orphan-root", createdAt: Date.now(), gameEntryText: "{}", launchManifestText: "{}", gameEntry: placeholder, launchManifest: placeholder, contentIndex: [], executableIndex: [], persistence: "denied" };
       await new Promise((resolve, reject) => { const tx = db.transaction("installations", "readwrite"); tx.objectStore("installations").put(record); tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
       db.close();
       const root = await navigator.storage.getDirectory();
@@ -98,9 +110,10 @@ test("staging stays invisible, orphan GC removes it, and object corruption inval
 
     const corruption = await page.evaluate(async () => {
       const db = await new Promise((resolve, reject) => { const request = indexedDB.open("loomrealm-pwa-installations-v1", 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
-      const installation = await new Promise((resolve, reject) => { const tx = db.transaction("installations", "readonly"); const request = tx.objectStore("installations").get("loomrealm-demo-v1"); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+      const installationId = window.__loomrealmPwa.installationId;
+      const installation = await new Promise((resolve, reject) => { const tx = db.transaction("installations", "readonly"); const request = tx.objectStore("installations").get(installationId); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
       db.close();
-      const entry = installation.contentIndex.find((value) => value.kind === "record" && value.namespace === "demo" && value.key === "config");
+      const entry = installation.contentIndex.find((value) => value.kind === "record" && value.namespace === "struct.demo" && value.key === "config");
       const root = await navigator.storage.getDirectory();
       const product = await root.getDirectoryHandle("loomrealm-pwa");
       const installations = await product.getDirectoryHandle("installations");
@@ -108,8 +121,8 @@ test("staging stays invisible, orphan GC removes it, and object corruption inval
       const objects = await directory.getDirectoryHandle("objects");
       const file = await objects.getFileHandle(entry.contentVersion.replace(":", "-"));
       const writer = await file.createWritable(); await writer.write("corrupt"); await writer.close();
-      const first = await fetch("/_lr/v1/games/loomrealm-demo-v1/records/demo/config");
-      const second = await fetch("/_lr/v1/games/loomrealm-demo-v1/records/demo/config");
+      const first = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/records/struct.demo/config`);
+      const second = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/records/struct.demo/config`);
       return [first.status, second.status];
     });
     assert.deepEqual(corruption, [422, 409]);

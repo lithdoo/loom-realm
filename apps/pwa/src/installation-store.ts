@@ -18,12 +18,14 @@ export interface StoredExecutableIndexEntry extends PwaExecutableIndexEntryV1, S
 
 export interface PwaInstallationRecord {
   readonly installationId: string;
+  readonly generation: string;
   readonly state: PwaInstallationState;
   readonly rootId: string;
   readonly createdAt: number;
+  readonly gameEntryText: string;
+  readonly launchManifestText: string;
   readonly gameEntry: StoredObjectRef;
   readonly launchManifest: StoredObjectRef;
-  readonly presentation: StoredObjectRef;
   readonly contentIndex: readonly StoredContentIndexEntry[];
   readonly executableIndex: readonly StoredExecutableIndexEntry[];
   readonly persistence: "granted" | "denied" | "unavailable";

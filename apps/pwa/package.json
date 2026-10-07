@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/build.mjs",
+    "build": "npm run build -w @loomrealm/game-launcher-pwa && tsc -p tsconfig.json && node scripts/build.mjs",
     "test": "npm run build && node scripts/run-e2e.mjs all",
     "test:m16": "npm run build && node scripts/run-e2e.mjs m16",
     "test:m17": "npm run build && node scripts/run-e2e.mjs m17"
@@ -22,6 +22,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@loomrealm/desktop": "0.1.0-alpha.0",
+    "@loomrealm/game-launcher-hostra": "0.1.0-alpha.0",
     "esbuild": "0.25.9",
     "playwright": "1.63.0",
     "typescript": "^5.5.0"

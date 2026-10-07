@@ -60,20 +60,16 @@ export function createPwaRuntimeHosting(options: {
       worker.addEventListener("message", (event: MessageEvent<unknown>) => {
         const value = event.data as Record<string, unknown> | null;
         if (value !== null && typeof value === "object" && Object.keys(value).length === 4 && value.type === "loomrealm.pwa.runner-terminal" && value.version === 1 && value.sessionEpoch === options.sessionEpoch && value.bootstrapToken === request.bootstrapToken) close();
+        else if (value !== null && typeof value === "object" && Object.keys(value).length === 3 && value.type === "loomrealm.pwa.runner-failure" && value.version === 1) { options.observe?.({ type: "runtime-error", subsystemKey: request.subsystemKey, message: "Worker bootstrap/runtime failure" }); close(); }
       });
       const bootstrap: PwaRunnerBootstrapV1 = Object.freeze({
-        type: "loomrealm.pwa.runner-bootstrap", version: 1,
+        formatVersion: 1,
         sessionEpoch: options.sessionEpoch,
-        serviceWorkerGeneration: options.launchPlan.serviceWorkerGeneration,
         installationId: options.launchPlan.installationId,
+        expectedServiceWorker: options.launchPlan.expectedServiceWorker,
         subsystemKey: request.subsystemKey,
         logicalModule: runtime.logicalModule,
-        moduleUrl: runtime.moduleUrl,
         bootstrapToken: request.bootstrapToken,
-        controlProtocolVersions: Object.freeze([1] as [1]),
-        helloDeadlineMs: options.launchPlan.runnerPolicy.helloDeadlineMs,
-        frameDeadlineMs: options.launchPlan.runnerPolicy.frameDeadlineMs,
-        terminalCleanupDeadlineMs: options.launchPlan.runnerPolicy.terminalCleanupDeadlineMs,
         runtimeControlPort: control.port2,
         realmStatePort: state.port2,
         provisioningPort: provisioning.port2,
@@ -89,10 +85,17 @@ export function createPwaRuntimeHosting(options: {
           },
         }),
         terminated: ended.promise,
-        requestTermination(terminationSignal: AbortSignal): Promise<void> {
-          if (terminationSignal.aborted) return Promise.reject(terminationSignal.reason);
+        async requestTermination(terminationSignal: AbortSignal): Promise<void> {
+          if (terminationSignal.aborted) throw terminationSignal.reason;
+          if (terminal) return;
+          try { worker.postMessage(Object.freeze({ type: "loomrealm.pwa.runner-shutdown", version: 1, sessionEpoch: options.sessionEpoch, bootstrapToken: request.bootstrapToken })); } catch {}
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            ended.promise,
+            new Promise<void>((resolve) => { timer = setTimeout(resolve, options.launchPlan.runnerPolicy.terminalCleanupDeadlineMs); }),
+          ]);
+          if (timer !== undefined) clearTimeout(timer);
           close();
-          return Promise.resolve();
         },
       });
       const provisioner: PwaRuntimeDataProvisioner = Object.freeze({

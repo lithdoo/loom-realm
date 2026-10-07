@@ -19,6 +19,7 @@ export type PwaLauncherErrorCode =
   | "SUBSYSTEM_MODULE_INVALID"
   | "SUBSYSTEM_MODULE_NOT_FOUND"
   | "SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION"
+  | "SUBSYSTEM_MODULE_GRAPH_INVALID"
   | "SUBSYSTEM_MODULE_LOAD_FAILED"
   | "SUBSYSTEM_MODULE_ABI_INVALID"
   | "PLATFORM_RUNTIME_UNSUPPORTED";
@@ -118,9 +119,9 @@ export interface PwaExecutableIndexEntryV1 {
 }
 
 function resolveRelativeModule(from: string, specifier: string): string {
-  if (!specifier.startsWith("./") && !specifier.startsWith("../")) return fail("SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION");
+  if (!specifier.startsWith("./") && !specifier.startsWith("../")) return fail("SUBSYSTEM_MODULE_GRAPH_INVALID");
   if (specifier.includes("\\") || specifier.includes(":") || specifier.includes("?") || specifier.includes("#")) {
-    return fail("SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION");
+    return fail("SUBSYSTEM_MODULE_GRAPH_INVALID");
   }
   const output = from.split("/");
   output.pop();
@@ -166,7 +167,7 @@ export function buildPwaExecutableIndexV1(
     }
     for (const match of module.source.matchAll(/\bimport\s*\(/g)) {
       const position = match.index ?? -1;
-      if (!matchedRanges.some(([start, end]) => position >= start && position < end)) return fail("SUBSYSTEM_MODULE_INVALID");
+      if (!matchedRanges.some(([start, end]) => position >= start && position < end)) return fail("SUBSYSTEM_MODULE_GRAPH_INVALID");
     }
     entries.push(Object.freeze({
       logicalModule: module.logicalModule,
@@ -185,15 +186,22 @@ export interface PwaRunnerPolicy {
 
 export interface ResolvedPwaSubsystemModuleV1 {
   readonly installationId: string;
+  readonly installationGeneration: string;
   readonly subsystemKey: string;
   readonly logicalModule: string;
-  readonly moduleUrl: string;
   readonly imports: readonly string[];
+}
+
+export interface PwaServiceWorkerGenerationV1 {
+  readonly protocolVersion: 1;
+  readonly buildId: string;
+  readonly generation: string;
 }
 
 export interface PwaLaunchPlan {
   readonly installationId: string;
-  readonly serviceWorkerGeneration: string;
+  readonly installationGeneration: string;
+  readonly expectedServiceWorker: PwaServiceWorkerGenerationV1;
   readonly runnerPolicy: PwaRunnerPolicy;
   readonly runtimes: readonly ResolvedPwaSubsystemModuleV1[];
 }
@@ -209,12 +217,21 @@ export interface PreparedPwaGame {
   readonly launchPlan: PwaLaunchPlan;
 }
 
-export interface PwaPrepareOptions {
+export interface PwaPrepareGameRequestV1 {
   readonly installationId: string;
-  readonly serviceWorkerGeneration: string;
+}
+
+export interface PublishedPwaInstallationV1 {
+  readonly installationId: string;
+  readonly generation: string;
   readonly gameEntryText: string;
   readonly launchManifestText: string;
   readonly executableIndex: readonly PwaExecutableIndexEntryV1[];
+}
+
+export interface PwaPrepareDependencies {
+  readonly openPublishedInstallation: (installationId: string, signal?: AbortSignal) => Promise<PublishedPwaInstallationV1>;
+  readonly expectedServiceWorker: PwaServiceWorkerGenerationV1;
   readonly runnerPolicy: PwaRunnerPolicy;
   readonly resolveModuleUrl: (logicalModule: string) => string;
 }
@@ -249,43 +266,47 @@ function validateExecutableIndex(value: readonly PwaExecutableIndexEntryV1[]): R
   return index;
 }
 
-export async function preparePwaGame(options: PwaPrepareOptions): Promise<PreparedPwaGame> {
-  if (options === null || typeof options !== "object") throw new TypeError("Invalid PWA prepare options");
-  if (!validSubsystemKey(options.installationId) || !validSubsystemKey(options.serviceWorkerGeneration)) {
-    throw new TypeError("Invalid PWA installation or Service Worker generation");
-  }
-  if (typeof options.resolveModuleUrl !== "function") throw new TypeError("Invalid PWA module resolver");
+export async function preparePwaGame(request: PwaPrepareGameRequestV1, dependencies: PwaPrepareDependencies, signal?: AbortSignal): Promise<PreparedPwaGame> {
+  const requestValue = exactObject(request, ["installationId"], "PWA prepare request");
+  if (!validSubsystemKey(requestValue.installationId)) throw new TypeError("Invalid PWA installation");
+  if (dependencies === null || typeof dependencies !== "object" || typeof dependencies.openPublishedInstallation !== "function" || typeof dependencies.resolveModuleUrl !== "function") throw new TypeError("Invalid PWA prepare dependencies");
+  if (signal?.aborted) throw signal.reason;
+  const installation = await dependencies.openPublishedInstallation(requestValue.installationId, signal);
+  const installationValue = exactObject(installation, ["installationId", "generation", "gameEntryText", "launchManifestText", "executableIndex"], "published PWA installation");
+  if (installationValue.installationId !== requestValue.installationId || !validSubsystemKey(installationValue.generation)) throw new TypeError("Invalid published PWA installation");
+  const expectedServiceWorker = exactObject(dependencies.expectedServiceWorker, ["protocolVersion", "buildId", "generation"], "Service Worker generation") as unknown as PwaServiceWorkerGenerationV1;
+  if (expectedServiceWorker.protocolVersion !== 1 || !validSubsystemKey(expectedServiceWorker.buildId) || !validSubsystemKey(expectedServiceWorker.generation)) throw new TypeError("Invalid Service Worker generation");
   let game: ValidatedGameEntryV1;
-  try { game = parseGameEntryV1(options.gameEntryText); }
+  try { game = parseGameEntryV1(installationValue.gameEntryText as string); }
   catch (cause) {
     if (cause instanceof GamePackageError) throw cause;
     throw new GamePackageError("GAME_ENTRY_INVALID");
   }
-  const manifest = parsePwaLaunchManifestV1(options.launchManifestText);
+  const manifest = parsePwaLaunchManifestV1(installationValue.launchManifestText as string);
   const gameKeys = new Set(game.subsystems.map(({ key }) => key));
   const bindings = new Map(manifest.subsystems.map(({ key, module }) => [key, module] as const));
   for (const { key } of game.subsystems) if (!bindings.has(key)) fail("PLATFORM_BINDING_MISSING");
   for (const { key } of manifest.subsystems) if (!gameKeys.has(key)) fail("PLATFORM_BINDING_UNDECLARED");
-  const index = validateExecutableIndex(options.executableIndex);
+  const index = validateExecutableIndex(installationValue.executableIndex as readonly PwaExecutableIndexEntryV1[]);
   const currentOrigin = typeof location === "object" ? location.origin : undefined;
   const runtimes = game.subsystems.map(({ key }) => {
     const logicalModule = bindings.get(key)!;
     const executable = index.get(logicalModule);
     if (executable === undefined) return fail("SUBSYSTEM_MODULE_NOT_FOUND");
     let moduleUrl: URL;
-    try { moduleUrl = new URL(options.resolveModuleUrl(logicalModule)); }
+    try { moduleUrl = new URL(dependencies.resolveModuleUrl(logicalModule)); }
     catch (cause) { return fail("SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION", cause); }
-    const expectedPath = `/_lr/internal/executables/${encodeURIComponent(options.installationId)}/${logicalModule.split("/").map(encodeURIComponent).join("/")}`;
+    const expectedPath = `/_lr/internal/executables/${encodeURIComponent(request.installationId)}/${logicalModule.split("/").map(encodeURIComponent).join("/")}`;
     if (
       (moduleUrl.protocol !== "http:" && moduleUrl.protocol !== "https:") ||
       currentOrigin === undefined || moduleUrl.origin !== currentOrigin || moduleUrl.pathname !== expectedPath ||
       moduleUrl.search !== "" || moduleUrl.hash !== ""
     ) return fail("SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION");
     return Object.freeze({
-      installationId: options.installationId,
+      installationId: request.installationId,
+      installationGeneration: installationValue.generation as string,
       subsystemKey: key,
       logicalModule,
-      moduleUrl: moduleUrl.href,
       imports: executable.imports,
     });
   });
@@ -297,9 +318,10 @@ export async function preparePwaGame(options: PwaPrepareOptions): Promise<Prepar
     logicalBootstrap,
     state: prepareRealmStateDefinition(game.state?.records ?? []),
     launchPlan: Object.freeze({
-      installationId: options.installationId,
-      serviceWorkerGeneration: options.serviceWorkerGeneration,
-      runnerPolicy: freezeRunnerPolicy(options.runnerPolicy),
+      installationId: request.installationId,
+      installationGeneration: installationValue.generation as string,
+      expectedServiceWorker: Object.freeze({ ...expectedServiceWorker }),
+      runnerPolicy: freezeRunnerPolicy(dependencies.runnerPolicy),
       runtimes: Object.freeze(runtimes),
     }),
   });

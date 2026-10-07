@@ -1,28 +1,24 @@
 export const PWA_PROTOCOL_VERSION = 1 as const;
 
+export interface PwaServiceWorkerGenerationV1 {
+  readonly protocolVersion: 1;
+  readonly buildId: string;
+  readonly generation: string;
+}
+
+export type PwaRuntimeInfoV1 = PwaServiceWorkerGenerationV1;
+
 export interface PwaSessionBootstrapV1 {
-  readonly type: "loomrealm.pwa.session-bootstrap";
-  readonly version: 1;
+  readonly formatVersion: 1;
   readonly sessionEpoch: string;
-  readonly serviceWorkerGeneration: string;
   readonly installationId: string;
+  readonly expectedServiceWorker: PwaServiceWorkerGenerationV1;
   readonly windowBridgePort: MessagePort;
 }
 
-export interface PwaServiceWorkerGenerationV1 {
-  readonly type: "loomrealm.pwa.sw-generation";
-  readonly version: 1;
-  readonly generation: string;
-}
-
-export interface PwaRuntimeInfoV1 {
-  readonly version: 1;
-  readonly generation: string;
-}
-
 export interface PwaInstallRendererControlV1 {
-  readonly type: "loomrealm.pwa.install-renderer-control";
-  readonly version: 1;
+  readonly formatVersion: 1;
+  readonly type: "renderer-control/install";
   readonly requestId: string;
   readonly sessionEpoch: string;
   readonly rendererControlToken: string;
@@ -30,8 +26,8 @@ export interface PwaInstallRendererControlV1 {
 }
 
 export interface PwaInstallRendererDataV1 {
-  readonly type: "loomrealm.pwa.install-renderer-data";
-  readonly version: 1;
+  readonly formatVersion: 1;
+  readonly type: "renderer-data/install";
   readonly requestId: string;
   readonly sessionEpoch: string;
   readonly subsystemKey: string;
@@ -41,37 +37,30 @@ export interface PwaInstallRendererDataV1 {
 }
 
 export interface PwaWindowBridgeResultV1 {
-  readonly type: "loomrealm.pwa.window-bridge-result";
-  readonly version: 1;
+  readonly formatVersion: 1;
+  readonly type: "install/result";
   readonly requestId: string;
   readonly sessionEpoch: string;
   readonly ok: boolean;
+  readonly errorCode?: "WINDOW_NOT_CURRENT" | "INSTALL_REJECTED";
 }
 
 export interface PwaRunnerBootstrapV1 {
-  readonly type: "loomrealm.pwa.runner-bootstrap";
-  readonly version: 1;
+  readonly formatVersion: 1;
   readonly sessionEpoch: string;
-  readonly serviceWorkerGeneration: string;
   readonly installationId: string;
+  readonly expectedServiceWorker: PwaServiceWorkerGenerationV1;
   readonly subsystemKey: string;
-  readonly logicalModule: string;
-  readonly moduleUrl: string;
   readonly bootstrapToken: string;
-  readonly controlProtocolVersions: readonly [1];
-  readonly helloDeadlineMs: number;
-  readonly frameDeadlineMs: number;
-  readonly terminalCleanupDeadlineMs: number;
+  readonly logicalModule: string;
   readonly runtimeControlPort: MessagePort;
   readonly realmStatePort: MessagePort;
   readonly provisioningPort: MessagePort;
 }
 
 export interface PwaInstallSubsystemDataV1 {
-  readonly type: "loomrealm.pwa.install-subsystem-data";
-  readonly version: 1;
-  readonly requestId: string;
-  readonly sessionEpoch: string;
+  readonly formatVersion: 1;
+  readonly type: "data/install";
   readonly subsystemKey: string;
   readonly generation: number;
   readonly dataProfile: string;
@@ -79,10 +68,8 @@ export interface PwaInstallSubsystemDataV1 {
 }
 
 export interface PwaRevokeSubsystemDataV1 {
-  readonly type: "loomrealm.pwa.revoke-subsystem-data";
-  readonly version: 1;
-  readonly requestId: string;
-  readonly sessionEpoch: string;
+  readonly formatVersion: 1;
+  readonly type: "data/revoke";
   readonly subsystemKey: string;
   readonly generation: number;
   readonly dataProfile: string;
@@ -102,52 +89,50 @@ function text(value: unknown, label: string): string {
   return value;
 }
 
+function logicalModule(value: unknown): string {
+  const result = text(value, "logicalModule");
+  if (new TextEncoder().encode(result).byteLength > 512 || !result.endsWith(".mjs") || result.includes("\\") || result.includes(":")) throw new TypeError("Invalid logicalModule");
+  const segments = result.split("/");
+  if (segments.some((segment) => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(segment))) throw new TypeError("Invalid logicalModule");
+  return result;
+}
+
 function port(value: unknown): MessagePort {
-  if (value === null || typeof value !== "object" || typeof (value as MessagePort).postMessage !== "function" || typeof (value as MessagePort).addEventListener !== "function") {
-    throw new TypeError("Invalid transferred MessagePort");
-  }
+  if (value === null || typeof value !== "object" || typeof (value as MessagePort).postMessage !== "function" || typeof (value as MessagePort).addEventListener !== "function") throw new TypeError("Invalid transferred MessagePort");
   return value as MessagePort;
 }
 
-function positive(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value) || Number(value) <= 0) throw new TypeError(`Invalid ${label}`);
-  return value as number;
+function parseGeneration(value: unknown): PwaServiceWorkerGenerationV1 {
+  const item = object(value, ["protocolVersion", "buildId", "generation"], "Service Worker generation");
+  if (item.protocolVersion !== 1) throw new TypeError("Invalid Service Worker protocol version");
+  return Object.freeze({ protocolVersion: 1, buildId: text(item.buildId, "buildId"), generation: text(item.generation, "generation") });
+}
+
+export function sameServiceWorkerGeneration(left: PwaServiceWorkerGenerationV1, right: PwaServiceWorkerGenerationV1): boolean {
+  return left.protocolVersion === right.protocolVersion && left.buildId === right.buildId && left.generation === right.generation;
 }
 
 export function parsePwaSessionBootstrapV1(value: unknown): PwaSessionBootstrapV1 {
-  const item = object(value, ["type", "version", "sessionEpoch", "serviceWorkerGeneration", "installationId", "windowBridgePort"], "Session bootstrap");
-  if (item.type !== "loomrealm.pwa.session-bootstrap" || item.version !== 1) throw new TypeError("Invalid Session bootstrap version");
-  return Object.freeze({ type: item.type, version: 1, sessionEpoch: text(item.sessionEpoch, "sessionEpoch"), serviceWorkerGeneration: text(item.serviceWorkerGeneration, "SW generation"), installationId: text(item.installationId, "installationId"), windowBridgePort: port(item.windowBridgePort) });
+  const item = object(value, ["formatVersion", "sessionEpoch", "installationId", "expectedServiceWorker", "windowBridgePort"], "Session bootstrap");
+  if (item.formatVersion !== 1) throw new TypeError("Invalid Session bootstrap version");
+  return Object.freeze({ formatVersion: 1, sessionEpoch: text(item.sessionEpoch, "sessionEpoch"), installationId: text(item.installationId, "installationId"), expectedServiceWorker: parseGeneration(item.expectedServiceWorker), windowBridgePort: port(item.windowBridgePort) });
 }
 
 export function parsePwaRuntimeInfoV1(value: unknown): PwaRuntimeInfoV1 {
-  const item = object(value, ["version", "generation"], "Runtime info");
-  if (item.version !== 1) throw new TypeError("Invalid Runtime info version");
-  return Object.freeze({ version: 1, generation: text(item.generation, "Runtime generation") });
+  return parseGeneration(value);
 }
 
 export function parsePwaRunnerBootstrapV1(value: unknown): PwaRunnerBootstrapV1 {
-  const fields = ["type", "version", "sessionEpoch", "serviceWorkerGeneration", "installationId", "subsystemKey", "logicalModule", "moduleUrl", "bootstrapToken", "controlProtocolVersions", "helloDeadlineMs", "frameDeadlineMs", "terminalCleanupDeadlineMs", "runtimeControlPort", "realmStatePort", "provisioningPort"];
-  const item = object(value, fields, "Runner bootstrap");
-  if (item.type !== "loomrealm.pwa.runner-bootstrap" || item.version !== 1 || !Array.isArray(item.controlProtocolVersions) || item.controlProtocolVersions.length !== 1 || item.controlProtocolVersions[0] !== 1) throw new TypeError("Invalid Runner bootstrap version");
-  const installationId = text(item.installationId, "installationId");
-  const logicalModule = text(item.logicalModule, "logicalModule");
-  const moduleUrl = new URL(text(item.moduleUrl, "moduleUrl"));
-  const expected = `/_lr/internal/executables/${encodeURIComponent(installationId)}/${logicalModule.split("/").map(encodeURIComponent).join("/")}`;
-  if (moduleUrl.origin !== location.origin || moduleUrl.pathname !== expected || moduleUrl.search || moduleUrl.hash) throw new TypeError("Invalid Runner module binding");
+  const item = object(value, ["formatVersion", "sessionEpoch", "installationId", "expectedServiceWorker", "subsystemKey", "bootstrapToken", "logicalModule", "runtimeControlPort", "realmStatePort", "provisioningPort"], "Runner bootstrap");
+  if (item.formatVersion !== 1) throw new TypeError("Invalid Runner bootstrap version");
   return Object.freeze({
-    type: item.type, version: 1,
+    formatVersion: 1,
     sessionEpoch: text(item.sessionEpoch, "sessionEpoch"),
-    serviceWorkerGeneration: text(item.serviceWorkerGeneration, "SW generation"),
-    installationId,
+    installationId: text(item.installationId, "installationId"),
+    expectedServiceWorker: parseGeneration(item.expectedServiceWorker),
     subsystemKey: text(item.subsystemKey, "subsystemKey"),
-    logicalModule,
-    moduleUrl: moduleUrl.href,
     bootstrapToken: text(item.bootstrapToken, "bootstrapToken"),
-    controlProtocolVersions: Object.freeze([1] as [1]),
-    helloDeadlineMs: positive(item.helloDeadlineMs, "helloDeadlineMs"),
-    frameDeadlineMs: positive(item.frameDeadlineMs, "frameDeadlineMs"),
-    terminalCleanupDeadlineMs: positive(item.terminalCleanupDeadlineMs, "terminalCleanupDeadlineMs"),
+    logicalModule: logicalModule(item.logicalModule),
     runtimeControlPort: port(item.runtimeControlPort),
     realmStatePort: port(item.realmStatePort),
     provisioningPort: port(item.provisioningPort),
@@ -155,19 +140,22 @@ export function parsePwaRunnerBootstrapV1(value: unknown): PwaRunnerBootstrapV1 
 }
 
 export function parseInstallRendererControl(value: unknown, epoch: string): PwaInstallRendererControlV1 {
-  const item = object(value, ["type", "version", "requestId", "sessionEpoch", "rendererControlToken", "port"], "Renderer Control install");
-  if (item.type !== "loomrealm.pwa.install-renderer-control" || item.version !== 1 || item.sessionEpoch !== epoch) throw new TypeError("Stale Renderer Control install");
-  return Object.freeze({ type: item.type, version: 1, requestId: text(item.requestId, "requestId"), sessionEpoch: epoch, rendererControlToken: text(item.rendererControlToken, "rendererControlToken"), port: port(item.port) });
+  const item = object(value, ["formatVersion", "type", "requestId", "sessionEpoch", "rendererControlToken", "port"], "Renderer Control install");
+  if (item.type !== "renderer-control/install" || item.formatVersion !== 1 || item.sessionEpoch !== epoch) throw new TypeError("Stale Renderer Control install");
+  return Object.freeze({ formatVersion: 1, type: item.type, requestId: text(item.requestId, "requestId"), sessionEpoch: epoch, rendererControlToken: text(item.rendererControlToken, "rendererControlToken"), port: port(item.port) });
 }
 
 export function parseInstallRendererData(value: unknown, epoch: string): PwaInstallRendererDataV1 {
-  const item = object(value, ["type", "version", "requestId", "sessionEpoch", "subsystemKey", "generation", "dataProfile", "port"], "Renderer Data install");
-  if (item.type !== "loomrealm.pwa.install-renderer-data" || item.version !== 1 || item.sessionEpoch !== epoch) throw new TypeError("Stale Renderer Data install");
-  return Object.freeze({ type: item.type, version: 1, requestId: text(item.requestId, "requestId"), sessionEpoch: epoch, subsystemKey: text(item.subsystemKey, "subsystemKey"), generation: positive(item.generation, "generation"), dataProfile: text(item.dataProfile, "dataProfile"), port: port(item.port) });
+  const item = object(value, ["formatVersion", "type", "requestId", "sessionEpoch", "subsystemKey", "generation", "dataProfile", "port"], "Renderer Data install");
+  if (item.type !== "renderer-data/install" || item.formatVersion !== 1 || item.sessionEpoch !== epoch || !Number.isSafeInteger(item.generation) || Number(item.generation) <= 0) throw new TypeError("Stale Renderer Data install");
+  return Object.freeze({ formatVersion: 1, type: item.type, requestId: text(item.requestId, "requestId"), sessionEpoch: epoch, subsystemKey: text(item.subsystemKey, "subsystemKey"), generation: item.generation as number, dataProfile: text(item.dataProfile, "dataProfile"), port: port(item.port) });
 }
 
 export function parseWindowBridgeResult(value: unknown, epoch: string, requestId: string): PwaWindowBridgeResultV1 {
-  const item = object(value, ["type", "version", "requestId", "sessionEpoch", "ok"], "Window bridge result");
-  if (item.type !== "loomrealm.pwa.window-bridge-result" || item.version !== 1 || item.sessionEpoch !== epoch || item.requestId !== requestId || typeof item.ok !== "boolean") throw new TypeError("Invalid Window bridge correlation");
-  return Object.freeze({ type: item.type, version: 1, requestId, sessionEpoch: epoch, ok: item.ok });
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Invalid Window bridge result");
+  const raw = value as Record<string, unknown>;
+  const item = object(value, raw.ok === true ? ["formatVersion", "type", "requestId", "sessionEpoch", "ok"] : ["formatVersion", "type", "requestId", "sessionEpoch", "ok", "errorCode"], "Window bridge result");
+  if (item.type !== "install/result" || item.formatVersion !== 1 || item.sessionEpoch !== epoch || item.requestId !== requestId || typeof item.ok !== "boolean") throw new TypeError("Invalid Window bridge correlation");
+  if (item.ok === false && item.errorCode !== "WINDOW_NOT_CURRENT" && item.errorCode !== "INSTALL_REJECTED") throw new TypeError("Invalid Window bridge error");
+  return Object.freeze(item as unknown as PwaWindowBridgeResultV1);
 }

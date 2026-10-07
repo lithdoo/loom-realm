@@ -42,12 +42,16 @@ test("PWA PREPARE exact-joins keys and freezes logical/state/physical projection
     let resolutions = 0;
     const source = "export default () => ({ frame: () => ({ type: 'completed', value: null }) });";
     const index = buildPwaExecutableIndexV1([{ logicalModule: "root.mjs", source, contentVersion: version(source) }]);
-    const prepared = await preparePwaGame({
+    const installation = {
       installationId: "install",
-      serviceWorkerGeneration: "generation",
+      generation: "installation-generation",
       gameEntryText: JSON.stringify({ formatVersion: 1, state: { records: [{ namespace: "n", key: "k", value: 1 }] }, initial: { subsystem: "root", input: { x: 1 } }, subsystems: [{ key: "root" }] }),
       launchManifestText: JSON.stringify({ formatVersion: 1, subsystems: [{ key: "root", module: "root.mjs" }] }),
       executableIndex: index,
+    };
+    const prepared = await preparePwaGame({ installationId: "install" }, {
+      expectedServiceWorker: { protocolVersion: 1, buildId: "build", generation: "generation" },
+      openPublishedInstallation: async () => installation,
       runnerPolicy: { helloDeadlineMs: 100, frameDeadlineMs: 1000, terminalCleanupDeadlineMs: 100 },
       resolveModuleUrl(logical) { resolutions += 1; return `https://game.test/_lr/internal/executables/install/${logical}`; },
     });
@@ -58,11 +62,12 @@ test("PWA PREPARE exact-joins keys and freezes logical/state/physical projection
     for (const forbidden of ["module", "moduleUrl", "installationId", "formatVersion"]) assert.equal(forbidden in prepared.logicalBootstrap, false);
 
     resolutions = 0;
-    await assert.rejects(preparePwaGame({
-      installationId: "install", serviceWorkerGeneration: "generation",
-      gameEntryText: JSON.stringify({ formatVersion: 1, initial: { subsystem: "root", input: null }, subsystems: [{ key: "root" }] }),
-      launchManifestText: JSON.stringify({ formatVersion: 1, subsystems: [{ key: "extra", module: "root.mjs" }] }),
-      executableIndex: index,
+    await assert.rejects(preparePwaGame({ installationId: "install" }, {
+      expectedServiceWorker: { protocolVersion: 1, buildId: "build", generation: "generation" },
+      openPublishedInstallation: async () => ({ ...installation,
+        gameEntryText: JSON.stringify({ formatVersion: 1, initial: { subsystem: "root", input: null }, subsystems: [{ key: "root" }] }),
+        launchManifestText: JSON.stringify({ formatVersion: 1, subsystems: [{ key: "extra", module: "root.mjs" }] }),
+      }),
       runnerPolicy: { helloDeadlineMs: 100, frameDeadlineMs: 1000, terminalCleanupDeadlineMs: 100 },
       resolveModuleUrl() { resolutions += 1; return "https://game.test/never"; },
     }), (error) => error.code === "PLATFORM_BINDING_MISSING");

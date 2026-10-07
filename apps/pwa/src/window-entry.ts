@@ -1,6 +1,6 @@
 import type { PwaServiceWorkerGenerationV1, PwaWindowBridgeResultV1 } from "./bootstrap-protocol.js";
 import { parseInstallRendererControl, parseInstallRendererData } from "./bootstrap-protocol.js";
-import { createDemoInstallationBundle, DEMO_INSTALLATION_ID } from "./installation-bundle.js";
+import { createDemoInstallationBundle, DEMO_PRESENTATION } from "./installation-bundle.js";
 import type { PwaInstallationBundleV1 } from "./installation-bundle.js";
 import { collectStagingOrphans, ensurePwaBundle, inspectInstallationStorage, installPwaBundle, uninstallPwaInstallation } from "./installer.js";
 import { createPwaRendererHost, type PwaRendererHost } from "./renderer-host.js";
@@ -28,15 +28,20 @@ declare global {
 const state: ProductState = {
   sessionEpoch: null,
   serviceWorkerGeneration: null,
-  installationId: DEMO_INSTALLATION_ID,
+  installationId: "",
   statuses: [],
   persistence: null,
   ready: false,
   failure: null,
   qualification: Object.freeze({
     inspectStorage: (requiredBytes = 0) => inspectInstallationStorage(requiredBytes),
-    uninstall: (installationId = DEMO_INSTALLATION_ID) => uninstallPwaInstallation(installationId),
-    reinstall: () => installPwaBundle(createDemoInstallationBundle()),
+    uninstall: (installationId = state.installationId) => uninstallPwaInstallation(installationId),
+    reinstall: async () => {
+      const installed = await installPwaBundle(createDemoInstallationBundle());
+      localStorage.setItem("loomrealm-demo-installation-v1", installed.installationId);
+      state.installationId = installed.installationId;
+      return installed;
+    },
     install: (bundle) => installPwaBundle(bundle),
   }),
 };
@@ -61,9 +66,10 @@ function waitForActive(registration: ServiceWorkerRegistration): Promise<void> {
   });
 }
 
-async function serviceWorkerGate(): Promise<string> {
+async function serviceWorkerGate(): Promise<PwaServiceWorkerGenerationV1> {
   if (!("serviceWorker" in navigator)) throw new Error("Service Worker unavailable");
   const registration = await navigator.serviceWorker.register("/service-worker.js", { scope: "/", type: "module", updateViaCache: "none" });
+  if (registration === undefined || registration === null) throw new Error("Service Worker registration unavailable");
   await waitForActive(registration);
   const controller = navigator.serviceWorker.controller;
   if (controller === null) {
@@ -80,8 +86,8 @@ async function serviceWorkerGate(): Promise<string> {
       clearTimeout(timer);
       channel.port1.close();
       const value = event.data as Record<string, unknown> | null;
-      if (value === null || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 3 || value.type !== "loomrealm.pwa.sw-generation" || value.version !== 1 || typeof value.generation !== "string" || value.generation.length === 0) { reject(new Error("Incompatible Service Worker")); return; }
-      resolve((value as unknown as PwaServiceWorkerGenerationV1).generation);
+      if (value === null || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 3 || value.protocolVersion !== 1 || typeof value.buildId !== "string" || value.buildId.length === 0 || typeof value.generation !== "string" || value.generation.length === 0) { reject(new Error("Incompatible Service Worker")); return; }
+      resolve(value as unknown as PwaServiceWorkerGenerationV1);
     }, { once: true });
     channel.port1.start();
     controller.postMessage(Object.freeze({ type: "loomrealm.pwa.sw-hello", version: 1 }), [channel.port2]);
@@ -89,20 +95,23 @@ async function serviceWorkerGate(): Promise<string> {
 }
 
 function result(requestId: string, epoch: string, ok: boolean): PwaWindowBridgeResultV1 {
-  return Object.freeze({ type: "loomrealm.pwa.window-bridge-result", version: 1, requestId, sessionEpoch: epoch, ok });
+  return ok
+    ? Object.freeze({ formatVersion: 1, type: "install/result", requestId, sessionEpoch: epoch, ok: true })
+    : Object.freeze({ formatVersion: 1, type: "install/result", requestId, sessionEpoch: epoch, ok: false, errorCode: "INSTALL_REJECTED" });
 }
 
 async function startFreshSession(): Promise<void> {
   stopCurrent();
   state.ready = false; state.failure = null; state.statuses = [];
   document.documentElement.dataset.loomrealmProduct = "starting";
-  const generation = await serviceWorkerGate();
+  const expectedServiceWorker = await serviceWorkerGate();
   const bundle = createDemoInstallationBundle();
   await collectStagingOrphans();
-  const installation = await ensurePwaBundle(bundle);
+  const installation = await ensurePwaBundle(bundle, localStorage.getItem("loomrealm-demo-installation-v1"));
+  localStorage.setItem("loomrealm-demo-installation-v1", installation.installationId);
   const epoch = randomEpoch();
   const controller = new AbortController();
-  const renderer = await createPwaRendererHost(installation.installationId, bundle.presentation, controller.signal);
+  const renderer = await createPwaRendererHost(installation.installationId, DEMO_PRESENTATION, controller.signal);
   const bridge = new MessageChannel();
   const seen = new Set<string>();
   bridge.port1.addEventListener("message", (event: MessageEvent<unknown>) => {
@@ -112,10 +121,10 @@ async function startFreshSession(): Promise<void> {
       requestId = typeof value?.requestId === "string" ? value.requestId : null;
       if (requestId === null || seen.has(requestId)) throw new Error("Duplicate Window bridge request");
       seen.add(requestId);
-      if (value?.type === "loomrealm.pwa.install-renderer-control") {
+      if (value?.type === "renderer-control/install") {
         const message = parseInstallRendererControl(event.data, epoch);
         renderer.installControl(message.rendererControlToken, message.port);
-      } else if (value?.type === "loomrealm.pwa.install-renderer-data") {
+      } else if (value?.type === "renderer-data/install") {
         const message = parseInstallRendererData(event.data, epoch);
         renderer.data.install({ subsystemKey: message.subsystemKey, generation: message.generation, dataProfile: message.dataProfile }, message.port);
       } else throw new Error("Unknown Window bridge request");
@@ -140,9 +149,10 @@ async function startFreshSession(): Promise<void> {
   worker.addEventListener("error", (event) => { state.failure = event.message; document.documentElement.dataset.loomrealmProduct = "failed"; });
   current = Object.freeze({ epoch, worker, bridge: bridge.port1, controller, renderer });
   state.sessionEpoch = epoch;
-  state.serviceWorkerGeneration = generation;
+  state.serviceWorkerGeneration = expectedServiceWorker.generation;
+  state.installationId = installation.installationId;
   state.persistence = installation.persistence;
-  worker.postMessage(Object.freeze({ type: "loomrealm.pwa.session-bootstrap", version: 1, sessionEpoch: epoch, serviceWorkerGeneration: generation, installationId: installation.installationId, windowBridgePort: bridge.port2 }), [bridge.port2]);
+  worker.postMessage(Object.freeze({ formatVersion: 1, sessionEpoch: epoch, installationId: installation.installationId, expectedServiceWorker, windowBridgePort: bridge.port2 }), [bridge.port2]);
 }
 
 function stopCurrent(): void {

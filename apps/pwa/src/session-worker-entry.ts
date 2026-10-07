@@ -1,7 +1,7 @@
 import { preparePwaGame } from "@loomrealm/game-launcher-pwa";
 import { runMain } from "@loomrealm/main";
 import { createRealmStateAuthority } from "@loomrealm/realm-state";
-import { parsePwaRuntimeInfoV1, parsePwaSessionBootstrapV1 } from "./bootstrap-protocol.js";
+import { parsePwaRuntimeInfoV1, parsePwaSessionBootstrapV1, sameServiceWorkerGeneration } from "./bootstrap-protocol.js";
 import { getInstallation, readInstallationObject } from "./installation-store.js";
 import { PwaPlatform } from "./pwa-platform.js";
 
@@ -12,7 +12,10 @@ const session = self as unknown as DedicatedWorkerGlobalScope;
 session.addEventListener("message", (event: MessageEvent<unknown>) => {
   if (consumed) return;
   consumed = true;
-  void start(event.data).catch((cause) => session.postMessage(Object.freeze({ type: "loomrealm.pwa.session-status", version: 1, status: "failed", detail: cause instanceof Error ? cause.message : "Session bootstrap failed" })));
+  void start(event.data).catch((cause) => {
+    session.postMessage(Object.freeze({ type: "loomrealm.pwa.session-status", version: 1, status: "failed", detail: cause instanceof Error ? cause.message : "Session bootstrap failed" }));
+    session.close();
+  });
 }, { once: true });
 
 async function verifiedText(rootId: string, reference: { readonly contentVersion: string; readonly size: number }): Promise<string> {
@@ -29,21 +32,28 @@ async function start(raw: unknown): Promise<void> {
   const runtimeResponse = await fetch("/_lr/internal/runtime-info", { cache: "no-store" });
   if (!runtimeResponse.ok) throw new Error("Service Worker runtime-info unavailable");
   const runtimeInfo = parsePwaRuntimeInfoV1(await runtimeResponse.json());
-  if (runtimeInfo.generation !== bootstrap.serviceWorkerGeneration) throw new Error("Service Worker generation mismatch before PREPARE");
-  const installation = await getInstallation(bootstrap.installationId);
-  if (installation === null || installation.state !== "complete") throw new Error("Selected installation is not complete");
-  const [gameEntryText, launchManifestText] = await Promise.all([
-    verifiedText(installation.rootId, installation.gameEntry),
-    verifiedText(installation.rootId, installation.launchManifest),
-  ]);
-  const prepared = await preparePwaGame({
-    installationId: installation.installationId,
-    serviceWorkerGeneration: bootstrap.serviceWorkerGeneration,
-    gameEntryText,
-    launchManifestText,
-    executableIndex: installation.executableIndex.map(({ logicalModule, contentVersion, imports }) => Object.freeze({ logicalModule, contentVersion, imports })),
+  if (!sameServiceWorkerGeneration(runtimeInfo, bootstrap.expectedServiceWorker)) throw new Error("Service Worker generation mismatch before PREPARE");
+  const prepared = await preparePwaGame({ installationId: bootstrap.installationId }, {
+    expectedServiceWorker: bootstrap.expectedServiceWorker,
     runnerPolicy: { helloDeadlineMs: 10_000, frameDeadlineMs: 10_000, terminalCleanupDeadlineMs: 250 },
-    resolveModuleUrl: (logicalModule) => new URL(`/_lr/internal/executables/${encodeURIComponent(installation.installationId)}/${logicalModule.split("/").map(encodeURIComponent).join("/")}`, location.origin).href,
+    resolveModuleUrl: (logicalModule) => new URL(`/_lr/internal/executables/${encodeURIComponent(bootstrap.installationId)}/${logicalModule.split("/").map(encodeURIComponent).join("/")}`, location.origin).href,
+    async openPublishedInstallation(installationId) {
+      const installation = await getInstallation(installationId);
+      if (installation === null || installation.state !== "complete") throw new Error("INSTALLATION_NOT_COMPLETE");
+      const [gameEntryText, launchManifestText] = await Promise.all([
+        verifiedText(installation.rootId, installation.gameEntry),
+        verifiedText(installation.rootId, installation.launchManifest),
+      ]);
+      const current = await getInstallation(installationId);
+      if (current?.state !== "complete" || current.generation !== installation.generation) throw new Error("INSTALLATION_INVALID");
+      return Object.freeze({
+        installationId,
+        generation: installation.generation,
+        gameEntryText,
+        launchManifestText,
+        executableIndex: installation.executableIndex.map(({ logicalModule, contentVersion, imports }) => Object.freeze({ logicalModule, contentVersion, imports })),
+      });
+    },
   });
   session.postMessage(Object.freeze({ type: "loomrealm.pwa.session-status", version: 1, status: "prepared", sessionEpoch: bootstrap.sessionEpoch }));
   let fatalListener: (() => void) | null = null;
