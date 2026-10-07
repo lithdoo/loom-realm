@@ -15,7 +15,10 @@ export function createMessagePortCarrier(port: MessagePort): MessageCarrier {
     port.removeEventListener("message", onMessage);
     port.removeEventListener("messageerror", onError);
     while (waiters.length > 0) waiters.shift()!({ done: true, value: undefined });
-    try { port.close(); } catch {}
+    try { port.close(); }
+    catch (cause) {
+      terminal = Object.freeze({ kind: "lost", cause: new AggregateError([fact.kind === "lost" ? fact.cause : undefined, cause].filter((value) => value !== undefined), "MessagePort carrier close failed") });
+    }
     settle(terminal);
   };
   const onMessage = (event: MessageEvent<unknown>) => {
@@ -32,8 +35,13 @@ export function createMessagePortCarrier(port: MessagePort): MessageCarrier {
     send(message: string) {
       if (terminal !== null) return Promise.reject(new Error("MessagePort carrier closed"));
       if (typeof message !== "string" || message === CLOSE) return Promise.reject(new TypeError("Invalid MessagePort unit"));
-      port.postMessage(message);
-      return Promise.resolve();
+      try {
+        port.postMessage(message);
+        return Promise.resolve();
+      } catch (cause) {
+        finish({ kind: "lost", cause });
+        return Promise.reject(cause);
+      }
     },
     messages() {
       let acquired = false;
@@ -55,7 +63,11 @@ export function createMessagePortCarrier(port: MessagePort): MessageCarrier {
     closed,
     async close() {
       if (terminal !== null) return;
-      try { port.postMessage(CLOSE); } catch {}
+      try { port.postMessage(CLOSE); }
+      catch (cause) {
+        finish({ kind: "lost", cause });
+        throw cause;
+      }
       finish({ kind: "closed" });
     },
   });

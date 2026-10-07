@@ -1,47 +1,45 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { deriveProductGeneration, emitProductArtifacts } from "./build-identity.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const sourceRoot = join(root, "src");
 const output = join(root, "dist");
+const qualification = process.argv.includes("--qualification");
+const entries = Object.freeze([
+  { input: join(sourceRoot, qualification ? "qualification-window-entry.ts" : "window-entry.ts"), output: "window.js" },
+  { input: join(sourceRoot, "session-worker-entry.ts"), output: "session-worker.js" },
+  { input: join(sourceRoot, "worker-runner-entry.ts"), output: "worker-runner.js" },
+  { input: join(sourceRoot, "service-worker.ts"), output: "service-worker.js" },
+]);
 
-async function sourceFiles(directory) {
-  const files = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const target = join(directory, entry.name);
-    if (entry.isDirectory()) files.push(...await sourceFiles(target));
-    else if (entry.name.endsWith(".ts")) files.push(target);
-  }
-  return files.sort();
-}
-
-const digest = createHash("sha256");
-for (const file of await sourceFiles(sourceRoot)) digest.update(await readFile(file));
-const generation = `pwa-v1-${digest.digest("hex").slice(0, 32)}`;
+const generation = await deriveProductGeneration(entries, root);
 await mkdir(output, { recursive: true });
-
-const entries = [
-  ["window-entry.ts", "window.js"],
-  ["session-worker-entry.ts", "session-worker.js"],
-  ["worker-runner-entry.ts", "worker-runner.js"],
-  ["service-worker.ts", "service-worker.js"],
-];
-for (const [entry, outfile] of entries) {
+for (const file of [...entries.map(({ output: name }) => name), "service-worker-update.js", "index.html", "generation.json", "blank.html"]) {
+  await rm(join(output, file), { force: true });
+}
+await rm(join(output, "qualification"), { recursive: true, force: true });
+await emitProductArtifacts(entries, output, root, generation);
+if (qualification) {
+  await emitProductArtifacts(
+    [{ input: join(sourceRoot, "service-worker.ts"), output: "service-worker-update.js" }],
+    output,
+    root,
+    `${generation}-qualification-update`,
+  );
   await build({
-    entryPoints: [join(sourceRoot, entry)],
-    outfile: join(output, outfile),
+    absWorkingDir: join(root, "..", ".."),
+    entryPoints: [join(root, "..", "..", "examples", "essentials-v21.1", "subsystems", "map.mjs")],
+    outfile: join(output, "qualification", "map-subsystem.mjs"),
     bundle: true,
     format: "esm",
     platform: "browser",
     target: "chrome140",
     sourcemap: false,
-    define: { __LOOMREALM_SW_GENERATION__: JSON.stringify(generation) },
   });
 }
-
 await writeFile(join(output, "index.html"), `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LoomRealm PWA</title></head>

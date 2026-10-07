@@ -8,6 +8,7 @@ import {
   type PreparedRealmStateDefinition,
 } from "@loomrealm/realm-state";
 import { utf8ByteLength, type JsonValue } from "@loomrealm/wire";
+import { init as initializeModuleLexer, parse as parseModule } from "es-module-lexer";
 
 const MODULE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const VERSION = /^sha256:[0-9a-f]{64}$/;
@@ -138,10 +139,52 @@ function resolveRelativeModule(from: string, specifier: string): string {
   return validatePwaLogicalModule(output.join("/"));
 }
 
+interface ParsedModuleEdgeV1 {
+  readonly kind: "static" | "dynamic";
+  readonly specifier: string;
+}
+
+interface ParsedModuleSourceV1 {
+  readonly module: PwaExecutableModuleSourceV1;
+  readonly edges: readonly ParsedModuleEdgeV1[];
+}
+
+async function parseExecutableModuleSource(
+  module: PwaExecutableModuleSourceV1,
+): Promise<ParsedModuleSourceV1> {
+  await initializeModuleLexer;
+  let imports: ReturnType<typeof parseModule>[0];
+  try {
+    [imports] = parseModule(module.source, module.logicalModule);
+  } catch (cause) {
+    return fail("SUBSYSTEM_MODULE_GRAPH_INVALID", cause);
+  }
+  const edges: ParsedModuleEdgeV1[] = [];
+  for (const candidate of imports) {
+    // es-module-lexer reports import.meta with d === -2. It is not a graph edge.
+    if (candidate.d === -2) continue;
+    if (candidate.n === undefined) return fail("SUBSYSTEM_MODULE_GRAPH_INVALID");
+    edges.push(Object.freeze({
+      kind: candidate.d === -1 ? "static" : "dynamic",
+      specifier: candidate.n,
+    }));
+  }
+  return Object.freeze({ module, edges: Object.freeze(edges) });
+}
+
+function validateExecutableEdgeSpecifier(specifier: string): void {
+  if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
+    fail("SUBSYSTEM_MODULE_GRAPH_INVALID");
+  }
+  if (specifier.includes("\\") || specifier.includes(":") || specifier.includes("?") || specifier.includes("#")) {
+    fail("SUBSYSTEM_MODULE_GRAPH_INVALID");
+  }
+}
+
 /** Installation-time ESM graph enumeration for the v1 relative-import subset. */
-export function buildPwaExecutableIndexV1(
+export async function buildPwaExecutableIndexV1(
   modules: readonly PwaExecutableModuleSourceV1[],
-): readonly PwaExecutableIndexEntryV1[] {
+): Promise<readonly PwaExecutableIndexEntryV1[]> {
   if (!Array.isArray(modules) || modules.length === 0) return fail("SUBSYSTEM_MODULE_NOT_FOUND");
   const sources = new Map<string, PwaExecutableModuleSourceV1>();
   for (const candidate of modules) {
@@ -152,27 +195,26 @@ export function buildPwaExecutableIndexV1(
     }
     sources.set(logicalModule, { logicalModule, source: value.source, contentVersion: value.contentVersion as string });
   }
-  const entries: PwaExecutableIndexEntryV1[] = [];
-  const staticImport = /(?:\bimport\s*(?:[^"'();]*?\sfrom\s*)?|\bexport\s+[^"']*?\sfrom\s*|\bimport\s*\(\s*)["']([^"']+)["']\s*\)?/g;
-  for (const module of sources.values()) {
+  const parsed = await Promise.all([...sources.values()].map(parseExecutableModuleSource));
+  const resolved = new Map<string, readonly string[]>();
+  for (const analysis of parsed) {
     const imports: string[] = [];
-    const matchedRanges: Array<readonly [number, number]> = [];
-    for (const match of module.source.matchAll(staticImport)) {
-      const specifier = match[1];
-      if (specifier === undefined || match.index === undefined) continue;
-      matchedRanges.push([match.index, match.index + match[0].length]);
-      const resolved = resolveRelativeModule(module.logicalModule, specifier);
-      if (!sources.has(resolved)) return fail("SUBSYSTEM_MODULE_NOT_FOUND");
-      if (!imports.includes(resolved)) imports.push(resolved);
+    for (const edge of analysis.edges) {
+      validateExecutableEdgeSpecifier(edge.specifier);
+      const target = resolveRelativeModule(analysis.module.logicalModule, edge.specifier);
+      if (!imports.includes(target)) imports.push(target);
     }
-    for (const match of module.source.matchAll(/\bimport\s*\(/g)) {
-      const position = match.index ?? -1;
-      if (!matchedRanges.some(([start, end]) => position >= start && position < end)) return fail("SUBSYSTEM_MODULE_GRAPH_INVALID");
-    }
+    resolved.set(analysis.module.logicalModule, Object.freeze(imports));
+  }
+  for (const imports of resolved.values()) {
+    if (imports.some((logicalModule) => !sources.has(logicalModule))) return fail("SUBSYSTEM_MODULE_NOT_FOUND");
+  }
+  const entries: PwaExecutableIndexEntryV1[] = [];
+  for (const module of sources.values()) {
     entries.push(Object.freeze({
       logicalModule: module.logicalModule,
       contentVersion: module.contentVersion,
-      imports: Object.freeze(imports),
+      imports: resolved.get(module.logicalModule)!,
     }));
   }
   return Object.freeze(entries);
@@ -274,8 +316,13 @@ export async function preparePwaGame(request: PwaPrepareGameRequestV1, dependenc
   const installation = await dependencies.openPublishedInstallation(requestValue.installationId, signal);
   const installationValue = exactObject(installation, ["installationId", "generation", "gameEntryText", "launchManifestText", "executableIndex"], "published PWA installation");
   if (installationValue.installationId !== requestValue.installationId || !validSubsystemKey(installationValue.generation)) throw new TypeError("Invalid published PWA installation");
-  const expectedServiceWorker = exactObject(dependencies.expectedServiceWorker, ["protocolVersion", "buildId", "generation"], "Service Worker generation") as unknown as PwaServiceWorkerGenerationV1;
-  if (expectedServiceWorker.protocolVersion !== 1 || !validSubsystemKey(expectedServiceWorker.buildId) || !validSubsystemKey(expectedServiceWorker.generation)) throw new TypeError("Invalid Service Worker generation");
+  const serviceWorkerValue = exactObject(dependencies.expectedServiceWorker, ["protocolVersion", "buildId", "generation"], "Service Worker generation");
+  if (serviceWorkerValue.protocolVersion !== 1 || !validSubsystemKey(serviceWorkerValue.buildId) || !validSubsystemKey(serviceWorkerValue.generation)) throw new TypeError("Invalid Service Worker generation");
+  const expectedServiceWorker: PwaServiceWorkerGenerationV1 = Object.freeze({
+    protocolVersion: 1,
+    buildId: serviceWorkerValue.buildId,
+    generation: serviceWorkerValue.generation,
+  });
   let game: ValidatedGameEntryV1;
   try { game = parseGameEntryV1(installationValue.gameEntryText as string); }
   catch (cause) {

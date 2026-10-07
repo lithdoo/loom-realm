@@ -30,7 +30,7 @@ export class PwaPlatform {
     readonly observe?: (event: Readonly<Record<string, unknown> & { type: string }>) => void;
   }) {
     this.bridge = new SessionWindowBridge(options.bridgePort, options.sessionEpoch);
-    this.broker = new PwaDataBroker(this.bridge, options.sessionEpoch);
+    this.broker = new PwaDataBroker(this.bridge, options.sessionEpoch, options.observe);
     const rendererControl: RendererControlBinding = Object.freeze({
       acquire: async (rendererControlToken: string, signal: AbortSignal) => {
         if (this.closed || signal.aborted) throw signal.reason ?? new Error("PWA Platform closed");
@@ -60,10 +60,13 @@ export class PwaPlatform {
     });
   }
 
-  close(): void {
+  async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.broker.close();
-    this.bridge.close();
+    try {
+      await this.broker.close();
+    } finally {
+      this.bridge.close();
+    }
   }
 }

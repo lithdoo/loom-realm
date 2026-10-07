@@ -78,7 +78,8 @@ async function start(raw: unknown): Promise<void> {
     session.postMessage(Object.freeze({ type: "loomrealm.pwa.session-status", version: 1, status: "settled", sessionEpoch: bootstrap.sessionEpoch, result }));
   } finally {
     session.removeEventListener("message", onShutdown);
-    platform.close();
+    await platform.close();
     authority.terminate();
+    session.postMessage(Object.freeze({ type: "loomrealm.pwa.session-status", version: 1, status: "closed", sessionEpoch: bootstrap.sessionEpoch }));
   }
 }

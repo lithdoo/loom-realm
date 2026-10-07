@@ -4,14 +4,14 @@ import {
   readInstallationObject,
 } from "./installation-store.js";
 
-function problem(status: number, code: string): Response {
-  return new Response(JSON.stringify({ type: `https://loomrealm.dev/problems/${code.toLowerCase()}`, title: code, status, code }), { status, headers: { "Content-Type": "application/problem+json", "Cache-Control": "no-store" } });
+function problem(status: number, code: string, headers?: HeadersInit): Response {
+  return new Response(JSON.stringify({ type: `https://loomrealm.dev/problems/${code.toLowerCase()}`, title: code, status, code }), { status, headers: { "Content-Type": "application/problem+json", "Cache-Control": "no-store", ...headers } });
 }
 
 function decode(value: string): string | null {
   let result: string;
   try { result = decodeURIComponent(value); } catch { return null; }
-  if (result.length === 0 || result === "." || result === ".." || /[\\/\0]|\p{Cc}|\p{Cs}/u.test(result)) return null;
+  if (result.length === 0 || result === "." || result === ".." || /[\\/\0:]|\p{Cc}|\p{Cs}/u.test(result)) return null;
   return result;
 }
 
@@ -20,8 +20,9 @@ async function hash(bytes: Uint8Array): Promise<string> {
   return `sha256:${[...digest].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export async function realizeExecutableRequest(request: Request, parts: readonly string[]): Promise<Response> {
-  if (request.method !== "GET") return problem(405, "METHOD_NOT_ALLOWED");
+export async function realizeExecutableRequest(request: Request, url: URL, parts: readonly string[]): Promise<Response> {
+  if (request.method !== "GET") return problem(405, "METHOD_NOT_ALLOWED", { Allow: "GET" });
+  if (url.search !== "") return problem(400, "SUBSYSTEM_MODULE_INVALID");
   const installationId = decode(parts[0] ?? "");
   const logicalParts = parts.slice(1).map(decode);
   if (installationId === null || logicalParts.length === 0 || logicalParts.some((value) => value === null)) return problem(400, "SUBSYSTEM_MODULE_INVALID");
@@ -33,9 +34,9 @@ export async function realizeExecutableRequest(request: Request, parts: readonly
   if (entry === undefined) return problem(404, "SUBSYSTEM_MODULE_NOT_FOUND");
   let bytes: Uint8Array;
   try { bytes = await readInstallationObject(installation.rootId, entry.contentVersion); }
-  catch { await markInstallationInvalid(installationId); return problem(422, "CONTENT_INTEGRITY_FAILED"); }
+  catch { await markInstallationInvalid(installationId, installation.generation, installation.rootId); return problem(422, "CONTENT_INTEGRITY_FAILED"); }
   if (bytes.byteLength !== entry.size || await hash(bytes) !== entry.contentVersion) {
-    await markInstallationInvalid(installationId);
+    await markInstallationInvalid(installationId, installation.generation, installation.rootId);
     return problem(422, "CONTENT_INTEGRITY_FAILED");
   }
   return new Response(bytes.slice().buffer as ArrayBuffer, { status: 200, headers: {

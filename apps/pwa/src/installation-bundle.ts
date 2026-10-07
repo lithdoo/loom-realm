@@ -86,7 +86,9 @@ export function createDemoInstallationBundle(): PwaInstallationBundleV1 {
     }),
     content: Object.freeze([
       Object.freeze({ kind: "record", namespace: "struct.demo", key: "config", mime: "application/json; charset=utf-8", body: new Blob([JSON.stringify({ message: "ready" })], { type: "application/json; charset=utf-8" }) }),
+      Object.freeze({ kind: "group", namespace: "group.demo", key: "items", mime: "application/x-ndjson; charset=utf-8", body: new Blob(['{"id":1}\n{"id":2}\n'], { type: "application/x-ndjson; charset=utf-8" }) }),
       Object.freeze({ kind: "resource", namespace: "resource.demo", key: "hello.txt", mime: "text/plain; charset=utf-8", body: new Blob(["LoomRealm PWA"], { type: "text/plain; charset=utf-8" }) }),
+      Object.freeze({ kind: "resource", namespace: "resource.demo", key: "nested/hello.txt", mime: "text/plain; charset=utf-8", body: new Blob(["Nested LoomRealm PWA"], { type: "text/plain; charset=utf-8" }) }),
     ]),
     executables: Object.freeze([
       Object.freeze({ logicalModule: "subsystems/demo.mjs", mime: "text/javascript", body: new Blob([DEMO_EXECUTABLE], { type: "text/javascript" }) }),

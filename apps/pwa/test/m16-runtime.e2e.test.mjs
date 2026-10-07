@@ -117,7 +117,7 @@ test("generation mismatch, PREPARE rejection, module ABI failure, and unexpected
       const mismatch = await runSession(currentInstallation, { ...expectedServiceWorker, generation: `${generation}-stale` });
       const invalidInstall = async (launchManifestText, source) => {
         try {
-          const installation = await window.__loomrealmPwa.qualification.install({
+          const installation = await window.__loomrealmPwaQualification.install({
             formatVersion: 1,
             gameEntryText: JSON.stringify({ formatVersion: 1, initial: { subsystem: "bad", input: null }, subsystems: [{ key: "bad" }] }),
             launchManifestText,
@@ -133,8 +133,8 @@ test("generation mismatch, PREPARE rejection, module ABI failure, and unexpected
       const abi = await runSession(abiInstall.installationId, expectedServiceWorker);
       const crashInstall = await invalidInstall(JSON.stringify({ formatVersion: 1, subsystems: [{ key: "bad", module: "bad.mjs" }] }), 'setTimeout(() => { throw new Error("unexpected"); }, 50); export default () => ({ frame: (frame) => new Promise((resolve) => frame.signal.addEventListener("abort", () => resolve({ type: "cancelled" }), { once: true })) });');
       const crash = await runSession(crashInstall.installationId, expectedServiceWorker);
-      await window.__loomrealmPwa.qualification.uninstall(abiInstall.installationId);
-      await window.__loomrealmPwa.qualification.uninstall(crashInstall.installationId);
+      await window.__loomrealmPwaQualification.uninstall(abiInstall.installationId);
+      await window.__loomrealmPwaQualification.uninstall(crashInstall.installationId);
       return { mismatch, keyMismatch, graphFailure, abiInstall, abi, crashInstall, crash };
     });
     assert.equal(outcomes.mismatch.at(-1).status, "failed");

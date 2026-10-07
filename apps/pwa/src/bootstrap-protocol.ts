@@ -33,7 +33,19 @@ export interface PwaInstallRendererDataV1 {
   readonly subsystemKey: string;
   readonly generation: number;
   readonly dataProfile: string;
+  readonly connectionId: string;
   readonly port: MessagePort;
+}
+
+export interface PwaRevokeRendererDataV1 {
+  readonly formatVersion: 1;
+  readonly type: "renderer-data/revoke";
+  readonly requestId: string;
+  readonly sessionEpoch: string;
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+  readonly connectionId: string;
 }
 
 export interface PwaWindowBridgeResultV1 {
@@ -61,18 +73,31 @@ export interface PwaRunnerBootstrapV1 {
 export interface PwaInstallSubsystemDataV1 {
   readonly formatVersion: 1;
   readonly type: "data/install";
+  readonly requestId: string;
   readonly subsystemKey: string;
   readonly generation: number;
   readonly dataProfile: string;
+  readonly connectionId: string;
   readonly port: MessagePort;
 }
 
 export interface PwaRevokeSubsystemDataV1 {
   readonly formatVersion: 1;
   readonly type: "data/revoke";
+  readonly requestId: string;
   readonly subsystemKey: string;
   readonly generation: number;
   readonly dataProfile: string;
+  readonly connectionId: string;
+}
+
+export interface PwaRunnerDataResultV1 {
+  readonly formatVersion: 1;
+  readonly type: "data/result";
+  readonly requestId: string;
+  readonly subsystemKey: string;
+  readonly connectionId: string;
+  readonly ok: boolean;
 }
 
 function object(value: unknown, fields: readonly string[], label: string): Record<string, unknown> {
@@ -146,9 +171,15 @@ export function parseInstallRendererControl(value: unknown, epoch: string): PwaI
 }
 
 export function parseInstallRendererData(value: unknown, epoch: string): PwaInstallRendererDataV1 {
-  const item = object(value, ["formatVersion", "type", "requestId", "sessionEpoch", "subsystemKey", "generation", "dataProfile", "port"], "Renderer Data install");
+  const item = object(value, ["formatVersion", "type", "requestId", "sessionEpoch", "subsystemKey", "generation", "dataProfile", "connectionId", "port"], "Renderer Data install");
   if (item.type !== "renderer-data/install" || item.formatVersion !== 1 || item.sessionEpoch !== epoch || !Number.isSafeInteger(item.generation) || Number(item.generation) <= 0) throw new TypeError("Stale Renderer Data install");
-  return Object.freeze({ formatVersion: 1, type: item.type, requestId: text(item.requestId, "requestId"), sessionEpoch: epoch, subsystemKey: text(item.subsystemKey, "subsystemKey"), generation: item.generation as number, dataProfile: text(item.dataProfile, "dataProfile"), port: port(item.port) });
+  return Object.freeze({ formatVersion: 1, type: item.type, requestId: text(item.requestId, "requestId"), sessionEpoch: epoch, subsystemKey: text(item.subsystemKey, "subsystemKey"), generation: item.generation as number, dataProfile: text(item.dataProfile, "dataProfile"), connectionId: text(item.connectionId, "connectionId"), port: port(item.port) });
+}
+
+export function parseRevokeRendererData(value: unknown, epoch: string): PwaRevokeRendererDataV1 {
+  const item = object(value, ["formatVersion", "type", "requestId", "sessionEpoch", "subsystemKey", "generation", "dataProfile", "connectionId"], "Renderer Data revoke");
+  if (item.type !== "renderer-data/revoke" || item.formatVersion !== 1 || item.sessionEpoch !== epoch || !Number.isSafeInteger(item.generation) || Number(item.generation) <= 0) throw new TypeError("Stale Renderer Data revoke");
+  return Object.freeze({ formatVersion: 1, type: item.type, requestId: text(item.requestId, "requestId"), sessionEpoch: epoch, subsystemKey: text(item.subsystemKey, "subsystemKey"), generation: item.generation as number, dataProfile: text(item.dataProfile, "dataProfile"), connectionId: text(item.connectionId, "connectionId") });
 }
 
 export function parseWindowBridgeResult(value: unknown, epoch: string, requestId: string): PwaWindowBridgeResultV1 {
@@ -157,5 +188,24 @@ export function parseWindowBridgeResult(value: unknown, epoch: string, requestId
   const item = object(value, raw.ok === true ? ["formatVersion", "type", "requestId", "sessionEpoch", "ok"] : ["formatVersion", "type", "requestId", "sessionEpoch", "ok", "errorCode"], "Window bridge result");
   if (item.type !== "install/result" || item.formatVersion !== 1 || item.sessionEpoch !== epoch || item.requestId !== requestId || typeof item.ok !== "boolean") throw new TypeError("Invalid Window bridge correlation");
   if (item.ok === false && item.errorCode !== "WINDOW_NOT_CURRENT" && item.errorCode !== "INSTALL_REJECTED") throw new TypeError("Invalid Window bridge error");
-  return Object.freeze(item as unknown as PwaWindowBridgeResultV1);
+  if (item.ok) return Object.freeze({ formatVersion: 1, type: "install/result", requestId, sessionEpoch: epoch, ok: true });
+  return Object.freeze({ formatVersion: 1, type: "install/result", requestId, sessionEpoch: epoch, ok: false, errorCode: item.errorCode as "WINDOW_NOT_CURRENT" | "INSTALL_REJECTED" });
+}
+
+export function parseInstallSubsystemData(value: unknown, subsystemKey: string): PwaInstallSubsystemDataV1 {
+  const item = object(value, ["formatVersion", "type", "requestId", "subsystemKey", "generation", "dataProfile", "connectionId", "port"], "Subsystem Data install");
+  if (item.type !== "data/install" || item.formatVersion !== 1 || item.subsystemKey !== subsystemKey || !Number.isSafeInteger(item.generation) || Number(item.generation) <= 0) throw new TypeError("Invalid Subsystem Data install");
+  return Object.freeze({ formatVersion: 1, type: item.type, requestId: text(item.requestId, "requestId"), subsystemKey, generation: item.generation as number, dataProfile: text(item.dataProfile, "dataProfile"), connectionId: text(item.connectionId, "connectionId"), port: port(item.port) });
+}
+
+export function parseRevokeSubsystemData(value: unknown, subsystemKey: string): PwaRevokeSubsystemDataV1 {
+  const item = object(value, ["formatVersion", "type", "requestId", "subsystemKey", "generation", "dataProfile", "connectionId"], "Subsystem Data revoke");
+  if (item.type !== "data/revoke" || item.formatVersion !== 1 || item.subsystemKey !== subsystemKey || !Number.isSafeInteger(item.generation) || Number(item.generation) <= 0) throw new TypeError("Invalid Subsystem Data revoke");
+  return Object.freeze({ formatVersion: 1, type: item.type, requestId: text(item.requestId, "requestId"), subsystemKey, generation: item.generation as number, dataProfile: text(item.dataProfile, "dataProfile"), connectionId: text(item.connectionId, "connectionId") });
+}
+
+export function parseRunnerDataResult(value: unknown, subsystemKey: string, requestId: string): PwaRunnerDataResultV1 {
+  const item = object(value, ["formatVersion", "type", "requestId", "subsystemKey", "connectionId", "ok"], "Runner Data result");
+  if (item.formatVersion !== 1 || item.type !== "data/result" || item.requestId !== requestId || item.subsystemKey !== subsystemKey || typeof item.ok !== "boolean") throw new TypeError("Invalid Runner Data result");
+  return Object.freeze({ formatVersion: 1, type: item.type, requestId, subsystemKey, connectionId: text(item.connectionId, "connectionId"), ok: item.ok });
 }

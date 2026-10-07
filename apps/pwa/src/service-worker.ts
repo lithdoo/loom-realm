@@ -36,7 +36,7 @@ worker.addEventListener("fetch", (event: FetchEvent) => {
   const executablePrefix = "/_lr/internal/executables/";
   if (url.pathname.startsWith(executablePrefix)) {
     const parts = url.pathname.slice(executablePrefix.length).split("/");
-    event.respondWith(realizeExecutableRequest(event.request, parts).catch(internalFailure));
+    event.respondWith(realizeExecutableRequest(event.request, url, parts).catch(internalFailure));
     return;
   }
   const contentPrefix = "/_lr/v1/games/";

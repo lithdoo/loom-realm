@@ -10,7 +10,18 @@ import {
 
 const version = (text) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 
-test("PWA manifest and executable graph are closed, relative and install-time enumerable", () => {
+function module(logicalModule, source) {
+  return { logicalModule, source, contentVersion: version(source) };
+}
+
+async function rejectsGraph(source, code = "SUBSYSTEM_MODULE_GRAPH_INVALID", extra = []) {
+  await assert.rejects(
+    buildPwaExecutableIndexV1([module("root/main.mjs", source), ...extra]),
+    (error) => error instanceof PwaLauncherError && error.code === code,
+  );
+}
+
+test("PWA manifest and executable graph are closed, relative and install-time enumerable", async () => {
   assert.deepEqual(parsePwaLaunchManifestV1('{"formatVersion":1,"subsystems":[{"key":"root","module":"root/main.mjs"}]}'), {
     formatVersion: 1,
     subsystems: [{ key: "root", module: "root/main.mjs" }],
@@ -23,16 +34,70 @@ test("PWA manifest and executable graph are closed, relative and install-time en
   ]) assert.throws(() => parsePwaLaunchManifestV1(invalid), PwaLauncherError);
   const main = 'import { value } from "./dep.mjs"; export default () => value;';
   const dep = "export const value = 1;";
-  assert.deepEqual(buildPwaExecutableIndexV1([
-    { logicalModule: "root/main.mjs", source: main, contentVersion: version(main) },
-    { logicalModule: "root/dep.mjs", source: dep, contentVersion: version(dep) },
+  assert.deepEqual(await buildPwaExecutableIndexV1([
+    module("root/main.mjs", main),
+    module("root/dep.mjs", dep),
   ]), [
     { logicalModule: "root/main.mjs", contentVersion: version(main), imports: ["root/dep.mjs"] },
     { logicalModule: "root/dep.mjs", contentVersion: version(dep), imports: [] },
   ]);
-  for (const source of ['import "pkg";', 'import "https://example.test/x.mjs";', "import(name);"]) {
-    assert.throws(() => buildPwaExecutableIndexV1([{ logicalModule: "main.mjs", source, contentVersion: version(source) }]), PwaLauncherError);
-  }
+});
+
+test("executable analysis lexes every supported ESM edge across comments, escapes, and multiline grammar", async () => {
+  const source = String.raw`
+    import "./side.mjs";
+    import/**/ { value } /* gap */ from
+      "./named.mjs" with { type: "javascript" };
+    export { value as renamed } from "./exported.mjs";
+    export * from "./star.mjs";
+    const lazy = import/**/("./dynamic.mjs");
+    const escaped = import(".\u002fescaped.mjs");
+    export default [value, lazy, escaped];
+  `;
+  const dependencies = ["side", "named", "exported", "star", "dynamic", "escaped"]
+    .map((name) => module(`root/${name}.mjs`, `export const value = ${JSON.stringify(name)};`));
+  const index = await buildPwaExecutableIndexV1([module("root/main.mjs", source), ...dependencies]);
+  assert.deepEqual(index[0].imports, dependencies.map(({ logicalModule }) => logicalModule));
+  assert.equal(Object.isFrozen(index), true);
+  assert.equal(Object.isFrozen(index[0].imports), true);
+});
+
+test("executable analysis ignores import-shaped text outside ESM grammar", async () => {
+  const source = [
+    'const string = \'import("https://example.test/string.mjs")\';',
+    'const template = `import("https://example.test/template.mjs")`;',
+    'const expression = /import\\("https:\\/\\/example\\.test\\/regex\\.mjs"\\)/;',
+    '// import("https://example.test/line-comment.mjs")',
+    '/* export * from "https://example.test/block-comment.mjs" */',
+    'export default [string, template, expression];',
+  ].join("\n");
+  assert.deepEqual(await buildPwaExecutableIndexV1([module("root/main.mjs", source)]), [
+    { logicalModule: "root/main.mjs", contentVersion: version(source), imports: [] },
+  ]);
+});
+
+test("executable policy rejects every non-relative or runtime-enumerated edge class", async () => {
+  for (const specifier of [
+    "pkg",
+    "https://example.test/x.mjs",
+    "data:text/javascript,export default 1",
+    "blob:https://example.test/id",
+    "//example.test/x.mjs",
+    "/absolute/x.mjs",
+  ]) await rejectsGraph(`import ${JSON.stringify(specifier)};`);
+  await rejectsGraph("import(name);");
+  await rejectsGraph("import(`./${name}.mjs`);");
+  await rejectsGraph('import/**/("https://example.test/comment-gap.mjs");');
+  await rejectsGraph('import "../../outside.mjs";', "SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION");
+});
+
+test("executable graph rejects missing and duplicate modules before publication", async () => {
+  await rejectsGraph('import "./missing.mjs";', "SUBSYSTEM_MODULE_NOT_FOUND");
+  const source = "export default 1;";
+  await assert.rejects(buildPwaExecutableIndexV1([
+    module("root/main.mjs", source),
+    module("root/main.mjs", source),
+  ]), (error) => error instanceof PwaLauncherError && error.code === "SUBSYSTEM_MODULE_INVALID");
 });
 
 test("PWA PREPARE exact-joins keys and freezes logical/state/physical projections before side effects", async () => {
@@ -41,7 +106,7 @@ test("PWA PREPARE exact-joins keys and freezes logical/state/physical projection
   try {
     let resolutions = 0;
     const source = "export default () => ({ frame: () => ({ type: 'completed', value: null }) });";
-    const index = buildPwaExecutableIndexV1([{ logicalModule: "root.mjs", source, contentVersion: version(source) }]);
+    const index = await buildPwaExecutableIndexV1([{ logicalModule: "root.mjs", source, contentVersion: version(source) }]);
     const installation = {
       installationId: "install",
       generation: "installation-generation",

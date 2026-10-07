@@ -103,10 +103,42 @@ export async function publishInstallation(record: PwaInstallationRecord): Promis
   } finally { db.close(); }
 }
 
-export async function markInstallationInvalid(installationId: string): Promise<void> {
-  const current = await getInstallation(installationId);
-  if (current === null || current.state === "invalid") return;
-  await putInstallation(Object.freeze({ ...current, state: "invalid" }));
+export async function markInstallationInvalid(
+  installationId: string,
+  expectedGeneration: string,
+  expectedRootId: string,
+): Promise<boolean> {
+  const db = await database();
+  try {
+    const tx = db.transaction(STORE, "readwrite");
+    const store = tx.objectStore(STORE);
+    const current = await request(store.get(installationId)) as PwaInstallationRecord | undefined;
+    const matches = current?.state === "complete"
+      && current.generation === expectedGeneration
+      && current.rootId === expectedRootId;
+    if (matches) store.put(Object.freeze({ ...current, state: "invalid" }));
+    await transactionDone(tx);
+    return matches;
+  } finally { db.close(); }
+}
+
+/**
+ * Atomically removes a complete installation from the publishable set while
+ * retaining its root identity until physical object cleanup succeeds.
+ */
+export async function retireInstallation(installationId: string): Promise<PwaInstallationRecord | null> {
+  const db = await database();
+  try {
+    const tx = db.transaction(STORE, "readwrite");
+    const store = tx.objectStore(STORE);
+    const current = await request(store.get(installationId)) as PwaInstallationRecord | undefined;
+    const retired = current?.state === "complete"
+      ? Object.freeze({ ...current, state: "invalid" as const })
+      : current;
+    if (retired !== undefined && retired !== current) store.put(retired);
+    await transactionDone(tx);
+    return retired ?? null;
+  } finally { db.close(); }
 }
 
 export async function removeInstallationRecord(installationId: string): Promise<PwaInstallationRecord | null> {
@@ -145,7 +177,11 @@ export async function writeInstallationObject(rootId: string, contentVersion: st
   const file = await objects.getFileHandle(objectName(contentVersion), { create: true });
   const writer = await file.createWritable();
   try { await writer.write(bytes.slice().buffer as ArrayBuffer); await writer.close(); }
-  catch (cause) { try { await writer.abort(); } catch {} throw cause; }
+  catch (cause) {
+    try { await writer.abort(); }
+    catch (abortCause) { throw new AggregateError([cause, abortCause], "Installation object write and abort failed"); }
+    throw cause;
+  }
 }
 
 export async function readInstallationObject(rootId: string, contentVersion: string): Promise<Uint8Array> {

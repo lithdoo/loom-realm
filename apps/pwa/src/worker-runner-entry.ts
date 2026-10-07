@@ -7,15 +7,24 @@ import {
 } from "@loomrealm/realm-state";
 import type { SubsystemDefinitionFactory } from "@loomrealm/subsystem";
 import { createSameOriginContentClient, runSubsystem } from "@loomrealm/subsystem/host";
-import { parsePwaRunnerBootstrapV1, parsePwaRuntimeInfoV1, sameServiceWorkerGeneration, type PwaInstallSubsystemDataV1 } from "./bootstrap-protocol.js";
+import {
+  parseInstallSubsystemData,
+  parsePwaRunnerBootstrapV1,
+  parsePwaRuntimeInfoV1,
+  parseRevokeSubsystemData,
+  sameServiceWorkerGeneration,
+  type PwaRunnerDataResultV1,
+} from "./bootstrap-protocol.js";
 import { createMessagePortCarrier } from "./message-port-carrier.js";
 
-interface CurrentData { readonly tuple: Omit<PwaInstallSubsystemDataV1, "port">; readonly carrier: MessageCarrier; delivered: boolean }
+interface DataTuple { readonly subsystemKey: string; readonly generation: number; readonly dataProfile: string }
+interface CurrentData { readonly tuple: DataTuple; readonly connectionId: string; readonly carrier: MessageCarrier; delivered: boolean }
 
 class RunnerDataBinding {
   readonly binding: SubsystemDataBinding;
   private current: CurrentData | null = null;
   private waiter: { readonly signal: AbortSignal; resolve(value: SubsystemDataBindingResult): void; reject(cause: unknown): void } | null = null;
+  private readonly seen = new Set<string>();
 
   constructor(private readonly port: MessagePort, private readonly subsystemKey: string) {
     this.binding = Object.freeze({ acquire: (signal: AbortSignal) => this.acquire(signal) });
@@ -39,21 +48,54 @@ class RunnerDataBinding {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return;
     const item = value as Record<string, unknown>;
     if (item.type === "data/install") {
-      const fields = ["formatVersion", "type", "subsystemKey", "generation", "dataProfile", "port"].sort();
-      const keys = Object.keys(item).sort();
-      if (keys.length !== fields.length || keys.some((key, index) => key !== fields[index]) || item.formatVersion !== 1 || item.subsystemKey !== this.subsystemKey || !Number.isSafeInteger(item.generation) || Number(item.generation) <= 0 || typeof item.dataProfile !== "string" || !(item.port instanceof MessagePort)) { try { (item.port as MessagePort | undefined)?.close(); } catch {} return; }
-      if (this.current !== null) { try { (item.port as MessagePort).close(); } catch {} return; }
-      const tuple = Object.freeze({ formatVersion: 1 as const, type: "data/install" as const, subsystemKey: this.subsystemKey, generation: item.generation as number, dataProfile: item.dataProfile as string });
-      this.current = { tuple, carrier: createMessagePortCarrier(item.port), delivered: false };
+      let request;
+      try { request = parseInstallSubsystemData(value, this.subsystemKey); }
+      catch {
+        try { if (item.port instanceof MessagePort) item.port.close(); }
+        catch (cause) { console.error("Invalid Runner Data endpoint could not be closed", cause); }
+        this.reply(item.requestId, item.connectionId, false);
+        return;
+      }
+      if (this.seen.has(request.requestId) || this.current !== null) {
+        request.port.close();
+        this.reply(request.requestId, request.connectionId, false);
+        return;
+      }
+      this.seen.add(request.requestId);
+      const tuple = Object.freeze({ subsystemKey: this.subsystemKey, generation: request.generation, dataProfile: request.dataProfile });
+      this.current = { tuple, connectionId: request.connectionId, carrier: createMessagePortCarrier(request.port), delivered: false };
       const waiter = this.waiter;
       if (waiter !== null && !waiter.signal.aborted) { this.waiter = null; this.current.delivered = true; waiter.resolve(Object.freeze({ carrier: this.current.carrier, generation: tuple.generation, dataProfile: tuple.dataProfile })); }
+      this.reply(request.requestId, request.connectionId, true);
       return;
     }
     if (item.type === "data/revoke") {
+      let request;
+      try { request = parseRevokeSubsystemData(value, this.subsystemKey); }
+      catch { this.reply(item.requestId, item.connectionId, false); return; }
+      if (this.seen.has(request.requestId)) { this.reply(request.requestId, request.connectionId, false); return; }
+      this.seen.add(request.requestId);
       const current = this.current;
-      if (current !== null && item.formatVersion === 1 && item.subsystemKey === this.subsystemKey && item.generation === current.tuple.generation && item.dataProfile === current.tuple.dataProfile && Object.keys(item).length === 5) { this.current = null; void current.carrier.close(); }
+      if (current !== null && request.connectionId === current.connectionId && request.generation === current.tuple.generation && request.dataProfile === current.tuple.dataProfile) {
+        this.current = null;
+        void current.carrier.close().catch((cause) => console.error("Runner Data carrier close failed", cause));
+      }
+      this.reply(request.requestId, request.connectionId, true);
     }
   };
+
+  private reply(requestId: unknown, connectionId: unknown, ok: boolean): void {
+    if (typeof requestId !== "string" || typeof connectionId !== "string") return;
+    const result: PwaRunnerDataResultV1 = Object.freeze({
+      formatVersion: 1,
+      type: "data/result",
+      requestId,
+      subsystemKey: this.subsystemKey,
+      connectionId,
+      ok,
+    });
+    this.port.postMessage(result);
+  }
 
   async close(): Promise<void> {
     this.port.removeEventListener("message", this.onMessage);
