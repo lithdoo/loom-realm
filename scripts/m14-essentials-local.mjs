@@ -165,7 +165,7 @@ async function browserQualification(renderState, resources) {
       }
       return { size: [getComputedStyle(view).width, getComputedStyle(view).height], tileVisible, playerVisible, dom: view.children[0] === sprite };
     }, { origin, prepared: presentation.prepared, renderState });
-    assert.deepEqual(result.size, ["640px", "480px"]); assert.equal(result.tileVisible, true); assert.equal(result.playerVisible, true); assert.equal(result.dom, true);
+    assert.deepEqual(result.size, ["800px", "600px"]); assert.equal(result.tileVisible, true); assert.equal(result.playerVisible, true); assert.equal(result.dom, true);
     return result;
   } finally { await browser.close(); await new Promise((resolve) => server.close(resolve)); }
 }

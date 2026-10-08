@@ -79,4 +79,5 @@ test("exact-local qualification enforces the current five-field production Map s
   assert.match(source, /createRealmStateClient\(\)/u);
   assert.match(source, /state: \(\(\) => \{/u);
   assert.match(source, /if \(mainFailure\) throw mainFailure/u);
+  assert.match(source, /result\.size, \["800px", "600px"\]/u);
 });
