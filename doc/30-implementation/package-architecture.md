@@ -2,10 +2,10 @@
 
 > 层级：实施计划 / Package Boundary  
 > 状态：Active Design / Tracking  
-> 稳定程度：M12/M13/M14 closed；M15 package boundaries frozen and implemented / current subject Requalification Pending
+> 稳定程度：M11/M12/M13/M14/M15 current qualification Closed；Viewport Core Qualified；M16/M17 implemented with independent qualification gate  
 > 主要定义：protocol、role、platform、Content、Web presentation、framework/game-library/example package ownership/dependency boundary  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
-> 最近复核：2026-09-11
+> 最近复核：2026-10-08
 
 ```text
 Protocol boundary
@@ -230,7 +230,7 @@ M17
     PWA full E2E / equivalence
 ```
 
-M15 qualification必须证明 Hostra是实际 Electron/Window owner，但这不正当化 production HostraManager/WindowManager abstraction。
+M15 qualification证明 Hostra 是实际 Electron/Window owner，但这不正当化 production HostraManager/WindowManager abstraction。Formal result 只由 [`m15-qualification.md`](./m15-qualification.md) 持有；当前 subject 已 Closed。
 
 ---
 
@@ -266,4 +266,4 @@ M12 Content
 → M17 PWA Full E2E / Equivalence
 ```
 
-Live status由 [`phase-1-delivery-plan.md`](./phase-1-delivery-plan.md) 汇总。M15 current physical SSOT仍为 ADR 0034 + root recomposition plan，current-subject formal status为 Requalification Pending；不再以 historical direct-Electron package boundary为准。
+Live status由 [`roadmap.md`](./roadmap.md) 汇总；历史 phase-plan 文档不拥有 current status。M11 current subject 已经 hosted Node 20/24 requalification Closed；M14/M15 physical placement 均 implemented/frozen 且 formal qualification Closed；M16/M17 已实现并接入独立 PWA qualification gate。后续行为变化仍按各自 ledger 的 subject/staleness 规则重新资格，不从本文继承 PASS。

@@ -2,16 +2,16 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M9/M12/M13/M14 closed baseline；M15 design frozen and implemented / current subject Requalification Pending；Realm State v1 implemented / qualified
+> 稳定程度：M9/M11/M12/M13/M14/M15 current qualification Closed；Realm State v1 implemented / qualified；PWA M16/M17 implemented with independent gate
 > 主要定义：跨平台 physical composition、Launcher PREPARE、Runtime/Renderer/Data/Content/Realm State/Web presentation placement  
 > 依赖：[系统架构总览](./system-overview.md)、[Realm State](./realm-state-system.md)、[渲染系统](./rendering-system.md)  
 > 正式化：[Realm State v1](../15-contracts/realm-state-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
 > 相关：[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
-> 最近复核：2026-10-05
+> 最近复核：2026-10-08
 
 本文回答：**同一套 LoomRealm logical application semantics 如何在 Hostra / PWA 上被完整准备、组合并运行。** Platform 是 physical composition boundary，不是 universal application authority/service locator。
 
-Milestone live qualification status由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总；M14 formal status/evidence只由 [`m14-qualification.md`](../30-implementation/m14-qualification.md) 维护。M15 exact physical realization由根目录 recomposition plan + ADR 0034拥有。
+Milestone live status 由 [`roadmap.md`](../30-implementation/roadmap.md) 汇总；M11/M14/M15 formal status/evidence 分别只由对应 qualification ledger 维护。M15 exact physical realization 由 ADR 0034 + Desktop composition SSOT 拥有，formal closure 只由 M15 ledger 签署。
 
 ---
 
@@ -542,7 +542,7 @@ M12 Content
 
 Realm State 是独立 implementation/qualification track；当前 subject/evidence 见 Realm State v1 ledger，且不 retroactively 修改既有 M10–M15 claims。
 
-Current status summary见 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md)。M15 physical composition remains frozen, while its current-subject formal status is Requalification Pending；historical direct-Electron evidence does not own the claim。
+Current status summary 见 [`roadmap.md`](../30-implementation/roadmap.md)。M15 physical composition remains frozen and implemented, and its current formal qualification is Closed；historical direct-Electron evidence does not own the claim。M16/M17 PWA physical profile is implemented and covered by its independent qualification gate。
 
 ---
 

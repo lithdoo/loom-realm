@@ -2,16 +2,16 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M15 implemented；M14 current subject Closed；M11/M15 current subject Requalification Pending
+> 稳定程度：M1–M15 implemented；M11/M14/M15 current qualification Closed；Viewport Core Qualified；M16/M17 PWA implemented with independent gate  
 > 主要定义：current monorepo physical placement、framework/game-library/example/app ownership、M14–M17 materialization order  
 > 依赖：[独立分包与发布架构](./package-architecture.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
-> 最近复核：2026-09-11
+> 最近复核：2026-10-08
 
-公开 package/authority职责以 architecture/contracts/package architecture为权威；本文只回答“代码放哪里、何时 materialize”。Live milestone status由 `phase-1-delivery-plan.md` 与对应 qualification ledger拥有。
+公开 package/authority 职责以 architecture/contracts/package architecture 为权威；本文只回答“代码放哪里、何时 materialize”。Live milestone status 由 [`roadmap.md`](./roadmap.md) 与对应 qualification ledger 拥有。
 
 ---
 
-## 1. Current / Planned Top-level
+## 1. Current Top-level
 
 ```text
 packages/      LoomRealm framework/runtime
@@ -31,20 +31,21 @@ packages/      LoomRealm framework/runtime
     renderer/
 
 game-libs/     reusable game-domain libraries
-    map/        M14 → @loomrealm-game/map
+    map/        @loomrealm-game/map
 
 examples/      concrete private games
-    essentials-v21.1/   M14
+    essentials-v21.1/
+    essentials-v21.1-local/
 
 apps/          platform/product compositions
-    desktop/    existing from M9; M15 recomposes as Hostra HOSTRA_SUBCMD plain Node product
-    pwa/        materializes with real PWA work
+    desktop/    Hostra HOSTRA_SUBCMD plain Node product
+    pwa/        canonical PWA Window/Worker product composition
 
 tools/         development/import/compatibility tooling
     fixtures/essentials-v21.1/
 ```
 
-M12 Content仍分布在 existing FSDB/HTTP、Subsystem/Renderer clients 与 Desktop composition；不存在 mandatory `packages/content` / `packages/content-service`。Map business属于 `game-libs/map`，不存在 framework `packages/map`。
+M12 Content 分布在 existing FSDB/HTTP、Subsystem/Renderer clients 与 Desktop/PWA composition；不存在 mandatory `packages/content` / `packages/content-service`。Map business 属于 `game-libs/map`，不存在 framework `packages/map`。
 
 Root workspace categories remain：
 
@@ -117,6 +118,9 @@ packages/game-launcher-hostra
     Hostra launch profile: PREPARE / Node Runner / child-owned provisioning mechanics
     conditional Electron-main run-as-node compatibility remains local to this Runtime owner
 
+packages/game-launcher-pwa
+    PWA launch/install/bootstrap profile used by the canonical PWA composition
+
 packages/fsdb + packages/fsdb-http
     Desktop prepared-content storage / readonly HTTP mechanics
 
@@ -128,15 +132,21 @@ apps/desktop
     Renderer Control/Data settlement physical carriers
     DOM RendererInputSource
     product startup/reload/termination composition
+
+apps/pwa
+    Window Renderer/Input/Viewport/Presentation
+    Session Worker with Main + RealmStateAuthority
+    Dedicated Runtime Worker / Runner
+    Service Worker Content/private executable/runtime-info boundary
 ```
 
-External `lithdoo/hostra` shell is not a LoomRealm workspace package。Do not move Hostra RPC/Window ownership into protocol packages or map business into `apps/desktop`。
+External `lithdoo/hostra` shell is not a LoomRealm workspace package。Do not move Hostra RPC/Window ownership into protocol packages or map business into `apps/desktop` / `apps/pwa`。
 
 ---
 
 ## 4. M14 Physical Placement
 
-M14 materializes exactly the first real framework-consumer layer：
+M14 materialized the first real framework-consumer layer：
 
 ```text
 game-libs/map/
@@ -157,13 +167,13 @@ examples/essentials-v21.1/
 
 `@loomrealm-game/map` root is the Runtime Definition entry。Browser artifacts stay on stable package subpaths and enter the product through prepared Content + M13 Config；Prepared Content assembly remains a small concrete action rather than GamePackager/ContentBuilder framework。
 
-M14 qualification may use test-owned composition + real Chromium；it is not a production Host。
+M14 qualification uses test-owned composition + real Chromium and exact official Essentials production-path evidence；it is not a production Host。
 
 ---
 
 ## 5. M15 Desktop Placement
 
-M9 already created `apps/desktop` for Desktop Data Broker mechanics。M15 recomposes the product without adding a top-level package category or shared Hostra framework。
+M9 created `apps/desktop` for Desktop Data Broker mechanics；M15 recomposed the product without adding a top-level package category or shared Hostra framework。
 
 Canonical placement：
 
@@ -217,37 +227,23 @@ canonical path creates no BrowserWindow and owns no app.quit
 Hostra RPC remains host-control only
 ```
 
-Migration may temporarily retain isolated direct-Electron code as regression oracle until Hostra replacement vertical passes；then dead Electron ownership/start dependency must be removed。
-
-Do not add another package merely to hold Hostra bootstrap、Window state、WS transport or native primitive capture。Concrete files/functions in `apps/desktop` are preferred。
+Dead direct-Electron ownership is not a current product path。Do not add another package merely to hold Hostra bootstrap、Window state、WS transport or native primitive capture；concrete files/functions in `apps/desktop` are preferred。
 
 ---
 
 ## 6. M16 / M17 PWA Placement
 
-M16 materializes only：
+The canonical PWA composition is materialized in `apps/pwa` and preserves logical authority while using a distinct physical topology：
 
 ```text
-PWA PREPARE
-→ Dedicated Worker Runner
-→ RuntimeHosting
-→ Runtime Control MessagePort
-→ Main ↔ Worker ↔ Subsystem lifecycle
+PWA Installer / complete installation
+→ Window Renderer/Input/Viewport/Presentation
+→ Session Worker: Main + RealmStateAuthority
+→ Dedicated Runtime Worker: Runner + Subsystem Runtime
+→ Service Worker: Content/private executable/runtime-info physical boundary
 ```
 
-M17 then completes：
-
-```text
-Window Renderer Control
-PWA Data broker / MessageChannel provisioning
-PWA Content realization
-physical Window RendererInputSource
-M13 Config/API/Projector
-same M14 concrete game + business WC
-cross-platform observable equivalence
-```
-
-Hostra shell/HOSTRA_SUBCMD/loopback WS/HTTP/signal mechanics are Desktop-only and do not create PWA directories/packages or common physical-host abstractions。
+M16 owns Worker Runtime hosting/lifecycle；M17 completes Window Renderer/Data/Content/Input/Web Presentation and same-game product equivalence。Hostra shell/HOSTRA_SUBCMD/loopback WS/HTTP/signal mechanics remain Desktop-only and do not create common physical-host abstractions。
 
 ---
 
@@ -272,8 +268,8 @@ apps/desktop/test
 test/m15* / equivalent
     frozen Hostra boundary/full E2E/lifecycle qualification
 
-PWA package/app tests
-    M16/M17 physical realization evidence
+apps/pwa + PWA qualification tests
+    M16/M17 physical realization/equivalence evidence
 ```
 
 A giant E2E never replaces lower-owner qualification。
@@ -282,7 +278,7 @@ A giant E2E never replaces lower-owner qualification。
 
 ## 8. Abstraction Budget
 
-Do not introduce for M14–M17 without real consumer evidence：
+Do not introduce without real consumer evidence：
 
 ```text
 GameLibrary registry/base framework
@@ -322,4 +318,4 @@ M16 PWA Runtime
 M17 PWA Full E2E / Equivalence
 ```
 
-Current summary见 [`phase-1-delivery-plan.md`](./phase-1-delivery-plan.md)。M14/M15 physical placement remains implemented and frozen；M14 current-subject qualification is Closed while M15 remains pending。Do not materialize later-milestone machinery early merely for test symmetry。
+Current summary 见 [`roadmap.md`](./roadmap.md)。M11 current-subject requalification、M14 exact qualification 与 M15 Hostra Desktop formal qualification 均已 Closed；Viewport Core 已 Qualified；M16/M17 已 materialized 并接入独立 qualification gate。后续不得为测试 symmetry 提前增加没有真实 consumer/authority 的新目录或抽象；任何行为变化按对应 ledger 重新形成 subject/evidence。
