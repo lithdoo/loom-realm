@@ -1,15 +1,15 @@
 # M11 Render Qualification
 
-> 状态：**Implemented / Requalification Running**（current implementation / qualification-input subject `a0a2da064d39489644f332379718aaa25cd6ed3f`）
+> 状态：**Closed**（current implementation / qualification-input subject `a0a2da064d39489644f332379718aaa25cd6ed3f`）
 > 日期：2026-10-08
 > 规范入口：仓库根目录 `M11_05_QUALIFICATION_CLOSURE.md`
 > 最终评审：[M11 Render 最终闭环评审结论](./m11-final-closure-review.md)
 > 协议：`loomrealm.render-update / 1`
 > Fixture：`fixtureSetRevision = 1`
 
-> **Current notice：** 旧 subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的本地 PASS 不再用于签署 current closure。其后共享 Renderer/Data/Desktop/Main/Subsystem 实现继续演进；审计到最新影响 M11 build/runtime surface 的提交为 `a0a2da064d39489644f332379718aaa25cd6ed3f`。当前 qualification PR 从 `main` checkout `db05277191e166c69110c252bafc8933ae876d70` 创建；该 checkout 在 `a0a2da...` 之后的变更不再改变 M11 executable behavior 或 `npm run test:m11` qualification input。正式 Closed 只在本 PR 的 hosted Node 20 + Node 24 root gate 同时 PASS 后记录。
+> **Current notice：** 旧 subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的本地 PASS 不用于签署 current closure。其后共享 Renderer/Data/Desktop/Main/Subsystem 实现继续演进；审计到最新影响 M11 build/runtime surface 的提交为 `a0a2da064d39489644f332379718aaa25cd6ed3f`。qualification PR 从 `main` checkout `db05277191e166c69110c252bafc8933ae876d70` 创建；该 checkout 在 `a0a2da...` 之后的变更不再改变 M11 executable behavior 或 `npm run test:m11` qualification input。Hosted [run 37789130711](https://github.com/lithdoo/loom-realm/actions/runs/37789130711) 在同一 PR merge checkout 上完成 Node 20 + Node 24 canonical root gate，两个 job 均 PASS，因此 M11 对 current subject 正式 Closed。
 
-M11 production architecture、Render representation validation、Subsystem-owned business Render authority、current Data publication、Renderer internal replica 与 Hostra/Desktop same-generation Render vertical 已实现并重新通过最终闭环评审。
+M11 production architecture、Render representation validation、Subsystem-owned business Render authority、current Data publication、Renderer internal replica 与 Hostra/Desktop same-generation Render vertical 已实现并通过 current-subject hosted requalification。
 
 DOM/Canvas/WebGL presentation、Content resolution 与 Hostra/PWA transport equivalence仍不属于 M11。
 
@@ -45,6 +45,14 @@ Runtime/Frame 独立性与 Domain close 证据复用真实 Main → Desktop → 
 
 因此 current implementation / qualification-input subject 取这些受消费路径中时间上最后的 `a0a2da064d39489644f332379718aaa25cd6ed3f`。本 PR 的 ledger-only changes 不创建新的 implementation subject。
 
+## Hosted Requalification Evidence — 2026-10-08
+
+- Workflow: [M11 Render qualification run 37789130711](https://github.com/lithdoo/loom-realm/actions/runs/37789130711), success.
+- PR merge checkout: `8f8d9143561d8f253e119b01ce55040059a8b445` = ledger-only PR head merged over `db05277191e166c69110c252bafc8933ae876d70`; implementation / qualification-input subject remains `a0a2da064d39489644f332379718aaa25cd6ed3f`.
+- Node 20 job: Node `20.20.2`, canonical `npm run test:m11`, qualification suite 10/10 PASS, M11 vertical/boundary suite 4/4 PASS, 0 fail / 0 skip.
+- Node 24 job: Node `24.21.0`, canonical `npm run test:m11`, qualification suite 10/10 PASS, M11 vertical/boundary suite 4/4 PASS, 0 fail / 0 skip.
+- Both jobs uploaded their qualification TAP artifact; production code, test harness, thresholds and workflow were unchanged by this qualification PR.
+
 ## Requalification Closure
 
 最终评审要求已一次完成：
@@ -76,7 +84,7 @@ authoritative coalescing, send failure, reconnect and revision rollover
 Renderer update-only COW result equivalence and per-op hard-limit atomicity
 ```
 
-这些项目扩展现有 M11 sender/receiver/root gate，不创建第二个 qualification framework。最终 `npm run test:m11` 必须在 Node 20 + Node 24 对同一 qualification checkout 通过。
+这些项目扩展现有 M11 sender/receiver/root gate，不创建第二个 qualification framework。`npm run test:m11` 已在 Node 20 + Node 24 对同一 qualification checkout 通过。
 
 ## Implemented Boundaries Retained
 
@@ -124,18 +132,18 @@ close → Registry removal → replica retirement
 npm run test:m11
 ```
 
-正式关闭要求：
+当前关闭结果：
 
 ```text
-same qualification checkout
-+ hosted Node 20 npm run test:m11 PASS
+hosted Node 20 npm run test:m11 PASS
 + hosted Node 24 npm run test:m11 PASS
++ same qualification checkout
 → M11 Render Closed
 ```
 
-本次 qualification PR 不修改 production、test harness、阈值或 `.github/workflows/m11.yml`；这里只更新 current subject/evidence ledger 以触发现有 hosted root gate。
+本次 qualification PR 不修改 production、test harness、阈值或 `.github/workflows/m11.yml`；ledger-only evidence commit 不创建新的 implementation subject。
 
 ```text
-M11 Render = Implemented / Requalification Running
+M11 Render = Closed
 M16 transport-equivalence = not claimed
 ```
