@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
+import { createRealmStateClient } from "@loomrealm/realm-state";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
 import { createBoundContentClient, runSubsystem } from "@loomrealm/subsystem/host";
@@ -220,6 +221,10 @@ try {
         launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] },
         data: hub.subsystemBinding,
         content: production.content,
+        state: (() => {
+          const client = createRealmStateClient();
+          return Object.freeze({ client, terminate: () => client.terminate() });
+        })(),
       });
       void runtime.catch(() => {});
       return Object.freeze({ runtimeControl: { acquire() { return Promise.resolve(pair.left); } }, terminated: runtime, async requestTermination() { await pair.left.close(); } });
@@ -231,8 +236,12 @@ try {
     signal: controller.signal,
     platform: { scheduler, opaqueMaterial: { generate: () => randomBytes(32).toString("base64url") }, runtimeHosting, rendererControl, dataConnections: { replace() {} } },
   });
-  void main.catch(() => {});
-  await waitFor(() => holder?.current() !== null && typeof inputEmit === "function", "Renderer and M10 input source");
+  let mainFailure;
+  void main.catch((error) => { mainFailure = error; });
+  await waitFor(() => {
+    if (mainFailure) throw mainFailure;
+    return holder?.current() !== null && typeof inputEmit === "function";
+  }, "Renderer and M10 input source");
   let latestView;
   detach = attachRendererPresentation(holder, { reevaluate(source) { latestView = structuredClone(source.read()); } });
   await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 2, "initial exact-source Render state");

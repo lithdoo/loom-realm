@@ -76,4 +76,7 @@ test("exact-local qualification enforces the current five-field production Map s
   assert.match(source, /Array\.isArray\(map\.behaviors\)/u);
   assert.match(source, /viewportSource = Object\.freeze\(\{ start\(emit\) \{ emit\(\{ width: 800, height: 600 \}\)/u);
   assert.match(source, /createRendererControlHolder\(hub\.rendererBinding, inputSource, viewportSource\)/u);
+  assert.match(source, /createRealmStateClient\(\)/u);
+  assert.match(source, /state: \(\(\) => \{/u);
+  assert.match(source, /if \(mainFailure\) throw mainFailure/u);
 });
