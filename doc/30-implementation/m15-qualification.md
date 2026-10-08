@@ -4,7 +4,7 @@
 
 **Requalification Pending for executable subject `488f8713a23158e736153677ec68e449879a8a1d`.** Local `npm run test:m14` and M15 Desktop 15/15 PASS on Windows 2026-10-06. Local `test:m15:pr` reaches frozen Hostra `d863beab`, but 6 real-window tests FAIL before readiness because its bundled `electron_bin/electron.exe` is absent; 10 non-window checks PASS. Hosted PR run [37449945940](https://github.com/lithdoo/loom-realm/actions/runs/37449945940) supplies the binary and passes M15 delta on the same executable subject. PWA remains OUT OF SCOPE.
 
-Dedicated hosted `npm run test:m15` on this SHA is still **not** recorded; the current PR delta runs `test:m15:pr` while M14 Node 20/24 runs separately on the same subject. Exact Essentials qualification is also incomplete because the available local corpus forms fail frozen source preflight. Historical Product Closed evidence remains historical and is not promoted to the current subject.
+Dedicated hosted `npm run test:m15` on this SHA is still **not** recorded; the current PR delta runs `test:m15:pr`. M14 is now formally Closed for subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` by [M14 run 37731662353](https://github.com/lithdoo/loom-realm/actions/runs/37731662353), satisfying only M15's M14 prerequisite. Historical Product Closed evidence remains historical and is not promoted to the current M15 subject.
 
 The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`. Physical design, ADR 0034, and the frozen Hostra baseline are not reopened.
 
@@ -69,8 +69,8 @@ The Hostra identity is frozen above；any later behavior-affecting change to M15
 
 | Gate | Evidence | Status |
 | --- | --- | --- |
-| Existing milestone prerequisite | current `npm run test:m14` on same tree | **PASS — local Windows, 2026-10-06；hosted rows remain pending in M14 ledger** |
-| Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PENDING — M14 is Requalification Pending** |
+| Existing milestone prerequisite | current `npm run test:m14` on the M14 qualification subject | **PASS — hosted Node 20/24 on `a5e406827d0e3814dad3ac797c4b5f13015173a0`, [run 37731662353](https://github.com/lithdoo/loom-realm/actions/runs/37731662353)** |
+| Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PASS — M14 Closed on 2026-10-08** |
 | Frozen M15 design | ADR 0034 + recomposition SSOT + frozen Hostra baseline | **PASS / PREIMPLEMENTATION CLOSED** |
 | M15 boundary/build | no canonical LoomRealm Electron ownership | **PASS — current-subject build and M15 Desktop 15/15, local Windows 2026-10-06** |
 | Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **PASS — hosted PR run 37449945940; local environment blocked by absent bundled Electron** |

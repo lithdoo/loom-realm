@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M9/M12/M13 closed baseline；M14/M15 design frozen and implemented / current subject Requalification Pending；Realm State v1 implemented / qualified
+> 稳定程度：M9/M12/M13/M14 closed baseline；M15 design frozen and implemented / current subject Requalification Pending；Realm State v1 implemented / qualified
 > 主要定义：跨平台 physical composition、Launcher PREPARE、Runtime/Renderer/Data/Content/Realm State/Web presentation placement  
 > 依赖：[系统架构总览](./system-overview.md)、[Realm State](./realm-state-system.md)、[渲染系统](./rendering-system.md)  
 > 正式化：[Realm State v1](../15-contracts/realm-state-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  

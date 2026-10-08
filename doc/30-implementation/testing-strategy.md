@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M10、M12–M13 closed；M11/M14/M15 current subject Requalification Pending
+> 稳定程度：M1–M10、M12–M14 closed；M11/M15 current subject Requalification Pending
 > 主要定义：package/role/protocol/vertical ownership，以及 M14–M17 E2E qualification 分工  
 > 依赖：[正式契约目录](../15-contracts/README.md)、[Phase 1 交付计划](./phase-1-delivery-plan.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-09-11
@@ -416,7 +416,7 @@ Prefer small test-local objects/functions that drive real seams。
 ## 10. Final Test Invariants
 
 1. M1–M10 and M12–M13 closed evidence remains valid；M11 current subject must requalify；
-2. M14 still proves the first real game consumer, while its current subject is Requalification Pending in its ledger；
+2. M14 still proves the first real game consumer, and its current subject is formally Closed in its ledger；
 3. M15 physical design stayed **Implementation Frozen / Preimplementation Closed** before coding, while current executable qualification is pending；
 4. M15 alone claims full Hostra-owned Desktop E2E；
 5. M16 alone closes PWA Worker Runtime；
