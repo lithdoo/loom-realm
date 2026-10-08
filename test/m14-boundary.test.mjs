@@ -69,3 +69,9 @@ test("map and example business sources do not cross Renderer/tooling boundaries"
   const allowedPreparation = path.normalize(path.resolve(new URL("examples/essentials-v21.1/test/prepare.mjs", root).pathname.slice(process.platform === "win32" ? 1 : 0)));
   assert.doesNotMatch(exampleSources.filter(({ file }) => file !== allowedPreparation).map(({ source }) => source).join("\n"), /packages[\\/]renderer[\\/]dist[\\/]internal/);
 });
+
+test("exact-local qualification enforces the current five-field production Map shape", async () => {
+  const source = await readFile(new URL("scripts/m14-essentials-local.mjs", root), "utf8");
+  assert.match(source, /Object\.keys\(map\), \["tileset_id", "width", "height", "data", "behaviors"\]/u);
+  assert.match(source, /Array\.isArray\(map\.behaviors\)/u);
+});

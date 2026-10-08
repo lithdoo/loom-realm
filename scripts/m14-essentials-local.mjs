@@ -181,7 +181,8 @@ try {
   const map = mapResult.value;
   const tilesetResult = await production.content.record("struct.Tileset", String(map.tileset_id));
   const tileset = tilesetResult.value;
-  assert.deepEqual(Object.keys(map), ["tileset_id", "width", "height", "data"]);
+  assert.deepEqual(Object.keys(map), ["tileset_id", "width", "height", "data", "behaviors"]);
+  assert.ok(Array.isArray(map.behaviors));
   assert.deepEqual(Object.keys(tileset), ["id", "tileset_name", "autotile_names", "passages", "priorities", "terrain_tags"]);
   assert.ok(Array.isArray(tileset.autotile_names) && tileset.autotile_names.length === 7);
   const tilesetResource = await production.content.resource("resource.Graphics", `Tilesets/${tileset.tileset_name}`);
