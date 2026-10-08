@@ -28,6 +28,9 @@ async function sourceTree(relative) {
 test("M14 workspace identity and dependency direction are explicit", async () => {
   const monorepo = await json("package.json");
   assert.deepEqual(monorepo.workspaces, ["packages/*", "game-libs/*", "apps/*", "examples/*"]);
+  const buildM14 = monorepo.scripts["build:m14"];
+  assert.ok(buildM14.includes("-w @loomrealm/fsdb-http"));
+  assert.ok(buildM14.indexOf("-w @loomrealm/fsdb-http") < buildM14.indexOf("-w @loomrealm/desktop"));
   const map = await json("game-libs/map/package.json");
   assert.equal(map.name, "@loomrealm-game/map");
   assert.deepEqual(Object.keys(map.dependencies), ["@loomrealm/subsystem", "@loomrealm-game/tile-presentation"]);
