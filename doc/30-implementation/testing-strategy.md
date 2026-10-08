@@ -2,14 +2,14 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M10、M12–M14 closed；M11/M15 current subject Requalification Pending
+> 稳定程度：M1–M15 current qualification baseline Closed where applicable；Viewport Core Qualified；M16/M17 implemented with independent PWA gate  
 > 主要定义：package/role/protocol/vertical ownership，以及 M14–M17 E2E qualification 分工  
-> 依赖：[正式契约目录](../15-contracts/README.md)、[Phase 1 交付计划](./phase-1-delivery-plan.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
-> 最近复核：2026-09-11
+> 依赖：[正式契约目录](../15-contracts/README.md)、[下一阶段路线图](./roadmap.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
+> 最近复核：2026-10-08
 
 测试目标不是“消息能通”，而是证明每层不能绕过 authority、lifecycle、failure-domain、public author API、PREPARE、package boundary 和 currentness。
 
-M14 formal status只以 [`m14-qualification.md`](./m14-qualification.md) 为准。M15 current physical subject只以根目录 recomposition plan + ADR 0034 为准；历史 direct-Electron evidence是 migration oracle，不是最终 closure evidence。
+M11/M14/M15 formal status 分别只以 [`m11-qualification.md`](./m11-qualification.md)、[`m14-qualification.md`](./m14-qualification.md)、[`m15-qualification.md`](./m15-qualification.md) 为准。Viewport Core 状态只以 [`viewport-profile-v1-qualification.md`](./viewport-profile-v1-qualification.md) 为准。历史 direct-Electron evidence 是 migration oracle，不是最终 M15 closure evidence；历史 qualification PASS 也不能自动转移到新的 executable/qualification-input subject。
 
 ---
 
@@ -48,16 +48,18 @@ Nearest owner owns nearest evidence。Large E2E does not replace package/role/pr
 
 ---
 
-## 2. Closed Baseline M1–M13
+## 2. Current Closed / Qualified Baseline
 
-Existing qualification remains authoritative：
+Current qualification records remain authoritative：
 
 ```text
-M1–M9   Foundation / Runtime / Main / launch profile / Renderer / Data
-M10      User Input
-M11      Render Replication
+M1–M10   Foundation / Runtime / Main / launch profile / Renderer / Data / User Input
+M11      Render Replication — current-subject hosted Node 20/24 Closed
 M12      Content
 M13      Web Presentation
+M14      first real game / exact official Essentials production path — Closed
+M15      frozen Hostra Desktop full E2E/lifecycle — Closed
+Viewport corrected four-child /1 — Core Qualified (Desktop + shared contracts)
 ```
 
 Current repository-level M14 gate remains：
@@ -100,7 +102,7 @@ Canonical gate：
 npm run test:m14
 ```
 
-Exact closure is owned by root `M14_05_QUALIFICATION_CLOSURE.md` and live evidence by `m14-qualification.md`。
+Exact closure is owned by live evidence in [`m14-qualification.md`](./m14-qualification.md)。
 
 Required ownership chain remains：
 
@@ -116,7 +118,7 @@ workspace/package boundary
 → deterministic passable then blocked movement
 ```
 
-M14 does not claim Hostra shell/BrowserWindow/full Desktop lifecycle。
+M14 does not claim Hostra shell/BrowserWindow/full Desktop lifecycle。Current M14 formal qualification is Closed for the subject recorded by its ledger；any later behavior/qualification-input change creates a new subject and must re-run the required exact + hosted gates。
 
 ---
 
@@ -170,7 +172,7 @@ generic Hostra/Window/Document/Connection/Recovery framework
 Hostra source patched by LoomRealm qualification
 ```
 
-During migration, legacy direct-Electron source may remain isolated as a regression oracle until replacement qualification。Repository-wide no-Electron ownership gate becomes mandatory only in the final legacy-removal slice。
+Historical legacy direct-Electron source may be retained only as fixed-history regression context；it is not a current production owner and does not substitute for Hostra qualification。
 
 ### 5.2 Process ownership evidence
 
@@ -228,7 +230,7 @@ Trusted Renderer captures required native `fetch` / `WebSocket` / input primitiv
 
 ### 5.5 Input evidence
 
-Use the production M15 DOM source and exact frozen mapping/provenance rules in `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md`：
+Use the production M15 DOM source and exact frozen mapping/provenance rules：
 
 ```text
 trusted Keyboard ArrowRight reaches existing M10 path
@@ -315,19 +317,19 @@ bootstrap/Renderer convergence failure
 
 `openWindow` RPC success is not considered product ready。
 
-### 5.10 Canonical gate
+### 5.10 Canonical gate and current result
 
 ```text
 npm run test:m15
 ```
 
-It runs current `npm run test:m14` first, then boundary/build + frozen Hostra full E2E + input/reload/Data-only reconnect/termination evidence。Formal M15 status is Requalification Pending in [`m15-qualification.md`](./m15-qualification.md)。
+It runs current `npm run test:m14` first, then boundary/build + frozen Hostra full E2E + input/reload/Data-only reconnect/termination evidence。Formal M15 status is **Closed** in [`m15-qualification.md`](./m15-qualification.md)：hosted canonical/lifecycle evidence and same-checkout local full three-viewport P95 evidence are recorded separately and combined only according to the frozen closure rule。A later behavior-affecting subject must re-run the applicable gates rather than inheriting this result。
 
 ---
 
 ## 6. M16 — PWA Runtime
 
-M16 closes only PWA Runtime hosting mechanics：
+M16 owns PWA Runtime hosting mechanics：
 
 ```text
 PWA PREPARE
@@ -338,7 +340,7 @@ PWA PREPARE
 → termination/failure
 ```
 
-M16 does not require PWA Renderer/Data/Content/Web Presentation。Do not add PWA abstractions merely for symmetry with Hostra Desktop。
+The canonical PWA product has implemented this physical profile and its independent CI gate。M16 does not redefine Desktop/Hostra physical ownership and does not justify shared physical-host abstractions merely for symmetry。
 
 ---
 
@@ -356,7 +358,7 @@ Window Renderer Control
 → same M14 concrete game/business WC
 ```
 
-Cross-platform equivalence compares logical/application outcomes, not physical implementation identity。
+The canonical PWA product has implemented these paths and their independent qualification gate。Cross-platform equivalence compares logical/application outcomes, not physical implementation identity。
 
 Allowed differences include：
 
@@ -370,7 +372,7 @@ Desktop FSDB/HTTP vs PWA storage/fetch mechanics
 
 ## 8. Root Gate Evolution
 
-Historical root gates remain unchanged。M14 adds：
+Historical root gates remain unchanged。M14 owns：
 
 ```text
 test:m14
@@ -384,7 +386,7 @@ M15 owns one top-level closure entry：
 test:m15
 ```
 
-Later milestones add unique top-level gates instead of silently redefining historical gates。
+PWA M16/M17 use their own independent completion/qualification commands documented in the PWA ledger。Later milestones add unique top-level gates instead of silently redefining historical gates。
 
 ---
 
@@ -415,12 +417,12 @@ Prefer small test-local objects/functions that drive real seams。
 
 ## 10. Final Test Invariants
 
-1. M1–M10 and M12–M13 closed evidence remains valid；M11 current subject must requalify；
-2. M14 still proves the first real game consumer, and its current subject is formally Closed in its ledger；
-3. M15 physical design stayed **Implementation Frozen / Preimplementation Closed** before coding, while current executable qualification is pending；
-4. M15 alone claims full Hostra-owned Desktop E2E；
-5. M16 alone closes PWA Worker Runtime；
-6. M17 closes full PWA E2E + logical equivalence；
+1. M1–M15 的 Closed/Qualified 结论只对各自 ledger 记录的 subject/evidence 有效，后续行为或 qualification-input 变化必须重新形成当前证据；
+2. M11 current subject 已通过 hosted Node 20/24 canonical root gate；
+3. M14 仍证明 first real game consumer，并在其 current qualification subject 上 formally Closed；
+4. M15 alone claims full Hostra-owned Desktop E2E，且 formal qualification 已 Closed；
+5. M16 owns PWA Worker Runtime evidence；
+6. M17 owns full PWA E2E + logical equivalence evidence；
 7. M15 uses frozen Hostra-owned BrowserWindow, not LoomRealm-owned Electron；
 8. M15 Hostra RPC is host-control only；
 9. M15 document bootstrap is top-level-navigation-only and rendezvous is race-safe；
@@ -428,4 +430,5 @@ Prefer small test-local objects/functions that drive real seams。
 11. M15 termination has one idempotent funnel including OS signals；
 12. M15 Data Broker remains sole candidate/current owner；
 13. tests assert observable behavior, not unnecessary helper/class topology；
-14. no generic registry/manager/recovery/framework is created solely for qualification convenience。
+14. no generic registry/manager/recovery/framework is created solely for qualification convenience；
+15. PWA qualification does not rewrite Desktop qualification history or vice versa。
