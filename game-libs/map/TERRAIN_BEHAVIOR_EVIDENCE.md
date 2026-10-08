@@ -4,6 +4,8 @@
 >
 > **发布边界：** 此版本以结构化事实、指纹、算法和复现入口代替旧附录 A 的完整 Map007 原始事件命令转储。完整原始地图、事件文本和派生 JSON 只在有合法来源的本地、gitignored 工作区读取，不作为仓库或 CI fixture 发布。源项目仓库的许可证不能自动证明其全部第三方游戏素材可再分发；相关权利未核清。
 
+> **2026-10-09 current checkpoint：** Terrain qualification-input subject 为 `a5e406827d0e3814dad3ac797c4b5f13015173a0`。合法本地 Map7/21/47 extractor、独立重算、focused suite、fixture suite、Map package、M14 PR gate 和真实本地 FSDB 产品测试均已实际执行；摘要与本文件固定值一致，产品测试不是 skip。项目邻近合法范围没有 Game.exe、RGSS DLL 或 mkxp runtime，因此没有新增原版 `DYNAMIC-OBSERVED`。精确命令、artifact 摘要和 FG/C/DEC disposition 见[最终资格记录](../../doc/30-implementation/final-performance-terrain-qualification.md)。
+
 ## 1. 取证对象及固定版本
 
 固定源码：Pokémon Essentials v21.1，commit `ea7b5d56d2436591160983c4e641a2ceee2d875a`，来源 https://github.com/Maruno17/pokemon-essentials/tree/v21.1 。取证环境历史记录：Windows 10、Node v22.12.0、本地 Essentials FSDB；未运行原版 RGSS。

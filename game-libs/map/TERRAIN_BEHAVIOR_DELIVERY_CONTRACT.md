@@ -1,6 +1,6 @@
 # Terrain Behavior：现行产品交付边界
 
-> **PRODUCT IMPLEMENTED ON MAIN / ORIGINAL RGSS BEHAVIOR QUALIFICATION PENDING / CONTRACT_V1 NOT FORMALLY SIGNED.** 代码通过 [PR #43](https://github.com/lithdoo/loom-realm/pull/43) 以 squash 方式合入 main（合并提交 [`c548110`](https://github.com/lithdoo/loom-realm/commit/c548110d9a608c65a7663cb0f2f4ea9bda082b88)）；此状态不等于 M14/M15 全部资格或原版逐帧等价。当前产品细节以当前源码、测试及同 SHA CI 为准；不可把本文件当成待开工 AG 任务卡。
+> **PRODUCT IMPLEMENTED ON MAIN / CURRENT PRODUCT-STATIC QUALIFICATION PASS / ORIGINAL RGSS DYNAMIC QUALIFICATION PENDING / CONTRACT_V1 NOT FORMALLY SIGNED.** 代码通过 [PR #43](https://github.com/lithdoo/loom-realm/pull/43) 以 squash 方式合入 main（合并提交 [`c548110`](https://github.com/lithdoo/loom-realm/commit/c548110d9a608c65a7663cb0f2f4ea9bda082b88)）；2026-10-09 对 Terrain subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` 的合法本地 FSDB、产品及回归结果见[最终资格记录](../../doc/30-implementation/final-performance-terrain-qualification.md)。此状态不等于原版逐帧等价或授权签署。当前产品细节以当前源码、测试及同 SHA CI 为准；不可把本文件当成待开工 AG 任务卡。
 
 ## 产品责任与数据
 

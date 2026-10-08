@@ -1,17 +1,17 @@
-> 当前冻结实施规格及历史测量；**正式性能资格仍待验证**。当前待办以[统一路线图](./roadmap.md)为准，不把历史 42.9ms/96.3ms 冒充新版本指标。
+> 当前冻结实施规格及历史测量；**当前性能资格已在 `6ade9506f0ef459e30e610505f4a788434b1e5f4` 正式通过**。精确环境、样本、原始产物摘要和 subject audit 见[当前资格记录](./final-performance-terrain-qualification.md)。历史 42.9ms/96.3ms 仍只属于旧 subject。
 
 # Render 移动延迟与核心链路改造设计
 
 > 状态：Implementation Specification Frozen；ADR 0035 Accepted，PR 0 治理传播已完成  
 > Freeze Gate：Passed — PR 0 governance baseline `59fcd6fb3d4e6e70943780d994d750ac4f26a34e`  
-> Implementation Status：**Requalification Pending** — current subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`；ordinary movement P95 `42.9ms` PASS，window-refresh movement P95 `96.3ms` FAIL（gate `<=50ms`）
+> Implementation Status：**Qualified** — performance subject `6ade9506f0ef459e30e610505f4a788434b1e5f4`；三视口 ordinary P95 `14.9/15.0/15.2ms`，window-refresh P95 `29.3/40.9/50.0ms`，均满足 movement gate `<=50ms`
 > 日期：2026-09-15  
 > 范围：`@loomrealm/subsystem`、`@loomrealm/renderer`、`@loomrealm-game/map`、`examples/essentials-v21.1-local`；`@loomrealm/data` / `@loomrealm/wire` 只做现有协议回归，不在本计划中优化  
 > 目标：消除本地地图移动从方向键按下到首个可见像素变化之间的高延迟，同时保持现有 authority、Render Update v1、碰撞、换图、重连和最终收敛语义。
 
 本文基于当前仓库代码、Map066 实际数据和 Hostra/Electron 本地链路测量。本文覆盖 `examples/essentials-v21.1-local/MAP_MOVEMENT_LATENCY_REFACTOR_DRAFT.md` 中关于问题根因、实施顺序和核心模块触发条件的结论；旧文档不得继续作为实现依据。Autotile、layering、transfer 文档中与本问题不冲突的既有约束继续有效。
 
-> **执行结果记录（非规范性状态）：** current subject 已完成 revision rollover、closed-shape validation、单次 COW 与真实截图 smoke 修正。本地三轮合并样本为 ordinary `n=300 / P95=42.9ms`、refresh `n=90 / P95=96.3ms`，三轮 invalid 均为 `1` 且低于 5%。因此严格触发第 9.4 节“保留正确实现，停止并报告”；不得降低门槛或在本文范围内追加 backing canvas、动态 margin、新 scheduler。该状态记录不修改冻结的 normative clauses，也不改变 PR 0 baseline。
+> **当前执行结果记录（非规范性状态）：** 2026-10-09 在冻结 Hostra/Windows native 链路对 `6ade9506f0ef459e30e610505f4a788434b1e5f4` 完成 full profile。每个视口三轮合计 ordinary `n=300`、refresh `n=90`；640/1280/1920 ordinary P95 为 `14.9/15.0/15.2ms`，refresh P95 为 `29.3/40.9/50.0ms`。invalid 分别 `1/528`、`1/552`、`1/572`；900/900 ordinary 样本为 camera-only 且零 tile draw。像素及 128MiB visible / 256MiB live+decode 内存门禁通过。完整结果与 artifact SHA-256 见[当前资格记录](./final-performance-terrain-qualification.md)。旧 subject 的 `42.9ms/96.3ms` 失败记录保留为历史，不覆盖、不继承。该状态记录不修改冻结的 normative clauses，也不改变 PR 0 baseline。
 
 ---
 

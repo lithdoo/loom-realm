@@ -2,6 +2,8 @@
 
 > **产品已在 main 实现；原版动态资格未完成，CONTRACT_V1 尚未签署。** 本页仅记录待核实的原版保真资格及 C-01～08/DEC-01～07 的审核范围；不阻止已授权的产品实现，也不声明原版逐帧保真。历史完整、已去除受限完整事件附录的 C-01～08 讨论和原始备选见 [固定 main 快照](https://github.com/lithdoo/loom-realm/blob/c00fe76b20ab07aeebe18a8056e39a024a9f9859/game-libs/map/TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md)；其 `NOT IMPLEMENTED` 和禁止实施语句是**当时的历史状态，不再生效**。
 
+> 2026-10-09 current checkpoint：C-01/C-07 技术条件已满足；C-02/C-03/C-05 有当前产品/静态覆盖但保留原版动态 caveat；C-04/C-06 等待原版时序；C-08 等待 FG-01/05/06。DEC-01～07 全部仍为 `UNSIGNED / REVIEW REQUIRED`。逐项证据见[最终资格记录](../../doc/30-implementation/final-performance-terrain-qualification.md)。
+
 ## 当前事实与审查层级
 
 产品实现及准确接口以 [现行交付边界](./TERRAIN_BEHAVIOR_DELIVERY_CONTRACT.md)、`src/semantics.ts`、`src/runtime.ts`、`browser/map.browser.js`、importer/Content 与当前测试为准。原始 v21.1 源码固定 `ea7b5d56d2436591160983c4e641a2ceee2d875a`；本地 Map7/21/47/Tilesets 等结构化 SHA 和安全复现入口见 [证据](./TERRAIN_BEHAVIOR_EVIDENCE.md)。`SOURCE-PROVEN`、`FSDB-OBSERVED`、`STATIC-INFERRED`、`PRODUCT-OBSERVED` 与原版 `DYNAMIC-OBSERVED` 是不同等级，不可互相冒充。未核清素材权利前不得提交原始 rxdata/PBS/完整事件命令。
