@@ -28,6 +28,9 @@ async function sourceTree(relative) {
 test("M14 workspace identity and dependency direction are explicit", async () => {
   const monorepo = await json("package.json");
   assert.deepEqual(monorepo.workspaces, ["packages/*", "game-libs/*", "apps/*", "examples/*"]);
+  const buildM14 = monorepo.scripts["build:m14"];
+  assert.ok(buildM14.includes("-w @loomrealm/fsdb-http"));
+  assert.ok(buildM14.indexOf("-w @loomrealm/fsdb-http") < buildM14.indexOf("-w @loomrealm/desktop"));
   const map = await json("game-libs/map/package.json");
   assert.equal(map.name, "@loomrealm-game/map");
   assert.deepEqual(Object.keys(map.dependencies), ["@loomrealm/subsystem", "@loomrealm-game/tile-presentation"]);
@@ -65,4 +68,16 @@ test("map and example business sources do not cross Renderer/tooling boundaries"
   assert.doesNotMatch(tilePresentationSources.map(({ source }) => source).join("\n"), /@loomrealm(?:-game)?\//);
   const allowedPreparation = path.normalize(path.resolve(new URL("examples/essentials-v21.1/test/prepare.mjs", root).pathname.slice(process.platform === "win32" ? 1 : 0)));
   assert.doesNotMatch(exampleSources.filter(({ file }) => file !== allowedPreparation).map(({ source }) => source).join("\n"), /packages[\\/]renderer[\\/]dist[\\/]internal/);
+});
+
+test("exact-local qualification enforces the current five-field production Map shape", async () => {
+  const source = await readFile(new URL("scripts/m14-essentials-local.mjs", root), "utf8");
+  assert.match(source, /Object\.keys\(map\), \["tileset_id", "width", "height", "data", "behaviors"\]/u);
+  assert.match(source, /Array\.isArray\(map\.behaviors\)/u);
+  assert.match(source, /viewportSource = Object\.freeze\(\{ start\(emit\) \{ emit\(\{ width: 800, height: 600 \}\)/u);
+  assert.match(source, /createRendererControlHolder\(hub\.rendererBinding, inputSource, viewportSource\)/u);
+  assert.match(source, /createRealmStateClient\(\)/u);
+  assert.match(source, /state: \(\(\) => \{/u);
+  assert.match(source, /if \(mainFailure\) throw mainFailure/u);
+  assert.match(source, /result\.size, \["800px", "600px"\]/u);
 });

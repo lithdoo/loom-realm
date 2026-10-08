@@ -46,3 +46,72 @@ jobs:
           name: m14-map-node-${{ matrix.node }}
           path: artifacts/m14-map-node-${{ matrix.node }}.tap
           if-no-files-found: error
+
+  exact-local:
+    name: Exact Essentials v21.1 / Node 24
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+
+      - name: Acquire pinned official Essentials v21.1 archive
+        shell: bash
+        run: |
+          mkdir -p .local/m14-official artifacts
+          node --input-type=module <<'NODE' | tee artifacts/m14-exact-source-identity.json
+          import { createHash } from "node:crypto";
+          import { createReadStream } from "node:fs";
+          import { stat } from "node:fs/promises";
+          import { downloadEeveeExpoArchive, OFFICIAL_ARCHIVE_IDENTITY } from "./tools/fixtures/essentials-v21.1/lib/acquisition/eevee-expo.mjs";
+
+          const archive = ".local/m14-official/essentials-v21.1.zip";
+          await downloadEeveeExpoArchive(archive);
+          const size = (await stat(archive)).size;
+          const hash = createHash("sha256");
+          for await (const chunk of createReadStream(archive)) hash.update(chunk);
+          const sha256 = hash.digest("hex");
+          if (size !== OFFICIAL_ARCHIVE_IDENTITY.size || sha256 !== OFFICIAL_ARCHIVE_IDENTITY.sha256) {
+            throw new Error(`Official archive identity mismatch: ${size} sha256:${sha256}`);
+          }
+          console.log(JSON.stringify({
+            source: "Pokemon Essentials v21.1",
+            acquisitionMode: "repository official downloader",
+            size,
+            sha256,
+          }, null, 2));
+          NODE
+
+      - name: Install qualification Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run exact-local production path
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:m14:essentials-local -- \
+            --source .local/m14-official/essentials-v21.1.zip \
+            --map-id 66 \
+            --x 8 \
+            --y 7 \
+            --character-name trainer_POKEMONTRAINER_Red \
+            | tee artifacts/m14-exact-local-node-24.log
+
+      - name: Upload exact-local evidence (corpus excluded)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m14-exact-local-node-24
+          path: |
+            artifacts/m14-exact-source-identity.json
+            artifacts/m14-exact-local-node-24.log
+            .local/m14-essentials/last-qualification.json
+          if-no-files-found: warn

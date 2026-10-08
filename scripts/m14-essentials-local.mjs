@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
+import { createRealmStateClient } from "@loomrealm/realm-state";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
 import { createBoundContentClient, runSubsystem } from "@loomrealm/subsystem/host";
@@ -164,7 +165,7 @@ async function browserQualification(renderState, resources) {
       }
       return { size: [getComputedStyle(view).width, getComputedStyle(view).height], tileVisible, playerVisible, dom: view.children[0] === sprite };
     }, { origin, prepared: presentation.prepared, renderState });
-    assert.deepEqual(result.size, ["640px", "480px"]); assert.equal(result.tileVisible, true); assert.equal(result.playerVisible, true); assert.equal(result.dom, true);
+    assert.deepEqual(result.size, ["800px", "600px"]); assert.equal(result.tileVisible, true); assert.equal(result.playerVisible, true); assert.equal(result.dom, true);
     return result;
   } finally { await browser.close(); await new Promise((resolve) => server.close(resolve)); }
 }
@@ -181,7 +182,8 @@ try {
   const map = mapResult.value;
   const tilesetResult = await production.content.record("struct.Tileset", String(map.tileset_id));
   const tileset = tilesetResult.value;
-  assert.deepEqual(Object.keys(map), ["tileset_id", "width", "height", "data"]);
+  assert.deepEqual(Object.keys(map), ["tileset_id", "width", "height", "data", "behaviors"]);
+  assert.ok(Array.isArray(map.behaviors));
   assert.deepEqual(Object.keys(tileset), ["id", "tileset_name", "autotile_names", "passages", "priorities", "terrain_tags"]);
   assert.ok(Array.isArray(tileset.autotile_names) && tileset.autotile_names.length === 7);
   const tilesetResource = await production.content.resource("resource.Graphics", `Tilesets/${tileset.tileset_name}`);
@@ -196,12 +198,13 @@ try {
   const hub = createDataHub();
   let inputEmit;
   const inputSource = Object.freeze({ start(emit) { inputEmit = emit; emit({ kind: "availability", channel: "keyboard.event", available: true }); return () => {}; } });
+  const viewportSource = Object.freeze({ start(emit) { emit({ width: 800, height: 600 }); return () => {}; } });
   let holder;
   const rendererControl = Object.freeze({
     acquire(token, signal) {
       if (holder) return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
       const pair = createMemoryCarrierPair();
-      holder = createRendererControlHolder(hub.rendererBinding, inputSource);
+      holder = createRendererControlHolder(hub.rendererBinding, inputSource, viewportSource);
       void holder.connect({ carrier: pair.right, rendererControlToken: token });
       return Promise.resolve(pair.left);
     },
@@ -218,6 +221,10 @@ try {
         launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] },
         data: hub.subsystemBinding,
         content: production.content,
+        state: (() => {
+          const client = createRealmStateClient();
+          return Object.freeze({ client, terminate: () => client.terminate() });
+        })(),
       });
       void runtime.catch(() => {});
       return Object.freeze({ runtimeControl: { acquire() { return Promise.resolve(pair.left); } }, terminated: runtime, async requestTermination() { await pair.left.close(); } });
@@ -229,8 +236,12 @@ try {
     signal: controller.signal,
     platform: { scheduler, opaqueMaterial: { generate: () => randomBytes(32).toString("base64url") }, runtimeHosting, rendererControl, dataConnections: { replace() {} } },
   });
-  void main.catch(() => {});
-  await waitFor(() => holder?.current() !== null && typeof inputEmit === "function", "Renderer and M10 input source");
+  let mainFailure;
+  void main.catch((error) => { mainFailure = error; });
+  await waitFor(() => {
+    if (mainFailure) throw mainFailure;
+    return holder?.current() !== null && typeof inputEmit === "function";
+  }, "Renderer and M10 input source");
   let latestView;
   detach = attachRendererPresentation(holder, { reevaluate(source) { latestView = structuredClone(source.read()); } });
   await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 2, "initial exact-source Render state");
