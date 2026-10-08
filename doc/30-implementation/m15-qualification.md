@@ -2,9 +2,9 @@
 
 ## Status
 
-**Requalification Pending for executable / qualification-input subject `a5e406827d0e3814dad3ac797c4b5f13015173a0`.** The previous `488f8713a23158e736153677ec68e449879a8a1d` evidence is historical: later landed Desktop Input/Viewport、Renderer/Data/Subsystem Content changes affect the M15 consumed lower layers, and PR #75 also changes M14 qualification inputs that are part of the canonical `npm run test:m15` aggregate through its leading `npm run test:m14`. The final such current input change is `a5e406827d0e3814dad3ac797c4b5f13015173a0`; later ledger-only commits do not create a newer M15 subject. PWA remains OUT OF SCOPE.
+**Closed for executable / qualification-input subject `a5e406827d0e3814dad3ac797c4b5f13015173a0`.** Hosted canonical run 37736485128 passed on documentation-only merge checkout `b540cdeaac857f5417b34b95d0c68c9297b03461`, and the same checkout then passed the local canonical aggregate with the explicit full three-viewport P95 profile on Windows on 2026-10-08. The previous `488f8713a23158e736153677ec68e449879a8a1d` evidence remains historical. PWA remains OUT OF SCOPE.
 
-M14 is formally Closed for the same subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` by [M14 run 37731662353](https://github.com/lithdoo/loom-realm/actions/runs/37731662353), satisfying M15's M14 prerequisite. Current-subject M15 delta evidence is [M12-M15 PR run 37732770302](https://github.com/lithdoo/loom-realm/actions/runs/37732770302): hosted Node 24 `test:m15:pr` PASS with frozen Hostra, including Desktop 15/15 and Hostra 16/16. That PR job is **not** the canonical aggregate. The later post-merge [M15 run 37736485128](https://github.com/lithdoo/loom-realm/actions/runs/37736485128) ran `xvfb-run -a npm run test:m15` successfully on checkout `b540cdeaac857f5417b34b95d0c68c9297b03461`, with Desktop 15/15 and Hostra 16/16. Formal M15 remains Requalification Pending: current local aggregate evidence and the full three-viewport P95 qualification are still missing. The hosted aggregate emitted `mode: "pr"`; aggregate command success must not be described as full performance qualification.
+M14 is formally Closed for the same subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` by [M14 run 37731662353](https://github.com/lithdoo/loom-realm/actions/runs/37731662353), satisfying M15's M14 prerequisite. Current-subject M15 delta evidence is [M12-M15 PR run 37732770302](https://github.com/lithdoo/loom-realm/actions/runs/37732770302). The later post-merge [M15 run 37736485128](https://github.com/lithdoo/loom-realm/actions/runs/37736485128) ran `xvfb-run -a npm run test:m15` successfully on checkout `b540cdeaac857f5417b34b95d0c68c9297b03461`, with Desktop 15/15 and Hostra 16/16. The local run below used the same checkout and frozen Hostra, ran the canonical aggregate with `LOOMREALM_M15_FULL_QUALIFICATION=1`, and supplied the missing full P95 matrix. The hosted aggregate remains `mode: "pr"`; no hosted full-profile PASS is claimed.
 
 The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`. Evidence recorded for `488f8713a23158e736153677ec68e449879a8a1d` is likewise previous-subject evidence only. Physical design, ADR 0034, and the frozen Hostra baseline are not reopened.
 
@@ -85,12 +85,12 @@ The Hostra identity is frozen above；any later behavior-affecting change to M15
 | Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **PASS — current-subject-equivalent PR merge tree, hosted Node 24 [run 37732770302](https://github.com/lithdoo/loom-realm/actions/runs/37732770302); frozen Hostra owns the Window and reaches the M14 map** |
 | Document bootstrap | acquire/document rendezvous + navigation-only route | **PASS for exercised checks — hosted canonical run 37736485128: both rendezvous orders, cancellation, navigation fetch/iframe rejection** |
 | Input/reload/reconnect | production Hostra Window path | **PASS — hosted canonical run 37736485128: trusted movement/blocking, reload identity replacement and same-generation Data reconnect identity retention** |
-| Movement first-paint | 640/720/1080 ordinary P95 ≤50ms; refresh P95 ≤50/75/100 | **PARTIAL — hosted canonical run 37736485128 used `mode: pr`, 640×480 only; ordinary P50/P95 26.4/27.7 ms, refresh P50/P95 43.2/44.4 ms. Full 640/720/1080 P95 matrix remains PENDING** |
-| Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **PASS for exercised checks — hosted canonical run 37736485128: programmatic close, RPC terminal, openWindow failure, final-window cleanup, Runner fatal and startup failure. This does not claim separately unexercised signal cases** |
-| Canonical aggregate | `npm run test:m15` | **PASS (hosted) — `xvfb-run -a npm run test:m15`, run 37736485128, checkout `b540cdea...`; default performance profile remains reduced** |
-| Hosted qualification | dedicated M15 workflow, same subject | **PASS for canonical command — dedicated run 37736485128; full performance matrix is not established by this run** |
-| Current local aggregate | same-subject `npm run test:m15` in the local frozen Hostra environment | **PENDING — no current local aggregate result recorded** |
-| Formal M15 closure | all rows above PASS for one subject | **Requalification Pending — local aggregate and full P95 matrix remain outstanding** |
+| Movement first-paint | 640/720/1080 ordinary P95 ≤50ms; refresh P95 ≤50/75/100 | **PASS — local canonical full mode: ordinary P95 15.8/19.6/21.0 ms; refresh P95 42.3/59.9/75.9 ms; 300 ordinary + 90 refresh samples per viewport; camera-only and zero tile-draw 300/300 each. Hosted canonical run remains reduced `mode: pr`** |
+| Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **PASS — hosted Ubuntu canonical run covers platform terminal ordering; local Windows canonical run covers programmatic close、RPC terminal、openWindow failure、final-window effects、Runner fatal and startup failure, with no residual tested processes** |
+| Canonical aggregate | `npm run test:m15` | **PASS — hosted `xvfb-run -a npm run test:m15` in run 37736485128 and local full-mode `npm run test:m15`, both on checkout `b540cdea...`** |
+| Hosted qualification | dedicated M15 workflow, same subject | **PASS for canonical command and Linux lifecycle assertions — run 37736485128; this row does not claim hosted full-profile performance** |
+| Current local aggregate | same-subject `npm run test:m15` in the local frozen Hostra environment | **PASS — Windows, Node 24.19.0 / npm 10.9.2, Desktop 15/15 and Hostra 16/16, exit 0** |
+| Formal M15 closure | all rows above PASS for one subject | **Closed — hosted canonical, local full canonical and Hostra-owned lifecycle evidence are all recorded without conflating their environments** |
 
 The current PR workflow checks out a merge tree that differs from `a5e4068...` only by the base integration and later M15-irrelevant ledger changes; its M15 delta therefore supplies current-subject behavior evidence, but it does not substitute for the unique canonical aggregate command.
 
@@ -106,9 +106,22 @@ The current PR workflow checks out a merge tree that differs from `a5e4068...` o
 
 The existing `.github/workflows/m15.yml` sets `LOOMREALM_QUALIFICATION_REPORT=1`, but does not set `LOOMREALM_M15_FULL_QUALIFICATION=1`. The test switches to full mode only with the latter environment variable or lifecycle event `test:m15:hostra:full`. The ordinary canonical aggregate invokes `test:m15:hostra` and therefore retains the reduced profile by default.
 
-For the remaining local aggregate, explicitly set `LOOMREALM_M15_FULL_QUALIFICATION=1` and run `npm run test:m15` with the frozen Hostra. Verify the fresh `artifacts/map-viewport-pr3-hostra.json` reports `mode: "full"`, three viewports (640×480, 1280×720, 1920×1080), three rounds each, ordinary n=300 / refresh n=90 per viewport, ordinary P95 ≤50 ms and refresh P95 ≤50/75/100 ms. Record local checkout SHA separately; the report otherwise defaults its subject to `local-worktree`.
+### 2.2 Current local canonical full evidence — 2026-10-08
 
-This record does not alter any executable or workflow to obtain PASS, and it does not claim a hosted full-profile run. Before formal closure, reconcile every remaining gate and any required full-profile environment evidence; do not replace pending evidence with the default aggregate's green status.
+- Checkout: `b540cdeaac857f5417b34b95d0c68c9297b03461`; qualification subject `a5e406827d0e3814dad3ac797c4b5f13015173a0`; executable、tests、workflow and relevant configuration remained byte-identical to the checkout before and after the run.
+- Frozen host: independent Hostra checkout `d863beab3c59c3bd4f271514a228fa8fee0bf5b6`, clean before and after; `hostra@1.0.1-beta.1`; Electron 44.1.1 / Chromium 152.0.7977.65.
+- Environment: Windows 11 Home 10.0.26300, native Console session, AMD Ryzen AI 9 365 (10 cores / 20 logical processors), Node 24.19.0, npm 10.9.2, Playwright 1.63.0 / Chromium 153.0.8010.12.
+- Command environment: `HOSTRA_SOURCE_DIR=<independent frozen checkout>`, `LOOMREALM_QUALIFICATION_REPORT=1`, `LOOMREALM_M15_FULL_QUALIFICATION=1`; command `npm run test:m15`; exit 0. Desktop 15/15 and Hostra 16/16 passed with no M15 skips.
+- Fresh report: `subject: "local-worktree"`, `mode: "full"`; report SHA-256 `bea4a694d122e21ebf41aff53c9e65c56b2c56b67e5707abd168a048408294a7`. The real checkout is recorded separately and is not represented as a GitHub run.
+- 640×480: ordinary P50/P95 13.6/15.8 ms, refresh P50/P95 37.9/42.3 ms; 300/90 samples.
+- 1280×720: ordinary P50/P95 13.7/19.6 ms, refresh P50/P95 54.1/59.9 ms; 300/90 samples.
+- 1920×1080: ordinary P50/P95 17.3/21.0 ms, refresh P50/P95 70.8/75.9 ms; 300/90 samples.
+- Every viewport had three rounds; the worst invalid ratio was 3/234 (1.282%), below 5%. Camera-only and zero tile-draw hits were 300/300 for every viewport.
+- Evidence directory: `artifacts/m15-local-qualification-20261008T143400+0800-windows-b540cdea` in the detached local qualification worktree. Canonical stdout SHA-256: `409191570897e414647a5fa62d2ea26a96461b0bf94198872dcdc5fb3b21bad3`.
+- Scope limit: ten checks requiring the absent uncommitted official local FSDB / original Map007、Map021 or Map047 sources skipped across the upstream aggregate. Synthetic checks ran, but this record does not declare original terrain fidelity complete.
+- Windows limit: the final-window test does not assert the POSIX-only ordered terminal-event list. Hosted Ubuntu run 37736485128 supplies those assertions; no claim is made that Windows executed them.
+
+No executable、test、threshold、Hostra lifecycle or workflow was changed to obtain this PASS. Hosted canonical PASS, local full PASS and hosted full-profile PASS remain distinct facts; the first two exist, while no hosted full-profile run is claimed or required by the closure rule above.
 
 `getHostState/getAllWindows` may observe that a Window is Hostra-owned；they are not production authority/currentness mechanisms。
 
@@ -238,7 +251,7 @@ camera-only hits: 20/20
 zero tile-draw hits: 20/20
 ```
 
-This is valid current-subject PR-delta evidence, but it is intentionally the reduced 640×480 PR gate. Formal M15 closure still requires the canonical aggregate/current full viewport evidence defined above.
+This is valid current-subject PR-delta evidence, but it is intentionally the reduced 640×480 PR gate. It did not by itself satisfy Formal M15 closure；the current local canonical full evidence in section 2.2 supplies the required viewport matrix.
 
 ### 5.2 Historical local movement measurement — 2026-09-16
 
@@ -427,6 +440,7 @@ M14 = formally Closed
 + frozen Hostra baseline used exactly
 + local/current npm run test:m15 = PASS
 + hosted npm run test:m15 = PASS
++ full three-viewport P95 evidence = PASS
 + Hostra-owned E2E/lifecycle evidence = PASS
 → M15 Closed
 ```
@@ -437,10 +451,10 @@ Current state：
 M10–M14 logical/business contracts   frozen
 historical standalone Electron M15   implemented + migration-qualified
 M15 Hostra physical design           Implementation Frozen / Preimplementation Closed
-M15 Hostra implementation            complete / hosted canonical functional suites PASS
-M15 canonical aggregate              hosted PASS / current local PENDING
-M15 full P95 viewport matrix         PENDING (hosted aggregate used reduced profile)
-formal M15 milestone                 Requalification Pending
+M15 Hostra implementation            complete / hosted + local canonical functional suites PASS
+M15 canonical aggregate              hosted PASS / current local full-mode PASS
+M15 full P95 viewport matrix         local PASS / hosted full-profile not claimed
+formal M15 milestone                 Closed
 ```
 
-No further architecture/design pass is authorized merely by the current requalification gap。Keep the correct current implementation and frozen latency gates；run the unique current-subject canonical aggregate before promoting M15 to Closed, and record a separate follow-up design before attempting backing canvas, dynamic retained margins, a new scheduler, or any other optimization outside the frozen refactor scope。
+No further architecture/design pass is authorized by this closure。Keep the qualified implementation and frozen latency gates；record a separate follow-up design before attempting backing canvas, dynamic retained margins, a new scheduler, or any other optimization outside the frozen refactor scope。Any later behavior-affecting change creates a new subject and reopens qualification。
