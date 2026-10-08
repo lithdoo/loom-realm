@@ -10,7 +10,12 @@ test("Desktop product wires one document-layout viewport source and Main only se
   assert.match(entry, /createRendererControlHolder\(dataBinding, inputSource, viewportSource\)/);
   assert.doesNotMatch(entry, /viewport\.state/);
 
-  const source = await read("../src/renderer-viewport-source.ts");
+  const adapter = await read("../src/renderer-viewport-source.ts");
+  assert.match(adapter, /@loomrealm\/renderer\/browser-window/);
+  assert.match(adapter, /createBrowserRendererViewportSource\(target\)/);
+  assert.doesNotMatch(adapter, /innerWidth|innerHeight|visibilitychange|devicePixelRatio/);
+
+  const source = await readFile(new URL("../../../packages/renderer/src/browser-viewport-source.ts", import.meta.url), "utf8");
   assert.match(source, /innerWidth/);
   assert.match(source, /innerHeight/);
   assert.match(source, /visibilitychange/);

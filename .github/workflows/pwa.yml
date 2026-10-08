@@ -1,0 +1,61 @@
+name: PWA M16-M17 qualification
+
+on:
+  pull_request:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "game-libs/**"
+      - "examples/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/actions/setup-workspace/**"
+      - ".github/workflows/pwa.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "game-libs/**"
+      - "examples/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/actions/setup-workspace/**"
+      - ".github/workflows/pwa.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: M16-M17 / Node 24
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Install repository-pinned Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run aggregate PWA qualification
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          npm run test:pwa | tee artifacts/pwa-m16-m17-node-24.tap
+      - name: Upload qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pwa-m16-m17-node-24
+          path: artifacts/pwa-m16-m17-node-24.tap
+          if-no-files-found: error

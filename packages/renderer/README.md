@@ -41,3 +41,8 @@ M11 adds one internal Render replica per existing Data slot. Registry/Snapshot/P
 M12 adds `@loomrealm/renderer/resource-client` as a platform-integration subpath while keeping the root surface unchanged. It resolves only logical namespace/hierarchical keys, requires `expectedContentVersion`, rejects version mismatch before returning bytes, and returns detached `Uint8Array` values.
 
 M13 adds only trusted/internal Config/bootstrap helpers, a Control/Store reevaluation attachment, a thin stable-identity Web Projector, and a Window-lifetime resource façade. None is exported from the package root. Real Chromium qualification covers browser loading, Custom Element lifecycle, per-subsystem currentness, structural data delivery, unknown-tag permanent freeze, and resource cancellation. M14 supplies the first real `loom.map` business component vocabulary; it does not own the projection mechanism.
+
+`@loomrealm/renderer/browser-window` owns the shared Browser Window
+`RendererInputSource` and `RendererViewportSource` realization used by both
+Desktop and PWA. Product-specific observation is accepted only through a
+narrow option; Input/Data protocol semantics stay single-sourced here.

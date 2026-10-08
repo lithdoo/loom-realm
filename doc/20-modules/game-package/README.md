@@ -19,4 +19,4 @@ Definition Module 的解析和 Node/Worker Runner 由匹配的 Launcher/Profile 
 
 逻辑字段、失败分类及规范边界以 [Game Package v1](../../15-contracts/game-package-v1.md)、[Hostra Launcher](../../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher](../../15-contracts/pwa-launcher-profile-v1.md) 为准；源码的 public exports 决定具体 API。原设计决策保留在[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)。
 
-用 Game Package workspace 测试、Platform PREPARE 和 M6/M9 集成验证已存在的逻辑边界。PWA M16/M17 产品组合尚待落地，仅在[路线图](../../30-implementation/roadmap.md)安排；PWA Launcher 包存在不意味着整套 PWA 产品已完成。
+用 Game Package workspace 测试、Platform PREPARE 和跨平台集成验证现有逻辑边界。PWA M16/M17 产品组合位于 `apps/pwa`，其 exact-HEAD 状态与命令见 [PWA 资格](../../30-implementation/pwa-m16-m17-qualification.md) 和[路线图](../../30-implementation/roadmap.md)。

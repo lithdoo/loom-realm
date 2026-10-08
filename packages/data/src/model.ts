@@ -70,24 +70,28 @@ export const KEYBOARD_CODES_V1 = [
   "NumpadAdd", "NumpadSubtract", "NumpadMultiply", "NumpadDivide", "NumpadDecimal", "NumpadEnter",
 ] as const;
 export type KeyboardCodeV1 = typeof KEYBOARD_CODES_V1[number];
-export interface KeyboardStatePayloadV1 { readonly down: readonly KeyboardCodeV1[]; }
-export interface KeyboardEventPayloadV1 { readonly action: "down" | "up"; readonly code: KeyboardCodeV1; readonly repeat: boolean; }
+export interface KeyboardStatePayloadV1 extends JsonObject { readonly down: readonly KeyboardCodeV1[]; }
+export interface KeyboardEventPayloadV1 extends JsonObject { readonly action: "down" | "up"; readonly code: KeyboardCodeV1; readonly repeat: boolean; }
 export type PointerKindV1 = "mouse" | "touch" | "pen";
 export type PointerButtonV1 = "primary" | "auxiliary" | "secondary" | "back" | "forward";
-export interface PointerSampleV1 { readonly pointerId: number; readonly kind: PointerKindV1; readonly x: number; readonly y: number; readonly buttons: readonly PointerButtonV1[]; }
-export interface PointerStatePayloadV1 { readonly pointers: readonly PointerSampleV1[]; }
-export interface PointerEventPayloadV1 { readonly action: "down" | "up" | "cancel"; readonly pointer: PointerSampleV1; readonly button: PointerButtonV1 | null; }
-export interface GamepadAxesV1 { readonly leftX: number; readonly leftY: number; readonly rightX: number; readonly rightY: number; }
-export interface GamepadButtonsV1 {
+export interface PointerSampleV1 extends JsonObject { readonly pointerId: number; readonly kind: PointerKindV1; readonly x: number; readonly y: number; readonly buttons: readonly PointerButtonV1[]; }
+export interface PointerStatePayloadV1 extends JsonObject { readonly pointers: readonly PointerSampleV1[]; }
+export interface PointerEventPayloadV1 extends JsonObject { readonly action: "down" | "up" | "cancel"; readonly pointer: PointerSampleV1; readonly button: PointerButtonV1 | null; }
+export interface GamepadAxesV1 extends JsonObject { readonly leftX: number; readonly leftY: number; readonly rightX: number; readonly rightY: number; }
+export interface GamepadButtonsV1 extends JsonObject {
   readonly south: number; readonly east: number; readonly west: number; readonly north: number;
   readonly leftBumper: number; readonly rightBumper: number; readonly leftTrigger: number; readonly rightTrigger: number;
   readonly select: number; readonly start: number; readonly leftStick: number; readonly rightStick: number;
   readonly dpadUp: number; readonly dpadDown: number; readonly dpadLeft: number; readonly dpadRight: number; readonly home: number;
 }
-export interface GamepadSampleV1 { readonly gamepadId: number; readonly axes: GamepadAxesV1; readonly buttons: GamepadButtonsV1; }
-export interface GamepadStatePayloadV1 { readonly gamepads: readonly GamepadSampleV1[]; }
-export type GamepadButtonNameV1 = keyof GamepadButtonsV1;
-export interface GamepadEventPayloadV1 { readonly action: "down" | "up"; readonly gamepadId: number; readonly button: GamepadButtonNameV1; readonly value: number; }
+export interface GamepadSampleV1 extends JsonObject { readonly gamepadId: number; readonly axes: GamepadAxesV1; readonly buttons: GamepadButtonsV1; }
+export interface GamepadStatePayloadV1 extends JsonObject { readonly gamepads: readonly GamepadSampleV1[]; }
+export type GamepadButtonNameV1 =
+  | "south" | "east" | "west" | "north"
+  | "leftBumper" | "rightBumper" | "leftTrigger" | "rightTrigger"
+  | "select" | "start" | "leftStick" | "rightStick"
+  | "dpadUp" | "dpadDown" | "dpadLeft" | "dpadRight" | "home";
+export interface GamepadEventPayloadV1 extends JsonObject { readonly action: "down" | "up"; readonly gamepadId: number; readonly button: GamepadButtonNameV1; readonly value: number; }
 
 export interface RenderDomainsV1 { readonly type: "render.domains"; readonly domains: readonly string[]; }
 export interface RenderNodeV1 {

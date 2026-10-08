@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import test from "node:test";
 import { ContentReadError } from "../dist/index.js";
-import { createBoundContentClient } from "../dist/host/index.js";
+import { createBoundContentClient, createSameOriginContentClient } from "../dist/host/index.js";
 
 const recordBytes = Buffer.from('{"hero":{"name":"Pika"}}');
 const resourceBytes = Buffer.from([1, 2, 3, 255]);
@@ -75,4 +75,28 @@ test("record/resource reads map errors, versions, hierarchy, cancellation, and v
   await assert.rejects(bound.value.record("struct.hero", "invalid"), (error) => error.code === "CONTENT_INVALID");
   bound.lifetime.abort();
   await assert.rejects(bound.value.record("struct.hero", "hero"), (error) => error.code === "CONTENT_CANCELLED");
+});
+
+test("same-origin PWA Content client shares decoding semantics and never sends bearer auth", async () => {
+  const locationDescriptor = Object.getOwnPropertyDescriptor(globalThis, "location");
+  const originalFetch = globalThis.fetch;
+  const observed = [];
+  Object.defineProperty(globalThis, "location", { configurable: true, value: new URL("https://game.test/app") });
+  globalThis.fetch = async (url, init) => {
+    observed.push({ url: String(url), headers: init?.headers ?? {} });
+    const version = hash(recordBytes);
+    return new Response(recordBytes, { status: 200, headers: { "Content-Type": "application/json; charset=utf-8", "X-Loom-Content-Version": version, ETag: `"${version}"` } });
+  };
+  try {
+    const lifetime = new AbortController();
+    const content = createSameOriginContentClient({ installationId: "installation" }, lifetime.signal);
+    assert.deepEqual((await content.record("struct.hero", "hero")).value, { hero: { name: "Pika" } });
+    assert.equal(observed[0].url, "https://game.test/_lr/v1/games/installation/records/struct.hero/hero");
+    assert.deepEqual(observed[0].headers, {});
+    assert.throws(() => createSameOriginContentClient({ installationId: "installation", token: "forbidden" }, lifetime.signal), TypeError);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (locationDescriptor) Object.defineProperty(globalThis, "location", locationDescriptor);
+    else delete globalThis.location;
+  }
 });

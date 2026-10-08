@@ -122,15 +122,18 @@ async function fixtureServer(t) {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
-    try {
-      await within(
-        new Promise((resolve) => server.close(resolve)),
-        "fixture server close",
-      );
-    } catch (error) {
-      server.closeAllConnections?.();
-      throw error;
-    }
+    const closed = new Promise((resolve, reject) => server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    }));
+    // node:test runs after hooks in registration order, so the fixture server
+    // closes before the Chromium hook registered by browserPage(). Retire every
+    // keep-alive or in-flight fixture connection after stopping admission; this
+    // makes teardown bounded without depending on a browser/version-specific
+    // decision to release idle HTTP connections first.
+    server.closeIdleConnections?.();
+    server.closeAllConnections?.();
+    await within(closed, "fixture server close");
   });
   return { origin: `http://127.0.0.1:${server.address().port}`, requests };
 }

@@ -114,7 +114,7 @@ trusted keydown
 
 ### 2.1 实际代码事实
 
-- `apps/desktop/src/renderer-input-source.ts` 在非 repeat keydown 时先发布 `keyboard.state`，随后发布 `keyboard.event`。
+- `packages/renderer/src/browser-input-source.ts` 在非 repeat keydown 时先发布 `keyboard.state`，随后发布 `keyboard.event`；Desktop 的窄 wrapper 只注入 qualification observation。
 - `packages/renderer/src/internal/input-gate.ts` 的 publisher 只串行等待 carrier send Promise，不等待网络往返确认。
 - `game-libs/map/src/runtime.ts` 的 `attempt()` 在合法移动时立即更新整数目标格、设置 `activeMove` 并调用 `domain.replace(renderState())`，之后才启动 250ms step timer。
 - Runtime 只拥有整数格目标、碰撞、transfer 和 step boundary authority；逐像素过程由 Browser 根据 retained motion state 插值。

@@ -95,7 +95,7 @@ Release cohort artifact manifest and SHA: C1 production dc024e8963cf6970cca8b28a
 Main/Data/Renderer/Subsystem/adapter inventory: see §7
 No-mixed-version executable proof: same git tree / 0.1.0-alpha.0 workspaces; Main selects only /1; no /2 identity
 Rollout owner/signoff on no mixed requirement: APPROVED (C0 owner attestation, 2026-09-16)
-Desktop physical source: document layout viewport via Window.innerWidth/innerHeight (adapter only)
+Desktop/PWA shared browser source: document layout viewport via Window.innerWidth/innerHeight (Window adapter only)
 PWA physical source: NOT RUN (no PWA application in this repository)
 ```
 
@@ -160,7 +160,8 @@ Branch: `feat/core-viewport-v1` from freeze subject `4cbf620ebe8aec0e7fb33743813
 | `packages/data/src/model.ts`, `viewport-codec.ts`, `viewport-sender.ts`, `profile-codec.ts`, `peers.ts`, `runtime.ts`, `index.ts` | Exact Viewport type, `"viewport"` family, demux, bounded latest sender, renderer `viewport.sendState` |
 | `packages/subsystem/src/viewport.ts`, `internal/viewport-manager.ts`, `model.ts`, `host/run-subsystem.ts`, `index.ts` | Runtime `scope.viewport` retain/notify/terminal isolation |
 | `packages/renderer/src/viewport.ts`, `internal/viewport-publisher.ts`, `control.ts`, `index.ts` | Optional construction-time source, floor/discard, attach/detach, fencing |
-| `apps/desktop/src/renderer-viewport-source.ts` | Product document-layout CSS logical source; not a Core Window dependency |
+| `packages/renderer/src/browser-viewport-source.ts` | Shared Browser Window document-layout CSS logical source; not a Core Window dependency |
+| `apps/desktop/src/renderer-viewport-source.ts` | Narrow Desktop wrapper over the shared Browser Window source |
 | `apps/desktop/src/renderer-entry.ts` | Unified `/1` holder: Data + Input + Viewport; Main does not hold size |
 
 Handler stubs in existing Input/Render/Data tests are required so four-child peers construct. Main is unchanged except it already selected `/1`; C1-D verifies it still has no width/height and does not relay `viewport.state`.

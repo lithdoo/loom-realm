@@ -1,12 +1,13 @@
 export { createSubsystemDataPeer, createRendererDataPeer } from "./peers.js";
 export {
+  KEYBOARD_CODES_V1,
   RENDERER_DATA_PROFILE_V1,
   WEB_PRESENTATION_EVENT_CHANNEL_V1,
 } from "./model.js";
 export { validateInputPayloadV1 } from "./input-codec.js";
 export type {
   RendererDataProfileV1, DataCurrentBindingV1, DataBindingViewV1,
-  InputChannelV1, InputStateChannelV1, InputEventChannelV1, FrameInputInterestV1,
+  InputChannelV1, InputStateChannelV1, InputEventChannelV1, CustomInputStateChannelV1, CustomInputEventChannelV1, FrameInputInterestV1,
   InputInterestV1, InputStateV1, InputEventV1, InputResetV1, UserInputMessageV1,
   KeyboardCodeV1, KeyboardStatePayloadV1, KeyboardEventPayloadV1,
   PointerKindV1, PointerButtonV1, PointerSampleV1, PointerStatePayloadV1, PointerEventPayloadV1,

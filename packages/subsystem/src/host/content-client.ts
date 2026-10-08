@@ -15,6 +15,10 @@ export interface BoundContentAccess {
   readonly token: string;
 }
 
+export interface SameOriginContentAccess {
+  readonly installationId: string;
+}
+
 function segment(value: unknown): asserts value is string {
   if (typeof value !== "string" || value.length === 0 || value === "." || value === ".." || /[\\/\0]|\p{Cc}|\p{Cs}/u.test(value) || /^[A-Za-z]:/.test(value) || value.startsWith("\\\\") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) {
     throw new TypeError("Invalid Content segment");
@@ -72,19 +76,17 @@ function encodeResourceKey(key: string): string {
   return key.split("/").map(encodeURIComponent).join("/");
 }
 
-export function createBoundContentClient(access: BoundContentAccess, lifetimeSignal: AbortSignal): ContentClient {
-  if (access === null || typeof access !== "object" || !abortSignal(lifetimeSignal) || typeof access.installationId !== "string" || access.installationId.length === 0 || typeof access.token !== "string" || access.token.length === 0) {
-    throw new TypeError("Invalid bound Content access");
-  }
-  let origin: URL;
-  try { origin = new URL(access.origin); } catch { throw new TypeError("Invalid Content origin"); }
-  if ((origin.protocol !== "http:" && origin.protocol !== "https:") || origin.username || origin.password || origin.search || origin.hash || origin.pathname !== "/") throw new TypeError("Invalid Content origin");
-  const base = new URL(`_lr/v1/games/${encodeURIComponent(access.installationId)}/`, origin);
+interface ContentFetchBinding {
+  readonly installationId: string;
+  readonly base: URL;
+  readonly headers: Readonly<Record<string, string>>;
+}
 
+function createContentClient(binding: ContentFetchBinding, lifetimeSignal: AbortSignal): ContentClient {
   async function readContent<T>(path: string, signal: AbortSignal | undefined, consume: (response: Response) => Promise<T>): Promise<T> {
     const combined = combineSignal(signal, lifetimeSignal);
     try {
-      const response = await fetch(new URL(path, base), { headers: { Authorization: `Bearer ${access.token}` }, signal: combined.signal });
+      const response = await fetch(new URL(path, binding.base), { headers: binding.headers, signal: combined.signal });
       if (!response.ok) throw mapStatus(response.status);
       return await consume(response);
     } catch (error) {
@@ -99,28 +101,63 @@ export function createBoundContentClient(access: BoundContentAccess, lifetimeSig
       segment(namespace); segment(key);
       const signal = readOptions(options);
       if (signal?.aborted || lifetimeSignal.aborted) return Promise.reject(new ContentReadError("CONTENT_CANCELLED"));
-      return (async () => {
-        return readContent(`records/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`, signal, async (response) => {
-          const observedVersion = contentVersion(response);
-          let value: JsonValue;
-          try { value = parseJsonText(await response.text()); }
-          catch { throw new ContentReadError("CONTENT_INVALID"); }
-          return Object.freeze({ value, contentVersion: observedVersion });
-        });
-      })();
+      return readContent(`records/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`, signal, async (response) => {
+        const observedVersion = contentVersion(response);
+        let value: JsonValue;
+        try { value = parseJsonText(await response.text()); }
+        catch { throw new ContentReadError("CONTENT_INVALID"); }
+        return Object.freeze({ value, contentVersion: observedVersion });
+      });
     },
     resource(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentResource> {
       segment(namespace); resourceKey(key);
       const signal = readOptions(options);
       if (signal?.aborted || lifetimeSignal.aborted) return Promise.reject(new ContentReadError("CONTENT_CANCELLED"));
-      return (async () => {
-        return readContent(`resources/${encodeURIComponent(namespace)}/${encodeResourceKey(key)}`, signal, async (response) => {
-          const observedVersion = contentVersion(response);
-          const mime = response.headers.get("content-type");
-          if (!mime) throw new ContentReadError("CONTENT_INVALID");
-          return Object.freeze({ bytes: Uint8Array.from(new Uint8Array(await response.arrayBuffer())), mime, contentVersion: observedVersion });
-        });
-      })();
+      return readContent(`resources/${encodeURIComponent(namespace)}/${encodeResourceKey(key)}`, signal, async (response) => {
+        const observedVersion = contentVersion(response);
+        const mime = response.headers.get("content-type");
+        if (!mime) throw new ContentReadError("CONTENT_INVALID");
+        return Object.freeze({ bytes: Uint8Array.from(new Uint8Array(await response.arrayBuffer())), mime, contentVersion: observedVersion });
+      });
     },
   });
+}
+
+function contentOrigin(value: string | URL): URL {
+  let origin: URL;
+  try { origin = new URL(value); } catch { throw new TypeError("Invalid Content origin"); }
+  if ((origin.protocol !== "http:" && origin.protocol !== "https:") || origin.username || origin.password || origin.search || origin.hash || origin.pathname !== "/") {
+    throw new TypeError("Invalid Content origin");
+  }
+  return origin;
+}
+
+/** Desktop bearer-bound client. The token remains mandatory. */
+export function createBoundContentClient(access: BoundContentAccess, lifetimeSignal: AbortSignal): ContentClient {
+  if (access === null || typeof access !== "object" || !abortSignal(lifetimeSignal) || typeof access.installationId !== "string" || access.installationId.length === 0 || typeof access.token !== "string" || access.token.length === 0) {
+    throw new TypeError("Invalid bound Content access");
+  }
+  const origin = contentOrigin(access.origin);
+  return createContentClient({
+    installationId: access.installationId,
+    base: new URL(`_lr/v1/games/${encodeURIComponent(access.installationId)}/`, origin),
+    headers: Object.freeze({ Authorization: `Bearer ${access.token}` }),
+  }, lifetimeSignal);
+}
+
+/** PWA same-origin client. It never manufactures or sends LoomRealm bearer material. */
+export function createSameOriginContentClient(access: SameOriginContentAccess, lifetimeSignal: AbortSignal): ContentClient {
+  if (access === null || typeof access !== "object" || Object.keys(access).length !== 1 || !abortSignal(lifetimeSignal)) {
+    throw new TypeError("Invalid same-origin Content access");
+  }
+  segment(access.installationId);
+  if (typeof location !== "object" || (location.protocol !== "http:" && location.protocol !== "https:")) {
+    throw new TypeError("Same-origin Content requires an HTTP(S) realm");
+  }
+  const origin = contentOrigin(`${location.origin}/`);
+  return createContentClient({
+    installationId: access.installationId,
+    base: new URL(`_lr/v1/games/${encodeURIComponent(access.installationId)}/`, origin),
+    headers: Object.freeze({}),
+  }, lifetimeSignal);
 }

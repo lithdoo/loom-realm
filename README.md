@@ -10,12 +10,12 @@ LoomRealm 是将逻辑游戏 Runtime 与平台物理组合分离的模块化游�
 packages/     通用运行框架、角色与协议实现
 game-libs/    可复用的具体游戏业务库（Map）
 examples/     具体游戏和合法的本地兼容性示例
-apps/         Desktop / 后续 PWA 物理产品组合
+apps/         Desktop / PWA 物理产品组合
 tools/        导入、fixture 和开发工具
 doc/          唯一 VitePress 文档站源目录
 ```
 
-依赖方向：`examples → game-libs → framework public author APIs`。跨模块 ABI 以契约为准；尚欠的 M11/M14/M15 当期资格、地形 RGSS 保真和 M16/M17 仅在路线图追踪，不在 README 维护另一个实时 PASS 表。
+依赖方向：`examples → game-libs → framework public author APIs`。跨模块 ABI 以契约为准；尚欠资格、地形 RGSS 保真以及 M16/M17 的 exact-HEAD 状态仅在路线图与对应 qualification ledger 追踪，不在 README 维护另一个实时 PASS 表。
 
 ## 本地文档检查
 

@@ -1,78 +1,136 @@
 # PWA Game Launcher / Worker Subsystem Runner Profile v1
 
 > 层级：正式契约 / PWA Platform Profile  
-> 状态：Active / Normative  
+> 状态：Active / Normative / Implementation Frozen；M16/M17 implemented，same-HEAD qualification 由仓库根命令判定  
 > Profile Version：1  
-> 稳定程度：Stabilizing；Realm State slice pre-implementation / physical profile not frozen / not qualified  
-> 主要定义：PWA Launcher-owned Game Entry consumption、PWA Launch Manifest、完整 PREPARE LaunchPlan/Main+Realm State prepared projections、Dedicated Worker RuntimeHosting、Host-owned Worker Runner、Runtime Control MessagePort 与动态 Data Port provisioning  
-> 依赖：[Game Package v1](./game-package-v1.md)、[Realm State v1](./realm-state-v1.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)、[Renderer Data Profile v1](./renderer-data-profile-v1.md)  
-> 最近复核：2026-10-05
+> 最近复核：2026-10-07  
+> 依赖：[Game Package v1](./game-package-v1.md)、[Realm State v1](./realm-state-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)、[Renderer Data Profile v1](./renderer-data-profile-v1.md)、[Content API v1](./content-api-v1.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
+本 Profile 已冻结 PWA v1 的 runtime-product physical profile。当前实现入口与自动资格范围见路线图及 PWA 资格说明；任何 PASS 仍只对实际执行根命令的 exact HEAD 成立。
+
 核心原则：
 
-> **PWA Launcher 是 PWA Runtime-product Game Entry consumer：它内部使用 `@loomrealm/game-package` 验证 common Game Entry，再与 `launch.pwa.json` 完成 exact join / executable preflight，并分别投影 Main 的 `LogicalGameBootstrap` 与 Realm State 的 `PreparedRealmStateDefinition`。Realm State READY 后才允许 Worker business Runtime side effect。Host-owned Worker Runner 是 Dedicated Worker entry，只安装 Runtime-scoped RealmStateClient，不拥有 RealmStateAuthority。**
-
-Realm State条款同步 future logical/ownership boundary；在 Realm State v1 formal freeze 与独立 PWA State qualification前，不得把现有 PWA Runtime/Data证据解释为 State 已实现。
+> **Browser Window 只拥有 presentation/browser-only adapter；Main 与 RealmStateAuthority 共置独立 Session Worker；每个 Subsystem Runtime 位于独立 Dedicated Worker；Service Worker 只实现 Content/executable/runtime-info 的 browser physical boundary，不成为 application authority。**
 
 ---
 
-## 1. Scope
+## 1. Normative Physical Profile
+
+PWA v1 MUST 使用：
 
 ```text
-PWA game source / installation
-        ↓
-PWA Launcher PREPARE
-    ├── @loomrealm/game-package
-    │       parse/validate Game Entry including optional state document
-    ├── launch.pwa.json validation
-    ├── exact Subsystem key-set join
-    ├── resolve all PWA modules
-    ├── origin/security/capability preflight
-    ├── immutable PwaLaunchPlan
-    ├── immutable LogicalGameBootstrap
-    └── immutable PreparedRealmStateDefinition
-        ↓
-PreparedPwaGame
-        ↓
-Session composition installs plan
-→ construct RealmStateAuthority from prepared State
-→ optional validated Load current overrides
-→ Realm State READY
-        ↓
-apps/pwa installs Main
-        ↓
-Main launch(subsystemKey)
-        ↓
-plan-bound PWA RuntimeHosting
-        ↓
-Host-owned Worker Runner
-→ install Runtime-scoped RealmStateClient
-        ↓
-selected Definition Module
+Browser Window
+├── Renderer
+├── Input source
+├── Viewport source
+├── Web Presentation / DOM
+├── Service Worker readiness
+└── Window-side platform adapter
+
+Session Worker (Dedicated Worker)
+├── Main
+├── RealmStateAuthority
+├── session-scoped PwaPlatform core
+├── frozen PwaLaunchPlan
+├── RuntimeHosting
+└── Data / Control provisioning
+
+Dedicated Subsystem Worker × N
+└── Host-owned Worker Runner → selected Subsystem Definition
+
+Service Worker
+├── /_lr/v1/games/...                 Content API
+├── /_lr/internal/executables/...     private executable route
+└── /_lr/internal/runtime-info        private generation probe
 ```
 
-```text
-PREPARE valid
-!= Realm State READY
-!= Worker created
-!= module imported
-!= connected
-!= identified
-!= ready
-!= Data Connection exists
-```
+`Main` 与 `RealmStateAuthority` 只物理共置；logical authority MUST 保持分离。
 
-Business Worker side effect requires PREPARE complete + Realm State READY once the Realm State slice is implemented。
+PWA v1 MUST NOT 将 Main 或 RealmStateAuthority 放入 Browser Window event loop 作为正式 realization。
 
-Product application MUST NOT be required to call `@loomrealm/game-package` before invoking PWA Launcher。
+PWA v1 不要求浏览器为 Worker 提供独立 OS process；要求的是独立 Worker execution context / event loop。
 
 ---
 
-## 2. PWA Launch Manifest
+## 2. Product / Launcher Ownership
 
-Current installation convention：
+标准调用链：
+
+```text
+Window product bootstrap
+→ select complete installationId
+→ create Session Worker
+→ Session Worker creates session-scoped PwaPlatform
+→ PwaPlatform.prepareGame({ installationId })
+→ @loomrealm/game-launcher-pwa
+→ @loomrealm/game-package
+→ immutable PreparedPwaGame
+→ construct RealmStateAuthority
+→ Main
+```
+
+PWA Launcher MUST own：
+
+```text
+Game Entry acquisition from the selected published installation
+launch.pwa.json parsing/validation
+exact Game ↔ PWA subsystem key-set join
+Executable Index resolution/preflight
+immutable PwaLaunchPlan
+LogicalGameBootstrap projection
+PreparedRealmStateDefinition projection
+Worker Runner plan-consumer integration
+```
+
+PWA Launcher MUST NOT own：
+
+```text
+Browser Window lifecycle
+installation import/write/delete
+Service Worker registration/update
+Main Frame/Runtime authority
+Realm State business authority
+Renderer authority
+DataAuthority generation/profile
+Content semantics
+```
+
+Product application MUST NOT manually call `@loomrealm/game-package` before PWA Launcher。
+
+---
+
+## 3. Canonical Prepared Input
+
+Runtime PREPARE consumes a **published installation**, not an external file/ZIP/network source。
+
+Canonical product-facing request：
+
+```ts
+interface PwaPrepareGameRequestV1 {
+  readonly installationId: string;
+}
+```
+
+`installationId` MUST identify one persistent installation whose registry state is `complete` and current。
+
+Launcher obtains from that installation：
+
+```text
+Game Entry
+launch.pwa.json
+Executable Index
+required installation generation/currentness facts
+```
+
+Installer/acquisition is defined by the PWA product design and is upstream of this Profile。
+
+---
+
+## 4. Launch Manifest
+
+Installation convention：
 
 ```text
 launch.pwa.json
@@ -92,88 +150,24 @@ interface PwaSubsystemBindingV1 {
 }
 ```
 
-示例：
+`module` selects one executable logical module in the selected installation。
 
-```json
-{
-  "formatVersion": 1,
-  "subsystems": [
-    {
-      "key": "loom.map",
-      "module": "subsystems/pwa/loom-map/subsystem.mjs"
-    },
-    {
-      "key": "loom.battle",
-      "module": "subsystems/pwa/loom-battle/subsystem.mjs"
-    }
-  ]
-}
+Manifest MUST NOT declare：
+
+```text
+Worker Runner URL/options
+arbitrary absolute/external executable URL
+MessagePort/bootstrap credential
+Runtime Control/Data/Realm State port
+Service Worker/CSP policy
+storage path/OPFS handle
 ```
-
-该 manifest 是 PWA executable binding，不是 Game logical topology、Realm State Record declaration 或普通 business configuration。
 
 ---
 
-## 3. Manifest Authority Boundary
+## 5. Exact Key-set Join
 
-PWA Launch Manifest MAY 声明：
-
-```text
-subsystem key → selected-installation PWA Definition Module
-```
-
-MUST NOT 声明/替换 Host-owned policy：
-
-```text
-Worker Runner entry
-arbitrary Worker constructor URL/options
-external module URL
-Worker credentials
-bootstrap MessagePort
-Runtime Control Port
-Data MessagePort
-Realm State endpoint/Port/credential/persistence policy
-Service Worker authority
-same-origin policy
-CSP policy
-browser feature flags
-```
-
-Realm State namespace/key/value MUST remain Game Package/business facts，不得进入 PWA manifest成为 physical binding配置。
-
----
-
-## 4. Game Entry Consumption / Prepared Projection
-
-PWA Launcher MUST own Runtime-product common Game validation：
-
-```text
-obtain Game Entry text/value from PWA installation/source abstraction
-→ @loomrealm/game-package parseGameEntryV1 / validateGameEntryV1 semantics
-→ ValidatedGameEntryV1 internal PREPARE fact
-```
-
-`ValidatedGameEntryV1` MAY exist inside Launcher implementation but MUST NOT be required as product application input and MUST NOT be passed to Main。
-
-Game Entry acquisition mechanism（Fetch/installation registry/OPFS etc.）is Platform/product input plumbing，不改变 Game Package schema authority。
-
-Launcher owns two logical projections：
-
-```text
-ValidatedGameEntryV1.initial/subsystems
-    → LogicalGameBootstrap
-
-ValidatedGameEntryV1.state
-    → PreparedRealmStateDefinition
-```
-
-`RealmStateGameDefinitionV1` is a Game Package document type and MUST NOT be passed directly to RealmStateAuthority as runtime bootstrap ABI。Prepared State MUST be detached/immutable/platform-neutral。
-
----
-
-## 5. Key-set Join
-
-Before any Worker creation：
+Before any business Worker creation：
 
 ```text
 keys(GameEntry.subsystems)
@@ -181,37 +175,33 @@ keys(GameEntry.subsystems)
 keys(PwaLaunchManifest.subsystems)
 ```
 
-Missing/extra/duplicate binding MUST fail closed in PREPARE。
+Missing、extra、duplicate binding MUST fail PREPARE。
 
-Runtime identity始终是 Game `key`；Worker id、module URL/path不得成为第二 identity。
-
-Realm State Record identities不参与 executable key-set join。
+Runtime identity remains Game `subsystemKey`; Worker id、module URL、logical module path MUST NOT become a second Runtime identity。
 
 ---
 
-## 6. PWA `module`
+## 6. Executable Logical Module Syntax
 
-Manifest `module` 是 selected installation namespace 内 executable logical module path，不是 arbitrary network URL。
+Manifest `module` MUST：
 
-MUST：
+1. be non-empty ASCII；
+2. use `/` separators；
+3. not start/end with `/`；
+4. contain no empty、`.`、`..` segment；
+5. contain no `\\`、`:`、NUL/control character；
+6. have UTF-8 length ≤ 512 bytes；
+7. end in `.mjs`；
+8. use segments matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`。
 
-1. non-empty；
-2. ASCII；
-3. `/` separator；
-4. 不以 `/` 开始/结束；
-5. 无空、`.`、`..` segment；
-6. 无 `\\`、`:`、NUL/control char；
-7. UTF-8 length ≤ 512 bytes；
-8. `.mjs` suffix；
-9. 每 segment匹配 `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`。
-
-Reject：
+Reject examples：
 
 ```text
 ../subsystem.mjs
 /subsystem.mjs
 https://example/subsystem.mjs
 blob:https://...
+data:text/javascript,...
 file:///...
 foo\\subsystem.mjs
 foo/subsystem.js
@@ -219,461 +209,620 @@ foo/subsystem.js
 
 ---
 
-## 7. PWA Resolution
+## 7. Frozen Executable Graph Rule
+
+PWA v1 installed business executable MUST form an install-time enumerable ESM graph。
+
+Allowed static specifier form：
+
+```text
+./x.mjs
+../shared/x.mjs
+```
+
+After URL resolution, every dependency MUST remain inside the current installation executable namespace and MUST exist in the Executable Index。
+
+PWA v1 MUST reject installed executable graphs containing：
+
+```text
+bare package specifier       @scope/pkg / package-name
+absolute app path            /modules/x.mjs
+external URL                 https://...
+blob:/data: URL
+non-enumerable dynamic import expression
+runtime npm/package resolution dependency
+runtime import-map dependency required for business graph correctness
+```
+
+Build/install tooling MUST materialize/bundle/resolve such dependencies before installation instead of creating a PWA runtime package resolver。
+
+Executable edge discovery is a security boundary and MUST use a real ECMAScript
+module lexer/parser. Text regular expressions are not conforming. The install
+pipeline MUST separately:
+
+```text
+parse module source
+→ enumerate static imports, export-from edges, and literal dynamic imports
+→ reject non-literal dynamic imports and forbidden specifier classes
+→ resolve relative logical modules
+→ require graph closure inside the installation namespace
+→ freeze the Executable Index
+```
+
+---
+
+## 8. Executable Resolution
 
 Resolver MUST：
 
 ```text
-validate logical path
-→ resolve through current validated installation registry
-→ require module belongs to selected installation
-→ require same-origin / trusted-installation execution policy
-→ reject arbitrary external URL substitution
-→ create host-private ResolvedPwaSubsystemModule
+validate logical module
+→ lookup current complete installation
+→ lookup Executable Index entry
+→ require entry belongs to selected installation
+→ require expected MIME/integrity/currentness
+→ derive private same-origin hierarchical identity
 ```
 
-Conceptual：
+Canonical route family：
+
+```text
+/_lr/internal/executables/{installationId}/{logicalModule...}
+```
+
+Conceptual host-private plan entry：
 
 ```ts
 interface ResolvedPwaSubsystemModuleV1 {
   readonly installationId: string;
   readonly subsystemKey: string;
   readonly logicalModule: string;
-  readonly moduleUrl: string; // host-private
+  readonly moduleUrl: string;
 }
 ```
 
-`moduleUrl` MUST NOT enter Game Entry、LogicalGameBootstrap、PreparedRealmStateDefinition、Main、Realm State values、Renderer、Frame、Render、Data 或 business payload。
+`moduleUrl` MUST NOT enter Game Entry、LogicalGameBootstrap、Main、Realm State values、Renderer、Frame、Render、Data or business payload。
+
+`blob:` MUST NOT be the installed executable identity。
 
 ---
 
-## 8. Immutable PwaLaunchPlan
+## 9. Immutable PREPARE
 
-Freeze only after：
+PREPARE MUST complete all of：
 
 ```text
+installation complete/current
 Game Entry valid
-PWA manifest valid
+launch.pwa.json valid
 exact key-set join valid
-all logical modules valid
-all modules resolve to selected installation
+all selected modules syntactically valid
+all selected modules present in Executable Index
+required executable graph preflight valid
 Host-owned Worker Runner entry available
 required Worker/MessageChannel capabilities available
-current security policy permits execution
-LogicalGameBootstrap projected
-PreparedRealmStateDefinition projected
+accepted Service Worker generation valid
+LogicalGameBootstrap projected/frozen
+PreparedRealmStateDefinition projected/frozen
+PwaLaunchPlan frozen
 ```
 
-Before freeze：
+Before PREPARE completes：
 
 ```text
-MUST NOT create business Runtime Worker
+MUST NOT create business Subsystem Worker
 MUST NOT import business Definition Module
 MUST NOT establish Runtime Control
 ```
 
-普通 launch path只按 `subsystemKey` lookup frozen plan。
-
----
-
-## 9. Main / Realm State Prepared Projections
-
-Main-facing logical projection：
+Prepared result：
 
 ```ts
-interface LogicalGameBootstrap {
-  readonly subsystemKeys: readonly string[];
-  readonly initial: {
-    readonly subsystemKey: string;
-    readonly input: JsonValue;
-  };
-}
-```
-
-Realm State sibling projection：
-
-```ts
-interface PreparedLogicalGame {
-  readonly main: LogicalGameBootstrap;
+interface PreparedPwaGame {
+  readonly logicalBootstrap: LogicalGameBootstrap;
   readonly state: PreparedRealmStateDefinition;
+  readonly launchPlan: PwaLaunchPlan;
 }
 ```
 
-`LogicalGameBootstrap` MUST preserve Game logical semantics and MUST NOT contain：
-
-```text
-formatVersion
-ValidatedGameEntryV1 brand
-Realm State Records
-module/logicalModule/moduleUrl
-PwaLaunchPlan
-Worker/Port/Runner material
-```
-
-`PreparedRealmStateDefinition` MUST contain only Realm State prepared baseline facts and MUST NOT contain：
-
-```text
-Game Package formatVersion/document brand
-PwaLaunchPlan/module/moduleUrl
-Runtime revision/version
-Frame/Activation/InputTarget
-```
-
-Prepared PWA result MUST NOT be released until plan + both projections are complete/immutable。
-
-Realm State physical binding profile is separately pending；prepared projection MUST NOT prematurely require MessagePort or another universal transport。
+Main receives only the logical bootstrap and Main-facing platform capabilities；Main MUST NOT receive `PwaLaunchPlan`。
 
 ---
 
-## 10. RuntimeHosting Boundary
+## 10. Service Worker Generation Fact
 
-Main-facing request：
+Window accepts a Service Worker generation before creating a Session。
 
-```text
-launch(subsystemKey, LaunchAttemptMaterial)
+Normative fact：
+
+```ts
+interface PwaServiceWorkerGenerationV1 {
+  readonly protocolVersion: 1;
+  readonly buildId: string;
+  readonly generation: string;
+}
 ```
 
-PWA RuntimeHosting：
+`generation` is an opaque product-owned currentness value, not a Game/Session/Runtime identity。
+
+It MUST identify the emitted PWA product behavior, including every transitive
+source that can affect Window, Session Worker, Runner, or Service Worker
+artifacts. Hashing only `apps/pwa/src`, or using a mutable deployment label, is
+insufficient. A deterministic placeholder build followed by artifact hashing
+and final generation injection is one conforming realization.
+
+Private endpoint：
+
+```http
+GET /_lr/internal/runtime-info
+```
+
+Response logical model：
+
+```ts
+interface PwaRuntimeInfoV1 {
+  readonly protocolVersion: 1;
+  readonly buildId: string;
+  readonly generation: string;
+}
+```
+
+Session Worker and every Subsystem Runner MUST fetch this endpoint and match the Window-accepted generation before PREPARE/business executable import respectively。
+
+Mismatch/probe failure MUST fail closed before first business Runtime side effect。
+
+---
+
+## 11. Session Bootstrap ABI v1
+
+Window → Session Worker bootstrap is product-private Structured Clone, but its v1 schema is frozen：
+
+```ts
+interface PwaSessionBootstrapV1 {
+  readonly formatVersion: 1;
+  readonly sessionEpoch: string;
+  readonly installationId: string;
+  readonly expectedServiceWorker: PwaServiceWorkerGenerationV1;
+  readonly windowBridgePort: MessagePort;
+}
+```
+
+Rules：
 
 ```text
-lookup subsystemKey in PwaLaunchPlan
+closed object schema
+unknown field → reject
+formatVersion != 1 → reject
+empty/malformed sessionEpoch or installationId → reject
+missing/non-MessagePort windowBridgePort → reject
+bootstrap is single-use
+```
+
+`sessionEpoch` is Host-generated opaque currentness material for one top-level document Session。It MUST NOT become Main Runtime identity or business data。
+
+Session Worker sequence：
+
+```text
+validate bootstrap
+→ probe runtime-info and match expectedServiceWorker
+→ open selected published installation
+→ create PwaPlatform
+→ PREPARE
+→ construct RealmStateAuthority
+→ Realm State READY
+→ run Main
+```
+
+---
+
+## 12. Window Bridge ABI v1
+
+`windowBridgePort` is **provisioning/lifecycle only**。It MUST NOT carry Renderer Control/Data application messages。
+
+Session Worker → Window messages：
+
+```ts
+interface PwaInstallRendererControlV1 {
+  readonly formatVersion: 1;
+  readonly type: "renderer-control/install";
+  readonly requestId: string;
+  readonly sessionEpoch: string;
+  readonly rendererControlToken: string;
+  readonly port: MessagePort;
+}
+
+interface PwaInstallRendererDataV1 {
+  readonly formatVersion: 1;
+  readonly type: "renderer-data/install";
+  readonly requestId: string;
+  readonly sessionEpoch: string;
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+  readonly connectionId: string;
+  readonly port: MessagePort;
+}
+
+interface PwaRevokeRendererDataV1 {
+  readonly formatVersion: 1;
+  readonly type: "renderer-data/revoke";
+  readonly requestId: string;
+  readonly sessionEpoch: string;
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+  readonly connectionId: string;
+}
+```
+
+Window → Session Worker acknowledgement：
+
+```ts
+interface PwaWindowBridgeResultV1 {
+  readonly formatVersion: 1;
+  readonly type: "install/result";
+  readonly requestId: string;
+  readonly sessionEpoch: string;
+  readonly ok: boolean;
+  readonly errorCode?: "WINDOW_NOT_CURRENT" | "INSTALL_REJECTED";
+}
+```
+
+`requestId` MUST be unique inside one `sessionEpoch`。Unknown/stale epoch、duplicate result、wrong request type MUST be ignored/rejected and MUST NOT install current authority。
+
+`RendererControlBinding.acquire()` and Renderer Data provisioning MAY resolve only after matching Window acknowledgement。
+
+---
+
+## 13. RuntimeHosting Boundary
+
+Main-facing request remains platform-neutral：
+
+```text
+RuntimeHosting.launch({ subsystemKey, bootstrapToken }, signal)
+```
+
+PWA RuntimeHosting MUST：
+
+```text
+lookup subsystemKey in frozen PwaLaunchPlan
 → create Worker supervision record
-→ establish Runtime Control/provisioning capability
-→ create Dedicated Worker at Host-owned Worker Runner entry
+→ create dedicated Runtime Control MessageChannel
+→ create dedicated Realm State MessageChannel
+→ create dedicated Runner provisioning MessageChannel
+→ create Host-owned generic Worker Runner
+→ transfer one endpoint of each private plane in PwaRunnerBootstrapV1
+→ expose Main side as HostedRuntime
 ```
 
-Main MUST NOT pass GameEntry、PreparedRealmStateDefinition、Realm State values/revision、module URL、Worker options或 MessagePort。
-
-RuntimeHosting owns physical Worker facts；it does not own Frame/Activation/InputTarget、Realm State OCC、Authority revision或 Session terminal policy。
+Main MUST NOT pass module URL、Worker options、MessagePort、installationId or Service Worker material。
 
 ---
 
-## 11. Host-owned Worker Runner
+## 14. Runner Bootstrap ABI v1
 
-Dedicated Worker constructor target MUST be Host-owned trusted Worker Runner，不是 game-selected Definition Module。
+Session Worker → Subsystem Worker bootstrap：
 
-Runner：
+```ts
+interface PwaRunnerBootstrapV1 {
+  readonly formatVersion: 1;
+  readonly sessionEpoch: string;
+  readonly installationId: string;
+  readonly expectedServiceWorker: PwaServiceWorkerGenerationV1;
+  readonly subsystemKey: string;
+  readonly bootstrapToken: string;
+  readonly logicalModule: string;
+  readonly runtimeControlPort: MessagePort;
+  readonly realmStatePort: MessagePort;
+  readonly provisioningPort: MessagePort;
+}
+```
+
+Rules：
 
 ```text
-receive/validate Platform bootstrap
-→ verify subsystemKey / selected binding
-→ obtain composition-owned Runtime-scoped RealmStateClient binding when Realm State slice is enabled
-→ import exact resolved Definition Module
-→ validate default export SubsystemDefinitionFactory
-→ construct RuntimeControlBinding
-→ construct SubsystemDataBinding
-→ construct ContentClient
-→ install RealmStateClient into @loomrealm/subsystem/host scope
+closed schema
+single-use
+subsystemKey/logicalModule must exactly match frozen PwaLaunchPlan
+bootstrapToken must match current Launch Attempt
+all transferred Ports are dedicated to this Runtime
+invalid bootstrap → terminate Worker before business import
+```
+
+Runner sequence：
+
+```text
+validate bootstrap
+→ fetch runtime-info
+→ require expected SW generation
+→ create RuntimeControlBinding
+→ create Runtime-scoped RealmStateClient from realmStatePort
+→ create SubsystemDataBinding backed by provisioningPort
+→ create same-origin PWA ContentClient for installationId
+→ import exact private executable URL derived from logicalModule
+→ validate default SubsystemDefinitionFactory
 → runSubsystem(...)
 ```
 
-Definition Module 不自己寻找 bootstrap Port、不读取 manifest/Game State document、不创建第二 Runtime/RealmStateAuthority。
-
-Runner MUST NOT require Frame/Activation to authorize `state.commit()` and MUST NOT interpret State binding loss as Main Runtime/Session failure by itself。
+Business Definition Module is never the Worker constructor entry。
 
 ---
 
-## 12. Definition Module ABI
+## 15. Runner Provisioning ABI v1
 
-Selected module MUST be `.mjs` ESM with default export accepted as `SubsystemDefinitionFactory` by `@loomrealm/subsystem/host`。
+`provisioningPort` is Platform-private and MUST NOT carry Runtime Control、Renderer Data application payload、Realm State RPC or business RPC。
 
-Hostra/PWA MAY choose different artifacts，只要 author-facing behavior、formal protocol outcome 与 cross-platform business semantics 等价。
+Session Worker → Runner：
 
-Realm State author surface, when implemented, is `scope.state` from `@loomrealm/subsystem`; Definition Module MUST NOT import Authority/Launcher/physical binding internals。
+```ts
+interface PwaInstallSubsystemDataV1 {
+  readonly formatVersion: 1;
+  readonly type: "data/install";
+  readonly requestId: string;
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+  readonly connectionId: string;
+  readonly port: MessagePort;
+}
 
----
+interface PwaRevokeSubsystemDataV1 {
+  readonly formatVersion: 1;
+  readonly type: "data/revoke";
+  readonly requestId: string;
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+  readonly connectionId: string;
+}
 
-## 13. Runtime Control MessagePort
-
-PWA Host creates/provides Runtime Control MessagePort binding。
-
-Application carrier：
-
-```text
-postMessage(string)
-= one UTF-8 JSON text string
-= one JSON-RPC message
+interface PwaRunnerDataResultV1 {
+  readonly formatVersion: 1;
+  readonly type: "data/result";
+  readonly requestId: string;
+  readonly subsystemKey: string;
+  readonly connectionId: string;
+  readonly ok: boolean;
+}
 ```
 
-Structured Clone only for Platform bootstrap/Port transfer。
+Runner MUST fence stale S/G/P and MUST NOT mint generation/profile。
 
-```text
-Worker created != connected != identified != ready
-ready != Data Port exists
-ready != Realm State authority created
-```
-
-Realm State READY is a sibling Session bootstrap prerequisite that already exists before business Worker side effect；it is not derived from Control ready。
-
-Control loss / Worker unexpected termination进入 Main-owned Runtime failure；same-attempt Control reconnect不存在。
-
-Realm State requests MUST NOT be multiplexed into Runtime Control RPC merely because both may use MessagePort primitives。
-
----
-
-## 14. Worker Provisioning Path
-
-Worker Runner MUST have Host-owned Data provisioning path distinct from Runtime Control/Data application carrier，typically dedicated bootstrap/provisioning MessagePort。
-
-It MAY carry：
-
-```text
-fresh Data endpoint Port for current S/G/P
-revoke/supersede physical Data material
-```
-
-It is not Subsystem Control、Frame、Renderer Control、Renderer Data application carrier、Realm State protocol、business RPC。
-
-Realm State physical binding MAY later use same-Worker direct object semantics or a separate private MessagePort/binding；this profile intentionally does not force it through Data provisioning。
-
----
-
-## 15. Data Provisioning
-
-For current `DataAuthority(S,G,P)`：
-
-```text
-PWA DataConnectionBroker
-→ create MessageChannel
-→ bind endpoints to current Session/Renderer/S/G/P
-→ transfer one endpoint to Renderer
-→ transfer one endpoint through Worker provisioning path
-→ Runner validates own S/G/P
-→ MessageCarrier
-→ SubsystemDataBinding yields {G,P,carrier}
-```
-
-Broker/Launcher MUST NOT mint generation/profile。
-
-same S/G/P reconnect uses fresh MessageChannel；stale/duplicate transferred Port cannot become current。
+The broker MUST treat provisioning as one transaction. Only matching
+acknowledgements for the same request/connection identity may commit current.
+Reject, timeout, bridge loss, Runtime termination, authority replacement, or a
+stale completion MUST revoke both endpoints before a newer channel may commit.
 
 Transfer/install failure：
 
 ```text
-!= Runtime failure
+!= Runtime failure by itself
 != Frame unwind
 != DataAuthority mutation
-!= Realm State reset/client replacement
+!= Realm State reset
 ```
-
-Realm State Record identity/revision/version MUST NOT use Data generation/profile。
 
 ---
 
-## 16. Realm State Binding / Failure Boundary
+## 16. MessagePort Planes
 
-Realm State logical flow：
-
-```text
-PREPARE projects PreparedRealmStateDefinition
-→ Session composition constructs one RealmStateAuthority
-→ optional validated Load current seed
-→ Realm State READY
-→ create Runtime-scoped RealmStateClient binding
-→ Worker Runner installs client before business Definition observes scope
-```
-
-Physical placement MAY be：
+PWA v1 MUST keep distinct：
 
 ```text
-RealmStateAuthority + Main in same Worker
-RealmStateAuthority in another trusted Worker
-private MessagePort/binding between authority and Runtime Worker
-other bounded PWA-private realization
+Window ↔ Session Worker
+    Window bridge / provisioning
+    Renderer Control application carrier
+    Renderer Data application carrier(s)
+
+Session Worker ↔ Subsystem Worker
+    Runtime Control application carrier
+    Realm State private binding
+    Runner provisioning
+    Renderer Data application carrier(s)
 ```
 
-This profile MUST NOT require physical symmetry with Hostra。
+A single mega-channel multiplexing these planes is forbidden。
 
-Realm State binding loss：
-
-```text
-→ affected old State binding/client terminal according to State profile
-→ old subscriptions terminal(binding-terminal)
-→ no automatic Runtime failure
-→ no Frame unwind
-→ no Session terminal
-→ no RealmStateAuthority reset
-→ no transparent old-client reattach
-```
-
-If a physical profile later supports recovery：
-
-```text
-fresh logical RealmStateClient binding
-→ fresh subscribe
-→ fresh baseline
-```
-
-RealmStateAuthority fatal：
-
-```text
-→ report Session-fatal condition
-→ Main / Session lifecycle owner commits Session terminal/unwind
-→ PWA composition performs physical cleanup
-```
-
-State subscription listener delivery MUST occur outside Authority serialized lane；sync throw/rejected thenable remains Runtime-local, and callback reentrancy MUST NOT deadlock Authority。
+Application protocol carriers continue to expose `MessageCarrier` and preserve their existing wire contracts。
 
 ---
 
-## 17. Worker Supervision / Termination
+## 17. Realm State Physical Profile
+
+PWA v1 physical placement is frozen：
+
+```text
+Session Worker
+├── Main
+└── RealmStateAuthority
+
+Subsystem Worker
+└── Runtime-scoped RealmStateClient
+        ↕ dedicated private MessagePort
+Session Worker RealmStateAuthority
+```
+
+This is physical co-location only；Main and Realm State authority semantics remain separate。
+
+Realm State binding loss alone MUST NOT imply Runtime/Frame/Session failure。
+
+RealmStateAuthority fatal is Session-fatal only through the existing Main/Session lifecycle owner chain。
+
+---
+
+## 18. Content Binding in Runner
+
+Subsystem author surface remains：
+
+```text
+scope.content.record(...)
+scope.content.resource(...)
+```
+
+PWA Runner MUST use same-origin Content Fetch：
+
+```text
+/_lr/v1/games/{installationId}/...
+```
+
+PWA Runner MUST NOT require Desktop bearer token distribution。
+
+Response/status/version/MIME/integrity semantics remain entirely governed by Content API v1。
+
+Content route builder、physical URL、installation storage handle MUST NOT enter business scope beyond the existing `ContentClient` capability。
+
+---
+
+## 19. Definition Module ABI
+
+Selected module MUST be `.mjs` ESM and default-export a value accepted as `SubsystemDefinitionFactory` by `@loomrealm/subsystem/host`。
+
+Definition Module MUST NOT：
+
+```text
+read launch.pwa.json
+read Game Entry directly
+find bootstrap Ports through ambient globals
+construct RealmStateAuthority
+construct a second Runtime
+import PWA Platform internals
+```
+
+---
+
+## 20. Worker Supervision
 
 Supervisor observes：
 
 ```text
 Worker creation failure
-Worker error/termination
+bootstrap validation failure
+module load/ABI failure
+Worker error/unexpected termination
 Main-requested termination
-bounded force termination result
+actual termination observation
 ```
 
-`stopped` only from actual Worker termination observation。
+Unexpected Subsystem Worker termination → Runtime failure through Main owner chain。
 
-Unexpected Worker termination → Runtime failure through Main-owned owner chain。
-
-Realm State binding loss alone MUST NOT terminate the Worker。RealmStateAuthority fatal only becomes product termination after Main/Session lifecycle owner commits Session terminal。
-
-v1 MUST NOT automatic restart；new Runtime = fresh Launch Attempt + Worker + Control lifetime + fresh Runtime-scoped State client binding。
+v1 MUST NOT automatically restart a Runtime。A new Runtime means a fresh Launch Attempt + Worker + Control lifetime + Realm State client binding。
 
 ---
 
-## 18. Browser / Host Policy
+## 21. Service Worker / Reload Currentness
 
-Host-owned PWA policy，MUST NOT be arbitrarily overridden by `launch.pwa.json`：
+One Session is pinned to the Service Worker generation accepted at bootstrap。
+
+The accepted worker is `navigator.serviceWorker.controller` captured for the
+current document. An installing or waiting worker is not a controller
+candidate, MUST NOT block the current Session, and MUST NOT replace its pinned
+generation. First installation may take exactly one normal reload path to
+obtain a controller.
+
+PWA v1 MUST NOT use product update hot takeover as normal semantics。
 
 ```text
-Worker constructor options
-Host-owned Runner URL
-CSP/same-origin policy
-Service Worker registration
-bootstrap/provisioning channel encoding
-Realm State physical binding/credential/persistence policy
-resource/capacity/timeouts
-credential material
+G2 may install/wait while Session on G1 runs
+→ current Session remains G1
+→ next fresh Session may accept G2
 ```
 
-Platform config只选择 selected installation 内 business implementation artifact。
+Top-level reload/navigation/BFCache restoration MUST NOT revive old Session material。
 
-Session/PWA composition MAY physically construct/wire Main + RealmStateAuthority，但 MUST NOT interpret Frame/Activation or Realm State business values, and MUST NOT become a generic SessionCoordinator/StateManager authority。
+`pagehide` makes the current `sessionEpoch` non-reusable；`pageshow(persisted)` requires a new epoch、new Session Worker and new bindings。
 
 ---
 
-## 19. Failure Categories / Ownership
+## 22. Failure Categories
 
-At least current platform categories：
+Implementations MUST preserve at least these distinguishable platform failures：
 
 ```text
 PLATFORM_LAUNCH_MANIFEST_INVALID
 PLATFORM_BINDING_MISSING
 PLATFORM_BINDING_UNDECLARED
+INSTALLATION_NOT_COMPLETE
+INSTALLATION_INVALID
+SERVICE_WORKER_NOT_READY
+SERVICE_WORKER_INCOMPATIBLE
+SERVICE_WORKER_GENERATION_MISMATCH
+SESSION_BOOTSTRAP_INVALID
+WINDOW_BRIDGE_REJECTED
 SUBSYSTEM_MODULE_INVALID
 SUBSYSTEM_MODULE_NOT_FOUND
 SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION
+SUBSYSTEM_MODULE_GRAPH_INVALID
 SUBSYSTEM_MODULE_LOAD_FAILED
 SUBSYSTEM_MODULE_ABI_INVALID
 PLATFORM_RUNTIME_UNSUPPORTED
 WORKER_CREATE_FAILED
+WORKER_BOOTSTRAP_INVALID
 WORKER_EXITED_DURING_BOOTSTRAP
 WORKER_EXITED_UNEXPECTEDLY
-PLATFORM_PROVISIONING_UNAVAILABLE
-DATA_PROVISION_INVALID
-DATA_ESTABLISHMENT_FAILED
+PLATFORM_PROVISIONING_FAILED
 ```
 
-Realm State error/evidence categories remain owned by Realm State contract：
-
-```text
-INVALID_REQUEST / LIMIT_EXCEEDED / CONFLICT
-    caller-visible State result
-
-OUTCOME_UNKNOWN
-    caller reconciliation, no auto retry
-
-subscription listener failure
-    Runtime-local containment
-
-State binding loss
-    State binding/client terminal only
-
-RealmStateAuthority fatal
-    Session-fatal report to Main/Session owner
-```
-
-PWA Launcher/Runner/transport MUST NOT reinterpret these as a second Runtime/Session failure state machine。
-
-User-facing errors MUST NOT leak credentials、Port object、Realm State private binding material、unnecessary resolved URL/internal stack。
+Exact public TypeScript error class layout MAY remain package-internal unless another formal contract consumes it, but tests MUST distinguish the failure facts above。
 
 ---
 
-## 20. Conformance
+## 23. Qualification Minimum
 
-Existing PWA Runtime/Data qualification at least：
-
-```text
-launcher accepts Game source without manual Game Package caller step
-Game Entry validation failures occur inside PREPARE
-valid/closed PWA manifest
-missing/duplicate/extra key
-exact Game↔PWA key equality
-module syntax/external-url/origin/install rejection
-all bindings resolved before first Worker creation
-no business module import during PREPARE
-LogicalGameBootstrap contains no document/executable material
-Main launch request contains no GameEntry/module
-Host-owned Worker Runner is constructor entry
-Runner imports exact planned Definition Module
-Runtime Control postMessage(string)
-created != connected != identified != ready
-ready independent from Data offer
-Worker provisioning distinct from Control/Data application protocols
-Data Port binds own S/G/P
-stale/duplicate Port rejected
-same S/G/P fresh MessageChannel reconnect
-provision failure does not fail Runtime/Frame
-unexpected Worker termination fails Runtime
-no automatic restart
-```
-
-Realm State slice requires separate qualification after formal/physical freeze：
+M16 qualification MUST exercise real browser Worker boundaries for：
 
 ```text
-Game State document → PreparedRealmStateDefinition projection
-Prepared State contains no PWA module/Port material
-Realm State READY before first business Worker side effect
-Main launch request contains no State material
-Runner installs Runtime-scoped client but owns no Authority
-state.commit has no Frame/Activation dependency
-State does not use Renderer Data generation/currentness
-State binding loss does not fail Runtime/Session
-Authority fatal report reaches Main/Session owner
-listener failure/reentrancy isolation
-fresh logical binding/subscription/baseline recovery if supported
+SW READY/controller/version gate
+Session bootstrap closed-schema validation
+Session Worker runtime-info generation match/mismatch
+complete PREPARE before Worker side effect
+exact key-set join
+Executable Index lookup
+relative ESM graph resolution
+forbidden bare/external/dynamic graph rejection
+nested Dedicated Worker Runner creation
+Runner bootstrap closed-schema validation
+Runner runtime-info generation match/mismatch
+Runtime Control created/connected/identified/ready distinctions
+real Realm State MessagePort client
+unexpected Worker termination / no auto restart
+Renderer Control Window↔Session Worker establishment
+Window main-thread stall does not execute Main on Window event loop
 ```
 
-Historical PWA Runtime/Data evidence MUST NOT be cited as proof of Realm State implementation/qualification。
+M17 adds：
+
+```text
+Renderer Data provisioning/currentness
+Input / Viewport
+same-origin ContentClient
+Content/integrity/storage failure paths
+Web Presentation
+reload/navigation/BFCache fresh Session
+existing real game-lib artifact through install/PREPARE/Runner/presentation
+Desktop ↔ PWA business-observable equivalence
+```
+
+Mandatory v1 browser qualification target is the repository-pinned Playwright **Chromium** environment。Firefox/WebKit support MAY be added later but is not an M16/M17 closure blocker unless the product baseline is explicitly revised。
 
 ---
 
-## 21. Final Invariants
+## 24. Final Invariants
 
-1. PWA Launcher是 PWA Runtime-product Game Entry consumer；
-2. `@loomrealm/game-package` common validation including optional State document在 Launcher PREPARE 内完成；
-3. Product application不需手动传 `ValidatedGameEntryV1`；
-4. Game/PWA Subsystem key set严格相等；Realm State keys不参与 executable join；
-5. PwaLaunchPlan + LogicalGameBootstrap + PreparedRealmStateDefinition 在 first business Worker side effect前完整冻结；
-6. Game Package State document不是 RealmStateAuthority bootstrap ABI；
-7. Realm State READY在 business Worker side effect前成立；
-8. Main不接收 Game Entry/Prepared State/module URL/Worker options/Realm State value/revision；
-9. resolved module URL只存在于 PWA boundary；
-10. Host-owned Worker Runner是 Dedicated Worker physical entry；Runner只安装 RealmStateClient，不拥有 Authority；
-11. Game/PWA manifest不能覆盖 Runner/Port/credential/security/Realm State physical policy；
-12. Definition Module ABI统一但 artifact不要求跨平台相同；
-13. Runtime Control、Data provisioning、Realm State logical plane保持独立；
-14. Realm State operations不依赖 Frame/Activation/InputTarget；
-15. Data provisioning failure不等于 Runtime/Frame/Realm State failure；
-16. Realm State binding loss不等于 Runtime/Session failure；Authority fatal只报告 Main/Session owner；
-17. Control/Data MessagePort application unit仍是 JSON text string；Realm State physical encoding/profile尚未因此冻结；
-18. stopped只来自 actual Worker termination；State binding loss不是 stopped事实；
-19. no automatic Runtime restart；Realm State old client/subscription也不 transparent reattach；
-20. Session/PWA composition只拥有 physical construction/binding/disposal，不成为第三 application authority；
-21. current v1不存在旧 `{key,module}` Game Descriptor compatibility path。
+1. Browser Window is presentation/browser adapter only；
+2. Main + RealmStateAuthority are in one Session Worker but remain separate authorities；
+3. each Subsystem Runtime is a separate Dedicated Worker；
+4. Launcher consumes one published complete `installationId`；
+5. Game/PWA subsystem key sets join exactly before any business Worker side effect；
+6. executable graph is install-time enumerable relative ESM inside one installation；
+7. installed executable identity is private same-origin hierarchical URL, never `blob:`；
+8. Main receives no executable/Worker/Port/storage material；
+9. Session bootstrap and Runner bootstrap use the frozen closed v1 schemas；
+10. Window bridge is provisioning-only and does not collapse application planes；
+11. Session/Runner both verify the accepted Service Worker generation with `runtime-info`；
+12. Runtime Control、Realm State、Renderer Data and provisioning remain distinct planes；
+13. PWA Content uses same-origin Fetch without Desktop bearer distribution；
+14. Realm State binding loss alone is not Runtime/Session failure；
+15. unexpected Worker termination enters Main-owned Runtime failure；
+16. v1 has no automatic Runtime restart；
+17. reload/navigation/BFCache restore cannot revive an old sessionEpoch；
+18. M16/M17 qualification is Chromium-mandatory until the baseline is explicitly expanded。

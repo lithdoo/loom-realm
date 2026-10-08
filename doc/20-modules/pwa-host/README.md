@@ -1,7 +1,48 @@
-# PWA 产品组合（尚未交付）
+# PWA 产品组合
 
-> 本页是从历史模块设计链接进入的兼容入口，**不是已实现核心模块**；当前实施顺序、完成标准和状态唯一见[下一阶段路线图](../../30-implementation/roadmap.md)。`packages/game-launcher-pwa` 代码的存在不能代表 M16/M17 整套产品已经验收。
+> 本页是 PWA 产品入口。实现位于 `apps/pwa`；同一 HEAD 的实际资格状态只由[路线图](../../30-implementation/roadmap.md)、[PWA 资格](../../30-implementation/pwa-m16-m17-qualification.md)与当前 GitHub Actions 判定，不能继承历史 PASS。
 
-预期物理差异为 Window / Dedicated Worker / MessagePort 与 Desktop 的 Process / loopback；它们应复用相同 Main、Subsystem、Input、Render、Content 与 M13 Presentation 逻辑契约，不额外创建应用权威。M16 范围限于 PWA PREPARE、Worker Runner 和 Runtime Control 的纵向链；M17 才涉及 Window Renderer、Data、Input、Content、业务 Web Components 及与 Hostra 的结果等价。
+PWA v1 的架构与实施规格为 **Implementation Frozen / Implemented**，见 [PWA 产品组合设计](./DESIGN.md) 与正式 [PWA Launcher / Worker Profile v1](../../15-contracts/pwa-launcher-profile-v1.md)。后续实现不应自行改变 authority placement、bootstrap ABI、installation source、Content binding、产品入口 ownership 或 qualification target。
 
-可执行规范由 [PWA Launcher](../../15-contracts/pwa-launcher-profile-v1.md)、[平台组合架构](../../10-architecture/platform-composition-system.md) 和[正式契约目录](../../15-contracts/README.md)定义。需要开始实施时只按[路线图](../../30-implementation/roadmap.md)给出的真实消费与验收进入，不恢复旧阶段提示词，也不因平台对称预造通用存储、TransportRegistry 或组件加载器。
+Frozen topology：Browser Window 只承载 Renderer / Input / Viewport / Web Presentation 与 browser-only bootstrap；Main + RealmStateAuthority 共置独立 Session Worker，不与 Renderer 共享 event loop；每个 Subsystem Runtime 位于独立 Dedicated Worker；same-origin Service Worker 只实现 Content、private executable 与 runtime-generation probe 的 physical serving boundary。
+
+PWA v1 同时冻结：
+
+```text
+SW READY/controller/version + runtime-info generation fencing
+Session/Runner closed bootstrap v1 schemas
+Window provisioning bridge + dedicated application MessagePorts
+PwaInstallationBundleV1 → staging → atomic visibility publish
+persistent Installation Registry + Content/Executable Index + OPFS objects
+installation-local GC / fail-closed eviction and corruption
+private same-origin executable route + relative enumerable ESM graph
+same-origin PWA ContentClient without weakening Desktop bearer binding
+reload/navigation/BFCache → fresh sessionEpoch
+```
+
+Canonical implementation root is `apps/pwa`。四个 browser entry ownership points固定为：
+
+```text
+window-entry.ts
+session-worker-entry.ts
+worker-runner-entry.ts
+service-worker.ts
+```
+
+Canonical installer only accepts the product-private semantic `PwaInstallationBundleV1`；File/ZIP/network acquisition are future adapters and do not enter Launcher/Runtime contracts。Launcher runtime PREPARE addresses one already-published `installationId`。
+
+M16/M17 implementation MUST establish root commands：
+
+```text
+npm run build:m16
+npm run test:m16
+npm run build:m17
+npm run test:m17
+npm run test:pwa
+```
+
+v1 mandatory browser qualification target is the repository-pinned Playwright Chromium environment。M16/M17 closure additionally requires `npm run test:regression` on the same HEAD；Firefox/WebKit are not v1 blockers unless the baseline is explicitly revised。
+
+Content business usage remains unchanged：Subsystem still only uses `scope.content.record()` / `resource()`；Content API route/status/header/version/integrity semantics remain [Content API v1](../../15-contracts/content-api-v1.md)。PWA adds `createSameOriginContentClient(...)` beside the existing mandatory-token Desktop `createBoundContentClient(...)` and reuses one private fetch/decode core；the existing Desktop token MUST NOT become optional。
+
+Do not introduce universal GameSource、TransportRegistry、generic filesystem provider、runtime npm/import-map resolver、single mega MessagePort、SharedWorker Session daemon、global object refcount/GC or automatic Runtime restart solely for PWA。

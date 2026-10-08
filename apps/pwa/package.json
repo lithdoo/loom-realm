@@ -1,0 +1,35 @@
+{
+  "name": "@loomrealm/pwa",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build -w @loomrealm/game-launcher-pwa && tsc -p tsconfig.json && node scripts/build.mjs",
+    "build:qualification": "npm run build -w @loomrealm-game/tile-presentation -w @loomrealm-game/map -w @loomrealm/game-launcher-pwa && tsc -p tsconfig.json && node scripts/build.mjs --qualification",
+    "test:unit": "node --test test/build-generation.test.mjs test/content-manifest.test.mjs test/data-broker.test.mjs test/provisioning-bridges.test.mjs test/service-worker-gate.test.mjs",
+    "test": "npm run build:qualification && npm run test:unit && node scripts/run-e2e.mjs all",
+    "test:m16": "npm run build:qualification && npm run test:unit && node scripts/run-e2e.mjs m16",
+    "test:m17": "npm run build:qualification && npm run test:unit && node scripts/run-e2e.mjs m17"
+  },
+  "dependencies": {
+    "@loomrealm/data": "0.1.0-alpha.0",
+    "@loomrealm/foundation": "0.1.0-alpha.0",
+    "@loomrealm/game-package": "0.1.0-alpha.0",
+    "@loomrealm/game-launcher-pwa": "0.1.0-alpha.0",
+    "@loomrealm/main": "0.1.0-alpha.0",
+    "@loomrealm/platform-ports": "0.1.0-alpha.0",
+    "@loomrealm/realm-state": "0.1.0-alpha.0",
+    "@loomrealm/renderer": "0.1.0-alpha.0",
+    "@loomrealm/subsystem": "0.1.0-alpha.0",
+    "@loomrealm/wire": "0.1.0-alpha.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@loomrealm/desktop": "0.1.0-alpha.0",
+    "@loomrealm/game-launcher-hostra": "0.1.0-alpha.0",
+    "esbuild": "0.25.9",
+    "playwright": "1.63.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": { "node": ">=20" }
+}

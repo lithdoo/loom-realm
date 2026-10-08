@@ -18,6 +18,10 @@
     "./web-presentation": {
       "types": "./dist/web-presentation.d.ts",
       "import": "./dist/web-presentation.js"
+    },
+    "./browser-window": {
+      "types": "./dist/browser-window.d.ts",
+      "import": "./dist/browser-window.js"
     }
   },
   "files": ["dist", "README.md"],
