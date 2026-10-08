@@ -9,15 +9,20 @@ import test, { after, before } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { RenderManager } from "../packages/subsystem/dist/internal/render-manager.js";
+import { calculateLayout } from "../game-libs/map/dist/layout.js";
 import {
   assertProjectable,
   autotileCorners,
+  computeCamera,
+  expandTileBounds,
   migrateLegacyTilesetRecord,
   oneDimensionalIndexTable,
+  projectTilesInBounds,
   tableAt,
   tileVisualDepth,
   validateMapRecord,
   validateTilesetRecord,
+  viewportTileBounds,
 } from "../game-libs/map/dist/semantics.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -261,6 +266,54 @@ function projectMapView({
   };
   exactKeys(data, VIEW_KEYS, "MapViewRenderData");
   return { data, camera, bounds, chunks, tileVisuals };
+}
+
+function projectCurrentMapView({
+  map, tileset, mapId, viewport, playerX, playerY,
+  sceneEpoch = 1, visualEpoch = 1, motionId = null, cameraMotion = null,
+}) {
+  const layout = calculateLayout(viewport.width, viewport.height);
+  const camera = computeCamera(map, playerX, playerY, layout);
+  const bounds = expandTileBounds(
+    viewportTileBounds(map, camera.cameraX, camera.cameraY, layout),
+    4,
+    map,
+  );
+  const tiles = projectTilesInBounds(map, tileset, bounds).map((tile) => Object.freeze([
+    tile.x,
+    tile.y,
+    tile.z,
+    tile.tileId,
+    tile.depth,
+  ]));
+  const data = {
+    sceneEpoch,
+    visualEpoch,
+    motionId,
+    viewportWidth: layout.windowWidth,
+    viewportHeight: layout.windowHeight,
+    barHeight: layout.barHeight,
+    contentWidth: layout.contentWidth,
+    contentHeight: layout.contentHeight,
+    columns: layout.columns,
+    rows: layout.rows,
+    logicalWidth: layout.logicalWidth,
+    logicalHeight: layout.logicalHeight,
+    scaleX: layout.scaleX,
+    scaleY: layout.scaleY,
+    mapName: String(mapId),
+    mapId,
+    mapWidth: map.width,
+    mapHeight: map.height,
+    cameraX: camera.cameraX,
+    cameraY: camera.cameraY,
+    tileset: resourceRef(`Tilesets/${tileset.tileset_name}`),
+    autotiles: tileset.autotile_names.map((name) => (name === null ? null : resourceRef(`Autotiles/${name}`))),
+    tiles,
+    cameraMotion,
+    bridgeLevel: 0,
+  };
+  return { data, camera, bounds, tiles };
 }
 
 function playerSprite(projection, playerX, playerY) {
@@ -575,13 +628,13 @@ test("RenderDomain.update full-state validation and snapshot residual", () => {
   assert.equal(report.renderDomain.independentBottleneck, false, JSON.stringify(report.renderDomain));
 });
 
-test("M13 structural equality cost for camera-only changes on large chunks", () => {
+test("M13 structural equality cost for camera-only changes on current tiles", () => {
   const loaded = denseMap();
   const viewport = { width: 1920, height: 1080 };
-  const projection = projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
+  const projection = projectCurrentMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
   const left = projection.data;
   const right = { ...left, cameraX: left.cameraX + 1 };
-  assert.equal(left.chunks, right.chunks);
+  assert.equal(left.tiles, right.tiles);
   const equalSelf = timeMs(() => structurallyEqualJson(left, left), 20);
   const cameraOnly = timeMs(() => structurallyEqualJson(left, right), 20);
   report.m13 = {
@@ -825,11 +878,11 @@ test("Chromium private ::slotted sprite stacking pixel oracle", { timeout: 60_00
   report.stacking = { status: "PASS", cases: result };
 });
 
-test("PR1 Browser 640 raster/camera-only on dense chunk payload", { timeout: 60_000 }, async () => {
+test("PR1 Browser 640 raster/camera-only on dense current payload", { timeout: 60_000 }, async () => {
   assert.equal(existsSync(mapBrowserPath), true, "map.browser.js dist missing; run npm run build:m14");
   const loaded = denseMap();
   const viewport = { width: 640, height: 480 };
-  const projection = projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
+  const projection = projectCurrentMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
   const viewPayload = projection.data;
   const spritePayload = playerSprite(projection, 64, 48);
   const page = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1 });
@@ -912,10 +965,10 @@ test("PR1 Browser 640 raster/camera-only on dense chunk payload", { timeout: 60_
     viewBytes: utf8Bytes(viewPayload),
     ...timing,
     clock: "same Browser Window performance.now(); receive-to-paint excludes screenshot",
-    note: "PR1 production chunk schema + camera-only identity path.",
+    note: "Current production tiles schema + camera-only identity path.",
   };
   assert.equal(typeof timing.receiveToPaintMs, "number");
-  assert.equal(timing.hostSpriteZ, "");
+  assert.equal(timing.hostSpriteZ, String(2 * ((48 + 1) * TILE) + 1));
   assert.equal(timing.cameraOnly.after.draws, timing.cameraOnly.before.draws);
   assert.equal(timing.cameraOnly.after.clears, timing.cameraOnly.before.clears);
   assert.equal(timing.cameraOnly.after.resizes, timing.cameraOnly.before.resizes);
@@ -927,7 +980,7 @@ test("PR2 Browser 720 and 1080 dense paint, host box, camera-only, and backing",
   const loaded = denseMap();
   const results = [];
   for (const viewport of [{ width: 1280, height: 720 }, { width: 1920, height: 1080 }]) {
-    const projection = projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
+    const projection = projectCurrentMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
     const viewPayload = projection.data;
     assert.ok(utf8Bytes(viewPayload) < 196608, JSON.stringify({ viewport, bytes: utf8Bytes(viewPayload) }));
     const spritePayload = playerSprite(projection, 64, 48);
