@@ -197,12 +197,13 @@ try {
   const hub = createDataHub();
   let inputEmit;
   const inputSource = Object.freeze({ start(emit) { inputEmit = emit; emit({ kind: "availability", channel: "keyboard.event", available: true }); return () => {}; } });
+  const viewportSource = Object.freeze({ start(emit) { emit({ width: 800, height: 600 }); return () => {}; } });
   let holder;
   const rendererControl = Object.freeze({
     acquire(token, signal) {
       if (holder) return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
       const pair = createMemoryCarrierPair();
-      holder = createRendererControlHolder(hub.rendererBinding, inputSource);
+      holder = createRendererControlHolder(hub.rendererBinding, inputSource, viewportSource);
       void holder.connect({ carrier: pair.right, rendererControlToken: token });
       return Promise.resolve(pair.left);
     },
