@@ -2,7 +2,7 @@
 
 ## Status
 
-**Closed — executable subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` passed the pinned official Essentials v21.1 exact-local path and the canonical M14 gate on hosted Node 20 and Node 24 on 2026-10-08.** All formal closure rows target that same subject in [M14 run 37731662353](https://github.com/lithdoo/loom-realm/actions/runs/37731662353).
+**Closed — executable subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` passed the identity-pinned official Essentials v21.1 exact production path and the canonical M14 gate on hosted Node 20 and Node 24 on 2026-10-08.** All formal closure rows target that same subject in [M14 run 37731662353](https://github.com/lithdoo/loom-realm/actions/runs/37731662353).
 
 The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`; neither is promoted to the current subject.
 
@@ -35,7 +35,7 @@ Any later change to M14 Runtime/importer/browser behavior, prepared Content, fix
 
 Previous-subject hosted evidence remains historically valid only for `fd1df5872d4310e268857e700a067f4e0b9e75d1` ([M14 run 34621763706](https://github.com/lithdoo/loom-realm/actions/runs/34621763706)) and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` ([M14 run 34998417357](https://github.com/lithdoo/loom-realm/actions/runs/34998417357)); it must not be promoted to the current subject.
 
-### Current exact-local qualification — 2026-10-08
+### Current exact production-path qualification — 2026-10-08
 
 The workflow acquired the official Pokémon Essentials v21.1 archive through the repository's pinned official downloader and verified its identity before extraction or import：
 
@@ -57,10 +57,10 @@ The archive was not committed or uploaded as evidence. Only its identity record,
 
 ## Why requalification was required
 
-Review of the earlier closure found two exact-local shortcuts weaker than the frozen claim：
+Review of the earlier closure found two exact-production shortcuts weaker than the frozen claim：
 
 1. directional input did not fully traverse the canonical RendererInputSource → M10 → Frame-bound InputListener path；
-2. exact-local Content/resource evidence did not fully traverse the Desktop FSDB HTTP service + standard bound ContentClient, including MIME evidence from that seam.
+2. exact-production Content/resource evidence did not fully traverse the Desktop FSDB HTTP service + standard bound ContentClient, including MIME evidence from that seam.
 
 The hardened subject closes both gaps without adding a second Runtime path or reopening M10–M13 public contracts. The hardening also strengthened passability branch evidence, author-API surface discipline, Custom Element conflict handling, projected-Table fail-closed validation and renderer-internal qualification boundaries.
 
@@ -96,7 +96,7 @@ Observed importer/content evidence：
 
 Exact v21.1 exposed unreferenced non-null editor placeholders 24 and 25 with empty `tileset_name`. The consumer projection was minimally refined to omit only unreferenced empty-name placeholders；a referenced empty-name entry still fails closed.
 
-## Current exact-local input evidence
+## Current exact production-path input evidence
 
 The selected non-repeat ArrowRight traversed：
 
@@ -109,7 +109,7 @@ synthetic RendererInputSource
 → @loomrealm-game/map handler
 ```
 
-The local qualification no longer invokes a captured listener handler directly.
+The exact production-path qualification no longer invokes a captured listener handler directly.
 
 Current-subject observed result：
 
@@ -173,12 +173,12 @@ This evidence demonstrates that the pre-hardening implementation was healthy, bu
 
 ## Formal closure rule
 
-M14 may return to `Closed` only when this record contains hosted Node 20 and Node 24 PASS evidence for the current subject in addition to the current exact-local PASS：
+M14 may return to `Closed` only when this record contains hosted Node 20 and Node 24 PASS evidence for the current subject in addition to the current identity-pinned exact production-path PASS：
 
 ```text
 current subject S
 +
-exact v21.1 local PASS
+identity-pinned exact v21.1 production-path PASS
 +
 hosted Node 20 npm run test:m14 PASS
 +
@@ -189,11 +189,11 @@ hosted Node 24 npm run test:m14 PASS
 The resulting status is：
 
 ```text
-architecture / contracts     frozen
-implementation               complete + hardened
-exact-local qualification    PASS — pinned official archive identity + production path
-current hosted qualification PASS — Node 20 + Node 24
-formal M14 milestone         Closed
+architecture / contracts          frozen
+implementation                    complete + hardened
+exact production qualification    PASS — pinned official archive identity + production path
+current hosted qualification      PASS — Node 20 + Node 24
+formal M14 milestone              Closed
 ```
 
-No M14 architecture or consumer redesign is authorized merely to change the status label. Run the frozen local and hosted gates on the current subject；if they expose a real behavioral failure, fix that concrete failure and establish a new qualification subject. Only after all same-subject evidence passes may this ledger and repository projections return to `Closed`.
+No M14 architecture or consumer redesign is authorized merely to change the status label. Run the frozen exact production and hosted gates on the current subject；if they expose a real behavioral failure, fix that concrete failure and establish a new qualification subject. Only after all same-subject evidence passes may this ledger and repository projections return to `Closed`.
