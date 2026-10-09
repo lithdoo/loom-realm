@@ -1,0 +1,1 @@
+Current authoritative final closure is recorded in `final-qualification-closure.md`; earlier performance/Terrain qualification files remain evidence snapshots and historical detail.
