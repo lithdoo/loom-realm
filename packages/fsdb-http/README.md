@@ -9,7 +9,7 @@ Read-only HTTP adapter for filesystem-backed FSDB directories.
 - HTTP/public-behavior contract: [DESIGN.md](./DESIGN.md)
 - Current dependency / FSDB-core ownership / valid-handle override: [CORE_OWNERSHIP_AMENDMENT.md](./CORE_OWNERSHIP_AMENDMENT.md)
 - Mandatory conformance: [CONFORMANCE.md](./CONFORMANCE.md)
-- FSDB storage reference: [FSDB 目录结构详解](../../doc/fsdb/FSDB目录结构详解.md)
+- FSDB storage reference: [FSDB layout](../../doc/20-modules/fsdb-content-service/fsdb-layout.md)
 
 Do not read the original DESIGN statements “0 runtime dependencies” or “only fsdb-http can mint `FsdbDatabase`” as current ownership; those exact clauses are superseded by the ownership amendment. All non-superseded HTTP behavior/security/lifecycle clauses remain in force.
 

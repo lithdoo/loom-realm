@@ -1,6 +1,6 @@
 # Content 与 FSDB：当前实现
 
-Content 是 **readonly installation definition authority**。本文描述 Current implementation ownership；正式 observable semantics 见 [Content API v1](../../15-contracts/content-api-v1.md)，system placement 见[存储系统](../../10-architecture/storage-system.md)。
+Content 是 **readonly installation definition authority**。本文描述 Current implementation ownership；正式 observable semantics 见 [Content API v1](../../15-contracts/content-api-v1.md)，system placement 见[存储系统](../../10-architecture/storage-system.md)。FSDB physical format reference 见 [FSDB layout](./fsdb-layout.md)。
 
 ## Logical structure
 
