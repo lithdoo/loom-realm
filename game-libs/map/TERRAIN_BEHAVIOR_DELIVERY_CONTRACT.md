@@ -1,6 +1,6 @@
 # Terrain Behavior：现行产品交付边界
 
-> **PRODUCT IMPLEMENTED ON MAIN / CURRENT PRODUCT-STATIC QUALIFICATION PASS / ORIGINAL RGSS DYNAMIC QUALIFICATION PENDING / CONTRACT_V1 NOT FORMALLY SIGNED.** 代码通过 [PR #43](https://github.com/lithdoo/loom-realm/pull/43) 以 squash 方式合入 main（合并提交 [`c548110`](https://github.com/lithdoo/loom-realm/commit/c548110d9a608c65a7663cb0f2f4ea9bda082b88)）；2026-10-09 对 Terrain subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` 的合法本地 FSDB、产品及回归结果见[最终资格记录](../../doc/30-implementation/final-performance-terrain-qualification.md)。此状态不等于原版逐帧等价或授权签署。当前产品细节以当前源码、测试及同 SHA CI 为准；不可把本文件当成待开工 AG 任务卡。
+> **PRODUCT IMPLEMENTED / ORIGINAL RGSS DYNAMIC TECHNICAL EVIDENCE COMPLETE / POLICY AND AUTHORIZED SIGN-OFF PENDING / CONTRACT_V1 NOT FORMALLY SIGNED.** 代码最初通过 [PR #43](https://github.com/lithdoo/loom-realm/pull/43) 合入 main；2026-10-09 又在 official v21.1 runtime 上完成 Map21/47 动态观察，并在 subject `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9` 将 Ledge 由 400ms 修正为原版观察的 500ms。精确 provenance、帧事实、产品对照与回归见[最终资格记录](../../doc/30-implementation/final-performance-terrain-qualification.md)。FG-05/06 尚未批准，因此此状态仍不等于正式合同签署。
 
 ## 产品责任与数据
 
@@ -15,7 +15,7 @@
 - 单次方向输入仅有一项 `blocked | walk | jump` 计划；walk 为既有 250ms。受阻走 front touch，成功到达后才判断 here/arrival；事件 start 与 interpreter execute 分离，受阻不能启动 walk-on Bridge 事件。
 - Runtime 唯一持有坐标、方向、`bridgeLevel∈{0,2}`、事件调度、motionId/sceneEpoch/visualEpoch。On execute 后为 2，Off execute 或 transfer 后为 0；事件完成后持续按键仍可继续输入，但不能在同次输入重新判定另一动作。
 - Bridge 层切换即使原地发生，也必须把人物、地形深度和必要相机投影在同一个 RenderDomain 更新中提交；不可用常量 z-index 或 `+32` 猜测代替桥上/桥下实际层级。
-- Ledge 在支持的方向执行**一次跨两格 jump、一个 motionId**，中间格不作为 walk 到达事件；合法落点只触发一次 arrival。产品 jump 400ms 与弧线 `distancePx * 3 / 8` 是 `PROJECT-DECISION-PROVISIONAL`，不代表原版 RGSS 帧精度；跨图 jump 不支持。
+- Ledge 在支持的方向执行**一次跨两格 jump、一个 motionId**，中间格不作为 walk 到达事件；合法落点只触发一次 arrival。official v21.1 动态观察确认 500ms 定义与 24px 峰值，产品已对齐；跨图 jump 不支持。
 - Browser 只验证并播放 Runtime payload，不管理通行或桥状态；resize、取消、切图和旧 motion completion 不得覆盖新状态。
 
 ## 产品验证及资格边界

@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M15 implemented；M11/M14/M15 current qualification Closed；Viewport Core Qualified；M16/M17 PWA implemented with independent gate  
+> 稳定程度：M1–M15 implemented；M11 baseline Closed，M14/M15 current subject local requalification PASS、exact-head CI pending；Viewport Core Qualified；M16/M17 PWA implemented with independent gate
 > 主要定义：current monorepo physical placement、framework/game-library/example/app ownership、M14–M17 materialization order  
 > 依赖：[独立分包与发布架构](./package-architecture.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-10-08
@@ -318,4 +318,4 @@ M16 PWA Runtime
 M17 PWA Full E2E / Equivalence
 ```
 
-Current summary 见 [`roadmap.md`](./roadmap.md)。M11 current-subject requalification、M14 exact qualification 与 M15 Hostra Desktop formal qualification 均已 Closed；Viewport Core 已 Qualified；M16/M17 已 materialized 并接入独立 qualification gate。后续不得为测试 symmetry 提前增加没有真实 consumer/authority 的新目录或抽象；任何行为变化按对应 ledger 重新形成 subject/evidence。
+Current summary 见 [`roadmap.md`](./roadmap.md)。M11 baseline 已 Closed；M14/M15 current subject 的本地重资格通过，formal 状态等待 exact-head CI；Viewport Core 已 Qualified；M16/M17 已 materialized 并接入独立 qualification gate。后续不得为测试 symmetry 提前增加没有真实 consumer/authority 的新目录或抽象；任何行为变化按对应 ledger 重新形成 subject/evidence。

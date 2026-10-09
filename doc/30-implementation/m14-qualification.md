@@ -2,7 +2,7 @@
 
 ## Status
 
-**Closed — executable subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` passed the identity-pinned official Essentials v21.1 exact production path and the canonical M14 gate on hosted Node 20 and Node 24 on 2026-10-08.** All formal closure rows target that same subject in [M14 run 37731662353](https://github.com/lithdoo/loom-realm/actions/runs/37731662353).
+**Previous subject Closed / current subject local requalification PASS, exact-head CI pending.** Executable subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` passed the identity-pinned official Essentials v21.1 exact production path and canonical hosted Node 20/24 gate on 2026-10-08. Current Terrain subject `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9` changes only the authorized Map Ledge duration from 400ms to the original-observed 500ms plus its regression; `npm run test:m14:pr` was rerun locally and passed (Map 106/106, live FSDB 3/3, vertical 3/3). Formal current-subject closure additionally requires the final PR head CI; see the [current qualification ledger](./final-performance-terrain-qualification.md).
 
 The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`; neither is promoted to the current subject.
 

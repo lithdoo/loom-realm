@@ -4,11 +4,11 @@
 >
 > **发布边界：** 此版本以结构化事实、指纹、算法和复现入口代替旧附录 A 的完整 Map007 原始事件命令转储。完整原始地图、事件文本和派生 JSON 只在有合法来源的本地、gitignored 工作区读取，不作为仓库或 CI fixture 发布。源项目仓库的许可证不能自动证明其全部第三方游戏素材可再分发；相关权利未核清。
 
-> **2026-10-09 current checkpoint：** Terrain qualification-input subject 为 `a5e406827d0e3814dad3ac797c4b5f13015173a0`。合法本地 Map7/21/47 extractor、独立重算、focused suite、fixture suite、Map package、M14 PR gate 和真实本地 FSDB 产品测试均已实际执行；摘要与本文件固定值一致，产品测试不是 skip。项目邻近合法范围没有 Game.exe、RGSS DLL 或 mkxp runtime，因此没有新增原版 `DYNAMIC-OBSERVED`。精确命令、artifact 摘要和 FG/C/DEC disposition 见[最终资格记录](../../doc/30-implementation/final-performance-terrain-qualification.md)。
+> **2026-10-09 current checkpoint：** Terrain subject 为 `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9`。除合法本地 FSDB/static/product gates 外，已通过仓库 downloader 路径取得 local-only official v21.1 runtime，用 observation-only hook 和外部真实按键采集 Map21 四对 Bridge、held input、Map47 正向/逆向 jump 的 sanitized `DYNAMIC-OBSERVED`。观察发现产品 400ms 与原版 500ms 不一致并已修复。精确 provenance、帧事实、raw digest 和 FG/C/DEC disposition 见[最终资格记录](../../doc/30-implementation/final-performance-terrain-qualification.md)。
 
 ## 1. 取证对象及固定版本
 
-固定源码：Pokémon Essentials v21.1，commit `ea7b5d56d2436591160983c4e641a2ceee2d875a`，来源 https://github.com/Maruno17/pokemon-essentials/tree/v21.1 。取证环境历史记录：Windows 10、Node v22.12.0、本地 Essentials FSDB；未运行原版 RGSS。
+固定源码：Pokémon Essentials v21.1，commit `ea7b5d56d2436591160983c4e641a2ceee2d875a`，来源 https://github.com/Maruno17/pokemon-essentials/tree/v21.1 。早期静态取证环境为 Windows 10、Node v22.12.0、本地 Essentials FSDB；2026-10-09 的原版动态环境、Game/data identity 与 observation-only capture 另见最终资格记录。
 
 | 对象 | SHA-256 | 观察范围 |
 |---|---|---|
@@ -53,7 +53,7 @@ Map7 有门类事件 IDs 1、2、3、4、7、8、9、12，坐标依次 `(11,13)`
 
 ## 7. 原版时序事实边界
 
-`can_move` 对当前输入先评估通行；成功写入目标位置并完成一步，再进行 arrival/here 事件启动；之后解释器执行脚本。启动与执行需分别计数。同一次输入不得因桥事件执行而重新计算已完成的通行。各帧准确执行顺序尚无 `DYNAMIC-OBSERVED` 证据。
+`can_move` 对当前输入先评估通行；成功写入目标位置并完成一步，再进行 arrival/here 事件启动；之后解释器执行脚本。official v21.1 动态 trace 在 Map21 四对事件上确认：坐标准入早于到达后的 event start，解释器 execute 与 bridge 0↔2 transition 位于下一观察帧；同一次输入不因桥状态变化重算已准入移动。产品只承诺该可观察顺序，不承诺与 RGSS 使用相同绝对帧号。
 
 ## 8. 碰撞与有效地形
 
@@ -65,7 +65,7 @@ Map7 有门类事件 IDs 1、2、3、4、7、8、9、12，坐标依次 `(11,13)`
 
 ## 10. 取证边界与未解决项目
 
-真实桥正例是 Map21，不是 Map7 或 Map27。原版逐帧、事件执行时机、held input 和 jump 动画尚未获得原版游戏日志；不能拿静态 replay 或产品试玩冒充 RGSS 逐帧保真。素材再分发和正式审查另外记录为 FG-05/06，均不阻止已经获准的产品编码。
+真实桥正例是 Map21，不是 Map7 或 Map27。Map21 事件时序、held input 和 Map47 jump 已取得原版结构化动态日志；真实 Map47 corpus 不含 source/destination blocked、边界或 skipped-cell event 样本，这些仍只由明确标注的合成测试覆盖。素材再分发和正式审查另外记录为 FG-05/06，动态证据不能替代 policy approval 或授权签署。
 
 ## 11. 事实到验收案例
 
@@ -80,7 +80,7 @@ Map7 有门类事件 IDs 1、2、3、4、7、8、9、12，坐标依次 `(11,13)`
 
 ## 12. 覆盖结论
 
-Map7 桥负例、Map21 桥正例、Map47 Ledge 均有带 digest 的静态证据。没有取得原版 RGSS 动态证据；不同证据等级不能混写。
+Map7 桥负例、Map21 桥正例、Map47 Ledge 均有带 digest 的静态证据；Map21 四对 Bridge 与 Map47 正向/逆向 Ledge 另有带 digest 的原版 RGSS 动态观察。未采样的 Map47 synthetic-only 边界不得提升为 `DYNAMIC-OBSERVED`。
 
 ## 13. Map21 桥基本事实
 
@@ -102,7 +102,7 @@ Map21/Route 2 是唯一经此次 69 图 corpus 限定扫描发现的 Bridge 地�
 
 ### 14.4 时序
 
-成功到达、start、解释器 execute 各为单独检查点，具体原版帧仍未观察。不允许同一次输入因事件状态变化重新通行判定。
+成功到达、start、解释器 execute 各为单独检查点；原版四对 trace 确认 move admission 早于 start，execute/state transition 随后发生。不允许同一次输入因事件状态变化重新通行判定。
 
 ### 14.5 Bridge 层
 
@@ -167,7 +167,7 @@ Map21 PBS 三条分别对应 3、4、0 条物化边。南缘 `21,S,0,7,N,21` 的
 
 ### 15.7 证明边界
 
-`FSDB-OBSERVED` + `STATIC-INFERRED` 不是原版 `DYNAMIC-OBSERVED`。跨图完整静态状态链已实现，但事件解释器逐帧、held input、Ledge 弧线等需另行原版实测；不阻止产品实现。
+`FSDB-OBSERVED` + `STATIC-INFERRED` 仍不等于原版 `DYNAMIC-OBSERVED`；本轮动态等级只适用于最终资格记录列出的 Map21/47 场景。真实 corpus 没有覆盖的 blocked/boundary/skipped-cell-event 继续保持 synthetic-only。
 
 ## 16. 完整静态验证与资格记录
 
@@ -179,9 +179,9 @@ Map7→Map21 四组 Off/On→真实桥格→下桥→反向转图均统一 repla
 
 30 个合法静态 Ledge 两格样本、30 个逆向失败。Map47 `(16,9)→(16,11)` 是真实地形静态样本；中间事件、落点阻挡和边界反例是 `sampleKind=synthetic`，不冒充原版 Map47 观察。
 
-### 16.3 RGSS 动态环境限制
+### 16.3 RGSS 动态环境与边界
 
-历史环境检查 repo/examples 中 `Game.exe`、`RGSS301.dll`、`RGSS300.dll`、`RGSS102J.dll`、`mkxp-z.exe` 均无；本仓库 `play.bat` 使用 Hostra/Electron，并非原版 RGSS。获取合法 v21.1 游戏环境后用固定输入记录 frame、x/y/direction、start、interpreter、bridgeLevel，并与静态 trace 对比。FG-01/03/04 不因此变 PASS。
+历史环境确实没有 runtime；本轮依据仓库 `reimport.bat` / downloader 路径在 gitignored `.local/` 准备了 official v21.1 runtime。observation-only Ruby hook 不覆盖 Input/调度/速度/状态，外部驱动发送真实 Windows 方向键；Game/data/plugin/driver 和 sanitized trace digests 见最终资格记录。原始二进制、数据、素材、截图及 raw logs 均未提交。FG-01/03/04 因此具备 technical evidence，但没有授权 reviewer 前不成为 formal PASS。
 
 ### 16.4 CI 与素材许可
 
@@ -191,4 +191,4 @@ Map7→Map21 四组 Off/On→真实桥格→下桥→反向转图均统一 repla
 
 历史取证 Agent 报告本地有 FSDB：组合静态 freeze 测试 54 pass/0 fail/0 skip；修改取证器后两套主要专项 37 pass；`npm run test:fixtures` 106 pass；map 包测试 78 pass；`npm run docs:check-links` 报 693 相对链接有效。这些是历史记录，不是本次合并 SHA 的独立重跑。
 
-**最终界限：** 本文件提供可重生成的原版结构和静态推论，产品交付事实由实际代码、试玩与当前 CI 验证。FG-01～06、正式 `CONTRACT_V1` 仍须按独立资格流程审查，不能从产品合并自动推导 PASS。
+**最终界限：** 本文件提供可重生成的结构/静态推论，并由最终资格记录补充窄范围原版动态事实；产品交付事实由实际代码和测试验证。FG-05 policy 与 FG-06 authorized sign-off 仍须独立审查，不能从动态采样或产品合并自动推导正式 `CONTRACT_V1`。

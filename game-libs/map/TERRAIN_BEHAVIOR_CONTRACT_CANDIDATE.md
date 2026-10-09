@@ -1,8 +1,8 @@
 # Terrain Behavior：原版保真合同候选摘要（未签署）
 
-> **产品已在 main 实现；原版动态资格未完成，CONTRACT_V1 尚未签署。** 本页仅记录待核实的原版保真资格及 C-01～08/DEC-01～07 的审核范围；不阻止已授权的产品实现，也不声明原版逐帧保真。历史完整、已去除受限完整事件附录的 C-01～08 讨论和原始备选见 [固定 main 快照](https://github.com/lithdoo/loom-realm/blob/c00fe76b20ab07aeebe18a8056e39a024a9f9859/game-libs/map/TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md)；其 `NOT IMPLEMENTED` 和禁止实施语句是**当时的历史状态，不再生效**。
+> **产品已实现，原版动态技术证据已完成；FG-05 policy 与 FG-06 authorized review 尚未签署，CONTRACT_V1 不存在。** 本页记录 C-01～08/DEC-01～07 的审核范围，不制造 maintainer approval。历史完整、已去除受限完整事件附录的讨论和原始备选见 [固定 main 快照](https://github.com/lithdoo/loom-realm/blob/c00fe76b20ab07aeebe18a8056e39a024a9f9859/game-libs/map/TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md)。
 
-> 2026-10-09 current checkpoint：C-01/C-07 技术条件已满足；C-02/C-03/C-05 有当前产品/静态覆盖但保留原版动态 caveat；C-04/C-06 等待原版时序；C-08 等待 FG-01/05/06。DEC-01～07 全部仍为 `UNSIGNED / REVIEW REQUIRED`。逐项证据见[最终资格记录](../../doc/30-implementation/final-performance-terrain-qualification.md)。
+> 2026-10-09 current checkpoint：C-01～07 在声明的 Terrain slice 内已有当前代码、数据/产品测试和原版动态观察支持；C-08 等待 FG-05/06。DEC-01～07 全部仍为 `UNSIGNED / REVIEW REQUIRED`。逐项证据见[最终资格记录](../../doc/30-implementation/final-performance-terrain-qualification.md)。
 
 ## 当前事实与审查层级
 
@@ -14,10 +14,10 @@
 | --- | --- |
 | C-01 Data | `terrain_tags` + 显式旧 Tileset 迁移、新 schema subject 已实现；独立正式资格仍需核对生产者/消费者及合法输入。 |
 | C-02 Semantics | TerrainTag 与 passage 分离，Neutral/Bridge/Ledge 产品语义有测试；尚不能声称全部原版游戏状态保真。 |
-| C-03 Event/Transfer | 白名单 MapAction 与源/目标 MapTransfer 已实现；Map21 八事件 `over_trigger?` 的早期结果为静态推导，不是逐帧运行。 |
-| C-04 Time | 产品区分通行、front/here、start 与 execute，并修复 held input；原版 interpreter tick、等待帧、同帧事件顺序仍需 RGSS 观察或正式调整验收范围。 |
-| C-05 State | Runtime 桥层 0/2 与切图重置为产品事实；需要原版状态转移动态对照才能升级保真资格。 |
-| C-06 Motion/Render | 产品 walk 250ms、jump 400ms/单动作、同步桥深度及 motion/epoch fencing；jump 时长、弧线、遮挡的原版精度仍待测。 |
+| C-03 Event/Transfer | 白名单 MapAction 与源/目标 MapTransfer 已实现；Map21 四对 On/Off 的原版实际输入、到达、start、execute 与 state transition 已观察。 |
+| C-04 Time | 产品区分通行、front/here、start 与 execute；原版观察确认 move 先准入、start 后 execute、held input 不在同一占用上重复 action。 |
+| C-05 State | Runtime 桥层 0/2 与切图重置为产品事实；原版四对事件的 0↔2 transition 与可见深度切换已动态对照。 |
+| C-06 Motion/Render | 产品 walk 250ms、jump 500ms/单动作、24px 峰值、同步桥深度及 motion/epoch fencing；原版 Map47 正向/逆向、held、深度和 500ms 定义已观察。 |
 | C-07 Support | 本切片仅 Neutral(13)/Bridge(15)/Ledge(1)；水/冰/骑行/冲浪、任意 NPC 解释器及跨图 jump 不在承诺范围。 |
 | C-08 Qualification | 本地真实素材和 CI 合成/跳过必须分开；未经素材许可、原版动态和授权 reviewer 审查不得签发 CONTRACT_V1。 |
 

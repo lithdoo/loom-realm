@@ -162,7 +162,7 @@ game.json
 | 计划 | 逻辑位移 | 持续时间 | 来源 |
 | --- | --- | --- | --- |
 | walk | 1 格 | `WALK_DURATION_MS = 250` | **对照源码** `Game_Character#move_speed=` 默认 3 → `move_time = 2.0/(2**3) = 0.25s`。当前项目常量，与默认原版步时一致 |
-| jump（Ledge） | 跳过 1 格落到前方第 2 格 | `JUMP_DURATION_MS = 400` | **项目策略**（`semantics.ts` 101–102 行标注 `PROJECT-DECISION-PROVISIONAL`）。原版同速度 3 时 `jump_time * dist`，2 格约为 **500ms**，不一致 |
+| jump（Ledge） | 跳过 1 格落到前方第 2 格 | `JUMP_DURATION_MS = 500` | 2026-10-09 official v21.1 动态观察确认原版定义 500ms；产品 divergence 已修复 |
 | jump 峰值 | `jumpPeakPx(2) = 2*32*3/8 = 24` | — | **对照源码** `Game_Character#jump`：`distance * TILE_HEIGHT * 3 / 8`。Browser `4*peak*t*(1-t)` 与原版抛物线等价 |
 
 通行：`evaluatePassability` / `canMove` 用 Tileset `passages`、`priorities`、`terrain_tags` 与 `bridgeLevel ∈ {0,2}`。碰撞是 **1×1 逻辑格**，与 PNG 像素无关。
@@ -260,7 +260,7 @@ characterName
 
 **4. 程序内置规则**
 
-- 32px 格、250ms 走、400ms 跳、24px 跳弧（2 格）
+- 32px 格、250ms 走、500ms 跳、24px 跳弧（2 格）
 - 镜头跟逻辑格
 - 锚点：水平居中于格、脚对齐格底
 - 高帧（>32）只影响绘制与 z，不影响碰撞
@@ -567,7 +567,7 @@ PBS `metadata.txt` 玩家段（两名角色）引用的行走图文件：
 | 路径 | 作用 |
 | --- | --- |
 | `game-libs/map/src/runtime.ts` | 启动、输入、移动、唯一 player 节点 |
-| `game-libs/map/src/semantics.ts` | 250/400ms、镜头、planMovement、方向 |
+| `game-libs/map/src/semantics.ts` | 250/500ms、镜头、planMovement、方向 |
 | `game-libs/map/browser/map.browser.js` | 4×4 切帧、锚点、单槽 CSS、PNG 缓存 |
 | `packages/game-launcher-hostra/src/launch-plan.ts` | `game.json` input → frame.params |
 | `packages/fsdb-http/CONFORMANCE.md` FDB-006/007 | 资源键去扩展名 |

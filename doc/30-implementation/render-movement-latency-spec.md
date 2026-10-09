@@ -1,17 +1,17 @@
-> 当前冻结实施规格及历史测量；**当前性能资格已在 `6ade9506f0ef459e30e610505f4a788434b1e5f4` 正式通过**。精确环境、样本、原始产物摘要和 subject audit 见[当前资格记录](./final-performance-terrain-qualification.md)。历史 42.9ms/96.3ms 仍只属于旧 subject。
+> 当前冻结实施规格及历史测量；current subject `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9` 的 ordinary 与 M15 viewport-specific 门禁通过，但严格统一 `<=50ms` refresh 门禁在 1920×1080 **未通过**，因此当前性能资格为 Follow-up Required。精确环境、样本、诊断和 subject audit 见[当前资格记录](./final-performance-terrain-qualification.md)。旧 subject 的 PASS 不可继承。
 
 # Render 移动延迟与核心链路改造设计
 
 > 状态：Implementation Specification Frozen；ADR 0035 Accepted，PR 0 治理传播已完成  
 > Freeze Gate：Passed — PR 0 governance baseline `59fcd6fb3d4e6e70943780d994d750ac4f26a34e`  
-> Implementation Status：**Qualified** — performance subject `6ade9506f0ef459e30e610505f4a788434b1e5f4`；三视口 ordinary P95 `14.9/15.0/15.2ms`，window-refresh P95 `29.3/40.9/50.0ms`，均满足 movement gate `<=50ms`
+> Implementation Status：**Correctness retained / strict performance follow-up required** — subject `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9` 的两轮 1920×1080 refresh P95 为 `62.1ms` 与 `50.5ms`，均高于 movement gate `<=50ms`；M15 独立 50/75/100ms product gate 仍通过
 > 日期：2026-09-15  
 > 范围：`@loomrealm/subsystem`、`@loomrealm/renderer`、`@loomrealm-game/map`、`examples/essentials-v21.1-local`；`@loomrealm/data` / `@loomrealm/wire` 只做现有协议回归，不在本计划中优化  
 > 目标：消除本地地图移动从方向键按下到首个可见像素变化之间的高延迟，同时保持现有 authority、Render Update v1、碰撞、换图、重连和最终收敛语义。
 
 本文基于当前仓库代码、Map066 实际数据和 Hostra/Electron 本地链路测量。本文覆盖 `examples/essentials-v21.1-local/MAP_MOVEMENT_LATENCY_REFACTOR_DRAFT.md` 中关于问题根因、实施顺序和核心模块触发条件的结论；旧文档不得继续作为实现依据。Autotile、layering、transfer 文档中与本问题不冲突的既有约束继续有效。
 
-> **当前执行结果记录（非规范性状态）：** 2026-10-09 在冻结 Hostra/Windows native 链路对 `6ade9506f0ef459e30e610505f4a788434b1e5f4` 完成 full profile。每个视口三轮合计 ordinary `n=300`、refresh `n=90`；640/1280/1920 ordinary P95 为 `14.9/15.0/15.2ms`，refresh P95 为 `29.3/40.9/50.0ms`。invalid 分别 `1/528`、`1/552`、`1/572`；900/900 ordinary 样本为 camera-only 且零 tile draw。像素及 128MiB visible / 256MiB live+decode 内存门禁通过。完整结果与 artifact SHA-256 见[当前资格记录](./final-performance-terrain-qualification.md)。旧 subject 的 `42.9ms/96.3ms` 失败记录保留为历史，不覆盖、不继承。该状态记录不修改冻结的 normative clauses，也不改变 PR 0 baseline。
+> **当前执行结果记录（非规范性状态）：** 2026-10-09 在冻结 Hostra/Windows native 链路对 `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9` 完成两次 full profile。每次每视口均为 ordinary `n=300`、refresh `n=90`。Run 1 的 640/1280/1920 ordinary P95 为 `15.5/15.6/16.3ms`，refresh P95 为 `35.9/46.9/62.1ms`；Run 2 为 `15.3/15.3/15.5ms` 与 `29.8/41.6/50.5ms`。camera-only、零 tile draw、像素、128MiB visible 和 256MiB live+decode 门禁通过。禁止取最佳轮或用 M15 的 100ms 1080p 门槛替换本文 50ms 门槛，所以 §9.4 的停止/报告/follow-up 规则生效。完整 raw digest 与诊断见[当前资格记录](./final-performance-terrain-qualification.md)。该状态记录不修改冻结的 normative clauses，也不改变 PR 0 baseline。
 
 ---
 

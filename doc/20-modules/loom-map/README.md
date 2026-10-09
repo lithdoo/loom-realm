@@ -23,7 +23,7 @@
 - 狭义 `MapAction` 只识别证据确定的 `pbBridgeOn`/`pbBridgeOff` 事件页面、占用和触发；不执行原始 Ruby。不透明相关事件局部拒绝，不因无关 NPC 使整图失败；不按 Map/event/tile 固定 ID 写玩法代码。
 - 事件调度先判断本次移动：blocked/front 与成功 arrival/here 互斥。事件 start 和后续 interpreter execute 是两个检查点；受阻不能错误启动 walk-on Bridge。On/Off 执行后持续方向输入应继续调度下一步，不能同一输入二次判定。
 - Runtime 独占 `bridgeLevel∈{0,2}`；On execute 后为 2，Off execute 和 transfer 后为 0。桥面、人物与必要相机在同一次 RenderDomain 更新里随状态改变；不要以人物固定 z-index 代替正确遮挡。
-- 普通 walk 为产品原有 250ms；Ledge 是一次两格 jump、一个 motionId，中间格没有普通 arrival；落点事件一次。jump 400ms 和弧线系数属于产品暂定策略，不是原版 RGSS 动态证据；跨图 jump 不支持。切图、resize、取消及过期 motion 完成包不能回写新状态。
+- 普通 walk 为产品原有 250ms；Ledge 是一次两格 jump、一个 motionId，中间格没有普通 arrival；落点事件一次。official Essentials v21.1 动态观察确认两格 jump 定义为 500ms、峰值 24px，当前产品已对齐；跨图 jump 不支持。切图、resize、取消及过期 motion 完成包不能回写新状态。
 
 准确接口、类型及消费者以 `game-libs/map/src/semantics.ts`、`src/runtime.ts`、`browser/map.browser.js` 和测试为准；不在本文另造 on-wire ABI。
 
