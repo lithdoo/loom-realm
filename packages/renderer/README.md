@@ -1,48 +1,34 @@
-# @loomrealm/renderer
+# `@loomrealm/renderer`
 
-Renderer Control holder with M8 Data reconciliation, qualified M10 User Input, qualified M11 Render replica, M12 version-safe resources, and qualified M13 Web Presentation.
+Renderer-side Control/Data integration, current presentation replica, input/viewport source integration, trusted resource access, and Web Presentation projection.
 
-> Status: **M8/M10/M11/M12/M13 Implemented / Qualified**
+System authority and lifecycle are described by [Rendering Architecture](../../doc/10-architecture/rendering-system.md); exact protocol legality is defined by the formal [Renderer Data](../../doc/15-contracts/renderer-data-profile-v1.md), [User Input](../../doc/15-contracts/user-input-v1.md), [Render Update](../../doc/15-contracts/render-update-v1.md), [Viewport State](../../doc/15-contracts/viewport-state-v1.md), and [Web Presentation](../../doc/15-contracts/web-presentation-api-v1.md) contracts.
 
-Current implemented state remains one atomic Control `{ peer, snapshot } | null` record plus one private Data slot per desired subsystem authority. Protocol legality stays in `@loomrealm/renderer-control` and `@loomrealm/data`.
+## Local realization
 
-M10 exact additive construction surface：
-
-```ts
-createRendererControlHolder(
-  data?: RendererDataBinding,
-  input?: RendererInputSource,
-): RendererControlHolder
-```
-
-Existing one-argument calls remain valid。
-
-M10 adds only role-local behavior on top of existing holder/Data slots：
+The package maintains one atomic current Control record and private per-subsystem Data slots. Each current slot can host role-local input gating, Render replica state, Viewport publication, and presentation reevaluation without becoming a second Main/Subsystem authority.
 
 ```text
-one optional construction-time RendererInputSource object
-→ 0..1 active source subscription for current Control peer
-→ current Data-slot Interest Registry
-→ Effective gate from Control + Data + Interest + Producer
-→ bounded State/Event/Reset publisher
-→ current RendererDataPeer
+current Control + Data identity
+→ input/viewport role-local gates
+→ Render registry/snapshot/patch commits
+→ current replica
+→ thin Web Projector
+→ business-owned Web Components
 ```
 
-Source object is fixed for holder lifetime；Control replacement/terminal invalidates and stops the old active subscription，and a later current Control on the same holder restarts the same source object with fresh producer facts。Late callbacks from a stopped subscription are ignored。
+Render Store state is not exported as business authority and is never reverse-synchronized from DOM. Same-generation physical Data replacement preserves logical Renderer identity while requiring fresh current baseline where the relevant contract requires it; stale carrier callbacks are ignored.
 
-No Store、EventBus、producer registry、mutable source replacement、InputTarget shadow authority、lease/heartbeat、generic queue framework、Broker、retry or replay layer is added。
+`@loomrealm/renderer/resource-client` provides trusted logical Content resource access with expected-version checking. Physical bearer/path/endpoints stay hidden from business components.
 
-ADR 0029 does not change Renderer Effective semantics：Subsystem mutation-gate State suppression/reopen convergence remains entirely Subsystem-local。
+`@loomrealm/renderer/browser-window` owns shared Browser Window realizations of `RendererInputSource` and `RendererViewportSource` used by Desktop/PWA products. Platform observation enters through narrow options and does not fork Input/Data semantics.
 
-Implementation may choose private class/layout names only；the public construction surface、source lifetime、Effective semantics and publisher ordering are frozen by M10/02–M10/05。
+## Boundary rules
 
-M11 adds one internal Render replica per existing Data slot. Registry/Snapshot/Patch commits are atomic, Event delivery is transient, and same-generation carrier replacement preserves identity history while requiring a fresh Registry/Snapshot baseline. The Store and its qualification observation seam are not exported from the package root; M11 adds no presentation or subscription API.
+- Renderer owns readonly/current presentation replica, not Main control or Subsystem/Realm State business truth;
+- DOM/custom elements own only private presentation state;
+- Viewport observation does not become a new projection/business authority;
+- package-private presentation helpers do not expand the root public API accidentally;
+- product-specific host/browser concerns stay in concrete app/platform composition.
 
-M12 adds `@loomrealm/renderer/resource-client` as a platform-integration subpath while keeping the root surface unchanged. It resolves only logical namespace/hierarchical keys, requires `expectedContentVersion`, rejects version mismatch before returning bytes, and returns detached `Uint8Array` values.
-
-M13 adds only trusted/internal Config/bootstrap helpers, a Control/Store reevaluation attachment, a thin stable-identity Web Projector, and a Window-lifetime resource façade. None is exported from the package root. Real Chromium qualification covers browser loading, Custom Element lifecycle, per-subsystem currentness, structural data delivery, unknown-tag permanent freeze, and resource cancellation. M14 supplies the first real `loom.map` business component vocabulary; it does not own the projection mechanism.
-
-`@loomrealm/renderer/browser-window` owns the shared Browser Window
-`RendererInputSource` and `RendererViewportSource` realization used by both
-Desktop and PWA. Product-specific observation is accepted only through a
-narrow option; Input/Data protocol semantics stay single-sourced here.
+Qualification/currentness is subject-based; historical M8/M10/M11/M12/M13 labels are retained only in Git/legacy evidence, not as package status.
