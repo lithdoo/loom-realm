@@ -2111,11 +2111,11 @@ test("multi-depth building layer survives an overlap refresh of the ground", { t
   assert.deepEqual(layers, [0, 64]);
 });
 
-test("jump motion uses 400ms and a peak arc without two walks", { timeout: 30_000 }, async (t) => {
+test("jump motion uses the vanilla-aligned 500ms and a peak arc without two walks", { timeout: 30_000 }, async (t) => {
   const page = await openPage({ clock: true });
   t.after(() => page.close());
   const viewPayload = viewData({
-    cameraMotion: { id: 7, durationMs: 400, fromCameraX: 0, fromCameraY: 0 },
+    cameraMotion: { id: 7, durationMs: 500, fromCameraX: 0, fromCameraY: 0 },
     cameraY: 64,
   });
   const spritePayload = {
@@ -2125,7 +2125,7 @@ test("jump motion uses 400ms and a peak arc without two walks", { timeout: 30_00
     pattern: 1,
     motion: {
       id: 7,
-      durationMs: 400,
+      durationMs: 500,
       fromY: 0,
       fromScreenX: 0,
       fromScreenY: 0,
@@ -2138,10 +2138,10 @@ test("jump motion uses 400ms and a peak arc without two walks", { timeout: 30_00
     window.__sprite.receiveRenderData(sprite);
   }, { viewPayload, spritePayload });
   await page.clock.runFor(0);
-  await page.clock.runFor(200);
+  await page.clock.runFor(250);
   const mid = await page.evaluate(() => Number.parseFloat(getComputedStyle(document.querySelector("lr-map-sprite")).top));
   assert.ok(Number.isFinite(mid), "sprite top is numeric during jump");
-  await page.clock.runFor(200);
+  await page.clock.runFor(250);
   const end = await page.evaluate(() => Number.parseFloat(getComputedStyle(document.querySelector("lr-map-sprite")).top));
   assert.ok(end > mid, "jump arc is higher at mid-duration than at landing");
 });

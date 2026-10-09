@@ -181,7 +181,8 @@ test("MovementPlan JSON examples cover blocked, walk, and jump without executing
   assert.equal(jump.peakPx, jumpPeakPx(2));
   assert.equal(jump.peakRule, JUMP_PEAK_RULE);
   assert.equal(WALK_DURATION_MS, 250);
-  assert.equal(JUMP_DURATION_MS, 400);
+  // Vanilla Essentials v21.1 Map47 reports a ~500ms two-tile speed-3 jump.
+  assert.equal(JUMP_DURATION_MS, 500);
   assert.notEqual(JUMP_DURATION_MS, WALK_DURATION_MS);
 
   const reverse = planMovement(ledgeMap, tileset, 2, 4, 8, 0);

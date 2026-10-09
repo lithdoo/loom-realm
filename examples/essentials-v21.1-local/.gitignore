@@ -1,1 +1,16 @@
 \[FSDB]*
+
+# Legal local-only original runtime/corpus inputs. Qualification may read these
+# from this directory, but they must never enter a repository commit.
+Game.exe
+RGSS*.dll
+Data/
+PBS/
+Graphics/
+Audio/
+Scripts.rxdata
+*.rgssad
+*.rgss2a
+*.rgss3a
+rgss-capture/
+original-logs/

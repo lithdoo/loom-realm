@@ -64,7 +64,7 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
     const realClearTimeout = globalThis.clearTimeout;
     const queued = [];
     globalThis.setTimeout = (callback, delay) => {
-      if (delay !== 250 && delay !== 100 && delay !== 400) return realSetTimeout(callback, delay);
+      if (delay !== 250 && delay !== 100 && delay !== 500) return realSetTimeout(callback, delay);
       const id = queued.length + 1;
       queued.push({ id, callback, delay });
       return id;
@@ -250,7 +250,7 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
     assert.equal(player(frame.latestState()).y, 11);
     assert.equal(player(frame.latestState()).motion.kind, "jump");
     assert.equal(player(frame.latestState()).motion.durationMs, JUMP_DURATION_MS);
-    frame.fireTimer(400);
+    frame.fireTimer(JUMP_DURATION_MS);
     assert.equal(player(frame.latestState()).y, 11);
     assert.equal(player(frame.latestState()).motion, null);
     frame.abort();

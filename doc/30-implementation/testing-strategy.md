@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M15 current qualification baseline Closed where applicable；Viewport Core Qualified；M16/M17 implemented with independent PWA gate  
+> 稳定程度：M1–M15 implemented；M14/M15 current subject requalified、hosted CI PASS；Viewport Core Qualified；M16/M17 implemented with independent PWA gate
 > 主要定义：package/role/protocol/vertical ownership，以及 M14–M17 E2E qualification 分工  
 > 依赖：[正式契约目录](../15-contracts/README.md)、[下一阶段路线图](./roadmap.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-10-08

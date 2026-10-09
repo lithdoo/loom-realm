@@ -35,7 +35,7 @@ interface MapRecord {
 
 **Bridge：**Tileset terrain tag 15 标识桥面，`behaviors` 在 Map 中显式规定入口／出口。只有 Player 完成成功移动并到达 occupied 时触发；原地转向、出生、被阻挡和跳跃跨越中间格都不触发。同一区域连续占用只触发一次，全部离开后允许再进入；另一不重叠区域可独立触发。`on/off` 分别把 Runtime 内部 `bridgeLevel` 置为 `2/0`，进入新图重置为 0。已是目标值时不产生多余投影修改，但仍记录本次区域到达。先处理成功移动落点的 Step Transfer；若启动转图，不在旧图触发 Bridge。层级改变必须在同一次 RenderDomain 更新中同步人物和地形深度；Browser 不拥有桥层权威。
 
-**Ledge：**Tileset terrain tag 1 隐式决定。`planMovement` 先校验相邻格的既有双向通行，再检查两格跳的落点是否合法；成功只发起一次 jump 和一个 motionId，跨越格没有到达行为，落点按 Step Transfer→Bridge 顺序处理；非法落点 blocked。跨图 jump、NPC 自动触发地形和扩展行为种类不在 v1。当前 400ms 跳跃动画是产品值，不宣称原版 RGSS 逐帧等价。
+**Ledge：**Tileset terrain tag 1 隐式决定。`planMovement` 先校验相邻格的既有双向通行，再检查两格跳的落点是否合法；成功只发起一次 jump 和一个 motionId，跨越格没有到达行为，落点按 Step Transfer→Bridge 顺序处理；非法落点 blocked。跨图 jump、NPC 自动触发地形和扩展行为种类不在 v1。current 500ms/24px 两格跳已由 official v21.1 动态观察校准。
 
 **NPC 与传送顺序补全：**保留当前 `MapTransfer.contacts` 在当前格+尝试方向上的输入优先级——它无需走进前方格，故在普通移动及 NPC 目标格碰撞检查之前触发。否则先规划地形移动；只有规划成功，才检查 NPC 是否占据真正的 walk 目标或 Ledge 最终落点；被占即 blocked，不移动、不触发该目标格的 Step Transfer／Bridge／NPC 脚本。两格 jump 的中间格不检查 NPC 占格。越界方向仍按既有 `MapTransfer.edges` 判定，不凭 NPC 阻挡触发 Edge。若 NPC 站在 Step Transfer 的格上，Player 不能进入该格，也不会触发其 Step Transfer；若命中当前格的 Contact Transfer，仍按 Contact 的既有优先级传送。自动传送的目标出生格必须在新场景准备时通过 NPC 冲突验证，失败按 Frame 级传送失败处理。这些是产品顺序，不声明修改 Contact/Step/Edge 的原有位置定义。详见 [接口契约](./RPG_MAP_PUBLIC_API_V1_EXECUTION_CONTRACT.md) 的移动与提交规则。
 
