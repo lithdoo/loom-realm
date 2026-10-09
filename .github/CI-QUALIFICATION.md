@@ -1,27 +1,27 @@
-# M12–M15 qualification execution
+# Qualification CI
 
-## Pull requests: one independent suite per milestone
+Repository CI 按 capability 提供 package、contract 与 product evidence。现有部分 workflow/script 仍使用 `mXX` 历史名字；这些名字是兼容的 command/check interface，不再定义 Current 文档信息架构。
 
-`.github/workflows/m12-m15-pr.yml` runs seven parallel matrix jobs and a fail-closed summary:
+## PR aggregate
 
-| Job | Nodes | Commands | Coverage |
+`.github/workflows/m12-m15-pr.yml` 当前仍运行四组 capability delta 和一个 fail-closed summary：
+
+| Capability | Existing alias | Nodes | Purpose |
 | --- | --- | --- | --- |
-| M12 | 20, 24 | `npm run test:m12`, `node --test test/ci-pr-coverage.test.mjs` | Original regression suite, M10/M11 qualifications and boundaries, fixture tree, M12 boundary, FSDB packaging |
-| M13 delta | 20, 24 | `npm run test:m13:pr` | Clean build of the desktop dependency stack; web qualification including Chromium, M13 boundary and renderer pack; **not** M12 again |
-| M14 delta | 20, 24 | `npm run test:m14:pr` | Clean M14 build, projection, map and example tests, M14 boundary/vertical and map pack; **not** M12/M13 again |
-| M15 delta | 24 | `npm run test:m15:pr` under `xvfb-run` | Clean M15 build, Desktop and frozen Hostra E2E; **not** M12/M13/M14 again |
-| Summary | n/a | `needs: [m12, m13, m14, m15]`, `if: always()` | Fails if **any** constituent job fails, is skipped or cancelled; there is no `continue-on-error` |
+| Content/storage integration | `test:m12` | 20, 24 | Content/FSDB boundary + upstream regressions |
+| Web Presentation | `test:m13:pr` | 20, 24 | Browser presentation/projector delta |
+| Map real consumer | `test:m14:pr` | 20, 24 | game-lib/example/real browser consumer delta |
+| Desktop product | `test:m15:pr` | 24 | Hostra-owned Desktop E2E delta |
+| Summary | workflow summary | n/a | fails if any constituent job fails/skips/cancels |
 
-M13, M14 and M15 run their own clean builds because GitHub Actions jobs do not share a filesystem; no unverified cross-job artifact sharing is assumed. Browser/Hostra setup and Node versions are unchanged. Each job still uploads a report even after test failure. The original M15 `--test-concurrency=1` is preserved for Electron isolation. The PR workflow cancels superseded runs of **the same PR only**.
+GitHub Actions jobs do not share filesystem state；各 delta 必须自行 clean build。Report artifact 继续在失败后上传，M15 的 Electron isolation/concurrency 约束保持不变。
 
-The M12–M15 PR suite remains complete as a **union** of tests, not as four independent full-closure test executions. A new invariant test (`test/ci-pr-coverage.test.mjs`) checks the stage suffixes, exact Node matrices, workflows, Hostra pin, and summary's failure propagation to prevent silent coverage erosion.
+## Canonical / main gates
 
-## Full canonical qualifications
+现有 `m12.yml`～`m15.yml`、`test:m12`～`test:m15` 暂时保留，避免文档整理同时改变 branch protection、required checks 或 release tooling。未来若重命名，应作为独立工程变更：保持 Node matrix、coverage、Hostra pin、fail-closed summary 与 required-check migration，并用 `test/ci-pr-coverage.test.mjs` 防止静默降级。
 
-`.github/workflows/m12.yml` through `m15.yml` still execute the unchanged nested qualification contract on `push` to `main` and `workflow_dispatch` (M12/M13/M14: Node 20 and 24; M15: Node 24). The public `npm run test:m12`, `test:m13`, `test:m14`, `test:m15` entry points preserve the M12→M13→M14→M15 dependency chain, with M14's exclusive suffix factored into `test:m14:pr`. M15 no longer invokes `build:m15` a second time after M14 has already built the same workspace. Manual/release consumers of the canonical entry points are not changed to the PR-only alternatives.
+PWA、Realm State、Renderer、Data、Runtime 等继续使用各自独立 workflow/package gates。
 
-**Required-check migration:** if branch protection or a ruleset requires any old `M12 Content qualification / Node ...` through `M15 Desktop full E2E qualification / Node ...` PR contexts, replace those PR requirements with the `M12-M15 PR qualification / M12-M15 PR qualification` summary job **as part of enabling this change**. Keep any other repository checks intact. A workflow summary cannot enforce merging on an unprotected branch by itself: a repository administrator must configure the required status check. Do not delete an existing check requirement without adding its replacement.
+## Qualification rule
 
-## Validation and measurement
-
-Run `node --test test/ci-pr-coverage.test.mjs` without game assets. The new workflow must complete successfully on its exact HEAD before declaring it qualified. Compare the actual Actions wall time, runner-minutes and per-job duration against the prior PR runs before publishing an acceleration claim. The old configuration executes M12 7 times, M13 5 times, M14 3 times and M15 once across the four milestone workflows; the PR workflow performs M12 twice, M13 twice, M14 twice and M15 once. These are counts inferred from the scripts and matrices, **not** a measured speedup. Full main/dispatch qualification is intentionally unchanged apart from removal of a redundant M15 build.
+CI success 只是 evidence。是否可以称为 Qualified 仍取决于 [`doc/30-development/qualification.md`](../doc/30-development/qualification.md) 的 subject/staleness 规则；历史 PASS 不能自动迁移到新的 behavior 或 qualification-input subject。
