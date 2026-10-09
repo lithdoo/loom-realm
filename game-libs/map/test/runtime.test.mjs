@@ -137,7 +137,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     let nextId = 1;
     let lastCallback = null;
     globalThis.setTimeout = (callback, delay) => {
-      if (delay !== 250 && delay !== 100 && delay !== 400) return realSetTimeout(callback, delay);
+      if (delay !== 250 && delay !== 100 && delay !== 500) return realSetTimeout(callback, delay);
       const id = nextId;
       nextId += 1;
       lastCallback = callback;
@@ -953,7 +953,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.pending;
   });
 
-  test("product Ledge jump is one 400ms motion skipping the middle tile", async (t) => {
+  test("product Ledge jump is one vanilla-aligned 500ms motion skipping the middle tile", async (t) => {
     const width = 8;
     const height = 8;
     const values = Array(width * height * 3).fill(0);
@@ -987,7 +987,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(view(frame.latestState()).cameraMotion.durationMs, JUMP_DURATION_MS);
     assert.equal(player(frame.latestState()).bridgeLevel, 0);
     await frame.emitEvent(up("ArrowDown"));
-    frame.fireTimer(400);
+    frame.fireTimer(JUMP_DURATION_MS);
     assert.equal(player(frame.latestState()).y, 4);
     assert.equal(player(frame.latestState()).bridgeLevel, 0);
     frame.abort();
@@ -1324,7 +1324,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(player(frame.latestState()).motion.kind, "jump");
     assert.equal(player(frame.latestState()).bridgeLevel, 0);
     await frame.emitEvent(up("ArrowDown"));
-    frame.fireTimer(400);
+    frame.fireTimer(JUMP_DURATION_MS);
     assert.equal(player(frame.latestState()).y, 4);
     assert.equal(player(frame.latestState()).bridgeLevel, 2);
     frame.abort();
@@ -1373,7 +1373,7 @@ describe("map runtime transfer", { concurrency: false }, () => {
     let nextId = 1;
     let lastCallback = null;
     globalThis.setTimeout = (callback, delay) => {
-      if (delay !== 250 && delay !== 100 && delay !== 400) return realSetTimeout(callback, delay);
+      if (delay !== 250 && delay !== 100 && delay !== 500) return realSetTimeout(callback, delay);
       const id = nextId;
       nextId += 1;
       lastCallback = callback;

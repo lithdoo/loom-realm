@@ -108,8 +108,9 @@ export const TERRAIN_NEUTRAL = 13;
 export const TERRAIN_BRIDGE = 15;
 export const TERRAIN_NO_EFFECT = 17;
 export const WALK_DURATION_MS = 250;
-/** PROJECT-DECISION-PROVISIONAL: not a vanilla RGSS measurement. Shared by Runtime and Browser via motion.durationMs. */
-export const JUMP_DURATION_MS = 400;
+/** Vanilla Essentials v21.1 Map47 dynamic observation: speed-3 two-tile jump is 0.5s. */
+export const JUMP_DURATION_MS = 500;
+/** PROJECT-DECISION-PROVISIONAL: the product formula generalizes the observed 24px Map47 peak. */
 export const JUMP_PEAK_RULE = "distancePx * 3 / 8";
 export const TILE_SIZE = TILE_SIZE_PX;
 export const LEGAL_BRIDGE_LEVELS = Object.freeze([0, 2] as const);
