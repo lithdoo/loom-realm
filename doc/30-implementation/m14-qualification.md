@@ -2,7 +2,7 @@
 
 ## Status
 
-**Previous subject Closed / current subject local requalification PASS, exact-head CI pending.** Executable subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` passed the identity-pinned official Essentials v21.1 exact production path and canonical hosted Node 20/24 gate on 2026-10-08. Current Terrain subject `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9` changes only the authorized Map Ledge duration from 400ms to the original-observed 500ms plus its regression; `npm run test:m14:pr` was rerun locally and passed (Map 106/106, live FSDB 3/3, vertical 3/3). Formal current-subject closure additionally requires the final PR head CI; see the [current qualification ledger](./final-performance-terrain-qualification.md).
+**Current subject requalified / hosted CI PASS.** Previous subject `a5e406827d0e3814dad3ac797c4b5f13015173a0` passed the identity-pinned official Essentials v21.1 exact production path and canonical hosted Node 20/24 gate on 2026-10-08. Current Terrain subject `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9` changes only the authorized Map Ledge duration from 400ms to the original-observed 500ms plus its regression; the official-runtime observations and `npm run test:m14:pr` requalified that delta locally (Map 106/106, live FSDB 3/3, vertical 3/3). PR evidence checkout `d9d59c6741127a1e0cfdf3ff619d79b4c4074b01` then passed the hosted Node 20/24 M14 delta jobs in [Actions run 37901294648, attempt 2](https://github.com/lithdoo/loom-realm/actions/runs/37901294648/attempts/2). See the [current qualification ledger](./final-performance-terrain-qualification.md) for the attempt history and scope boundary.
 
 The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`; neither is promoted to the current subject.
 
@@ -15,8 +15,8 @@ This file is the **single source of truth** for M14 formal qualification status 
 Current qualification subject：
 
 ```text
-a5e406827d0e3814dad3ac797c4b5f13015173a0
-test(m14): assert propagated exact viewport
+8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9
+fix(map): align ledge jump with original timing
 ```
 
 A qualification subject is the last commit that changes M14 executable behavior or qualification inputs. Later docs-only commits that only record/explain evidence do **not** create a new subject.
@@ -27,10 +27,10 @@ Any later change to M14 Runtime/importer/browser behavior, prepared Content, fix
 
 | Gate | Required evidence | Status |
 | --- | --- | --- |
-| Local map/vertical/boundary/projection | `npm test -w @loomrealm-game/map`, `test:m14:vertical`, `test:m14:boundary`, `test:m14:projection` on `a5e406827d0e3814dad3ac797c4b5f13015173a0` | **PASS — local Windows, 2026-10-08; Map package 106/106, vertical 3/3, boundary 4/4, projection 8/8** |
-| Exact Essentials v21.1 | exact production command against the identity-pinned official ZIP | **PASS — [run 37731662353](https://github.com/lithdoo/loom-realm/actions/runs/37731662353), Exact Essentials v21.1 / Node 24** |
-| Hosted Node 20 | `npm run test:m14` on the current subject | **PASS — [run 37731662353](https://github.com/lithdoo/loom-realm/actions/runs/37731662353), 2026-10-08** |
-| Hosted Node 24 | `npm run test:m14` on the current subject | **PASS — [run 37731662353](https://github.com/lithdoo/loom-realm/actions/runs/37731662353), 2026-10-08** |
+| Local map/vertical/boundary/projection | `npm run test:m14:pr` plus focused current-Terrain regressions on `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9` | **PASS — local Windows, 2026-10-09; Map package 106/106, live FSDB 3/3, vertical 3/3; focused Terrain evidence 54/54** |
+| Exact Essentials v21.1 | identity-pinned official ZIP plus observation-only original-runtime qualification | **PASS — archive identity unchanged; Map21 four Bridge pairs and Map47 forward/reverse Ledge observed on the original runtime; current product fixtures 117/117** |
+| Hosted Node 20 | M14 delta gate on the current subject and evidence checkout | **PASS — [run 37901294648, attempt 2](https://github.com/lithdoo/loom-realm/actions/runs/37901294648/attempts/2), 2026-10-09** |
+| Hosted Node 24 | M14 delta gate on the current subject and evidence checkout | **PASS — [run 37901294648, attempt 2](https://github.com/lithdoo/loom-realm/actions/runs/37901294648/attempts/2), 2026-10-09** |
 | Formal M14 closure | all required rows target the same qualification subject | **Closed** |
 
 Previous-subject hosted evidence remains historically valid only for `fd1df5872d4310e268857e700a067f4e0b9e75d1` ([M14 run 34621763706](https://github.com/lithdoo/loom-realm/actions/runs/34621763706)) and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` ([M14 run 34998417357](https://github.com/lithdoo/loom-realm/actions/runs/34998417357)); it must not be promoted to the current subject.
@@ -66,7 +66,7 @@ The hardened subject closes both gaps without adding a second Runtime path or re
 
 ## Historical exact-local evidence
 
-The following exact-source compatibility evidence remains historical and does not qualify the current subject `a5e406827d0e3814dad3ac797c4b5f13015173a0`.
+The following earlier exact-source compatibility evidence remains historical and does not by itself qualify the current subject `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9`.
 
 Source fingerprint：
 

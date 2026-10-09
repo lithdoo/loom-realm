@@ -13,8 +13,21 @@
 | `6ade9506f0ef459e30e610505f4a788434b1e5f4` | `test/map-viewport-pr0.test.mjs` | Qualification input | No | Previous performance subject; historical after the Ledge fix |
 | `c3e0cd6` | Qualification ledgers only | No | No | Evidence-only; not a subject |
 | `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9` | Map jump duration, Browser acceptance and regressions | Yes | Yes | Current `PERF_SUBJECT` and `TERRAIN_SUBJECT` |
+| `d9d59c6741127a1e0cfdf3ff619d79b4c4074b01` | Qualification evidence and follow-up documentation | No | No | Hosted CI evidence checkout; not a new executable/input subject |
 
-Changing jump from 400ms to the original-observed 500ms changes the current movement executable, so the former performance result cannot be inherited. M14 and M15 were requalified in dependency order. M11 and M13 were not reopened because their executable and qualification input did not change. The final evidence-only commit does not create another subject.
+Changing jump from 400ms to the original-observed 500ms changes the current movement executable, so the former performance result cannot be inherited. M14 and M15 were requalified in dependency order. M11 and M13 were not reopened because their executable and qualification input did not change. Evidence-only documentation commits do not create another subject.
+
+## Hosted CI evidence
+
+Evidence checkout `d9d59c6741127a1e0cfdf3ff619d79b4c4074b01` passed every reported PR check:
+
+- [M12–M15 qualification run 37901294648, attempt 2](https://github.com/lithdoo/loom-realm/actions/runs/37901294648/attempts/2): M12 Node 20/24, M13 Node 20/24, M14 Node 20/24, M15 Node 24 and the aggregate all PASS.
+- [PWA M16–M17 run 37901294663](https://github.com/lithdoo/loom-realm/actions/runs/37901294663): PASS.
+- [M9 run 37901294679](https://github.com/lithdoo/loom-realm/actions/runs/37901294679): Node 20/24 PASS.
+- [RPGMap run 37901294678](https://github.com/lithdoo/loom-realm/actions/runs/37901294678): Node 24 PASS.
+- [Documentation run 37901294683](https://github.com/lithdoo/loom-realm/actions/runs/37901294683): PASS.
+
+Attempt 1 of run 37901294648 was not concealed: M14 Node 24 exceeded the existing fixed 30-second timeout in the real Chromium vertical (the Map suite had passed 106/106), while M12 Node 20 stopped making progress in its closure step. The stuck workflow was cancelled and only failed/incomplete jobs were rerun on the same checkout. No source, test, timeout, threshold, sample count or validator changed. Attempt 2 completed M12 Node 20 in about 62 seconds and M14 Node 24 in about 66 seconds; all jobs passed.
 
 ## Performance acceptance matrix
 
@@ -74,7 +87,7 @@ The second run misses the strict limit by 0.5ms and the first by 12.1ms. A best-
 | Browser receive-to-paint raster diagnostic | — | — | 21.5ms for its recorded production-schema sample | Canvas preparation/paint is material; not the same sample population as the e2e table |
 | Native end-to-end refresh run 2 | 29.8ms | 41.6ms | 50.5ms | Input through first changed pixel; authoritative failure result |
 
-The current canonical product harness records only `input-captured`, `presentation-received` and `browser-first-motion-paint`; it does not expose the full §7.3 per-process author/materialize/encode/decode/store/projector breakdown. Therefore no unsupported subtraction or cross-process clock comparison is reported. The evidence points to size-dependent retained-state validation/projection plus browser preparation/paint rather than ordinary camera redraws or transport alone, but exact attribution remains unresolved. The correctness implementation is preserved and a separate follow-up must add the missing qualification-only stage measurements before considering any cache, protocol, scheduling or canvas redesign. Such a design is not accepted by this PR.
+The current canonical product harness records only `input-captured`, `presentation-received` and `browser-first-motion-paint`; it does not expose the full §7.3 per-process author/materialize/encode/decode/store/projector breakdown. Therefore no unsupported subtraction or cross-process clock comparison is reported. The evidence points to size-dependent retained-state validation/projection plus browser preparation/paint rather than ordinary camera redraws or transport alone, but exact attribution remains unresolved. The correctness implementation is preserved and [Issue #80](https://github.com/lithdoo/loom-realm/issues/80) tracks a separate follow-up that must add the missing qualification-only stage measurements before considering any cache, protocol, scheduling or canvas redesign. Such a design is not accepted by this PR.
 
 Historical `42.9/96.3ms`, PR0–PR3, remediation and the former `6ade950` 50.0ms result remain history only.
 
