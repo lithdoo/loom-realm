@@ -2,277 +2,171 @@
 
 > 层级：产品总览  
 > 状态：Active / Normative  
-> 稳定程度：方向稳定，current v1 在首次实现 compatibility boundary 形成前可按治理规则直接收口  
-> 主要定义：产品目标、Game/Platform/Main 消费边界、跨平台原则、第一阶段验收方向  
-> 最近复核：2026-09-11
+> 稳定程度：Stable  
+> 主要定义：产品目标、逻辑角色、authority partition、跨平台原则与兼容边界  
+> 最近复核：2026-10-09
 
-本文是 LoomRealm 最高层产品事实源。下层架构、协议、模块和实施文档不得通过实现便利反向改变这里的产品边界。
-
-Milestone live qualification 状态不由本文复制维护：当前汇总见 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md)。M15 Hostra physical correction由 [ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md) formalize。
-
----
+本文是 LoomRealm 最高层产品事实源。下层 Architecture、Contract、Module 和 Development 文档只能细化这里的边界，不能因为实现便利反向改变 authority。
 
 ## 1. 产品目标
 
-LoomRealm 是一个：
+LoomRealm 是一个将 **platform-neutral logical game runtime** 与 **platform-specific physical composition** 分离的模块化游戏运行平台。
 
-> **由只读 Game Entry 声明 platform-neutral logical Subsystem topology，由 matching Platform Launcher/launch profile 负责 common Game validation + current-platform executable preflight，由 Main 管理 Session/Runtime/Frame/Data authority，并由 Hostra Desktop / PWA 等真实 Platform Composition 提供物理承载的模块化游戏运行平台。**
+核心目标：
 
-目标：
+- 地图、菜单、对话、战斗等业务能力以边界明确的 Subsystem/game library 组合；
+- concrete game 声明 logical Subsystem topology、初始输入与只读安装内容；
+- Platform Launcher 完成当前平台 executable/provisioning PREPARE；
+- Main 管理 Session/control-flow，而不解析安装文档或业务状态；
+- Realm State 独立持有 session 共享可变业务状态；
+- Subsystem 持有 domain execution、local state 与 authoritative Render Domains；
+- Renderer 维护 current readonly presentation replica，并作为受控 Input producer；
+- Content 是 installation-scoped readonly definition authority；
+- Desktop/Hostra 与 PWA 可以采用不同 process/worker/window topology，但对相同 logical scenario 保持等价 application semantics。
 
-- 地图、菜单、对话、战斗等业务能力拆成边界明确的 Subsystem；
-- reusable game-domain libraries 是 LoomRealm author API 的消费者，不自动成为 framework `@loomrealm/*` package；
-- concrete game 显式组合 game libraries、game-specific Subsystem 与 logical content；
-- Game Entry 显式声明当前 Session 完整 logical Subsystem key set 与 initial business input；
-- `@loomrealm/game-package` 只验证 common document，不成为 Runtime role；
-- product bootstrap caller 调 matching Platform Launcher/launch profile，不要求先手动调用 Game Package；
-- Main 不解析 `game.json`、不依赖 `@loomrealm/game-package`、不接收 executable material；
-- 每个平台独立拥有 Launch Manifest/schema/resolver，不建立万能 launcher option bag；
-- 业务 Subsystem source 不依赖 Desktop/PWA/Transport/launch config；
-- Main 是唯一 Session/Runtime/Frame/Activation/InputTarget/DataAuthority application authority；
-- physical host/composition负责 Process/Worker/Socket/Port/Window/Content/Provisioning topology，但不获得 application authority；
-- Hostra/PWA 对相同 logical Game/scenario 得到等价 application outcome；
-- 不同平台可以使用不同 Definition artifact/path/bytes，只要遵守相同 author ABI、formal semantics 与 business-observable result。
-
----
-
-## 2. 总体闭环
+## 2. Authority partition
 
 ```text
-Game installation / source
-        ↓
-matching Platform Launcher / launch-profile PREPARE
-    ├── @loomrealm/game-package
-    │       Game Entry parse / validate
-    ├── current Platform Launch Manifest parse / validate
-    ├── exact Game↔Platform key-set join
-    ├── executable resolution
-    ├── installation/security containment
-    └── hosting capability preflight
-        ↓
-Prepared Current-Platform Game
-    ├── immutable LogicalGameBootstrap
-    │       ↓
-    │      LoomRealm Main
-    │       │
-    │       └── launch(subsystemKey)
-    │
-    └── plan-bound RuntimeHosting
-            ↓
-        physical Runner
-            ↓
- platform-selected Definition Module
-            ↓
-     @loomrealm/subsystem/host
-            ↓
-       business behavior
+Main
+    Control Authority
+    Session / Runtime / Frame / Activation / InputTarget / DataAuthority
+
+Realm State
+    Session Shared Business State Authority
+    Records / versions / OCC / commit revision
+
+Subsystem
+    Domain Execution / Local State Authority
+    Input Interest / Render Domains
+
+Renderer
+    Readonly/current Presentation Replica
+    authorized Input producer gate
+
+Content
+    Readonly Installation Definition Authority
 ```
 
-Renderer/Data：
+一个 application fact 只能有一个 authoritative owner。Process、Worker、Socket、MessagePort、BrowserWindow、DOM、Service Worker 等 physical ownership 不产生第二份 application authority。
+
+## 3. Game / Platform / Main boundary
+
+Game Entry 描述 logical game，不携带平台 executable selection。Platform-specific launch profile 负责：
 
 ```text
-Main committed authority
-        ↓
-Web Renderer
-        ⇅ authorized Data Profile
-Subsystem Runtime
+Game Entry validation
+→ current-platform manifest validation
+→ exact logical-key join
+→ executable / installation / hosting preflight
+→ immutable PlatformLaunchPlan
+→ LogicalGameBootstrap + prepared platform capabilities
 ```
 
-核心边界：
+Main 只接收运行所需的 logical bootstrap，不接收 raw `game.json`、module path、URL、Node/Worker option、Hostra/PWA manifest 或任意 executable bytes。
+
+因此：
 
 ```text
-Game Entry document != Main bootstrap model
-Game logical topology != Platform executable binding
-external physical host != LoomRealm application authority
-framework package != reusable game library != concrete game
+Game logical topology
+!= platform executable binding
+!= physical host composition
+!= presentation bootstrap
 ```
 
----
+正式边界见 [Game Package v1](../15-contracts/game-package-v1.md)、[Runtime Control](../15-contracts/runtime-control-profile-v1.md) 与对应 Platform profiles。
 
-## 3. Game Entry / Game Package
+## 4. Runtime / State / Render flow
 
-Game Package v1 document：
-
-```ts
-interface GameEntryV1 {
-  readonly formatVersion: 1;
-  readonly initial: {
-    readonly subsystem: string;
-    readonly input: JsonValue;
-  };
-  readonly subsystems: readonly {
-    readonly key: string;
-  }[];
-}
-```
-
-`key` 是 application Subsystem identity，由 concrete game 拥有；LoomRealm 不为 map 等业务预留 `loom.*` key prefix。
-
-Game Entry 不声明：
+典型运行链：
 
 ```text
-module
-launcher.type / launcher.entry
-Node/Worker selection
-argv/env/options
-WebSocket/MessagePort
-Platform provisioning
-bootstrap token / Data ticket
-platform switch/options bag
+Platform PREPARE
+→ Session composition
+→ Main + RealmStateAuthority READY
+→ RuntimeHosting launches Subsystem Runtime
+→ Subsystem business behavior
+→ RenderDomain authoritative updates
+→ Render Update
+→ Renderer current replica
+→ Web presentation projection
 ```
 
-`@loomrealm/game-package`：
+Input 反向流动，但只能经过 current Renderer/Data/InputTarget/Activation/Interest gates；DOM 或业务 Web Component 不得反向成为 Store、Main、Realm State 或 Subsystem authority。
+
+Realm State 与 Renderer Data 是两个不同 lifetime/currentness domain：共享业务状态不会因为 Renderer reload 或 Data reconnect 被重置；presentation 只能通过 Subsystem business logic → RenderDomain → Renderer projection 间接反映 Realm State。
+
+## 5. Content 与 game libraries
+
+Content 只提供 prepared installation 中的 readonly logical bytes/records/resources。Subsystem 通过 author-facing `ContentClient` 消费，不依赖 importer、Marshal、FSDB physical path 或平台 transport。
+
+Repository taxonomy：
 
 ```text
-untrusted Game Entry
-→ deterministic closed validation
-→ detached immutable ValidatedGameEntryV1
+packages/      framework/runtime/protocol/platform seams
+game-libs/     reusable game-domain libraries
+examples/      concrete games / fixtures / legal-local compatibility entry
+apps/          concrete Desktop / PWA product compositions
+tools/         import / fixture / developer tooling
 ```
 
-它的 Runtime-product primary consumers 是 matching Platform Launchers/launch profiles，不是 Main 或业务 Subsystem。
-
----
-
-## 4. Platform Launcher / Launch-profile PREPARE
-
-Hostra launch profile：
+主要业务依赖方向：
 
 ```text
-@loomrealm/game-launcher-hostra
-    game.json via @loomrealm/game-package
-    + launch.hostra.json
-    → HostraLaunchPlan
+examples → game-libs → framework public author APIs
 ```
 
-这里的 **Hostra launch profile** 是 LoomRealm 内部 PREPARE + Node Runner realization；它不等于 external `lithdoo/hostra` Electron shell。
+Reusable game library 不是因为“可复用”就自动成为 `@loomrealm/*` framework package。
 
-PWA：
+## 6. Physical platform composition
 
-```text
-@loomrealm/game-launcher-pwa
-    game.json via @loomrealm/game-package
-    + launch.pwa.json
-    → PwaLaunchPlan
-```
-
-两个 Platform manifest 当前 MAY 都有 `{key,module}` binding，但不是 universal schema。
-
-Phase 1：
-
-```text
-keys(Game Entry) = keys(Current Platform Launch Manifest)
-```
-
-PREPARE 必须在任何 business Runtime side effect 前完成：
-
-```text
-Game validation
-→ Platform manifest validation
-→ exact join
-→ executable resolution
-→ security/hosting capability validation
-→ freeze immutable PlatformLaunchPlan
-→ project immutable LogicalGameBootstrap
-```
-
-任何 PREPARE failure：
-
-```text
-Runner/Worker creation = 0
-business Definition import = 0
-Runtime Control establishment = 0
-```
-
----
-
-## 5. Main-facing Bootstrap
-
-Main 接收已经投影的 logical facts：
-
-```ts
-interface LogicalGameBootstrap {
-  readonly subsystemKeys: readonly string[];
-  readonly initial: {
-    readonly subsystemKey: string;
-    readonly input: JsonValue;
-  };
-}
-```
-
-Main 不接收：
-
-```text
-formatVersion
-ValidatedGameEntryV1 brand
-PlatformLaunchPlan
-module/path/URL
-Node/Worker options
-raw launch manifest
-```
-
-同时 concrete Platform composition 提供 plan-bound `RuntimeHosting`：
-
-```text
-Main launch(subsystemKey)
-→ RuntimeHosting lookup frozen plan
-→ physical Runner Runtime
-```
-
-Main 因此保持 platform-neutral，不与 installation document 或外部 host model 耦合。
-
----
-
-## 6. Physical Host / Composition / Runner
-
-产品层不要求 external host直接拥有每个 Runner。真实 process tree由 concrete platform composition决定。
-
-Canonical Hostra Desktop：
+Desktop canonical ownership：
 
 ```text
 Hostra shell
-    lithdoo/hostra Electron / BrowserWindow / RPC host
+    Electron / BrowserWindow / host RPC
         ↓ HOSTRA_SUBCMD
 LoomRealm Desktop process
-    plain Node product composition
+    plain Node composition
         ↓ RuntimeHosting
-Node Runner
+Runner
         ↓
 Subsystem Runtime
 ```
 
-PWA：
+PWA canonical ownership：
 
 ```text
-PWA composition
-→ Dedicated Worker Runner
-→ Subsystem Runtime
+Browser Window
+    Renderer / Input / Viewport / Presentation
+        ↕ dedicated application ports
+Session Worker
+    Main + Realm State
+        ↓
+Dedicated Subsystem Workers
+
+Service Worker
+    Content / private executable / runtime-info physical serving boundary
 ```
 
-Runner统一负责：
+两种 topology 不要求相同 physical implementation；要求相同逻辑 authority、formal contract 与 business-observable outcome。
 
-```text
-verify planned binding
-→ load exact selected Definition Module
-→ validate SubsystemDefinitionFactory
-→ construct RuntimeControlBinding / SubsystemDataBinding / ContentClient
-→ enter @loomrealm/subsystem/host
-```
+## 7. Compatibility 与演进
 
-Business Definition Module 不是 Process/Worker entry，也不读取 Platform manifest/bootstrap material。
+`Frozen != Implemented != Qualified`。一旦形成真实 compatibility boundary，incompatible schema/identity/order/error/recovery/limit/encoding change 必须 version 或显式 migration。
 
-Physical deployment/security policy包括：
+没有真实 compatibility obligation 时，错误的 current-v1 设计可以按 [文档治理](./document-governance.md) 用 Accepted ADR 直接修正，但必须同步 Architecture、Contracts、Modules、tests 与 qualification input；不得制造 fake v2 或 dual parser 逃避治理。
 
-```text
-external host process/window policy where applicable
-Node executable / Worker Runner entry
-shell/argv/env safety policy
-Worker constructor policy
-bootstrap credentials
-Control/provisioning facilities
-resource/timeouts
-browser CSP/origin policy
-```
+## 8. Product invariants
 
-Game/Platform manifest不能把“选择 business implementation”升级为任意 Host code execution authority。
+1. logical game definition 与 physical platform binding 分离；
+2. Main 只拥有 Control Authority，不吸收 Realm State 或业务 local state；
+3. Realm State 只拥有 session shared mutable business truth；
+4. Subsystem 是业务执行与 RenderDomain authority；
+5. Renderer 是 readonly/current presentation replica，不是业务 authority；
+6. Content 是 readonly installation definition authority；
+7. physical host/composition 不获得 application authority；
+8. Desktop/PWA 可以物理不同，但必须遵守同一逻辑 semantics；
+9. framework、game library、concrete game 三层依赖不可反转；
+10. 当前产品事实、工作进度、历史 evidence 分别由 Current docs、Issue/PR、ADR/Git/evidence 管理。
 
-Hostra Desktop 的 exact Window/subprocess ownership、termination signals与 document bootstrap属于低层 physical realization；它们不创建 product-level executable selection或 application authority。Canonical M15 owner chain由 ADR 0034定义，历史 ADR 0033仅保留 direct-Electron embedding compatibility provenance。
+继续阅读：[系统架构](../10-architecture/system-overview.md) · [正式契约](../15-contracts/README.md) · [当前模块](../20-modules/core/README.md) · [开发与资格](../30-development/README.md)。
