@@ -1,36 +1,36 @@
 # Hostra Desktop：当前产品组合
 
-> 代码：`apps/desktop`、`packages/game-launcher-hostra`；决策：[ADR 0034](../../decisions/0034-hostra-owned-desktop-composition.md)。这是已实现产品的物理结构；当期 Hostra E2E、性能与资格缺口集中在[路线图](../../30-implementation/roadmap.md)和[M15 ledger](../../30-implementation/m15-qualification.md)。
+> 代码：`apps/desktop`、`packages/game-launcher-hostra`；system decision：[ADR0034](../../decisions/0034-hostra-owned-desktop-composition.md)。本文描述 Current physical composition，不维护 live PASS dashboard。
 
-## 物理进程所有权
+## Physical ownership
 
 ```text
-Hostra shell（唯一 Electron / BrowserWindow / HOSTRA_SUBCMD owner）
-  └─ LoomRealm Desktop plain Node 子进程
-      ├─ Hostra JSON-RPC adapter（仅 host control）
-      ├─ Main / RuntimeHosting → Runner
-      ├─ Desktop Data Broker
-      ├─ Content Service + trusted shell
-      ├─ Renderer Control loopback carrier
-      └─ Data settlement loopback carrier
-          ↔ Hostra-owned BrowserWindow 的可信 Renderer
-              → DOM RendererInputSource / M10
-              → M13 Presentation / 业务自有 Web Components
+Hostra shell
+  Electron / BrowserWindow / host RPC
+  └─ HOSTRA_SUBCMD
+      LoomRealm Desktop plain Node process
+        ├─ Main / RealmStateAuthority / RuntimeHosting → Runner
+        ├─ Desktop Data Broker
+        ├─ Content Service + trusted shell
+        ├─ Renderer Control carrier
+        └─ Data settlement carrier
+             ↔ Hostra-owned BrowserWindow trusted Renderer
 ```
 
-Hostra shell 负责 Electron 与 BrowserWindow；`apps/desktop` 不能重新创建独立 Electron 主进程或复制 Main 权威。`@loomrealm/game-launcher-hostra` 只负责 Game Entry + launch manifest 的 PREPARE、Node Runner 实现；外部 Hostra shell 并非 Game Launcher。Hostra RPC 不承载 Renderer Control、Data application、Content bytes、Input/Render 消息。
+Hostra shell 唯一拥有 Electron、BrowserWindow、preload 与 direct child lifecycle；`apps/desktop` 不能重新创建独立 Electron main 或复制 Main authority。`@loomrealm/game-launcher-hostra` 负责 Game Entry + launch manifest PREPARE 与 Node Runner realization；Hostra outer shell 不是 logical Game Launcher。
 
-## 身份、安全与收敛
+Hostra JSON-RPC 仅用于 bounded host control（例如 window open/close/event），不承载 Renderer Control/Data application/Content/Input/Render protocol。
 
-- `openWindow`、`closeWindow`、`hostra.event` 为产品 Hostra 控制入口；窗口状态查询只作诊断，不能充当 Renderer currentness。
-- 只有受信任顶层文档导航建立新 document/Renderer lifetime；资源加载、iframe 与子资源请求不能冒充新 Renderer。acquire 与 document 两侧采用有界 rendezvous。
-- reload：同一 Hostra Window，新的 Renderer logical identity；同 generation 的 Data-only reconnect：同一 Renderer identity、新物理 Data pair。Control/Data/Content 的通道和授权不能混用。
-- 窗口关闭、信号、RPC 失败、启动失败等最终汇入同一幂等 termination funnel；不能叠加自己的 Runtime 或连接管理框架。
+## Identity / lifetime / security
 
-## 不复制的规范与验证
+- trusted top-level navigation 才建立新的 document/Renderer lifetime；subresource/iframe 不得冒充 Renderer；
+- reload：same Hostra window、fresh Renderer logical identity；
+- same-generation Data replacement：preserve Renderer identity、replace physical Data pair；
+- window close、signal、RPC/start failure 汇入单一幂等 termination funnel；
+- product requires non-empty `HOSTRA_RPC_TOKEN`；Hostra 自身更宽松的部署能力不放宽 LoomRealm product policy。
 
-精确生命周期、失败清理及固定外部 Hostra baseline 由[M15 资格记录](../../30-implementation/m15-qualification.md)、[ADR 0034](../../decisions/0034-hostra-owned-desktop-composition.md) 和 [Desktop 物理设计源](https://github.com/lithdoo/loom-realm/blob/main/doc/20-modules/desktop-host/hostra-composition.md)拥有；逻辑 API 仍以[契约索引](../../15-contracts/README.md)为准。
+## Validation
 
-验证覆盖 `npm run test:m15`、真正 Hostra/BrowserWindow E2E、reload/reconnect/失败清理，以及同一版本的 M14 游戏。旧 direct-Electron 测试仅作历史回归参考；不能继承其 PASS。当前可验收与待办只在[路线图](../../30-implementation/roadmap.md)追踪。
+Existing aliases `build:m15` / `test:m15:*` / `test:m15` 继续作为 CI/release interface；它们不再代表 Current 文档阶段。冻结 Hostra baseline 与 historical exact-subject evidence 仍可从 legacy M15 ledger 追溯；新的 behavior/input subject 是否需要重测由[qualification 规则](../../30-development/qualification.md)决定。
 
-实现细节：[Hostra 物理组合细节](./hostra-composition.md)。
+实现细节：[Hostra composition](./hostra-composition.md)；跨角色逻辑 API：[契约索引](../../15-contracts/README.md)。

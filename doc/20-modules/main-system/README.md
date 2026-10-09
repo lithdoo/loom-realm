@@ -1,61 +1,51 @@
 # Main 与 Runtime：当前实现
 
-> 模块入口：`packages/main`、`packages/runtime-control`、`packages/subsystem`、`packages/platform-ports`、`packages/realm-state`。这里描述当前模块所有权，不维护旧 M5–M9 阶段签核表；当期验证与后续工作统一见[路线图](../../30-implementation/roadmap.md)。Realm State v1 已实现并由独立 ledger qualified。
+> 模块入口：`packages/main`、`packages/runtime-control`、`packages/subsystem`、`packages/platform-ports`、`packages/realm-state`。本文描述 Current ownership/realization；精确协议见[正式契约](../../15-contracts/README.md)，qualification 规则见[30-development](../../30-development/qualification.md)。
 
-## 所有权
+## Authority ownership
 
-Main 是唯一的 **Control Authority**：拥有 Session/Runtime lifecycle、Frame/Stack、Activation、InputTarget、Renderer currentness、AuthorityRevision、DataAuthority 与 failure unwind。它串行提交这些 control facts；Platform、Renderer、Data Broker、Hostra 都不能复制第二份 control authority。
+Main 是唯一 **Control Authority**：拥有 Session/Runtime lifecycle、Frame/Stack、Activation、InputTarget、Renderer currentness、AuthorityRevision、DataAuthority 与 failure unwind。Platform、Renderer、Data Broker、Hostra/PWA physical host 都不能复制第二份 control authority。
 
-Realm State 是 Main 的 sibling authority，而不是 Main 内部业务字段：
+Realm State 是 sibling authority：
 
 ```text
-Main
-    Session / Runtime / Frame / Activation
-    InputTarget / DataAuthority / failure unwind
-
-RealmStateAuthority
-    Session shared mutable business Records
-    initial/current values / Record versions / OCC / commit revision
+Main                           RealmStateAuthority
+Session / Runtime / Frame      shared mutable Records
+Activation / InputTarget       record versions / OCC
+DataAuthority / unwind         commit revision / subscriptions
 ```
 
-RealmStateAuthority 由 `packages/realm-state` 实现，仍是 `packages/main` 的 sibling；Main 只新增 narrow fatal fact intake，不拥有 State values/OCC/bootstrap。
+Realm State 不拥有 Frame/Activation/InputTarget；Main 不拥有 business record values/OCC。Realm State fatal 只报告无法维持自身 invariant 的 fact，**Main 唯一提交 Session terminal 与 Runtime/Frame unwind**。
 
-Prepared bootstrap boundary：
+## Bootstrap / runtime composition
 
 ```text
-Game Package document + Platform Launcher PREPARE
-    ├─ LogicalGameBootstrap
-    │     → Main only
-    └─ PreparedRealmStateDefinition
-          → Realm State bootstrap only
+Game Entry + Platform Launcher PREPARE
+    ├─ LogicalGameBootstrap → Main
+    └─ PreparedRealmStateDefinition → Realm State
 
-Realm State READY
-→ Main Session / RuntimeHosting
+required authorities READY
+→ RuntimeHosting
 → Runner / Subsystem
-→ Renderer Control current participant
-→ Main DataAuthority → Platform Data provisioning
+→ Renderer current participant
+→ DataAuthority / platform Data provisioning
 ```
 
-Realm State bootstrap只消费 prepared Game baseline；Save/Load/restore 不进入 Main/Realm State bootstrap。具体游戏若实现持久化恢复，由 business Subsystem 在 Runtime 启动后通过普通 RealmStateClient read/commit 完成。
+Main 不消费 raw installation document、Realm State values、Save/Load document、module URL/path、Node/Worker object、DOM 或 Hostra RPC payload。Save/Load 是 business workflow：Subsystem 在 Runtime 启动后通过普通 RealmStateClient read/commit 实现。
 
-`Main` 只消费平台的窄 capability 与 `LogicalGameBootstrap`；不消费 Game Entry 文件/类型、Realm State prepared definition/values、Save/Load document、模块 URL、Node/Worker 对象、浏览器 DOM 或 Hostra RPC 内容。
+`DataConnectionAuthoritySink` 只发布 current DataAuthority view；platform broker 负责 physical candidate/carrier，不接管 logical generation/profile。Data carrier loss 不自动产生新 Session/authority，也不重置 Realm State。
 
-`DataConnectionAuthoritySink` 仅向平台发布当前 DataAuthority 视图；Desktop Broker 负责物理候选连接，不接管 logical generation/profile 决策。Data carrier 丢失不自动制造新 Session/DataAuthority，也不影响 Realm State authority。
+## Core invariants
 
-Session/Platform composition MAY physically construct Main 与 RealmStateAuthority，但 composition本身不是第三 application authority。
-
-## 核心行为
-
-- Runtime launch/auth/ready、Frame 激活与 InputTarget 由 Main 仲裁；Realm State read/commit/subscription 不创建、消费或验证 Frame/Activation/InputTarget authority。
-- `RendererControlBinding.acquire` 只建立物理候选，当前 Renderer identity 只能在合法 hello transaction 后切换。
-- Main-owned control mutation 依照已有 causal barrier 提交；失败遵照固定点 unwind/terminal，Platform层不能额外维护重试、回滚或并行 control authority。
-- Realm State ordinary invalid/limit/conflict、subscription listener failure或 State binding loss不得自动触发 Main Runtime/Frame/Session transition。
-- Runtime-scoped RealmStateClient logical lifetime不等于一个 physical State binding lifetime；binding丢失可以由平台替换 carrier，但 old subscription必须 terminal/fresh subscribe，ambiguous commit不得自动 replay。
-- 如果 RealmStateAuthority 无法继续维持自身 invariant，它只报告 Session-fatal fact；**Main 唯一提交 Session terminal 与 Runtime/Frame unwind**。Platform/Session composition只负责物理 wiring/cleanup，不是第二个 Session lifecycle owner。
-- `renderer-data/1` 的精确子项及当前兼容性见 [Renderer Data Profile](../../15-contracts/renderer-data-profile-v1.md) 和 [Viewport](../../15-contracts/viewport-state-v1.md)，不要引用旧三子项实现状态推断当前主线资格。
+- Runtime launch/auth/ready、Frame activation、InputTarget 由 Main 仲裁；
+- Renderer identity 只能通过合法 current hello/transaction 收敛，physical acquire 本身不创建 authority；
+- Main-owned control mutation 遵守现有 causal barrier 与 fixed-point unwind；
+- Realm State ordinary invalid/conflict/listener/binding failure 不自动触发 Main control transition；
+- physical State binding lifetime != Runtime-scoped logical RealmStateClient lifetime；ambiguous commit 不自动 replay；
+- `renderer-data/1` current children/compatibility 以 [Renderer Data Profile](../../15-contracts/renderer-data-profile-v1.md) 与 [Viewport State](../../15-contracts/viewport-state-v1.md) 为准。
 
 ## 使用与验证
 
-当前实现入口以源码的 public exports 为准。Main 已实现可观察语义见 [Runtime Control](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control](../../15-contracts/main-renderer-control-v1.md)、[Data Connection](../../15-contracts/renderer-subsystem-data-connection-v1.md)。Realm State 见 [Realm State architecture](../../10-architecture/realm-state-system.md)、[Realm State v1](../../15-contracts/realm-state-v1.md) 与 [qualification ledger](../../30-implementation/realm-state-v1-qualification.md)。
+Current semantics 入口：[Runtime Control](../../15-contracts/runtime-control-profile-v1.md) · [Frame / Call](../../15-contracts/frame-call-protocol-v1.md) · [Renderer Control](../../15-contracts/main-renderer-control-v1.md) · [Data Connection](../../15-contracts/renderer-subsystem-data-connection-v1.md) · [Realm State v1](../../15-contracts/realm-state-v1.md)。
 
-验证使用对应 workspace 测试及当前提交的 qualification；Realm State 的独立 evidence 不能从历史 Main/M9–M15 evidence 推导。当前被测 SHA、缺口和正式状态见[路线图](../../30-implementation/roadmap.md)及 [Realm State ledger](../../30-implementation/realm-state-v1-qualification.md)。旧阶段设计与变更原因从 [ADR](../../decisions/README.md) 和 Git 历史追溯。
+验证由对应 workspace、integration 与 qualification suites 承担。现有 `test:mXX` 名称只是兼容 command alias；是否需要 requalification 由具体 behavior/qualification-input change 与 subject/staleness 决定，历史 ledger 只作 evidence。
