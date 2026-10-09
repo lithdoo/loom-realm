@@ -19,7 +19,7 @@ current Control + Data identity
 
 Render Store state is not exported as business authority and is never reverse-synchronized from DOM. Same-generation physical Data replacement preserves logical Renderer identity while requiring fresh current baseline where the relevant contract requires it; stale carrier callbacks are ignored.
 
-`@loomrealm/renderer/resource-client` provides trusted logical Content resource access with expected-version checking. Physical bearer/path/endpoints stay hidden from business components.
+`@loomrealm/renderer/resource-client` provides trusted logical Content resource access with expected-version checking. It stays off the package root and remains available only through the **platform-integration subpath**; physical bearer/path/endpoints stay hidden from business components.
 
 `@loomrealm/renderer/browser-window` owns shared Browser Window realizations of `RendererInputSource` and `RendererViewportSource` used by Desktop/PWA products. Platform observation enters through narrow options and does not fork Input/Data semantics.
 
