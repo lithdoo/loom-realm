@@ -1,36 +1,42 @@
 # 地图游戏库：当前产品行为
 
-> 实现入口：`game-libs/map` / `@loomrealm-game/map`。Terrain Behavior 已由 [PR #43](https://github.com/lithdoo/loom-realm/pull/43) 合入 `main`；**已实现不等于原版 RGSS 逐帧保真或当前 subject 正式资格通过**。具体产品行为见[交付边界](../../../game-libs/map/TERRAIN_BEHAVIOR_DELIVERY_CONTRACT.md)，原版资格见[FG 记录](../../../game-libs/map/TERRAIN_BEHAVIOR_FREEZE_READINESS.md)；下一阶段见[唯一路线图](../../30-implementation/roadmap.md)，M14 精确资格见[M14 ledger](../../30-implementation/m14-qualification.md)。
+> 实现入口：`game-libs/map` / `@loomrealm-game/map`。System/framework boundary 由 [ADR0032](../../decisions/0032-game-library-example-boundary.md) 与 Current Architecture/Contracts 定义；本文拥有 Map game-library 的 Current realization summary。
+
+Terrain Behavior v1 已冻结，支持范围为 Neutral(13)、Bridge(15)、Ledge(1)。正式语义见 [`TERRAIN_BEHAVIOR_CONTRACT_V1.md`](../../../game-libs/map/TERRAIN_BEHAVIOR_CONTRACT_V1.md)，原版来源/合法边界/动态观察 provenance 见 [`TERRAIN_BEHAVIOR_EVIDENCE.md`](../../../game-libs/map/TERRAIN_BEHAVIOR_EVIDENCE.md)。2026-10-09 的 original RGSS dynamic qualification 已完成；该历史 PASS 只对记录的 subject/input 有效，未来相关行为或 qualification input 改变仍按[subject/staleness](../../30-development/qualification.md)重新判断。
 
 ## 责任与数据流
 
 ```text
-合法本地 Essentials / RMXP 原始数据（只读）
-→ tools/fixtures/essentials-v21.1：选择性导入与校验
-→ prepared FSDB：Map / Tileset / 狭义 MapAction + resources
-→ M12 ContentClient
-→ map-owned Runtime（坐标、输入、事件、运动唯一 authority）
-→ RenderDomain → M11 Renderer Store → M13 Web Presentation
+legal-local Essentials / RMXP source (readonly)
+→ selective importer + validation
+→ prepared FSDB: Map / Tileset / narrow MapAction / resources
+→ ContentClient
+→ map-owned Runtime
+→ RenderDomain
+→ Renderer current replica / Web Presentation
 → game-owned lr-map-view / lr-map-sprite
 ```
 
-`game-libs/map` 是可复用游戏业务，而非 `packages/map` 公共协议。导入工具不进入 Runtime；Browser 不决定通行或事件；Game Entry 和页面样式归 `examples/essentials-v21.1`。
+`game-libs/map` 是 reusable game business，不是 framework protocol package。Importer 不进入 Runtime；Browser 不决定 passage/event/bridge authority；concrete Game Entry、资源和页面组合归 example/product。
 
-## 当前数据与运动语义
+## 数据与运动语义
 
-- 地图保持 RMXP 三层 Table；Tileset 保留 `id,tileset_name,autotile_names,passages,priorities` 并新增 `terrain_tags`。旧记录显式迁移，缺失或非法 Table fail-closed。地形原值 0–17 全部保留；此切片只实现 Neutral(13)、Bridge(15)、Ledge(1)，None(0) 与 NoEffect(17) 不等于 Neutral。
-- `resolveEffectiveTerrainTag` 与 `evaluatePassability` 是不同纯查询；检查源方向、目标反方向、图层优先级与桥层。一次输入只生成 `blocked | walk | jump` 之一；blocked 不发生半步位移。
-- 狭义 `MapAction` 只识别证据确定的 `pbBridgeOn`/`pbBridgeOff` 事件页面、占用和触发；不执行原始 Ruby。不透明相关事件局部拒绝，不因无关 NPC 使整图失败；不按 Map/event/tile 固定 ID 写玩法代码。
-- 事件调度先判断本次移动：blocked/front 与成功 arrival/here 互斥。事件 start 和后续 interpreter execute 是两个检查点；受阻不能错误启动 walk-on Bridge。On/Off 执行后持续方向输入应继续调度下一步，不能同一输入二次判定。
-- Runtime 独占 `bridgeLevel∈{0,2}`；On execute 后为 2，Off execute 和 transfer 后为 0。桥面、人物与必要相机在同一次 RenderDomain 更新里随状态改变；不要以人物固定 z-index 代替正确遮挡。
-- 普通 walk 为产品原有 250ms；Ledge 是一次两格 jump、一个 motionId，中间格没有普通 arrival；落点事件一次。official Essentials v21.1 动态观察确认两格 jump 定义为 500ms、峰值 24px，当前产品已对齐；跨图 jump 不支持。切图、resize、取消及过期 motion 完成包不能回写新状态。
-
-准确接口、类型及消费者以 `game-libs/map/src/semantics.ts`、`src/runtime.ts`、`browser/map.browser.js` 和测试为准；不在本文另造 on-wire ABI。
+- RMXP map 保持三层 Table；Tileset 包含 `terrain_tags`，旧记录通过显式迁移进入 current shape；非法输入 fail-closed。
+- Terrain 原值 0–17 保留；正式支持 slice 只承诺 Neutral(13)、Bridge(15)、Ledge(1)。None(0)/NoEffect(17) 不可冒充 Neutral。
+- `resolveEffectiveTerrainTag` 与 passage evaluation 分离；一次方向输入只得到 `blocked | walk | jump` 之一。
+- narrow `MapAction` 只投影有证据的 `pbBridgeOn` / `pbBridgeOff` 页面、占用和触发，不执行原始 Ruby，也不按固定 map/event/tile ID 写玩法逻辑。
+- Runtime 唯一持有坐标、方向、事件调度、`bridgeLevel∈{0,2}`、motion/scene/visual epoch。Bridge state 改变时人物、terrain depth 和必要 camera projection 在同一次 RenderDomain authoritative update 中收敛。
+- ordinary walk 为 250ms。正式 Ledge slice 是单次两格 jump / one motionId；official v21.1 动态观察确认当前支持案例为 500ms、24px 峰值；cross-map jump 不在 v1 slice。
+- Browser 只验证/播放 Runtime payload；resize、transfer、取消和过期 motion completion 不得回写 authority。
 
 ## 场景与验证
 
-Map7 普通行走/Transfer 和桥负例；Map7→Map21 四组 On/Off（EV004/028、EV010/007、EV022/020、EV025/023）覆盖桥面、桥下、折返、held input 和 blocked touch；Map47 包含一次两格下跳 `(16,9)→(16,11)` 与逆向、阻挡、边界负例。事件 ID 仅用于场景识别，产品逻辑不可硬编码。
+Map7 覆盖普通行走/Transfer 与 bridge negative；Map21 覆盖四组 Bridge On/Off 场景；Map47 覆盖两格 Ledge jump 及逆向/阻挡/边界负例。具体事件 ID 只属于 evidence/fixture identity，产品逻辑不可硬编码。
 
-测试入口：`npm test -w @loomrealm-game/map`、`npm run test:m14`、真实 Browser/Hostra 产品 E2E、Essentials importer fixture tests；原始游戏素材仅在合法本地运行 live，CI skip 不等于 PASS。静态路线重放不能替代产品 E2E；产品 E2E 也不能证明原版 RGSS 帧精度。
+主要验证入口包括 map workspace tests、importer fixture tests、browser/product E2E，以及需要合法本地 runtime/material 的 original-behavior qualification。CI synthetic fixture、产品 E2E 与 original dynamic observation 是不同证据等级。
 
-规范引用：[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[M13 Presentation API](../../15-contracts/web-presentation-api-v1.md)。原始 SHA、事件摘要与合法复现入口见[地形证据](../../../game-libs/map/TERRAIN_BEHAVIOR_EVIDENCE.md)；尚待正式签署的 C-01～08 仅见[原版合同候选摘要](../../../game-libs/map/TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md)。已完成 AG-01～04 任务卡、逐轮评审与方案草稿已经从 `game-libs/map/` 删除，原文仅可通过[安全的旧 main 快照](https://github.com/lithdoo/loom-realm/tree/c00fe76b20ab07aeebe18a8056e39a024a9f9859/game-libs/map)追溯。
+## 当前/未来边界
+
+Current v1 behavior 由 Contract + 本模块 + source/tests 定义。未实现的产品改进不作为“qualification backlog”塞进本文；例如**小矩形地图居中/地图外白色填充**已迁到 [Issue #82](https://github.com/lithdoo/loom-realm/issues/82) 跟踪，完整旧 draft 可从 Git 历史恢复。
+
+相关规范：[User Input v1](../../15-contracts/user-input-v1.md) · [Render Update v1](../../15-contracts/render-update-v1.md) · [Content API v1](../../15-contracts/content-api-v1.md) · [Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)。
