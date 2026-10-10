@@ -23,6 +23,8 @@ function executablePath() {
 
 const tileset = Object.freeze({ namespace: "resource.Graphics", key: "Tilesets/blue", contentVersion: version });
 const sprite = Object.freeze({ namespace: "resource.Graphics", key: "Characters/red", contentVersion: version });
+const tilesetRef = (contentVersion) => ({ namespace: "resource.Graphics", key: "Tilesets/blue", contentVersion });
+const identityOf = (ref) => `${ref.namespace}\u0000${ref.key}\u0000${ref.contentVersion}`;
 
 function viewData() {
   return {
@@ -68,6 +70,28 @@ function spriteData() {
     sprite,
     motion: { id: 1, durationMs: 250, fromY: 0, fromScreenX: 0, fromScreenY: 0 },
     bridgeLevel: 0,
+  };
+}
+
+function staticViewData(ref, visualEpoch) {
+  return {
+    ...viewData(),
+    visualEpoch,
+    motionId: null,
+    tileset: ref,
+    tiles: [[0, 0, 0, 384, 0]],
+    cameraMotion: null,
+  };
+}
+
+function staticSpriteData(visualEpoch) {
+  return {
+    ...spriteData(),
+    visualEpoch,
+    motionId: null,
+    y: 0,
+    pattern: 0,
+    motion: null,
   };
 }
 
@@ -121,7 +145,7 @@ async function freezeAt(page, elapsedMs) {
   }, elapsedMs);
 }
 
-test("moving depth composites below the tile before the boundary and above it after crossing", { timeout: 30_000 }, async (t) => {
+async function serveMapBrowser(t) {
   const source = await readFile(browserAsset);
   const server = http.createServer((request, response) => {
     if (new URL(request.url ?? "/", "http://localhost").pathname === "/map.browser.js") {
@@ -138,10 +162,14 @@ test("moving depth composites below the tile before the boundary and above it af
   const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1 });
-  await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.addScriptTag({ url: `http://127.0.0.1:${server.address().port}/map.browser.js` });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  await page.goto(origin);
+  await page.addScriptTag({ url: `${origin}/map.browser.js` });
+  return page;
+}
 
-  await page.evaluate(async ({ viewPayload, spritePayload }) => {
+async function installMapPair(page, { delayOldTileset = false } = {}) {
+  await page.evaluate(async ({ delayOld }) => {
     const png = async (width, height, paint) => {
       const canvas = new OffscreenCanvas(width, height);
       const context = canvas.getContext("2d");
@@ -159,9 +187,29 @@ test("moving depth composites below the tile before the boundary and above it af
         context.fillRect(column * 32, 0, 32, 128);
       }
     });
+
+    let resolveOld;
+    const oldTileset = delayOld ? new Promise((resolve) => { resolveOld = resolve; }) : null;
+    window.__resolveOldTileset = () => resolveOld?.({ bytes: tileBytes, mime: "image/png" });
+
+    const originalCreateImageBitmap = createImageBitmap.bind(globalThis);
+    window.__bitmapCloses = 0;
+    globalThis.createImageBitmap = async function trackedCreateImageBitmap(...args) {
+      const bitmap = await originalCreateImageBitmap(...args);
+      const close = bitmap.close.bind(bitmap);
+      bitmap.close = function trackedClose() {
+        window.__bitmapCloses += 1;
+        return close();
+      };
+      return bitmap;
+    };
+
     const resources = {
-      async resource(_namespace, key) {
-        if (key.startsWith("Tilesets/")) return { bytes: tileBytes, mime: "image/png" };
+      async resource(_namespace, key, contentVersion) {
+        if (key.startsWith("Tilesets/")) {
+          if (delayOld && contentVersion === "old") return oldTileset;
+          return { bytes: tileBytes, mime: "image/png" };
+        }
         if (key.startsWith("Characters/")) return { bytes: spriteBytes, mime: "image/png" };
         throw new Error(`missing resource ${key}`);
       },
@@ -174,8 +222,15 @@ test("moving depth composites below the tile before the boundary and above it af
     actor.receiveRenderContext({ resources });
     window.__view = view;
     window.__sprite = actor;
-    view.receiveRenderData(viewPayload);
-    actor.receiveRenderData(spritePayload);
+  }, { delayOld: delayOldTileset });
+}
+
+test("moving depth composites below the tile before the boundary and above it after crossing", { timeout: 30_000 }, async (t) => {
+  const page = await serveMapBrowser(t);
+  await installMapPair(page);
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
   }, { viewPayload: viewData(), spritePayload: spriteData() });
 
   await waitUntil(page, () => {
@@ -199,4 +254,64 @@ test("moving depth composites below the tile before the boundary and above it af
   assert.equal(after.viewRaf, undefined);
   assert.equal(after.spriteRaf, undefined);
   assert.deepEqual(await compositeCenter(page), [255, 0, 0, 255]);
+});
+
+test("superseded delayed candidate closes its stale bitmap after decode without replacing accepted", { timeout: 30_000 }, async (t) => {
+  const page = await serveMapBrowser(t);
+  await installMapPair(page, { delayOldTileset: true });
+
+  const oldRef = tilesetRef("old");
+  const newRef = tilesetRef("new");
+  const oldView = staticViewData(oldRef, 1);
+  const newView = staticViewData(newRef, 2);
+
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: oldView, spritePayload: staticSpriteData(1) });
+
+  await waitUntil(page, () => window.__view._images.has("resource.Graphics\u0000Tilesets/blue\u0000old"), "old tileset decode pending");
+
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: newView, spritePayload: staticSpriteData(2) });
+
+  await waitUntil(page, () => {
+    const view = window.__view;
+    return view?._accepted?.view.visualEpoch === 2
+      && view._accepted.view.tileset.contentVersion === "new"
+      && [...view._images.keys()].every((id) => id.endsWith("\u0000new"));
+  }, "new candidate accepted before old decode completes");
+
+  const beforeResolve = await page.evaluate(() => ({
+    visualEpoch: window.__view._accepted.view.visualEpoch,
+    tilesetVersion: window.__view._accepted.view.tileset.contentVersion,
+    images: [...window.__view._images.keys()],
+    bitmaps: [...window.__view._bitmaps.keys()],
+    closes: window.__bitmapCloses,
+  }));
+  assert.equal(beforeResolve.visualEpoch, 2);
+  assert.equal(beforeResolve.tilesetVersion, "new");
+  assert.ok(beforeResolve.images.every((id) => id.endsWith("\u0000new")), JSON.stringify(beforeResolve));
+  assert.ok(beforeResolve.bitmaps.every((id) => id.endsWith("\u0000new")), JSON.stringify(beforeResolve));
+  assert.equal(beforeResolve.closes, 0);
+
+  await page.evaluate(() => window.__resolveOldTileset());
+  await waitUntil(page, () => window.__bitmapCloses >= 1, "stale old bitmap close after decode");
+
+  const after = await page.evaluate(() => ({
+    visualEpoch: window.__view._accepted.view.visualEpoch,
+    tilesetVersion: window.__view._accepted.view.tileset.contentVersion,
+    images: [...window.__view._images.keys()],
+    bitmaps: [...window.__view._bitmaps.keys()],
+    closes: window.__bitmapCloses,
+  }));
+  assert.equal(after.visualEpoch, 2);
+  assert.equal(after.tilesetVersion, "new");
+  assert.ok(after.images.every((id) => id.endsWith("\u0000new")), JSON.stringify(after));
+  assert.ok(after.bitmaps.every((id) => id.endsWith("\u0000new")), JSON.stringify(after));
+  assert.ok(after.closes >= 1, JSON.stringify(after));
+  assert.equal(after.images.includes(identityOf(oldRef)), false);
+  assert.equal(after.bitmaps.includes(identityOf(oldRef)), false);
 });
