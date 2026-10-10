@@ -81,8 +81,8 @@ test("Renderer keeps ResourceClient off root and version-safe in its integration
 test("Content qualification stays explicit while Node 20 compatibility is centralized", async () => {
   const runner = await text("scripts/ci/run-capability.mjs");
   const workflow = await text(".github/workflows/ci.yml");
-  assert.match(runner, /content\(\) \{[\s\S]*test:fixtures[\s\S]*test\/m12-boundary\.test\.mjs[\s\S]*test:m12:pack/);
-  assert.doesNotMatch(runner, /npm\("run", "test:m12"\)/);
+  assert.match(runner, /content\(\) \{[\s\S]*test:fixtures[\s\S]*test\/m12-boundary\.test\.mjs[\s\S]*@loomrealm\/fsdb-http/);
+  assert.doesNotMatch(runner, /npm\("run", "test:m12/);
   assert.match(workflow, /name: Node 20 compatibility/);
   assert.match(workflow, /node-version: 20/);
   assert.match(workflow, /name: Linux \/ Node 24/);

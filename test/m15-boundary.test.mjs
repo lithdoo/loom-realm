@@ -87,8 +87,8 @@ test("Desktop capability preserves frozen Hostra identity, sandboxing and full-q
   const runner = await read("scripts/ci/run-capability.mjs");
   const workflow = await read(".github/workflows/ci.yml");
   const full = await read(".github/workflows/full-qualification.yml");
-  assert.match(runner, /desktop\(\) \{[\s\S]*build:m15[\s\S]*runDesktopTests\(\)/u);
-  assert.doesNotMatch(runner, /npm\("run", "test:m15"\)/u);
+  assert.match(runner, /desktop\(\) \{[\s\S]*buildMapStack\(\)[\s\S]*runDesktopTests\(\)/u);
+  assert.doesNotMatch(runner, /npm\("run", "(?:test|build):m15/u);
   for (const source of [workflow, full]) {
     assert.match(source, /lithdoo\/hostra/u);
     assert.match(source, /d863beab3c59c3bd4f271514a228fa8fee0bf5b6/u);

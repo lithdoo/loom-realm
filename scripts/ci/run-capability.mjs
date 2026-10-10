@@ -26,6 +26,48 @@ function buildRegressionStack() {
   npm("run", "build", "-w", "@loomrealm/fsdb-http");
 }
 
+function buildMapStack() {
+  npm(
+    "run", "build",
+    "-w", "@loomrealm/fsdb",
+    "-w", "@loomrealm/fsdb-http",
+    "-w", "@loomrealm/foundation",
+    "-w", "@loomrealm/wire",
+    "-w", "@loomrealm/realm-state",
+    "-w", "@loomrealm/game-package",
+    "-w", "@loomrealm/platform-ports",
+    "-w", "@loomrealm/runtime-control",
+    "-w", "@loomrealm/renderer-control",
+    "-w", "@loomrealm/data",
+    "-w", "@loomrealm/subsystem",
+    "-w", "@loomrealm/renderer",
+    "-w", "@loomrealm/main",
+    "-w", "@loomrealm/game-launcher-hostra",
+    "-w", "@loomrealm/desktop",
+    "-w", "@loomrealm-game/tile-presentation",
+    "-w", "@loomrealm-game/map",
+  );
+}
+
+function buildPwaStack() {
+  npm(
+    "run", "build",
+    "-w", "@loomrealm/foundation",
+    "-w", "@loomrealm/wire",
+    "-w", "@loomrealm/realm-state",
+    "-w", "@loomrealm/game-package",
+    "-w", "@loomrealm/platform-ports",
+    "-w", "@loomrealm/runtime-control",
+    "-w", "@loomrealm/renderer-control",
+    "-w", "@loomrealm/data",
+    "-w", "@loomrealm/subsystem",
+    "-w", "@loomrealm/renderer",
+    "-w", "@loomrealm/main",
+    "-w", "@loomrealm/game-launcher-pwa",
+    "-w", "@loomrealm/pwa",
+  );
+}
+
 async function packPublishable() {
   for (const dir of ["packages", "game-libs"]) {
     const entries = await readdir(new URL(`${dir}/`, root), { withFileTypes: true });
@@ -61,9 +103,9 @@ const capabilities = {
   core() {
     buildRegressionStack();
     npm("run", "test:regression");
-    npm("run", "test:m10:qualification:run");
+    node("--test", "test/user-input-v1/qualification.test.mjs");
     node("--test", "test/m10-boundary.test.mjs");
-    npm("run", "test:m11:qualification:run");
+    node("--test", "test/render-update-v1/qualification.test.mjs");
     node("--test", "test/m11-boundary.test.mjs");
   },
 
@@ -75,25 +117,29 @@ const capabilities = {
   content() {
     npm("run", "test:fixtures");
     node("--test", "test/m12-boundary.test.mjs");
-    npm("run", "test:m12:pack");
+    npm("pack", "-w", "@loomrealm/fsdb", "-w", "@loomrealm/fsdb-http", "--dry-run");
   },
 
   presentation() {
     npm("run", "build:desktop-stack");
-    npm("run", "test:m13:qualification:run");
+    node("--test", "test/web-presentation-v1/qualification.test.mjs");
     node("--test", "test/m13-boundary.test.mjs");
-    npm("run", "test:m13:pack");
+    npm("pack", "-w", "@loomrealm/renderer", "--dry-run");
+  },
+
+  "map-build"() {
+    buildMapStack();
   },
 
   map() {
-    npm("run", "build:m14");
+    buildMapStack();
     node("--test", "test/m14-boundary.test.mjs");
-    npm("run", "test:m14:projection");
+    node("--test", "tools/fixtures/essentials-v21.1/m14-consumer.test.mjs");
     npm("test", "-w", "@loomrealm-game/tile-presentation");
     npm("test", "-w", "@loomrealm-game/map");
     npm("test", "-w", "@loomrealm-example/essentials-v21.1");
-    npm("run", "test:m14:vertical");
-    npm("run", "test:m14:pack");
+    node("--test", "test/m14-vertical.test.mjs");
+    npm("pack", "-w", "@loomrealm-game/tile-presentation", "-w", "@loomrealm-game/map", "--dry-run");
     node("examples/essentials-v21.1/scripts/generate-fixtures.mjs");
     node(
       "--test",
@@ -113,7 +159,7 @@ const capabilities = {
   },
 
   pwa() {
-    npm("run", "build:m16");
+    buildPwaStack();
     npm("test", "-w", "@loomrealm/game-launcher-pwa");
     npm("test", "-w", "@loomrealm/pwa");
   },
@@ -124,12 +170,12 @@ const capabilities = {
   },
 
   desktop() {
-    npm("run", "build:m15");
+    buildMapStack();
     runDesktopTests();
   },
 
   "desktop-full"() {
-    npm("run", "build:m15");
+    buildMapStack();
     runDesktopTests();
   },
 

@@ -122,13 +122,15 @@ jobs:
           NODE
       - name: Install repository-pinned Chromium
         run: npx playwright install --with-deps chromium
+      - name: Build exact-local production path
+        run: node scripts/ci/run-capability.mjs map-build
       - name: Run exact-local production path
         env:
           LOOMREALM_QUALIFICATION_REPORT: "1"
         shell: bash
         run: |
           set -o pipefail
-          npm run test:m14:essentials-local -- \
+          node scripts/m14-essentials-local.mjs \
             --source .local/exact-essentials/essentials-v21.1.zip \
             --map-id 66 \
             --x 8 \
