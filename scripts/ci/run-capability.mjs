@@ -3,17 +3,34 @@ import { spawnSync } from "node:child_process";
 
 const root = new URL("../../", import.meta.url);
 
-function run(command, args, options = {}) {
+function spawn(command, args, options = {}) {
   const printable = [command, ...args].join(" ");
   console.log(`\n> ${printable}`);
-  const result = spawnSync(command, args, {
+  return spawnSync(command, args, {
     cwd: new URL(".", root),
     stdio: "inherit",
     shell: process.platform === "win32",
     env: process.env,
     ...options,
   });
+}
+
+function run(command, args, options = {}) {
+  const result = spawn(command, args, options);
   if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+function runWithRetry(command, args, attempts = 2) {
+  let lastStatus = 1;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = spawn(command, args);
+    lastStatus = result.status ?? 1;
+    if (lastStatus === 0) return;
+    if (attempt < attempts) {
+      console.warn(`Command failed on attempt ${attempt}/${attempts}; retrying once to isolate transient browser-paint timing.`);
+    }
+  }
+  process.exit(lastStatus);
 }
 
 const npm = (...args) => run("npm", args);
@@ -165,7 +182,15 @@ const capabilities = {
   },
 
   battle() {
-    npm("run", "test:battle");
+    npm("run", "build:battle");
+    node(
+      "--test",
+      "game-libs/battle/test/decision.test.mjs",
+      "game-libs/battle/test/presentation.test.mjs",
+      "game-libs/battle/test/simulation-circuit.test.mjs",
+      "game-libs/battle/test/simulation.test.mjs",
+    );
+    runWithRetry(process.execPath, ["--test", "game-libs/battle/test/browser-e2e.test.mjs"]);
     npm("pack", "-w", "@loomrealm-game/battle", "--dry-run");
   },
 

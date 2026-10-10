@@ -36,7 +36,12 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - name: Install repository-pinned Chromium
-        run: npx playwright install --with-deps chromium
+        shell: bash
+        run: |
+          npx playwright install --with-deps chromium
+          chromium_path="$(node --input-type=module -e 'import { chromium } from "playwright"; process.stdout.write(chromium.executablePath())')"
+          test -x "$chromium_path"
+          printf 'LOOMREALM_CHROMIUM_PATH=%s\n' "$chromium_path" >> "$GITHUB_ENV"
       - name: Run full Linux capability qualification
         env:
           LOOMREALM_QUALIFICATION_REPORT: "1"
