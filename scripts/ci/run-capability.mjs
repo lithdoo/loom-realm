@@ -37,6 +37,19 @@ async function packPublishable() {
   }
 }
 
+function runDesktopTests() {
+  node(
+    "--test",
+    "apps/desktop/test/renderer-input-source.test.mjs",
+    "apps/desktop/test/renderer-viewport-source.test.mjs",
+    "apps/desktop/test/product-viewport-composition.test.mjs",
+    "apps/desktop/test/loopback-renderer-control.test.mjs",
+    "apps/desktop/test/product-lifecycle.test.mjs",
+    "test/m15-boundary.test.mjs",
+  );
+  node("--test", "--test-concurrency=1", "test/m15-hostra-product.test.mjs");
+}
+
 const capabilities = {
   core() {
     npm("run", "build:packages");
@@ -59,11 +72,21 @@ const capabilities = {
   },
 
   presentation() {
-    npm("run", "test:m13:pr");
+    npm("run", "build:desktop-stack");
+    npm("run", "test:m13:qualification:run");
+    node("--test", "test/m13-boundary.test.mjs");
+    npm("run", "test:m13:pack");
   },
 
   map() {
-    npm("run", "test:m14:pr");
+    npm("run", "build:m14");
+    node("--test", "test/m14-boundary.test.mjs");
+    npm("run", "test:m14:projection");
+    npm("test", "-w", "@loomrealm-game/tile-presentation");
+    npm("test", "-w", "@loomrealm-game/map");
+    npm("test", "-w", "@loomrealm-example/essentials-v21.1");
+    npm("run", "test:m14:vertical");
+    npm("run", "test:m14:pack");
     node("examples/essentials-v21.1/scripts/generate-fixtures.mjs");
     node(
       "--test",
@@ -95,14 +118,12 @@ const capabilities = {
 
   desktop() {
     npm("run", "build:m15");
-    npm("run", "test:m15:desktop");
-    npm("run", "test:m15:hostra");
+    runDesktopTests();
   },
 
   "desktop-full"() {
     npm("run", "build:m15");
-    npm("run", "test:m15:desktop");
-    npm("run", "test:m15:hostra:full");
+    runDesktopTests();
   },
 
   "state-windows"() {

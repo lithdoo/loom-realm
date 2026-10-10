@@ -83,16 +83,20 @@ test("Desktop termination budgets preserve the frozen nested deadline order", as
   assert.equal(mainDeadline < 1_000, true, `${mainDeadline} must fit inside Hostra's frozen 1000 ms grace`);
 });
 
-test("M15 canonical gate runs M14 first and then frozen Hostra", async () => {
-  const monorepo = await json("package.json");
-  assert.match(monorepo.scripts["test:m15"], /^npm run test:m14 && /u);
-  assert.match(monorepo.scripts["test:m15"], /test:m15:hostra/u);
-  assert.equal(monorepo.scripts["test:m15:electron"], undefined);
-  const workflow = await read(".github/workflows/m15.yml");
-  assert.match(workflow, /lithdoo\/hostra/u);
-  assert.match(workflow, /d863beab3c59c3bd4f271514a228fa8fee0bf5b6/u);
-  assert.match(workflow, /chrome-sandbox/u);
-  assert.match(workflow, /chmod 4755/u);
-  assert.doesNotMatch(workflow, /--no-sandbox|ELECTRON_DISABLE_SANDBOX/u);
-  assert.match(workflow, /npm run test:m15/u);
+test("Desktop capability preserves frozen Hostra identity, sandboxing and full-qualification evidence", async () => {
+  const runner = await read("scripts/ci/run-capability.mjs");
+  const workflow = await read(".github/workflows/ci.yml");
+  const full = await read(".github/workflows/full-qualification.yml");
+  assert.match(runner, /desktop\(\) \{[\s\S]*build:m15[\s\S]*runDesktopTests\(\)/u);
+  assert.doesNotMatch(runner, /npm\("run", "test:m15"\)/u);
+  for (const source of [workflow, full]) {
+    assert.match(source, /lithdoo\/hostra/u);
+    assert.match(source, /d863beab3c59c3bd4f271514a228fa8fee0bf5b6/u);
+    assert.match(source, /chrome-sandbox/u);
+    assert.match(source, /chmod 4755/u);
+    assert.doesNotMatch(source, /--no-sandbox|ELECTRON_DISABLE_SANDBOX/u);
+  }
+  assert.match(workflow, /run-capability\.mjs desktop/u);
+  assert.match(full, /run-capability\.mjs desktop-full/u);
+  assert.match(full, /node: \[20, 24\]/u);
 });

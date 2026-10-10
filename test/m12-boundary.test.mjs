@@ -78,14 +78,15 @@ test("Renderer keeps ResourceClient off root and version-safe in its integration
   assert.match(await text("packages/renderer/README.md"), /platform-integration subpath/);
 });
 
-test("M12 closure has a persistent Node 20 and 24 CI gate and separated regression entry", async () => {
-  const monorepo = await json("package.json");
-  assert.match(monorepo.scripts["test:m12"], /test:regression/);
-  assert.doesNotMatch(monorepo.scripts["test:m10"], /test:m9/);
-  assert.doesNotMatch(monorepo.scripts["test:m11"], /test:m10/);
-  const workflow = await text(".github/workflows/m12.yml");
-  assert.match(workflow, /node: \[20, 24\]/);
-  assert.match(workflow, /npm run test:m12/);
+test("Content qualification stays explicit while Node 20 compatibility is centralized", async () => {
+  const runner = await text("scripts/ci/run-capability.mjs");
+  const workflow = await text(".github/workflows/ci.yml");
+  assert.match(runner, /content\(\) \{[\s\S]*test:fixtures[\s\S]*test\/m12-boundary\.test\.mjs[\s\S]*test:m12:pack/);
+  assert.doesNotMatch(runner, /npm\("run", "test:m12"\)/);
+  assert.match(workflow, /name: Node 20 compatibility/);
+  assert.match(workflow, /node-version: 20/);
+  assert.match(workflow, /name: Linux \/ Node 24/);
+  assert.match(workflow, /run-capability\.mjs content/);
 });
 
 test("M12 does not introduce forbidden generic storage or Content framework packages", async () => {
