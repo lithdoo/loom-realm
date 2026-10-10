@@ -83,49 +83,115 @@ Exact supported original behavior and intentional scope differences are frozen i
 
 ## Autotile and regular-tile presentation
 
-The importer/runtime preserves the seven RMXP autotile slots. Current presentation supports the established RMXP 48-variant structural projection and the source bitmap layouts required by the supported Essentials corpus:
+The importer/runtime preserves the seven RMXP autotile slots. Current tile partition is fail-closed:
+
+```text
+0          empty
+1..47      unsupported
+48..383    autotile; slot=floor((tileId-48)/48), variant=(tileId-48)%48
+>=384      regular tileset tile
+```
+
+Autotile projection uses the current 48-variant quarter table. Browser presentation supports the source bitmap layouts required by the supported Essentials corpus:
 
 - standard block layout: 96×128 per animation frame, composed from 16×16 quarters;
-- single-cell layout: 32px-high horizontal 32×32 frames, used by assets such as the qualified Flowers-style cell autotiles;
-- browser presentation selects animation frames; the map Runtime does not turn presentation animation phase into business state.
+- single-cell layout: 32px-high horizontal 32×32 frames;
+- default animation frame duration is 250ms (`5 × 50ms` ticks);
+- a trailing `[N]` in the logical autotile resource name selects `N × 50ms`; `N` must be a positive safe integer or preparation fails.
 
-Current autotile presentation cadence is 250ms. Animation reuses the Browser paint loop rather than introducing a second gameplay timer/authority. A new RenderData value does not redefine the logical map just because presentation time advances.
+Browser presentation owns the animation phase. The Runtime does not turn presentation animation time into gameplay state, and receiving a new RenderData value does not reset authority simply because an autotile frame advances.
 
-Malformed or unsupported presentation resources fail/clear presentation according to the Browser boundary; they do not retroactively rewrite a committed Runtime scene.
+Malformed/unsupported presentation resources fail through the Browser preparation boundary; they do not retroactively rewrite a committed Runtime scene.
+
+## Small-map presentation geometry
+
+Small-map centering is **current implemented behavior**, not future work. For the accepted logical viewport and current map dimensions, Browser presentation computes:
+
+```text
+mapPixelWidth  = mapWidth  * 32
+mapPixelHeight = mapHeight * 32
+originX = max(0, (logicalWidth  - mapPixelWidth)  / 2)
+originY = max(0, (logicalHeight - mapPixelHeight) / 2)
+```
+
+Each axis is centered independently. Therefore a map can be centered horizontally while still scrolling vertically, or vice versa. The map's gameplay coordinates and Runtime camera remain in world/map space; `originX/originY` are presentation offsets only.
+
+The Map View paints the out-of-map world area white and retains the current in-map background/tile composition inside the visible map rectangle. Tile layers and sprites receive the same presentation origin, so centering does not alter passability, transfer coordinates, event semantics, walk/jump timing or RenderDomain authority.
+
+Resize/transfer/new-scene preparation follows the same `sceneEpoch` / `visualEpoch` currentness checks as other Map presentation. A stale preparation cannot install geometry over a newer accepted scene.
 
 ## Layering / depth
 
-Tile depth derives from map row + Tileset priority; Player/NPC visual depth derives from character foot position and the current character frame geometry. The durable observable rule is:
+Current tile depth is computed in the Runtime projection:
 
 ```text
-tile depth < character depth  → tile behind character
-tile depth > character depth  → tile in front of character
-tile depth = character depth  → character in front of tile
+if terrain tag == Bridge(15) and bridgeLevel == 2:
+  tileDepth = 0
+else if priority == 0:
+  tileDepth = 0
+else:
+  tileDepth = (y + priority + 1) * 32
 ```
 
-This ordering is part of the Map presentation behavior and must not depend accidentally on DOM creation order. Terrain/Bridge depth and character depth remain consistent with the current Renderer payload and Browser compositor.
+Tileset priority is validated in the range `0..5`.
+
+Browser character depth uses the current visible foot position and sprite-frame height:
+
+```text
+characterDepth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0)
+```
+
+Stack values are explicit rather than relying on DOM creation order:
+
+```text
+tile stack      = tileDepth * 2
+character stack = characterDepth * 2 + 1
+```
+
+Observable ordering:
+
+```text
+tileDepth < characterDepth  → tile behind character
+tileDepth > characterDepth  → tile in front of character
+tileDepth = characterDepth  → character in front of tile
+```
 
 ## RenderDomain topology / node identity
 
 The map RenderDomain uses one `viewport` View root, one `player` child and zero or more static NPC sprite children.
 
-Business `NPCPlacement.instanceId` is not a RenderNode key. Internal NPC render keys are private, short-lived implementation identities constrained by RenderDomain node lifetime. A removed node key must not be resurrected in the same Domain. Surviving NPC instances may retain their current render key across a same-scene replacement; removed/re-added or new-scene instances receive fresh internal keys.
+Business `NPCPlacement.instanceId` is not a RenderNode key. Internal NPC render keys are private implementation identities constrained by RenderDomain node lifetime. A removed node key must not be resurrected in the same Domain. Surviving same-scene NPC instances may retain their current render key; removed/re-added or new-scene instances receive fresh internal keys.
 
-Topology changes such as map replacement or NPC-set membership changes use a complete authoritative candidate/`replace` path. Fixed-topology movement, Bridge, camera and resize changes can use existing-node `update`. This distinction preserves the framework rule that `update` mutates existing nodes rather than creating/removing topology.
+Topology changes such as map replacement or NPC-set membership changes use a complete authoritative candidate/`replace` path. Fixed-topology movement, Bridge, camera and resize changes can use existing-node `update`. This preserves the framework rule that `update` mutates existing nodes rather than creating/removing topology.
 
-Candidate state must satisfy current RenderDomain/Data hard limits before a predictable failing authoritative commit is attempted. Numeric framework limits are owned by the framework implementation/contracts; the game library must not bypass them by truncating NPCs/tiles or splitting one logical commit into hidden partial truth.
+### Map-local capacity guards
+
+Before a predictable authoritative commit, the current game-library implementation applies these map-local guards:
+
+```text
+viewport serialized data guard     < 196,608 bytes
+complete RenderDomain node count   <= 16,384
+complete candidate JSON size       <= 1,000,000 bytes
+internal NPC render-key UTF-8      <= 128 bytes
+```
+
+The viewport projection window attempts bounded retained margins and accepts the first candidate below the viewport-data guard; inability to produce a legal candidate fails rather than silently dropping tiles.
+
+A deterministic candidate-capacity failure caused by NPC content maps to `MAP_NPC_INVALID`; a map/content-owned deterministic capacity failure maps to `MAP_CONTENT_FAILED`. These map-local guards do **not** replace or weaken lower-layer RenderManager/Data hard limits. The game library must not bypass limits by truncating NPCs/tiles or by splitting one logical truth into hidden partial commits.
 
 ## Browser currentness and resource lifetime
 
-`lr-map-view` and `lr-map-sprite` are presentation consumers only. Their key currentness properties are:
+`lr-map-view` and `lr-map-sprite` are presentation consumers only. Their durable currentness rules include:
 
-- requested resources for one paint candidate are prepared before that candidate is painted;
-- async decode/completion re-checks current scene/visual identity before touching the current presentation;
+- a candidate view/sprite set must agree on `sceneEpoch`, `visualEpoch` and Bridge level before commit;
+- resources for a candidate are decoded/prepared before that candidate is installed;
+- async decode/completion re-checks sequence/current scene identity before touching accepted presentation;
 - stale success cannot overwrite a newer map/scene;
 - stale failure cannot clear a newer successful presentation;
-- Player motion and camera interpolation are presentation of current Runtime motion facts, not an independent gameplay position;
+- camera/player motion interpolation presents current Runtime motion facts, not an independent gameplay position;
+- current small-map geometry, tile layers and sprites are committed from the same accepted candidate;
 - resize and late animation/motion callbacks cannot write business authority back into Runtime;
-- resources no longer owned by current presentation are released according to the current Browser resource-owner implementation.
+- resources no longer owned by current presentation are released according to the Browser resource-owner implementation.
 
 `mapEntered` and Browser-visible-pixel success are deliberately separate evidence. Product/browser tests are required for actual visible compositing.
 

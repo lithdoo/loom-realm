@@ -41,8 +41,9 @@ legal-local Essentials / RMXP source (readonly)
 - Runtime 唯一持有坐标、方向、事件调度、`bridgeLevel∈{0,2}`、motion/scene/visual epoch。Bridge state 改变时人物、terrain depth 和必要 camera projection 在同一次 RenderDomain authoritative update 中收敛。
 - ordinary walk 为 250ms。正式 Ledge slice 是单次两格 jump / one motionId；official v21.1 动态观察确认当前支持案例为 500ms、24px 峰值；cross-map jump 不在 v1 slice。
 - Browser 只验证/播放 Runtime payload；resize、transfer、取消和过期 motion completion 不得回写 authority。
+- 当前 Map View 已实现 small-map presentation geometry：地图像素尺寸小于 logical viewport 时按轴居中，地图外区域为白色；这只改变 presentation，不改变 gameplay 坐标、passability、transfer 或 Runtime authority。
 
-精确 Builder/Handler/Error surface、NPC 规则和命令生命周期见 [API](./api.md)；autotile、layering、transfer transaction、RenderDomain topology 与 Browser latest-wins 见 [Runtime / Presentation reference](./runtime-and-presentation.md)。
+精确 Builder/Handler/Error surface、NPC 规则和命令生命周期见 [API](./api.md)；autotile、layering、transfer transaction、RenderDomain topology、small-map geometry 与 Browser latest-wins 见 [Runtime / Presentation reference](./runtime-and-presentation.md)。
 
 ## 场景与验证
 
@@ -56,6 +57,6 @@ Map7 覆盖普通行走/Transfer 与 bridge negative；Map21 覆盖四组 Bridge
 
 Current v1 behavior 由正式 Terrain Contract、本文及两个 Current Map reference、源码/tests 共同投影；冲突时以 formal contract / actual public source surface 为准，文档必须同步修正。
 
-未实现的产品改进不作为“qualification backlog”塞进本文；例如**小矩形地图居中/地图外白色填充**由 [Issue #82](https://github.com/lithdoo/loom-realm/issues/82) 跟踪，旧实施草稿只保留于 Git 历史。
+Future product work 使用 GitHub Issue/PR 追踪；已经存在于 current source/tests 的行为不得为了“清理旧 draft”重新登记成未实现需求。完成后的 durable facts 回到本模块/Contract/Development，而不是新建 milestone roadmap。
 
 相关规范：[User Input v1](../../15-contracts/user-input-v1.md) · [Render Update v1](../../15-contracts/render-update-v1.md) · [Content API v1](../../15-contracts/content-api-v1.md) · [Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)。
