@@ -1,0 +1,173 @@
+name: Full Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      exact_essentials:
+        description: Acquire the pinned official Essentials v21.1 archive and run the exact-local path
+        required: false
+        default: false
+        type: boolean
+      performance_full:
+        description: Run the full Desktop performance profile
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: full-qualification
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux / Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install repository-pinned Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run full Linux capability qualification
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        run: node scripts/ci/run-capability.mjs full-linux
+
+  windows:
+    name: Windows / Node ${{ matrix.node }}
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Run full Windows-sensitive qualification
+        run: node scripts/ci/run-capability.mjs full-windows
+
+  desktop:
+    name: Desktop / frozen Hostra / Node 24
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check out frozen Hostra
+        uses: actions/checkout@v6
+        with:
+          repository: lithdoo/hostra
+          ref: d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+          path: .qualification/hostra
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Install Chromium and frozen Hostra runtime
+        run: |
+          npx playwright install --with-deps chromium
+          npm ci --prefix .qualification/hostra --no-audit --no-fund
+          test -x .qualification/hostra/packages/hostra/electron_bin/electron
+          sandbox=.qualification/hostra/packages/hostra/electron_bin/chrome-sandbox
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%u:%g:%a' "$sandbox")" = "0:0:4755"
+      - name: Run full Desktop product qualification
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+          LOOMREALM_PERFORMANCE_FULL: ${{ inputs.performance_full }}
+          HOSTRA_SOURCE_DIR: ${{ github.workspace }}/.qualification/hostra
+        run: xvfb-run -a node scripts/ci/run-capability.mjs desktop-full
+
+  exact-essentials:
+    name: Exact Essentials v21.1 / Node 24
+    if: inputs.exact_essentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Acquire pinned official Essentials v21.1 archive
+        shell: bash
+        run: |
+          mkdir -p .local/exact-essentials artifacts
+          node --input-type=module <<'NODE' | tee artifacts/exact-essentials-source-identity.json
+          import { createHash } from "node:crypto";
+          import { createReadStream } from "node:fs";
+          import { stat } from "node:fs/promises";
+          import { downloadEeveeExpoArchive, OFFICIAL_ARCHIVE_IDENTITY } from "./tools/fixtures/essentials-v21.1/lib/acquisition/eevee-expo.mjs";
+
+          const archive = ".local/exact-essentials/essentials-v21.1.zip";
+          await downloadEeveeExpoArchive(archive);
+          const size = (await stat(archive)).size;
+          const hash = createHash("sha256");
+          for await (const chunk of createReadStream(archive)) hash.update(chunk);
+          const sha256 = hash.digest("hex");
+          if (size !== OFFICIAL_ARCHIVE_IDENTITY.size || sha256 !== OFFICIAL_ARCHIVE_IDENTITY.sha256) {
+            throw new Error(`Official archive identity mismatch: ${size} sha256:${sha256}`);
+          }
+          console.log(JSON.stringify({ source: "Pokemon Essentials v21.1", size, sha256 }, null, 2));
+          NODE
+      - name: Install repository-pinned Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run exact-local production path
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:m14:essentials-local -- \
+            --source .local/exact-essentials/essentials-v21.1.zip \
+            --map-id 66 \
+            --x 8 \
+            --y 7 \
+            --character-name trainer_POKEMONTRAINER_Red \
+            | tee artifacts/exact-essentials-node-24.log
+      - name: Upload exact-local evidence without the restricted corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-essentials-node-24
+          path: |
+            artifacts/exact-essentials-source-identity.json
+            artifacts/exact-essentials-node-24.log
+            .local/m14-essentials/last-qualification.json
+          if-no-files-found: warn
+
+  summary:
+    name: Full Qualification / summary
+    needs: [linux, windows, desktop, exact-essentials]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      LINUX_RESULT: ${{ needs.linux.result }}
+      WINDOWS_RESULT: ${{ needs.windows.result }}
+      DESKTOP_RESULT: ${{ needs.desktop.result }}
+      EXACT_RESULT: ${{ needs.exact-essentials.result }}
+      EXACT_REQUIRED: ${{ inputs.exact_essentials }}
+    steps:
+      - name: Require all requested evidence to succeed
+        shell: bash
+        run: |
+          for result in "$LINUX_RESULT" "$WINDOWS_RESULT" "$DESKTOP_RESULT"; do
+            if [ "$result" != success ]; then
+              printf 'Required qualification job did not succeed: %s\n' "$result" >&2
+              exit 1
+            fi
+          done
+          if [ "$EXACT_REQUIRED" = true ] && [ "$EXACT_RESULT" != success ]; then
+            printf 'Exact Essentials qualification was requested but finished as %s\n' "$EXACT_RESULT" >&2
+            exit 1
+          fi

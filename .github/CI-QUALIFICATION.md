@@ -1,27 +1,42 @@
-# Qualification CI
+# Capability-driven CI
 
-Repository CI 按 capability 提供 package、contract 与 product evidence。现有部分 workflow/script 仍使用 `mXX` 历史名字；这些名字是兼容的 command/check interface，不再定义 Current 文档信息架构。
+Repository CI is impact-driven. Milestone workflow sequencing is retired.
 
-## PR aggregate
+## Daily CI
 
-`.github/workflows/m12-m15-pr.yml` 当前仍运行四组 capability delta 和一个 fail-closed summary：
+`.github/workflows/ci.yml` is the only PR/main development workflow. It resolves the diff into affected capabilities, then runs only the required evidence lanes:
 
-| Capability | Existing alias | Nodes | Purpose |
-| --- | --- | --- | --- |
-| Content/storage integration | `test:m12` | 20, 24 | Content/FSDB boundary + upstream regressions |
-| Web Presentation | `test:m13:pr` | 20, 24 | Browser presentation/projector delta |
-| Map real consumer | `test:m14:pr` | 20, 24 | game-lib/example/real browser consumer delta |
-| Desktop product | `test:m15:pr` | 24 | Hostra-owned Desktop E2E delta |
-| Summary | workflow summary | n/a | fails if any constituent job fails/skips/cancels |
+- Linux / Node 24: canonical package regression, contract regression, affected content/battle checks, publishable-surface packing, CI architecture self-test.
+- Node 20 compatibility: one aggregate compatibility lane instead of a Node 20 matrix on every package workflow.
+- Browser / Node 24: Web Presentation, Map/RPGMap, Schema Form and PWA checks share one Chromium installation.
+- Desktop / frozen Hostra: only changes that can affect the Desktop product run the frozen Hostra/Electron product gate.
+- Windows / Node 24: only platform-sensitive changes run Windows authority/launcher checks.
+- Documentation: only documentation and documentation-input changes validate/build the site.
+- `CI / summary`: fail-closed aggregate. A required job that fails, is cancelled or is skipped fails the aggregate.
 
-GitHub Actions jobs do not share filesystem state；各 delta 必须自行 clean build。Report artifact 继续在失败后上传，M15 的 Electron isolation/concurrency 约束保持不变。
+The impact resolver is `scripts/ci/impact.mjs`. Unknown non-document paths fail closed to all code capabilities. Global CI/dependency inputs also fan out to all code capabilities.
 
-## Canonical / main gates
+## Full qualification
 
-现有 `m12.yml`～`m15.yml`、`test:m12`～`test:m15` 暂时保留，避免文档整理同时改变 branch protection、required checks 或 release tooling。未来若重命名，应作为独立工程变更：保持 Node matrix、coverage、Hostra pin、fail-closed summary 与 required-check migration，并用 `test/ci-pr-coverage.test.mjs` 防止静默降级。
+`.github/workflows/full-qualification.yml` is manual and preserves the expensive evidence that should not execute on every change:
 
-PWA、Realm State、Renderer、Data、Runtime 等继续使用各自独立 workflow/package gates。
+- Linux Node 20 and 24 full capability qualification.
+- Windows Node 20 and 24 platform-sensitive qualification.
+- frozen Hostra Desktop full profile on Node 24.
+- optional pinned official Essentials v21.1 exact-local qualification.
 
-## Qualification rule
+Full qualification remains subject to `doc/30-development/qualification.md` subject/staleness rules. A green workflow is evidence, not an automatic migration of historical qualification to a new behavior or qualification-input subject.
 
-CI success 只是 evidence。是否可以称为 Qualified 仍取决于 [`doc/30-development/qualification.md`](../doc/30-development/qualification.md) 的 subject/staleness 规则；历史 PASS 不能自动迁移到新的 behavior 或 qualification-input subject。
+## Legacy command aliases
+
+Historical `test:mXX` package scripts and some historical test filenames remain temporarily as compatibility/local command aliases. Current workflows do not use recursive milestone closure scripts. New CI work must use capability names and must not introduce a new milestone workflow chain.
+
+## CI maintenance rules
+
+- Do not create one workflow per package or product milestone.
+- Do not recursively invoke broad aggregate qualification commands.
+- Install Chromium at most once per Browser job.
+- Preserve frozen Hostra identity and sandbox requirements.
+- Keep Node 20 compatibility and full Windows qualification in the full-qualification surface.
+- Keep the impact resolver fail closed.
+- Update `test/ci-architecture.test.mjs` whenever the CI architecture intentionally changes.

@@ -1,0 +1,245 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  impact:
+    name: Impact
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.impact.outputs.code }}
+      content: ${{ steps.impact.outputs.content }}
+      presentation: ${{ steps.impact.outputs.presentation }}
+      map: ${{ steps.impact.outputs.map }}
+      schema: ${{ steps.impact.outputs.schema }}
+      pwa: ${{ steps.impact.outputs.pwa }}
+      battle: ${{ steps.impact.outputs.battle }}
+      desktop: ${{ steps.impact.outputs.desktop }}
+      windows: ${{ steps.impact.outputs.windows }}
+      docs: ${{ steps.impact.outputs.docs }}
+      browser: ${{ steps.impact.outputs.browser }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - id: impact
+        name: Resolve affected capabilities
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
+        shell: bash
+        run: |
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            node scripts/ci/impact.mjs --all
+          elif [ "$EVENT_NAME" = pull_request ]; then
+            node scripts/ci/impact.mjs "$PR_BASE" "$PR_HEAD"
+          else
+            node scripts/ci/impact.mjs "$PUSH_BASE" "$PUSH_HEAD"
+          fi
+
+  linux:
+    name: Linux / Node 24
+    needs: impact
+    if: needs.impact.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Canonical package and contract regression
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        run: node scripts/ci/run-capability.mjs core
+      - name: Content/storage delta
+        if: needs.impact.outputs.content == 'true'
+        run: node scripts/ci/run-capability.mjs content
+      - name: Battle delta
+        if: needs.impact.outputs.battle == 'true'
+        run: node scripts/ci/run-capability.mjs battle
+      - name: Verify publishable package surfaces
+        run: node scripts/ci/run-capability.mjs pack
+      - name: Verify CI architecture
+        run: node --test test/ci-architecture.test.mjs
+
+  node20:
+    name: Node 20 compatibility
+    needs: impact
+    if: needs.impact.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 20
+      - name: Compatibility regression
+        run: node scripts/ci/run-capability.mjs compat
+
+  browser:
+    name: Browser / Node 24
+    needs: impact
+    if: needs.impact.outputs.browser == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Install repository-pinned Chromium once
+        run: npx playwright install --with-deps chromium
+      - name: Web Presentation
+        if: needs.impact.outputs.presentation == 'true'
+        run: node scripts/ci/run-capability.mjs presentation
+      - name: Map and RPGMap
+        if: needs.impact.outputs.map == 'true'
+        run: node scripts/ci/run-capability.mjs map
+      - name: Schema Form
+        if: needs.impact.outputs.schema == 'true'
+        run: node scripts/ci/run-capability.mjs schema-form
+      - name: PWA
+        if: needs.impact.outputs.pwa == 'true'
+        run: node scripts/ci/run-capability.mjs pwa
+
+  desktop:
+    name: Desktop / frozen Hostra
+    needs: impact
+    if: needs.impact.outputs.desktop == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check out frozen Hostra
+        uses: actions/checkout@v6
+        with:
+          repository: lithdoo/hostra
+          ref: d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+          path: .qualification/hostra
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Install Chromium and frozen Hostra runtime
+        run: |
+          npx playwright install --with-deps chromium
+          npm ci --prefix .qualification/hostra --no-audit --no-fund
+          test -x .qualification/hostra/packages/hostra/electron_bin/electron
+          sandbox=.qualification/hostra/packages/hostra/electron_bin/chrome-sandbox
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%u:%g:%a' "$sandbox")" = "0:0:4755"
+      - name: Desktop product delta
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+          HOSTRA_SOURCE_DIR: ${{ github.workspace }}/.qualification/hostra
+        run: xvfb-run -a node scripts/ci/run-capability.mjs desktop
+
+  windows:
+    name: Windows / Node 24
+    needs: impact
+    if: needs.impact.outputs.windows == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Windows-sensitive authority and launcher checks
+        run: node scripts/ci/run-capability.mjs state-windows hostra-conformance
+
+  docs:
+    name: Documentation
+    needs: impact
+    if: needs.impact.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Validate Markdown links
+        run: npm run docs:check-links
+      - name: Reject links to retired process docs
+        run: python3 scripts/check-retired-doc-links.py
+      - name: Build VitePress
+        run: npm run docs:build
+
+  summary:
+    name: CI / summary
+    needs: [impact, linux, node20, browser, desktop, windows, docs]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      CODE: ${{ needs.impact.outputs.code }}
+      BROWSER_REQUIRED: ${{ needs.impact.outputs.browser }}
+      DESKTOP_REQUIRED: ${{ needs.impact.outputs.desktop }}
+      WINDOWS_REQUIRED: ${{ needs.impact.outputs.windows }}
+      DOCS_REQUIRED: ${{ needs.impact.outputs.docs }}
+      LINUX_RESULT: ${{ needs.linux.result }}
+      NODE20_RESULT: ${{ needs.node20.result }}
+      BROWSER_RESULT: ${{ needs.browser.result }}
+      DESKTOP_RESULT: ${{ needs.desktop.result }}
+      WINDOWS_RESULT: ${{ needs.windows.result }}
+      DOCS_RESULT: ${{ needs.docs.result }}
+    steps:
+      - name: Fail closed and write compact result
+        shell: bash
+        run: |
+          require_success() {
+            local required="$1"
+            local result="$2"
+            local name="$3"
+            if [ "$required" = true ] && [ "$result" != success ]; then
+              printf '%s was required but finished as %s\n' "$name" "$result" >&2
+              exit 1
+            fi
+          }
+
+          require_success "$CODE" "$LINUX_RESULT" linux
+          require_success "$CODE" "$NODE20_RESULT" node20
+          require_success "$BROWSER_REQUIRED" "$BROWSER_RESULT" browser
+          require_success "$DESKTOP_REQUIRED" "$DESKTOP_RESULT" desktop
+          require_success "$WINDOWS_REQUIRED" "$WINDOWS_RESULT" windows
+          require_success "$DOCS_REQUIRED" "$DOCS_RESULT" docs
+
+          cat > ci-summary.json <<JSON
+          {
+            "code": "$CODE",
+            "browser_required": "$BROWSER_REQUIRED",
+            "desktop_required": "$DESKTOP_REQUIRED",
+            "windows_required": "$WINDOWS_REQUIRED",
+            "docs_required": "$DOCS_REQUIRED",
+            "linux": "$LINUX_RESULT",
+            "node20": "$NODE20_RESULT",
+            "browser": "$BROWSER_RESULT",
+            "desktop": "$DESKTOP_RESULT",
+            "windows": "$WINDOWS_RESULT",
+            "docs": "$DOCS_RESULT",
+            "result": "success"
+          }
+          JSON
+          cat ci-summary.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-summary
+          path: ci-summary.json
+          if-no-files-found: error
