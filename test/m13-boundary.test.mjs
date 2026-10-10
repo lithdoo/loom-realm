@@ -35,14 +35,15 @@ test("M13 private implementation stays thin and credential-free at the business 
   assert.doesNotMatch(control.match(/private readPresentation\(\)[\s\S]*?\n  }/)?.[0] ?? "", /snapshotForQualification/);
 });
 
-test("M13 canonical gate strictly includes M12, Chromium, pack and Node 20/24 CI", async () => {
+test("Web Presentation capability preserves Chromium, boundary, pack and Node 20 compatibility evidence", async () => {
   const monorepo = await json("package.json");
-  assert.match(monorepo.scripts["test:m13"], /test:m12/);
-  assert.match(monorepo.scripts["test:m13"], /test:m13:qualification:run/);
-  assert.match(monorepo.scripts["test:m13"], /test:m13:pack/);
+  const runner = await text("scripts/ci/run-capability.mjs");
+  const workflow = await text(".github/workflows/ci.yml");
   assert.equal(monorepo.devDependencies.playwright, "1.63.0");
-  const workflow = await text(".github/workflows/m13.yml");
-  assert.match(workflow, /node: \[20, 24\]/);
+  assert.match(runner, /presentation\(\) \{[\s\S]*build:desktop-stack[\s\S]*web-presentation-v1\/qualification\.test\.mjs[\s\S]*test\/m13-boundary\.test\.mjs[\s\S]*@loomrealm\/renderer/);
+  assert.doesNotMatch(runner, /npm\("run", "test:m13/);
+  assert.match(workflow, /name: Browser \/ Node 24/);
   assert.match(workflow, /playwright install --with-deps chromium/);
-  assert.match(workflow, /npm run test:m13/);
+  assert.match(workflow, /run-capability\.mjs presentation/);
+  assert.match(workflow, /name: Node 20 compatibility/);
 });
