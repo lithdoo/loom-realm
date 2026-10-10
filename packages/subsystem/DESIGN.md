@@ -1,538 +1,140 @@
-# `@loomrealm/subsystem`
+# `@loomrealm/subsystem` — package design
 
-> 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Qualified** + **M11 Implemented / Requalification Pending**
-> 阶段：M11 accepted capability evolution / current subject requalification
-> 最近复核：2026-09-15
-> 架构：[Subsystem Model](../../doc/10-architecture/subsystem-model.md) · [Rendering System](../../doc/10-architecture/rendering-system.md)
-> 正式语义：[Runtime Control v1](../../doc/15-contracts/runtime-control-profile-v1.md) · [Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md) · [Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md) · [User Input v1](../../doc/15-contracts/user-input-v1.md) · [Render Update v1](../../doc/15-contracts/render-update-v1.md)
-> Input correction：[ADR 0029](../../doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
-> Exact M10 surface：[M10 / 01](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M10_01_SUBSYSTEM_INPUT_MANAGER.md)
-> Exact M11 surface：[M11 / 01](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M11_01_SUBSYSTEM_RENDER_MANAGER.md)
-> M11 correction：[ADR 0035](../../doc/decisions/0035-render-domain-existing-node-update.md)
+`@loomrealm/subsystem` is the platform-neutral host/author boundary for Subsystem business execution. System ownership is defined by [Subsystem Architecture](../../doc/10-architecture/subsystem-model.md) and [Rendering Architecture](../../doc/10-architecture/rendering-system.md); this file records package-local author surface, construction/lifecycle realization and invariants.
 
-> **业务只表达业务；SDK把 Frozen protocol 投影为窄 author capability。M11 不新增 Platform Port、service locator、public RenderManager、EventBus 或第二份 Frame/Input/Render authority。**
-
-> **Current notice：** ADR 0035 的 `RenderDomain.update()` 已实现，本文 Current surface 含 `RenderDomainUpdate` 与 `update()`。current implementation subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的本地 `npm run test:m11` 已通过，hosted Node 20/24 待复验；旧 `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 仅保留历史 Closed 记录。
-
----
-
-## 1. Package / Consumer Boundary
+## Consumer boundary
 
 ```text
 Game logical subsystem key
 → Platform-selected Definition Module
-→ Host-owned Runner
+→ RuntimeHosting / Runner
 → @loomrealm/subsystem/host
 → @loomrealm/subsystem author root
 → Business Definition
 ```
 
-Business Definition source只 import `@loomrealm/subsystem`，不得直接 import Runtime Control、Data、Platform Ports、Wire、carrier、launch manifest 或 Hostra/PWA details。
+Business Definition code imports the author-facing `@loomrealm/subsystem` surface, not Runtime Control/Data/Wire carriers, platform ports, launch manifests, Hostra/PWA details or framework internals.
 
-Package implementation MAY 在 trusted host/internal code依赖现有 shared protocol/port/wire packages；这不授权把 protocol envelope、peer、carrier或 platform capability暴露到 author root。
+## Author capabilities
 
----
+The package projects frozen/shared runtime semantics into narrow business capabilities including:
 
-## 2. Capability Readiness
+- definition lifecycle / `Frame` / `FrameOutcome`;
+- input listeners and input mutation gating;
+- authoritative `RenderDomain` authoring, including complete replacement and existing-node update;
+- readonly `ContentClient` access;
+- session-scoped Realm State client access where composed by the host;
+- readonly current viewport facts where the current Renderer Data profile provides them.
 
-```text
-M4  Definition/lifecycle + Frame/Outcome       implemented / qualified
-M4  Host Runtime Control mapping              implemented / qualified
-M8  role-local Data peer lifecycle            implemented / qualified
-M10 InputListener + InputManager               implemented / qualified
-M11 RenderDomain + RenderManager               implemented / qualified
-M12 ContentClient author mapping               pending
-```
+These capabilities do not create service locators, EventBus/Store frameworks, public RenderManager internals, retry/replay systems, generic Entity systems or second copies of Main/Realm State/Render authority.
 
-`Package Scope != Current Implementable Slice != Milestone Closure`。
+## Construction / bootstrap realization
 
----
-
-## 3. Definition ABI
-
-```ts
-import { defineSubsystem, completed } from "@loomrealm/subsystem";
-
-export default defineSubsystem(scope => ({
-  async initialize() {},
-  async frame(frame) {
-    return completed(null);
-  },
-  async shutdown() {},
-}));
-```
-
-Module load不等于 Runtime start；module path不等于 Runtime identity。Definition不得拥有 physical provisioning 或读取 Platform Launch Manifest。
-
----
-
-## 4. Root / Host Surface
-
-Author root through M10：
-
-```text
-defineSubsystem
-SubsystemDefinitionFactory / SubsystemScope
-Frame / FrameOutcome / FrameFailure
-completed / cancelled / failed
-business-safe Frame errors
-
-InputStateChannel
-InputEventChannel
-InputChannel
-KeyboardStateInput
-KeyboardEventInput
-PointerStateInput
-PointerEventInput
-GamepadStateInput
-GamepadEventInput
-InputPayload
-InputHandler
-Unsubscribe
-CreateInputListenerOptions
-InputListener
-```
-
-`SubsystemScope` 增加 `createInputListener(...)`。
-
-**不单独 root-export** keyboard code、pointer sample/button/kind、gamepad sample/axes/buttons/button-name、custom JSON object 等 supporting aliases。它们没有独立 author lifecycle/behavior；业务可从六个 payload 类型通过 indexed access获得精确类型。
-
-M11 root **只新增**：
-
-```text
-RenderNode
-RenderDomainState
-RenderEvent
-RenderDomain
-RenderDomainUpdate
-```
-
-以及：
-
-```text
-SubsystemScope.createRenderDomain(initialState)
-```
-
-不 root-export `RenderManager`、protocol envelope、domainId/generation/revision、Snapshot/Patch、`RenderStringDelta` / `RenderDataDelta` / `RenderNodeUpdate` supporting declarations、其他 JSON aliases或 presentation types。
-
-Host surface保持：
-
-```text
-runSubsystem
-SubsystemRuntimeFatalError
-RunSubsystemOptions
-SubsystemLaunchContext
-SubsystemRuntimeControlPolicy
-```
-
-不得创建万能 `SubsystemRuntime` / `RenderManager` service locator。
-
----
-
-## 5. Platform Capability Ownership
-
-Current host uses：
-
-```text
-DeadlineScheduler
-RuntimeControlBinding
-SubsystemDataBinding
-```
-
-M10/M11 都不新增 Platform Port；Input/Render建立在 current Data peer之上。
-
----
-
-## 6. Bootstrap-safe Wiring
-
-现有 M4 `FrameRuntime` constructor需要 `SubsystemDefinition`，而 Definition factory又必须先拿到带 author capabilities 的 scope。
-
-固定最小 late-bound wiring：
+The host builds one coherent author scope around the current Runtime identity. The package-local sequence is conceptually:
 
 ```text
 validate Definition Module ABI
-→ create exactly one InputManager
-→ create exactly one RenderManager
-→ create SubsystemScope
-     signal
-     createInputListener(...) → same InputManager
-     createRenderDomain(...)  → same RenderManager
-→ definition factory(scope)
-→ create FrameRuntime(definition, ...)
-→ one-time bind exact FrameRuntime facts into InputManager
-→ Runtime Control acquire/connect
-→ initialize
-→ ready
-→ optional Data acquire
+→ construct role-local managers/adapters
+   - Input manager
+   - Render manager
+   - Content client binding
+   - Realm State client binding when available
+   - Viewport/current Data projection
+→ create one SubsystemScope backed by those managers
+→ invoke the Definition factory
+→ create/bind Frame runtime facts
+→ acquire Runtime Control / Data according to host profile
+→ initialize definition
+→ report ready
 ```
 
-RenderManager不需要 FrameRuntime authority binding；Frame lifecycle不拥有 Render Domain。
+Construction is late-bound only where required to break the real Frame/Definition ordering dependency. It must not introduce a dummy Frame, shadow authority registry or service locator.
 
-实现可用 private one-time setter 或 closure over `FrameRuntime | null`；不得为了构造顺序重写 FrameRuntime 成 service locator，也不得建立 dummy/shadow Frame/Render registry。
+A Definition module does not become Runtime-current merely because it was imported. Physical module path, Worker/process identity and logical Runtime identity remain distinct.
 
-Input binding必须在任何 protocol Frame能进入 author handler前完成。
+## Frame-local facts
 
----
-
-## 7. Frame Model / Local Fact Source
-
-Author `Frame` 保持：
+The author `Frame` remains a narrow business context:
 
 ```text
 id
 params
 signal
-call(subsystem, params)
+call(...)
 ```
 
-Author不见 activationId。
+Main owns public Frame/Activation authority. Inside the Subsystem process, the package's Frame runtime is the local projection used to decide whether a business mutation/input callback still belongs to the current Frame/Activation.
 
-Main拥有 public Frame/Activation authority；Subsystem内部 `FrameRuntime` 是 local Frame Context、current Activation 与 mutation gate 的唯一事实源。
+Input gating consults those current local facts rather than copying the Main Frame state machine. Frame close/cancellation invalidates late callbacks and ensures listener cleanup before retired work can mutate newer state.
 
-InputManager只通过少量 same-package query/hook消费这些 facts，不复制 Frame lifecycle state machine。
+RenderDomain lifetime is not redefined as “one Domain per Frame”. A Domain is an author capability created by the Subsystem and explicitly closed by its owner; package cleanup still guarantees that terminal Runtime shutdown cannot leave active author mutation paths behind.
 
-Frame close protocol success成立前，FrameRuntime必须要求 InputManager先完成该 Frame local Input cleanup。RenderManager不复制 Frame state，也不自动把 Frame close 映射为 Domain close。
+## Input realization
 
----
+Input arrives only through the current Renderer/Data/InputTarget/Activation/Interest chain. Author handlers see channel payloads, not protocol envelopes, frame/activation wire IDs or physical carrier identity.
 
-## 8. Minimal Exact Input Types
+Key invariants:
 
-M10 exact author types以 [M10 / 01](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M10_01_SUBSYSTEM_INPUT_MANAGER.md) 为唯一详细事实源。
+- a frozen production seam is not bypassed by a test-only direct callback path;
+- stale Data/currentness callbacks cannot deliver mutations to a newer Runtime/Frame identity;
+- state/event ordering and mutation-gate rules stay owned by the formal User Input contract;
+- platform-specific input acquisition stays outside this package.
 
-原则：
+## RenderDomain realization
+
+Subsystem owns authoritative Render Domains. Business mutation flows:
 
 ```text
-InputStateChannel / InputEventChannel / InputChannel
-    exact User Input v1 channel set/shape
-
-six standard *Input payload names
-    structural aliases/projections of User Input v1 canonical payloads
-
-InputPayload<C>
-    channel → payload mapping
-    custom x.* → bounded JSON object structural type
+business state change
+→ RenderDomain author operation
+→ package-local RenderManager validation/authoritative commit
+→ existing Render Update protocol
+→ Renderer current replica
 ```
 
-Package implementation可 type-alias复用 `@loomrealm/data` declarations；不得复制第二套 payload fields/range/ordering semantics。
+The author-facing Domain supports the current narrow operations needed by game libraries: complete authoritative replacement, existing-node update, author event emission where defined, and close. It does not expose domain IDs, wire revisions, carrier/send results, Renderer Store state or publication acknowledgements as business APIs.
 
-Supporting nested shapes不形成额外 root API。示例：
+Durable rules:
 
-```ts
-type KeyboardCode = KeyboardEventInput["code"];
-type Pointer = PointerStateInput["pointers"][number];
-type Gamepad = GamepadStateInput["gamepads"][number];
-```
+- complete topology changes are expressed as a complete candidate/replace, not as hidden incremental node creation;
+- existing-node `update` only mutates already current nodes and preserves Render Update v1 semantics;
+- deterministic validation/capacity failure occurs before mutating the current Domain candidate;
+- a failed authoritative mutation is not reported as success and cannot leave business code believing an uncommitted candidate is current;
+- consumed/retired node identity follows the RenderManager's no-resurrection rules;
+- Renderer/DOM presentation never becomes a second source of RenderDomain truth.
 
-Handler只收到 payload，不收到 message type、frameId、activationId 或 Data identity。
+Package-private validation/serialization optimizations are permitted only when they remain behaviorally equivalent to the formal/bounded data model and keep failure atomicity/current snapshot immutability.
 
----
+## Content / Realm State / Viewport
 
-## 9. InputListener Semantics
+`ContentClient` is readonly logical installation access. It does not expose filesystem paths, installation mutators or platform credentials to business code.
 
-```ts
-interface CreateInputListenerOptions {
-  readonly frame: Frame;
-  readonly channels: readonly InputChannel[];
-}
+Realm State is a separate session-shared mutable business authority. The Subsystem client consumes that authority; it must not silently mirror shared records into a competing local store or treat Render state as Realm State.
 
-interface InputListener {
-  on<C extends InputChannel>(channel: C, handler: InputHandler<C>): Unsubscribe;
-  setChannels(channels: readonly InputChannel[]): void;
-  close(): void;
-}
-```
+Viewport is a readonly current presentation/environment fact delivered through the current Data identity. It can influence business projection/layout where the game library chooses, but it does not create a second Input/Render/Data connection or become Main authority.
 
-Frozen behavior：
+## Cancellation / terminal cleanup
 
-```text
-channels/setChannels → this listener's Interest contribution only
-on/unsubscribe       → callback registration only
-setChannels          → preserves dormant registrations
-unsubscribe          → idempotent; no Interest change
-close                → idempotent; removes contribution + registrations
-```
+Runtime cancellation/terminal state invalidates new author mutations and late asynchronous completions. Package-owned listeners/subscriptions/domains/connections are retired through the host's bounded cleanup path. Cleanup must be idempotent and must not reopen physical acquisition after the Runtime is terminal.
 
-`channels=[]` valid。`on/setChannels` after close → TypeError。Foreign Frame → TypeError；known local closed Frame → existing FrameClosedError。Invalid/duplicate channels → TypeError；Registry hard-limit overflow → RangeError。
+A package-local error cannot be hidden by inventing a retry/recovery framework that changes formal failure semantics. Where an operation is defined as fatal, the host maps it through the existing Runtime failure path.
 
-不新增 Input-specific error hierarchy。
+## Dependency boundary
 
----
+Author code sees only the public author root. Package implementation may depend on the existing shared runtime/data/wire/port packages needed to realize the role, but must not leak those protocol/carrier objects through the author root.
 
-## 10. Desired Interest / Validation
+The package must not depend on concrete game examples, `apps/*`, Hostra/PWA physical implementations, filesystem storage or platform-specific executable resolution.
 
-```text
-DesiredRegistry[F] = union(live listener contributions for F)
-```
+## Package invariants
 
-Author config mutation：
+- Subsystem owns domain execution, local business state and authoritative Render Domains;
+- Main Session/Frame/InputTarget/DataAuthority are not duplicated here;
+- Realm State shared records remain a sibling authority;
+- protocol envelopes/carriers stay host/internal and do not leak into the author root;
+- public author APIs express business intent, not physical transport mechanics;
+- stale callbacks/completions cannot mutate a newer Runtime/Data/render identity;
+- platform-specific composition remains outside this package.
 
-```text
-validate exact channel grammar + candidate representability
-→ atomic local commit
-→ local eligibility immediately updated
-→ required retained-State local baseline
-→ if derived Registry changed, queue latest full Interest Registry
-```
+Normative references: [Runtime Control](../../doc/15-contracts/runtime-control-profile-v1.md), [Frame / Call](../../doc/15-contracts/frame-call-protocol-v1.md), [Renderer Data Profile](../../doc/15-contracts/renderer-data-profile-v1.md), [User Input](../../doc/15-contracts/user-input-v1.md), [Render Update](../../doc/15-contracts/render-update-v1.md), [Content API](../../doc/15-contracts/content-api-v1.md), and [Realm State v1](../../doc/15-contracts/realm-state-v1.md).
 
-失败：old config unchanged、wire send=0、Data unchanged。
-
-`on/unsubscribe` 永不改变 Interest。
-
-Publisher只有：
-
-```text
-0..1 sendInterest inFlight
-0..1 pendingLatest full Registry
-```
-
----
-
-## 11. Retained State / Delivery
-
-State retention eligibility：
-
-```text
-current Data peer
-local Frame exists
-activationId == local current Activation
-channel ∈ DesiredRegistry[F]
-```
-
-满足即保存 latest detached deep-immutable payload。Business delivery另需 Frame active + mutation gate open。
-
-新 `.state` handler / dormant state handler重新 locally eligible时，若 retained State current，则同步交付一次 latest baseline；`.event` 永不 local replay。
-
-Union 真正移除 state channel、Reset、Activation revoke、fresh Data、Frame close均按 User Input v1清理 retained State。
-
-Author-visible payload identity不是 contract；immutable structural value才是。
-
----
-
-## 12. Handler Ordering / Async Isolation
-
-每次 delivery捕获 stable matching-registration snapshot。
-
-Observable order：
-
-```text
-single channel
-    matching handlers by successful on() registration order
-
-multi-channel local convergence
-    canonical ASCII channel order
-    then matching handlers by successful on() registration order
-```
-
-这只是行为 contract，**不要求内部 ordinal/counter/ordering helper**。Array insertion order 或任何等价 private representation都合法。
-
-Handler mutation只影响 subsequent delivery。Sync throw contained，后续 matching handlers仍尝试。
-
-Returned Promise：observe rejection only；不得 await后续 handler，不得 chain进 `@loomrealm/data` dispatcher。Never-settling Promise不能 stall Data reader。
-
----
-
-## 13. Mutation Gate / Recoverable Call Ordering
-
-Pending commit-sensitive mutation：
-
-```text
-same-current-Activation State → retain latest / suppress delivery
-Event → drop
-current Reset → clear retained/suppressed State
-```
-
-Known-no-commit + same Activation：
-
-```text
-restore mutation eligibility
-→ synchronously converge latest retained State
-→ only then expose recoverable frame.call rejection to business
-```
-
-Async handler Promise不属于该 barrier。
-
-Commit/revoke/admin suspend/close/terminal/Data retire均丢弃对应 suppressed old-Activation State。
-
----
-
-## 14. Data / Runtime Lifetime
-
-Fresh Data：
-
-```text
-old publisher state discarded
-old retained State cleared
-DesiredRegistry/listeners remain
-→ publish current full Registry
-```
-
-InputManager不参与 acquire/reconnect policy，也不竞争 `carrier.messages()`。
-
-Business handler failure → local containment。Data loss/protocol fatal → Data unavailable/retire，不自动 Frame unwind。Runtime Control ambiguity/fatal仍由既有 M3/M4 semantics处理。
-
-M11 RenderManager同样不参与 Data acquire/reconnect policy；它只接收 current Data peer变化并重建/退休 publication state。
-
----
-
-## 15. Render / Content Targets — M11 Current
-
-Exact M11 author declarations以 [M11 / 01](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M11_01_SUBSYSTEM_RENDER_MANAGER.md) 为唯一详细事实源。概念形状：
-
-```ts
-// internal/type-only aliases may reuse @loomrealm/data declarations
-export type RenderNode = RenderNodeV1;
-
-export interface RenderDomainState {
-  readonly zIndex: number;
-  readonly roots: readonly RenderNode[];
-}
-
-export interface RenderEvent {
-  readonly targetKey: string;
-  readonly name: string;
-  readonly data: RenderEventV1["data"];
-}
-
-export interface RenderDomain {
-  replace(state: RenderDomainState): void;
-  update(update: RenderDomainUpdate): void;
-  emit(event: RenderEvent): void;
-  close(): void;
-}
-```
-
-`SubsystemScope` 增加：
-
-```ts
-createRenderDomain(initialState: RenderDomainState): RenderDomain;
-```
-
-`RenderDomainUpdate` 的 exact nested declaration以 M11/01 为准；只支持 Domain zIndex 与 existing-node attrs/data 顶层 members，结构变化继续 `replace()`。所有 author operations 是 synchronous local-only：
-
-```text
-validate Frozen Render v1 representability
-→ detach caller-owned value
-→ atomic local commit / bounded Event offer
-→ return
-```
-
-不得等待 Data/Renderer、返回 publication Promise/send outcome、保留 caller-owned mutable object by reference。
-
-成功 state/event 必须完整满足 Frozen Render v1 schema/semantic/hard-limit 可表示性；live business Domains / Subsystem instance `<= 256`。
-
-Errors：
-
-```text
-invalid shape/semantic/stale target/closed handle → TypeError
-hard-limit overflow                         → RangeError
-```
-
-失败 local-atomic，不产生由该失败调用引起的新 publication，不升级 Data/Runtime/Frame。
-
-Identity/lifetime：
-
-```text
-SDK domainId never reused within one Subsystem Runtime instance
-business Node key once removed from one business RenderDomain lifetime
-→ cannot be reintroduced in that same business Domain lifetime
-Frame close/suspend != Domain destroy/hide
-Data retire          != business Domain destroy
-```
-
-`close()` idempotent；close 后 replace/update/emit → TypeError。`emit` 要求 targetKey 当前存在于 business authoritative state。
-
-Fresh Data：
-
-```text
-render.domains(current Registry)
-→ fresh Snapshot each current Domain
-→ Patch/Snapshot/Event
-```
-
-Baseline 后 ordinary `update()` 固定映射为 existing `RenderPatchV1`；baseline queued/in-flight 时收敛为 latest Snapshot。`replace()` 继续使用完整 Snapshot。满队列 Event drop、authoritative coalescing、in-flight、failure、rollover 的唯一语义见 M11/02；不得新增 generic admission/replication abstraction。
-
-no current Data 的 Event不带到 future carrier；current unbaselined carrier MAY bounded-pend Event behind establishing Snapshot；carrier loss/Domain removal丢弃 pending Event。Event不 replay。
-
-M12：ContentClient只提供 readonly logical content access；不得变成 executable/filesystem capability。
-
----
-
-## 16. Abstraction Budget
-
-M10允许：
-
-```text
-one InputManager
-listener contribution + registration records
-one DesiredRegistry
-minimal immutable retained State
-small FrameRuntime integration methods
-latest-only Interest publisher
-small JSON detach/freeze helper
-```
-
-M11只增加：
-
-```text
-one internal RenderManager
-RenderDomain handles/records
-minimal detached Render state + tree/index validation
-one bounded current-carrier publication coordinator
-per-generation emitted identity history
-per-carrier Domain cursors
-```
-
-禁止：
-
-```text
-InputStore / EventBus / Observable
-public RenderManager / RenderStore author API
-registration ordinal abstraction required only by documentation
-extra root supporting types only for symmetry
-Frame/Activation/InputTarget shadow registry
-Frame→Domain implicit ownership registry
-Generic capability/service locator
-Generic async scheduler
-Generic replication/connection/retry/replay framework
-business-key → wire-key translation layer
-second Data reader/writer
-Platform/presentation objects in author API
-```
-
----
-
-## 17. M10 Closure
-
-实现必须直接得到：
-
-```text
-minimal exact root Input exports
-one InputManager / instance
-Interest contribution and handler registration separation
-retained immutable State/local baseline
-successful-on() registration-order delivery without prescribed private counter
-async handler isolation
-ADR 0029 convergence before recoverable rejection
-latest-only Interest publication
-fresh Activation/Data cleanup/baseline
-```
-
-Qualification见根目录 `M10_05_QUALIFICATION_CLOSURE.md`。完整 Hostra/PWA User Input equivalence留到 M16。
-
----
-
-## 18. M11 Implementation Freeze / ADR 0035 Correction
-
-M11 coding 只允许选择：
-
-```text
-private files/classes/data structures
-private domainId representation meeting frozen invariants
-finite queue capacities within protocol bounds
-replace Snapshot / post-baseline update Patch 的 private materialization mechanics
-internal test wiring
-```
-
-ADR 0035 已按真实 M14 workload evidence显式修正并重新冻结 root Render exports和 update publication。实现不得再次设计 public surface、sync author semantics、validation/error model、Domain/Node lifetime/identity或 Data publication lifecycle。只有证明 Frozen Render v1、ADR 0035 或 implementation specification 存在 correctness contradiction 才按治理流程重新打开设计。
-
-Qualification见根目录 `M11_05_QUALIFICATION_CLOSURE.md`。
+Implementation/qualification history is recoverable from Git and legacy ledgers; this package document does not maintain milestone status.

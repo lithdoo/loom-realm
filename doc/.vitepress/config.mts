@@ -3,16 +3,13 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   lang: 'zh-CN',
   title: 'LoomRealm',
-  description: 'LoomRealm 当前架构、正式契约、已实现模块与下一阶段',
+  description: 'LoomRealm 当前架构、正式契约、已实现模块与开发资格规则',
   base: '/loom-realm/',
   cleanUrls: true,
   lastUpdated: true,
   markdown: {
     lineNumbers: true,
     config(md) {
-      // A link out of doc/ is valid on GitHub but has no equivalent VitePress page.
-      // Only the known repository-owned roots are rewritten; ordinary site links
-      // retain VitePress's dead-link validation and are never ignored.
       const renderLink = md.renderer.rules.link_open
       md.renderer.rules.link_open = (tokens, index, options, env, self) => {
         const token = tokens[index]
@@ -32,7 +29,7 @@ export default defineConfig({
       { text: '已实现模块', link: '/20-modules/core/README' },
       { text: '系统架构', link: '/10-architecture/system-overview' },
       { text: '正式契约', link: '/15-contracts/README' },
-      { text: '下一阶段', link: '/30-implementation/roadmap' },
+      { text: '开发与资格', link: '/30-development/README' },
     ],
     sidebar: [
       { text: '开始', items: [
@@ -50,6 +47,7 @@ export default defineConfig({
         { text: '渲染', link: '/10-architecture/rendering-system' },
         { text: 'Subsystem', link: '/10-architecture/subsystem-model' },
         { text: '存储与 Content', link: '/10-architecture/storage-system' },
+        { text: 'Realm State', link: '/10-architecture/realm-state-system' },
         { text: 'Viewport', link: '/10-architecture/viewport-capability' },
       ] },
       { text: '正式契约', items: [
@@ -57,8 +55,8 @@ export default defineConfig({
         { text: 'Game Package', link: '/15-contracts/game-package-v1' },
         { text: 'Runtime Control', link: '/15-contracts/runtime-control-profile-v1' },
         { text: 'Frame / Call', link: '/15-contracts/frame-call-protocol-v1' },
-        { text: 'Main ⇄ Renderer Control', link: '/15-contracts/main-renderer-control-v1' },
-        { text: 'Renderer Data Profile', link: '/15-contracts/renderer-data-profile-v1' },
+        { text: 'Renderer Control', link: '/15-contracts/main-renderer-control-v1' },
+        { text: 'Renderer Data', link: '/15-contracts/renderer-data-profile-v1' },
         { text: 'Data Connection', link: '/15-contracts/renderer-subsystem-data-connection-v1' },
         { text: 'User Input', link: '/15-contracts/user-input-v1' },
         { text: 'Render Update', link: '/15-contracts/render-update-v1' },
@@ -74,17 +72,21 @@ export default defineConfig({
         { text: 'Main / Runtime', link: '/20-modules/main-system/README' },
         { text: 'Renderer / Presentation', link: '/20-modules/web-renderer/README' },
         { text: 'Content / FSDB', link: '/20-modules/fsdb-content-service/README' },
-        { text: 'Map / Bridge / Ledge', link: '/20-modules/loom-map/README' },
+        { text: 'Map / Terrain', link: '/20-modules/loom-map/README' },
         { text: 'Desktop / Hostra', link: '/20-modules/desktop-host/README' },
+        { text: 'PWA', link: '/20-modules/pwa-host/README' },
       ] },
-      { text: '下一阶段与验证', items: [
-        { text: '唯一路线图', link: '/30-implementation/roadmap' },
-        { text: '交付证据索引', link: '/30-implementation/README' },
-        { text: '测试策略', link: '/30-implementation/testing-strategy' },
-        { text: 'PWA M16/M17（规划）', link: '/20-modules/pwa-host/README' },
+      { text: '开发与资格', items: [
+        { text: '开发入口', link: '/30-development/README' },
+        { text: '开发工作流', link: '/30-development/development-workflow' },
+        { text: '测试策略', link: '/30-development/testing' },
+        { text: '资格与 Subject', link: '/30-development/qualification' },
+        { text: '性能资格', link: '/30-development/performance' },
+        { text: '仓库布局', link: '/30-development/repository-layout' },
+        { text: 'Package 边界', link: '/30-development/package-boundaries' },
       ] },
       { text: '设计决策', collapsed: true, items: [
-        { text: 'ADR 当前与历史索引', link: '/decisions/README' },
+        { text: 'ADR 索引', link: '/decisions/README' },
       ] },
     ],
     search: { provider: 'local' },

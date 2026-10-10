@@ -1,22 +1,26 @@
 # Game Package：当前实现边界
 
-> 源码：`packages/game-package`；形式契约：[Game Package v1](../../15-contracts/game-package-v1.md)。本页描述已实现的逻辑模型，不恢复历史提案里的 Installation Registry、Catalog Builder 或 Repository Toolkit。
+> 源码：`packages/game-package`；正式契约：[Game Package v1](../../15-contracts/game-package-v1.md)。本文描述 logical installation/game topology，不引入 Installation Registry、Catalog Builder 或 Repository Toolkit。
 
-## 只负责游戏的逻辑拓扑
+## Logical topology only
 
-`@loomrealm/game-package` 解析与验证 Game Entry：版本、Subsystem `{key}` 集合、初始目标和 JSON input，产生脱离原输入、不可变的合法快照。它既不是运行时角色，也不包含模块加载或物理资源定位。Game Entry 的 key-set 必须与被选平台启动清单精确对应。
+`@loomrealm/game-package` 解析/验证 Game Entry：版本、Subsystem `{key}` 集合、initial target/input，产出与原始输入脱离的 immutable valid snapshot。它不是 Runtime role，也不拥有 executable/module/resource physical location。
 
 ```text
-game.json → Game Entry validator（logical topology）
-                       + matching launch.hostra.json / launch.pwa.json
-                       → 平台 PREPARE（解析可信 Definition material）
-                       → LogicalGameBootstrap → Main
+game.json
+→ Game Entry validation (logical topology)
+        + matching platform launch manifest
+→ Platform Launcher PREPARE
+→ LogicalGameBootstrap
+→ Main
 ```
 
-Definition Module 的解析和 Node/Worker Runner 由匹配的 Launcher/Profile 与 RuntimeHosting 实现，不得塞回通用 Game Package。FSDB 记录、Content HTTP 与资源授权归 [Content 模块](../fsdb-content-service/README.md)，具体游戏的内容和 initial input 归 `examples/`。
+Game Entry key-set 必须与所选平台 launch manifest exact join。Definition Module/Runner resolution 由匹配的 Launcher/Profile + RuntimeHosting 实现；不得塞回通用 Game Package。Content/storage 归 Content capability，具体游戏内容与 initial input 归 `examples/`。
 
-## 接口与验收
+## Cross-platform boundary
 
-逻辑字段、失败分类及规范边界以 [Game Package v1](../../15-contracts/game-package-v1.md)、[Hostra Launcher](../../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher](../../15-contracts/pwa-launcher-profile-v1.md) 为准；源码的 public exports 决定具体 API。原设计决策保留在[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)。
+Desktop 与 PWA 可以使用不同 launch manifest、executable carrier 与 physical hosting，但消费同一个 logical Game Package model。平台差异不得反向扩展 `game.json` 成 Node/Worker/URL/Hostra-specific bootstrap。
 
-用 Game Package workspace 测试、Platform PREPARE 和跨平台集成验证现有逻辑边界。PWA M16/M17 产品组合位于 `apps/pwa`，其 exact-HEAD 状态与命令见 [PWA 资格](../../30-implementation/pwa-m16-m17-qualification.md) 和[路线图](../../30-implementation/roadmap.md)。
+Current normative sources：[Game Package v1](../../15-contracts/game-package-v1.md) · [Hostra/Node launcher profile](../../15-contracts/nodejs-launcher-profile-v1.md) · [PWA launcher profile](../../15-contracts/pwa-launcher-profile-v1.md)。Decision provenance 见 [ADR0020](../../decisions/0020-game-entry-consumer-boundary.md)。
+
+验证由 Game Package workspace tests、两平台 PREPARE/profile tests 与 product integration 承担；PWA/Hostra 历史 Mxx ledger 只作 exact-subject evidence，不承担 Current status。

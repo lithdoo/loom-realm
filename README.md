@@ -1,23 +1,23 @@
 # LoomRealm
 
-LoomRealm 是将逻辑游戏 Runtime 与平台物理组合分离的模块化游戏运行平台。Main 持有 Session/Runtime/InputTarget/DataAuthority，Subsystem 持有业务状态与 RenderDomain；Renderer 维护当前副本并投影。`game-libs/map` 是独立游戏业务库，不属于 framework；Hostra 是桌面的 Electron/BrowserWindow owner。
+LoomRealm 是将逻辑游戏 Runtime 与平台物理组合分离的模块化游戏运行平台。Main 持有 Session/Runtime/InputTarget/DataAuthority，Realm State 持有 session 共享业务状态，Subsystem 持有 domain execution 与 RenderDomain；Renderer 维护只读/current presentation replica 并产生输入。`game-libs/` 存放可复用游戏业务库，Desktop 与 PWA 采用不同 physical topology，但遵守相同逻辑 authority 与 contract。
 
-**[文档首页](./doc/index.md) · [已实现核心模块](./doc/20-modules/core/README.md) · [系统架构](./doc/10-architecture/system-overview.md) · [正式契约](./doc/15-contracts/README.md) · [下一阶段路线图](./doc/30-implementation/roadmap.md) · [ADR](./doc/decisions/README.md)**
+**[文档首页](./doc/index.md) · [产品与治理](./doc/00-overview/product-vision.md) · [系统架构](./doc/10-architecture/system-overview.md) · [正式契约](./doc/15-contracts/README.md) · [已实现模块](./doc/20-modules/core/README.md) · [开发与资格](./doc/30-development/README.md) · [ADR](./doc/decisions/README.md)**
 
 ## 仓库布局
 
 ```text
 packages/     通用运行框架、角色与协议实现
-game-libs/    可复用的具体游戏业务库（Map）
-examples/     具体游戏和合法的本地兼容性示例
+game-libs/    可复用的具体游戏业务库
+examples/     具体游戏、fixture 与合法本地兼容性入口
 apps/         Desktop / PWA 物理产品组合
 tools/        导入、fixture 和开发工具
 doc/          唯一 VitePress 文档站源目录
 ```
 
-依赖方向：`examples → game-libs → framework public author APIs`。跨模块 ABI 以契约为准；尚欠资格、地形 RGSS 保真以及 M16/M17 的 exact-HEAD 状态仅在路线图与对应 qualification ledger 追踪，不在 README 维护另一个实时 PASS 表。
+依赖方向以 architecture/contracts 为准；跨模块 ABI 以 `doc/15-contracts` 为准。任务进度属于 GitHub Issue/PR，不在 Current 文档维护第二套 milestone ledger。历史 M7–M17 qualification、旧 review 与原始测量仍可从 legacy evidence 路径和 Git 历史追溯，但不能覆盖 Current Architecture、Contract、Module 或 Development 文档。
 
-## 本地文档检查
+## 文档检查
 
 ```bash
 npm ci
@@ -25,4 +25,4 @@ npm run docs:check-links
 npm run docs:build
 ```
 
-产品测试请使用根 `package.json` 中存在的脚本和[测试策略](./doc/30-implementation/testing-strategy.md)。PR 的 M12–M15 使用增量任务并由汇总检查统一判定；`main`/手动入口保留完整 canonical 链，细节见[CI 说明](./.github/CI-QUALIFICATION.md)。实际完成状态以当前 SHA 的 GitHub Actions 为准，不能复用历史成功记录。
+产品测试与 requalification 入口见[测试](./doc/30-development/testing.md)和[资格规则](./doc/30-development/qualification.md)。实际 PASS 只对被测 subject/HEAD 有效，不能继承历史成功记录。

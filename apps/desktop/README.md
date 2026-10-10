@@ -1,41 +1,20 @@
-# `@loomrealm/desktop` Hostra-owned product composition
-
-> 状态：M15 Hostra recomposition implemented / physical design frozen / current subject Requalification Pending；live evidence in `doc/30-implementation/m15-qualification.md`。
+# `@loomrealm/desktop` — Hostra-owned product composition
 
 Canonical Desktop topology：
 
 ```text
-frozen Hostra shell
+Hostra shell
 └─ HOSTRA_SUBCMD plain Node apps/desktop/dist/main-entry.js
-   ├─ Main + RuntimeHosting-owned Runner
+   ├─ Main + RealmStateAuthority + RuntimeHosting-owned Runner
    ├─ prepared readonly Content service
    ├─ navigation-only trusted document route
    ├─ one-shot loopback Renderer Control capability
    └─ document-scoped loopback Data settlement
-      └─ existing Data application WebSocket pair
+      └─ Hostra-owned BrowserWindow trusted Renderer
 ```
 
-Hostra exclusively owns Electron、BrowserWindow、preload and direct subprocess lifecycle。Desktop consumes only `HOSTRA_RPC_PORT`、`HOSTRA_RPC_TOKEN` and the bounded `openWindow`/`closeWindow`/`hostra.event` JSON-RPC surface。
+Hostra exclusively owns Electron、BrowserWindow、preload and direct subprocess lifecycle. Desktop consumes only the bounded Hostra host-control surface；application Control/Data/Content/Input/Render remain LoomRealm contracts and do not travel over Hostra RPC。
 
-The canonical LoomRealm Hostra composition requires a non-empty `HOSTRA_RPC_TOKEN` as a concrete product security policy, even though Hostra itself also supports unauthenticated RPC deployments。
+LoomRealm Desktop requires a non-empty `HOSTRA_RPC_TOKEN` as concrete product security policy. Reload creates a fresh Renderer identity while preserving Hostra `windowId` and Main/Runner/game truth；same-generation Data replacement preserves Renderer identity。
 
-The existing Main、M9 Broker、Content、M10 Input、M13 Presentation and M14 game contracts remain unchanged。Reload creates a fresh Renderer identity while preserving Hostra `windowId` and Main/Runner/game truth；same-generation Data replacement preserves the Renderer identity。
-
-Canonical gates：
-
-```powershell
-npm run build:m15
-npm run test:m15:desktop
-npm run test:m15:hostra
-npm run test:m15
-```
-
-The Hostra qualification requires the exact frozen source：
-
-```text
-hostra@1.0.1-beta.1
-d863beab3c59c3bd4f271514a228fa8fee0bf5b6
-Electron 44.1.1
-```
-
-Locally it is discovered at `../hostra`，or supplied through `HOSTRA_SOURCE_DIR`。The hosted workflow checks out that exact commit rather than following a moving package or branch。
+Current architecture/module docs：[`doc/20-modules/desktop-host`](../../doc/20-modules/desktop-host/README.md)。Existing `build:m15` / `test:m15:*` / `test:m15` commands remain compatibility CI/release aliases, not a project stage. Frozen Hostra baseline and historical exact-subject results remain in the legacy qualification ledger；future currentness follows [`doc/30-development/qualification.md`](../../doc/30-development/qualification.md).

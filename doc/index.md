@@ -1,32 +1,32 @@
 ---
 layout: home
 title: LoomRealm
-tagline: 当前实现、正式契约与下一阶段
+tagline: 当前产品、正式契约与开发规则
 hero:
   name: LoomRealm
   text: 模块化游戏运行平台
-  tagline: 先读已经实现的模块，再读跨角色契约；未完成事项统一进入路线图。
+  tagline: 先读当前模块和架构，再读跨角色契约；开发与资格采用 capability/subject 模型，不再以 milestone 组织 Current 文档。
   actions:
     - theme: brand
       text: 已实现核心模块
       link: /20-modules/core/README
     - theme: alt
-      text: 下一阶段路线图
-      link: /30-implementation/roadmap
+      text: 系统架构
+      link: /10-architecture/system-overview
     - theme: alt
-      text: 正式契约
-      link: /15-contracts/README
+      text: 开发与资格
+      link: /30-development/README
 features:
-  - title: 逻辑与物理分离
-    details: Game Package 声明逻辑游戏；Main/Subsystem/Renderer 遵循权威边界，Hostra 与未来 PWA 各自完成物理组合。
-  - title: 当前代码是实现依据
-    details: 核心模块目录列出真正存在的包、责任与测试，不再把过期里程碑过程写成当前实现。
-  - title: 地图真实消费者
-    details: Map 是 game-libs/map 的业务库；Bridge、Ledge、输入与浏览器渲染已进入产品，原版动态保真仍单独待资格。
-  - title: 证据与待办分离
-    details: 已完成过程回归 Git/ADR；现有正式资格 ledger 保留，不把旧 SHA 的 PASS 移给新实现；M16/M17 和其他缺口集中在路线图。
+  - title: 单一 Authority
+    details: Main、Realm State、Subsystem、Renderer、Content 各自拥有明确且不重叠的 authoritative state；物理平台差异不改变逻辑语义。
+  - title: Contract-first
+    details: Architecture 定义责任与 topology，Contracts 定义可互操作边界，Modules 投影当前实现；Frozen、Implemented、Qualified 明确区分。
+  - title: Capability-based maintenance
+    details: 新改动按 capability、authority impact、contract impact 与 qualification subject 管理，不再新增 M18/M19 式阶段文档。
+  - title: Evidence 与 Current 分离
+    details: 历史 SHA、机器、样本与 P95 可作为 evidence 保留，但 Current 状态只由当前产品文档和同 subject 资格结果定义。
 ---
 
 ## 从这里开始
 
-[阅读指南](./README.md) · [当前核心模块](./20-modules/core/README.md) · [架构总览](./10-architecture/system-overview.md) · [契约目录](./15-contracts/README.md) · [下一阶段](./30-implementation/roadmap.md) · [ADR](./decisions/README.md)
+[阅读指南](./README.md) · [当前核心模块](./20-modules/core/README.md) · [架构总览](./10-architecture/system-overview.md) · [契约目录](./15-contracts/README.md) · [开发与资格](./30-development/README.md) · [ADR](./decisions/README.md)
