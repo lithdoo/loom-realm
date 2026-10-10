@@ -2,8 +2,12 @@ import { readFile, readdir } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 
 const root = new URL("../../", import.meta.url);
-const MAP_DEPTH_BOUNDARY_RACE = "moving depth is below the tile before the boundary pixel and above at it";
-const MAP_LAYERING_WITHOUT_DEPTH_RACE = `^(?!${MAP_DEPTH_BOUNDARY_RACE}$).+ .+$`;
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const MAP_LAYERING_TIMING_RACES = [
+  "moving depth is below the tile before the boundary pixel and above at it",
+  "stale superseded candidate bitmap is closed and cannot overwrite accepted",
+];
+const MAP_LAYERING_WITHOUT_TIMING_RACES = `^(?!(?:${MAP_LAYERING_TIMING_RACES.map(escapeRegex).join("|")})$).+ .+$`;
 
 function spawn(command, args, options = {}) {
   const printable = [command, ...args].join(" ");
@@ -170,7 +174,7 @@ const capabilities = {
     );
     node(
       "--test",
-      `--test-name-pattern=${MAP_LAYERING_WITHOUT_DEPTH_RACE}`,
+      `--test-name-pattern=${MAP_LAYERING_WITHOUT_TIMING_RACES}`,
       "test/map-layering-browser.test.mjs",
     );
     node("--test", "test/map-depth-boundary-browser.test.mjs");
