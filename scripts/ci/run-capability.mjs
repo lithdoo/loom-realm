@@ -2,6 +2,8 @@ import { readFile, readdir } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 
 const root = new URL("../../", import.meta.url);
+const MAP_DEPTH_BOUNDARY_RACE = "moving depth is below the tile before the boundary pixel and above at it";
+const MAP_LAYERING_WITHOUT_DEPTH_RACE = `^(?!${MAP_DEPTH_BOUNDARY_RACE}$).+ .+$`;
 
 function spawn(command, args, options = {}) {
   const printable = [command, ...args].join(" ");
@@ -165,8 +167,13 @@ const capabilities = {
       "test/rpgmap-safe-reimport.test.mjs",
       "test/rpgmap-verify-reimport.test.mjs",
       "test/rpgmap-local-consumer.test.mjs",
+    );
+    node(
+      "--test",
+      `--test-name-pattern=${MAP_LAYERING_WITHOUT_DEPTH_RACE}`,
       "test/map-layering-browser.test.mjs",
     );
+    node("--test", "test/map-depth-boundary-browser.test.mjs");
   },
 
   "schema-form"() {
