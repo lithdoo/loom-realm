@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
-import { classifyPaths } from "../scripts/ci/impact.mjs";
+import { classifyPaths, requiresBrowser } from "../scripts/ci/impact.mjs";
 
 const root = new URL("../", import.meta.url);
 const read = (relative) => readFile(new URL(relative, root), "utf8");
@@ -12,7 +12,7 @@ test("active workflow surface is compact and milestone-free", async () => {
   assert.ok(files.every((name) => !/^m\d+/i.test(name)));
 });
 
-test("impact routing is selective for docs and fail-closed for unknown code", () => {
+test("impact routing is selective for docs, routes Battle to Browser, and fails closed for unknown code", () => {
   assert.deepEqual(classifyPaths(["doc/20-modules/main-system/README.md"]), {
     code: false,
     content: false,
@@ -31,6 +31,10 @@ test("impact routing is selective for docs and fail-closed for unknown code", ()
     assert.equal(foundation[key], true, `foundation must affect ${key}`);
   }
 
+  const battle = classifyPaths(["game-libs/battle/src/index.ts"]);
+  assert.equal(battle.battle, true);
+  assert.equal(requiresBrowser(battle), true);
+
   const unknown = classifyPaths(["new-runtime-surface.bin"]);
   assert.equal(unknown.code, true);
   assert.equal(unknown.desktop, true);
@@ -42,14 +46,17 @@ test("impact routing is selective for docs and fail-closed for unknown code", ()
   assert.equal(terrainContract.presentation, true);
 });
 
-test("daily CI has one fail-closed summary and capability runner does not invoke milestone commands", async () => {
+test("daily CI has one fail-closed summary and Browser owns Battle browser qualification", async () => {
   const ci = await read(".github/workflows/ci.yml");
   const runner = await read("scripts/ci/run-capability.mjs");
   assert.match(ci, /name: CI \/ summary/);
   assert.match(ci, /require_success "\$CODE" "\$LINUX_RESULT"/);
   assert.match(ci, /require_success "\$BROWSER_REQUIRED" "\$BROWSER_RESULT"/);
   assert.match(ci, /if: needs\.impact\.outputs\.browser == 'true'/);
-  assert.match(ci, /npx playwright install --with-deps chromium/);
+  assert.match(ci, /LOOMREALM_CHROMIUM_PATH/);
+  assert.match(ci, /name: Battle browser qualification[\s\S]*run-capability\.mjs battle/);
+  assert.doesNotMatch(ci.match(/  linux:[\s\S]*?\n  node20:/)?.[0] ?? "", /run-capability\.mjs battle/);
+  assert.match(runner, /runWithRetry\(process\.execPath, \["--test", "game-libs\/battle\/test\/browser-e2e\.test\.mjs"\]\)/);
   assert.doesNotMatch(ci, /npm run (?:test|build):m\d+/);
   assert.doesNotMatch(runner, /npm\("run", "(?:test|build):m\d+/);
   assert.doesNotMatch(ci, /--no-sandbox|ELECTRON_DISABLE_SANDBOX/);
@@ -62,6 +69,7 @@ test("full qualification preserves compatibility, Windows, frozen Hostra, full p
   assert.match(workflow, /d863beab3c59c3bd4f271514a228fa8fee0bf5b6/);
   assert.match(workflow, /chmod 4755/);
   assert.match(workflow, /LOOMREALM_M15_FULL_QUALIFICATION: \$\{\{ inputs\.performance_full && '1' \|\| '0' \}\}/);
+  assert.match(workflow, /LOOMREALM_CHROMIUM_PATH/);
   assert.doesNotMatch(workflow, /LOOMREALM_PERFORMANCE_FULL/);
   assert.match(workflow, /inputs\.exact_essentials/);
   assert.match(workflow, /OFFICIAL_ARCHIVE_IDENTITY/);

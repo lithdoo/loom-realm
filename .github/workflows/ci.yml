@@ -71,9 +71,6 @@ jobs:
       - name: Content/storage delta
         if: needs.impact.outputs.content == 'true'
         run: node scripts/ci/run-capability.mjs content
-      - name: Battle delta
-        if: needs.impact.outputs.battle == 'true'
-        run: node scripts/ci/run-capability.mjs battle
       - name: Verify publishable package surfaces
         run: node scripts/ci/run-capability.mjs pack
       - name: Verify CI architecture
@@ -104,7 +101,12 @@ jobs:
         with:
           node-version: 24
       - name: Install repository-pinned Chromium once
-        run: npx playwright install --with-deps chromium
+        shell: bash
+        run: |
+          npx playwright install --with-deps chromium
+          chromium_path="$(node --input-type=module -e 'import { chromium } from "playwright"; process.stdout.write(chromium.executablePath())')"
+          test -x "$chromium_path"
+          printf 'LOOMREALM_CHROMIUM_PATH=%s\n' "$chromium_path" >> "$GITHUB_ENV"
       - name: Web Presentation
         if: needs.impact.outputs.presentation == 'true'
         run: node scripts/ci/run-capability.mjs presentation
@@ -117,6 +119,9 @@ jobs:
       - name: PWA
         if: needs.impact.outputs.pwa == 'true'
         run: node scripts/ci/run-capability.mjs pwa
+      - name: Battle browser qualification
+        if: needs.impact.outputs.battle == 'true'
+        run: node scripts/ci/run-capability.mjs battle
 
   desktop:
     name: Desktop / frozen Hostra

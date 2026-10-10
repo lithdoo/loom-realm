@@ -27,6 +27,10 @@ const sourcePath = (path) =>
   /\.(?:[cm]?[jt]sx?|json|ya?ml|toml|lock|css|html)$/i.test(path) ||
   path.endsWith(".npmrc");
 
+export function requiresBrowser(impact) {
+  return impact.presentation || impact.map || impact.schema || impact.pwa || impact.battle;
+}
+
 export function classifyPaths(paths) {
   if (paths.length === 0) return { ...ALL };
 
@@ -195,7 +199,7 @@ function changedPaths(base, head) {
 }
 
 function emit(impact, paths) {
-  const browser = impact.presentation || impact.map || impact.schema || impact.pwa;
+  const browser = requiresBrowser(impact);
   const result = { ...impact, browser, paths };
   if (process.env.GITHUB_OUTPUT) {
     for (const [key, value] of Object.entries({ ...impact, browser })) {
