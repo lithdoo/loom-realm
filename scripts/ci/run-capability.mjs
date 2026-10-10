@@ -19,6 +19,13 @@ function run(command, args, options = {}) {
 const npm = (...args) => run("npm", args);
 const node = (...args) => run(process.execPath, args);
 
+function buildRegressionStack() {
+  // npm run build --workspaces is not dependency-topological. Build the known
+  // authority/product stack in its explicit dependency order before tests.
+  npm("run", "build:realm-state-stack");
+  npm("run", "build", "-w", "@loomrealm/fsdb-http");
+}
+
 async function packPublishable() {
   for (const dir of ["packages", "game-libs"]) {
     const entries = await readdir(new URL(`${dir}/`, root), { withFileTypes: true });
@@ -52,7 +59,7 @@ function runDesktopTests() {
 
 const capabilities = {
   core() {
-    npm("run", "build:packages");
+    buildRegressionStack();
     npm("run", "test:regression");
     npm("run", "test:m10:qualification:run");
     node("--test", "test/m10-boundary.test.mjs");
@@ -61,7 +68,7 @@ const capabilities = {
   },
 
   compat() {
-    npm("run", "build:packages");
+    buildRegressionStack();
     npm("run", "test:regression");
   },
 

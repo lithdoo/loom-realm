@@ -70,11 +70,17 @@ test("cross-boundary validation does not classify machine failures from diagnost
   assert.match(validation, /error\.path/u);
 });
 
-test("Realm State changes have a cross-platform package, vertical, boundary, and Desktop CI gate", async () => {
-  const workflow = await readFile(path.join(root, ".github/workflows/realm-state.yml"), "utf8");
-  for (const required of [
-    "ubuntu-latest", "windows-latest", "node: [20, 24]",
-    "npm run test:realm-state", "npm run test:realm-state:qualification",
-    "npm test -w @loomrealm/desktop", "npm pack -w @loomrealm/realm-state",
-  ]) assert.match(workflow, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+test("Realm State changes keep selective daily coverage and full cross-platform qualification", async () => {
+  const daily = await readFile(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const full = await readFile(path.join(root, ".github/workflows/full-qualification.yml"), "utf8");
+  const runner = await readFile(path.join(root, "scripts/ci/run-capability.mjs"), "utf8");
+  const impact = await readFile(path.join(root, "scripts/ci/impact.mjs"), "utf8");
+
+  assert.match(impact, /path\.startsWith\("packages\/realm-state\/"\)/u);
+  assert.match(daily, /name: Windows \/ Node 24/u);
+  assert.match(daily, /run-capability\.mjs state-windows hostra-conformance/u);
+  assert.match(runner, /"state-windows"\(\) \{[\s\S]*test:realm-state[\s\S]*test:realm-state:qualification:run[\s\S]*@loomrealm\/desktop[\s\S]*@loomrealm\/realm-state/u);
+  assert.match(full, /runs-on: windows-latest/u);
+  assert.match(full, /node: \[20, 24\]/u);
+  assert.match(full, /run-capability\.mjs full-windows/u);
 });
