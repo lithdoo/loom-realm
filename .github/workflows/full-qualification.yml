@@ -85,7 +85,7 @@ jobs:
       - name: Run full Desktop product qualification
         env:
           LOOMREALM_QUALIFICATION_REPORT: "1"
-          LOOMREALM_PERFORMANCE_FULL: ${{ inputs.performance_full }}
+          LOOMREALM_M15_FULL_QUALIFICATION: ${{ inputs.performance_full && '1' || '0' }}
           HOSTRA_SOURCE_DIR: ${{ github.workspace }}/.qualification/hostra
         run: xvfb-run -a node scripts/ci/run-capability.mjs desktop-full
 

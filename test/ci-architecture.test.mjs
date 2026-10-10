@@ -53,12 +53,14 @@ test("daily CI has one fail-closed summary and no recursive milestone aggregate"
   assert.doesNotMatch(ci, /--no-sandbox|ELECTRON_DISABLE_SANDBOX/);
 });
 
-test("full qualification preserves compatibility, Windows, frozen Hostra and exact-local evidence", async () => {
+test("full qualification preserves compatibility, Windows, frozen Hostra, full performance and exact-local evidence", async () => {
   const workflow = await read(".github/workflows/full-qualification.yml");
   assert.match(workflow, /node: \[20, 24\]/);
   assert.match(workflow, /runs-on: windows-latest/);
   assert.match(workflow, /d863beab3c59c3bd4f271514a228fa8fee0bf5b6/);
   assert.match(workflow, /chmod 4755/);
+  assert.match(workflow, /LOOMREALM_M15_FULL_QUALIFICATION: \$\{\{ inputs\.performance_full && '1' \|\| '0' \}\}/);
+  assert.doesNotMatch(workflow, /LOOMREALM_PERFORMANCE_FULL/);
   assert.match(workflow, /inputs\.exact_essentials/);
   assert.match(workflow, /OFFICIAL_ARCHIVE_IDENTITY/);
   assert.doesNotMatch(workflow, /--no-sandbox|ELECTRON_DISABLE_SANDBOX/);
