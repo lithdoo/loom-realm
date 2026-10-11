@@ -1,47 +1,87 @@
 # RPG Dialogue v0 Presentation Events
 
 > 状态：**DRAFT / PREIMPLEMENTATION**  
-> 层级：`game-libs/rpg-dialogue` 业务层 Presentation Event ABI  
+> 层级：`game-libs/rpg-dialogue` 业务层 Presentation Event / Interaction ABI  
 > 依赖：[`RPG_DIALOGUE_V0_PRESENTATION.md`](./RPG_DIALOGUE_V0_PRESENTATION.md)  
 > 架构依赖：[`Web Presentation Render Event Delivery Delta`](../../doc/15-contracts/web-presentation-render-event-delta.md)
 
-本文定义 RPG Dialogue 如何使用 proposed `RenderEventReceiver.receiveRenderEvent()` 接收 Subsystem 产生的瞬时 Presentation Event。
+本文定义 RPG Dialogue 在 Subsystem 与业务 WebComponent 之间的双向交互协议。
 
-Dialogue 的 retained state 继续通过 RenderNode `data` 表达；滚动、立即 reveal 等一次性动作通过 Render Event 表达。
-
----
-
-## 1. State 与 Event 分工
+基本分工：
 
 ```text
 RenderNode.data
-→ 当前是什么
-→ retained state
+→ retained presentation facts
 
-receiveRenderEvent(...)
-→ 现在做一下什么
-→ transient presentation impulse
+Subsystem → WC
+RenderDomain.emit(...)
+→ receiveRenderEvent(...)
+→ transient presentation operation
+
+WC → Subsystem
+WebPresentationContext.emitCustomEvent(...)
+→ WEB_PRESENTATION_EVENT_CHANNEL_V1
+→ business submission intent/result
 ```
-
-Dialogue 示例：
-
-```text
-selectedChoiceId / history visible / current text
-→ state
-
-scroll-up / scroll-down / scroll-to-latest
-→ event
-```
-
-不得用不断变化的 `commandId` 塞进 `RenderNode.data` 来模拟一次性事件。
 
 ---
 
-## 2. Conversation scrolling
+## 1. Conversation 的 local interaction ownership
 
-`lr-dialogue-conversation` 是一个业务语义上的可滚动 presentation surface。
+`lr-dialogue-conversation` WebComponent 允许拥有以下 Presentation-local state：
 
-Subsystem 在当前 Dialogue interaction state 判定本次输入应解释为会话滚动后，向 `conversation` node 发送事件：
+```text
+typewriter / reveal progress
+selectedOptionId: null | string
+conversation scroll position
+local focus / animation state
+```
+
+这些状态不进入 Renderer Store，也不持续同步回 Subsystem。
+
+当 `conversationId` 改变时，Conversation WC MUST 重置上一 Conversation unit 的 local interaction state：
+
+```text
+reveal progress → fresh
+selectedOptionId → null
+scroll position → reset according to presentation policy
+```
+
+其中：
+
+> **存在 options 时，不默认选择任何 option。**
+
+---
+
+## 2. Conversation：Subsystem → WebComponent
+
+当前 canonical Conversation Presentation Events：
+
+```text
+scroll-up
+scroll-down
+option-above
+option-next
+commit
+```
+
+事件全部 target 当前 `conversation` RenderNode：
+
+```ts
+renderDomain.emit({
+  targetKey: "conversation",
+  name: "scroll-down",
+  data: {},
+});
+```
+
+Event name 属于 `rpg-dialogue` 业务 Presentation ABI，不属于 LoomRealm Core vocabulary。
+
+---
+
+## 3. `scroll-up` / `scroll-down`
+
+`scroll-up` / `scroll-down` 表达的是 Conversation 的**方向性阅读导航**，而不是具体 DOM `scrollTop` 命令。
 
 ```ts
 renderDomain.emit({
@@ -57,36 +97,310 @@ renderDomain.emit({
 });
 ```
 
-对应 WebComponent：
+Conversation WC 自己决定：
+
+```text
+每次滚动距离
+smooth / paged / line-based scrolling
+scrollbar
+wheel / touch inertia
+内容滚动与 option selection 的协调方式
+```
+
+### 3.1 与 option selection 的联合优化
+
+当当前 Conversation 存在 options 时，WC MAY 将 `scroll-up / scroll-down` 同时用于优化 option 的上下切换。
+
+例如第三方 Presentation 可以采用：
+
+```text
+长文本尚未进入选项区域
+→ scroll-down 主要滚动正文
+
+已经浏览到 options 区域
+→ scroll-down 同时推进当前 option selection
+→ 自动保证新 selection 可见
+```
+
+具体策略属于 Presentation-local behavior。
+
+Subsystem 不需要知道：
+
+```text
+当前 pixel scrollTop
+当前 viewport 中看到了哪一行
+本次 scroll 是否顺带改变了 selection
+```
+
+---
+
+## 4. `option-above` / `option-next`
+
+除了方向性阅读导航之外，v0 单独提供两个明确的 option selection event：
+
+```text
+option-above
+option-next
+```
+
+它们只要求 Conversation WC 改变当前 option selection，不要求同时滚动正文。
 
 ```ts
-interface RenderEventReceiver {
-  receiveRenderEvent(
-    event: DeepReadonly<WebPresentationRenderEvent>,
-  ): void;
+renderDomain.emit({
+  targetKey: "conversation",
+  name: "option-above",
+  data: {},
+});
+
+renderDomain.emit({
+  targetKey: "conversation",
+  name: "option-next",
+  data: {},
+});
+```
+
+WC 应根据当前可用 option 顺序选择前一个 / 后一个 enabled option，并可为保证可见性进行 Presentation-local scroll 调整。
+
+如果当前尚无 selection：
+
+```text
+option-next
+→ 可选择第一个可用 option
+
+option-above
+→ 可选择最后一个可用 option
+```
+
+具体 wrap-around 行为是否允许仍保持 DRAFT，不由 Core 决定。
+
+selection 发生变化后仍然**不向 Subsystem 发事件**；它只是 WC local interaction state。
+
+---
+
+## 5. `commit`
+
+`commit` 是 Conversation 的确认操作。
+
+```ts
+renderDomain.emit({
+  targetKey: "conversation",
+  name: "commit",
+  data: {},
+});
+```
+
+Subsystem 不直接判断“本次确认是 reveal 还是 submit”，因为 typewriter / reveal progress 属于 WC local state。
+
+Conversation WC 收到 `commit` 后按以下状态机处理。
+
+### 5.1 文本尚未完整显示
+
+```text
+commit
+  ↓
+text reveal incomplete
+  ↓
+立即完整显示当前 text
+  ↓
+不 submit
+```
+
+第一次确认只结束 typewriter / reveal，不产生业务提交。
+
+### 5.2 文本已完整显示，且没有 options
+
+```text
+commit
+  ↓
+text complete
+  ↓
+no options
+  ↓
+emitCustomEvent("submit")
+```
+
+即：
+
+```ts
+context.emitCustomEvent("submit");
+```
+
+Renderer 最终向 Subsystem 交付：
+
+```text
+name = submit
+data = {}
+```
+
+表示玩家完成了当前无选项 Conversation unit。
+
+### 5.3 文本已完整显示，有 options，但尚未选择
+
+```text
+commit
+  ↓
+text complete
+  ↓
+options exist
+  ↓
+selectedOptionId === null
+  ↓
+no submit
+```
+
+v0 不允许：
+
+```text
+commit
+→ 自动选择第一项
+→ submit
+```
+
+用户必须先通过 `scroll-up / scroll-down`、`option-above / option-next`，或未来明确允许的 pointer/touch selection 行为形成实际 selection。
+
+### 5.4 文本已完整显示，有 options，且已有 selection
+
+例如：
+
+```text
+selectedOptionId = "accept"
+```
+
+收到 `commit` 后：
+
+```ts
+context.emitCustomEvent("submit", {
+  optionId: "accept",
+});
+```
+
+WC → Subsystem 的业务结果：
+
+```text
+name = submit
+data = { optionId: string }
+```
+
+---
+
+## 6. `submit`：WebComponent → Subsystem
+
+Conversation v0 当前只定义一个 canonical reverse custom event：
+
+```text
+submit
+```
+
+合法 payload 有两种语义：
+
+```text
+无 options：
+{}
+
+有 options：
+{ optionId: string }
+```
+
+Subsystem 收到 `submit` 后仍是业务 authority，必须重新验证当前 authoritative Conversation：
+
+```text
+当前 conversation 是否仍然允许提交
+当前是否存在 options
+如果存在 options，optionId 是否存在
+option 是否 enabled
+当前 Render target / Session / generation 是否仍然 current
+```
+
+WC 拥有 local selection，但不拥有最终业务合法性。
+
+---
+
+## 7. Keyboard / Gamepad 与 `commit`
+
+物理输入仍先由 Dialogue Subsystem 的 Input Handler 接收并归一化。
+
+例如：
+
+```text
+Enter / Gamepad A
+→ Dialogue confirm action
+→ render.event target=conversation name=commit
+```
+
+这样 reveal 状态无需同步到 Subsystem：
+
+```text
+Subsystem
+  ↓ commit
+Conversation WC
+  ├─ text incomplete → reveal only
+  └─ text complete   → maybe submit
+```
+
+Subsystem 不通过猜测或 retained field 判断 typewriter 是否完成。
+
+---
+
+## 8. Pointer / Touch
+
+Pointer / Touch 可以直接操作 Conversation WC 的 Presentation-local state，例如：
+
+```text
+scrolling
+option focus / selection
+local hover / pressed visual state
+```
+
+这些行为默认不需要不断回传 Subsystem。
+
+v0 尚未冻结：
+
+```text
+点击 option 是“只选择”还是“选择并等价于 commit”
+触摸当前 option 是否立即提交
+pointer selection 是否改变 keyboard/gamepad current selection
+```
+
+无论未来采用哪种规则，**最终业务提交仍统一为 `submit` custom event**。
+
+---
+
+## 9. History：retained visibility + 三个瞬时事件
+
+`lr-dialogue-history` 的进入 / 退出不使用 Event。
+
+History 是否显示直接由 retained state 控制：
+
+```ts
+interface DialogueHistoryRenderDataV0 {
+  readonly visible: boolean;
 }
 ```
 
-`lr-dialogue-conversation` 的 concrete implementation 自己决定：
-
 ```text
-每次滚多少
-是否 smooth scroll
-是否分页滚动
-是否基于 line / viewport proportion
-是否显示 scrollbar
-触摸 / wheel 的惯性
+进入 History
+→ RenderNode.data.visible = true
+
+退出 History
+→ RenderNode.data.visible = false
 ```
 
-这些都不进入 Dialogue business ABI。
+因此不存在 canonical：
 
----
+```text
+open-history event
+close-history event
+```
 
-## 3. History scrolling
+History 的瞬时 Presentation Events 只有：
 
-`lr-dialogue-history` 是独立的可滚动 modal surface。
+```text
+scroll-up
+scroll-down
+scroll-to-latest
+```
 
-当 History 已经处于 `visible=true` 时：
+示例：
 
 ```ts
 renderDomain.emit({
@@ -100,9 +414,15 @@ renderDomain.emit({
   name: "scroll-down",
   data: {},
 });
+
+renderDomain.emit({
+  targetKey: "history",
+  name: "scroll-to-latest",
+  data: {},
+});
 ```
 
-打开 History 后需要默认展示最新记录时，使用：
+打开 History 并默认定位最新记录：
 
 ```ts
 renderDomain.update({
@@ -119,136 +439,142 @@ renderDomain.emit({
 });
 ```
 
-依赖架构层 ordering contract：WebComponent 必须先观察到 `visible=true`，再收到 `scroll-to-latest`。
+依赖架构层 ordering contract：WC 必须先观察 `visible=true`，再收到 `scroll-to-latest`。
 
-History 的实际 `scrollTop`、scrollbar、viewport height、virtualization 与当前 pixel offset 都属于 Presentation-local state。
+History 的实际 `scrollTop`、viewport、scrollbar、virtualization 等属于 Presentation-local state。
 
----
-
-## 4. Input interpretation ownership
-
-原始 Keyboard / Gamepad 输入仍由 Dialogue Handler 按当前 interaction state 解释。
-
-```text
-READING
-↑ / ↓
-→ conversation scroll-up / scroll-down event
-
-CHOOSING
-↑ / ↓
-→ change selectedChoiceId retained state
-→ 不发送 conversation scroll event
-
-HISTORY_MODAL
-↑ / ↓
-→ history scroll-up / scroll-down event
-```
-
-因此 WebComponent 不负责判断：
-
-```text
-ArrowDown 到底代表滚动还是换选项？
-```
-
-这个决定属于 Dialogue interaction logic。
-
-WebComponent 只接收已经解释后的 Presentation Event。
+History v0 不定义 WC → Subsystem custom event。
 
 ---
 
-## 5. Pointer / touch local scrolling
+## 10. Canonical v0 Event Vocabulary
 
-Mouse wheel、touch drag、scrollbar drag 属于 concrete Web presentation 的局部交互时，可以直接修改对应 WebComponent 的 presentation-local scroll state。
-
-正常情况下不需要形成：
+### Subsystem → Conversation WC
 
 ```text
-DOM scroll
-→ emit custom event
-→ Subsystem
-→ render event
-→ DOM scroll
+scroll-up
+scroll-down
+option-above
+option-next
+commit
 ```
 
-这种反馈环。
+### Conversation WC → Subsystem
 
-只有当某个具体游戏规则真的需要知道滚动行为时，才能在业务 contract 中另行增加明确事件；v0 不预建该能力。
+```text
+submit
+  {}
+  or
+  { optionId: string }
+```
+
+### Subsystem → History WC
+
+```text
+scroll-up
+scroll-down
+scroll-to-latest
+```
+
+### History WC → Subsystem
+
+```text
+none in v0
+```
 
 ---
 
-## 6. Proposed canonical Dialogue presentation events
+## 11. State 与 Event 的最终边界
 
-当前候选 vocabulary：
-
-```text
-conversation target
-  scroll-up
-  scroll-down
-
-history target
-  scroll-up
-  scroll-down
-  scroll-to-latest
-```
-
-未来可能增加：
+Retained state：
 
 ```text
-conversation
-  reveal
-
-choice / conversation
-  focus-selected-choice
+conversationId
+speaker
+full text
+options
+option enabled state
+history.visible
+history entries
+characters
+control hints
 ```
 
-但未被真实 consumer 需要前不冻结。
+Conversation WC local state：
 
-Event name 属于 `rpg-dialogue` 业务 Presentation ABI，不属于 LoomRealm Core vocabulary。
+```text
+reveal/typewriter progress
+selectedOptionId
+scroll position
+```
+
+Transient Presentation Event：
+
+```text
+scroll-up
+scroll-down
+option-above
+option-next
+commit
+scroll-to-latest
+```
+
+Business submission：
+
+```text
+submit
+```
+
+不得用不断变化的 `commandId` 塞进 RenderNode `data` 模拟一次性 event，也不得为了同步 Presentation-local state 持续发送 `selectedOptionId`、`scrollTop` 或 typewriter progress。
 
 ---
 
-## 7. Explicit non-goals
+## 12. Explicit non-goals
 
-Dialogue Event ABI 不允许退化成 DOM 命令：
+Dialogue Event ABI 不是 DOM command protocol。
+
+允许业务语义动作：
+
+```text
+scroll-down
+option-next
+commit
+scroll-to-latest
+```
+
+不定义：
 
 ```text
 set-scroll-top-320px
 set-style
 add-class
 query-selector
+append-dom
 ```
 
-业务事件描述语义动作：
-
-```text
-scroll-down
-scroll-to-latest
-```
-
-具体如何完成由 default / third-party WebComponent 决定。
+具体 DOM / Shadow DOM / Canvas / WebGL 行为属于 default / third-party WebComponent。
 
 ---
 
-## 8. Current design consequence
+## 13. Current design consequence
 
-加入 `receiveRenderEvent()` 后，Dialogue 不再需要使用以下 workaround：
-
-```ts
-data: {
-  command: {
-    id: 42,
-    action: "scroll-down"
-  }
-}
-```
-
-推荐模型固定为：
+当前推荐模型：
 
 ```text
-retained Dialogue facts
+Subsystem retained facts
 → RenderNode.data
 
-transient Dialogue presentation impulses
+Subsystem transient operation
 → RenderDomain.emit(...)
 → receiveRenderEvent(...)
+
+Conversation WC local interaction
+→ reveal / option selection / scroll
+
+真正业务提交
+→ emitCustomEvent("submit", ...)
+→ WEB_PRESENTATION_EVENT_CHANNEL_V1
+→ Dialogue Subsystem
 ```
+
+这使 Dialogue 不需要把 typewriter、当前 option selection 或滚动位置提升为 Subsystem authority，同时仍保持最终提交和 option 合法性的业务 authority 在 Subsystem。
