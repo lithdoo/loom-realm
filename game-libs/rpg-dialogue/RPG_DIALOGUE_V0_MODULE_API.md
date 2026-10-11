@@ -4,14 +4,16 @@
 > 层级：`@loomrealm-game/rpg-dialogue` public module API  
 > 目标：冻结 `RPGDialogue` / `openConversation()` 的模块边界，不内建剧情流程
 
-本文定义 RPG Dialogue v0 的调用模型、Conversation request/result、人物与历史输入，以及 public API 到 Presentation ABI 的 ownership 边界。
+本文定义 RPG Dialogue v0 的调用模型、Conversation request/result、人物输入、History session state，以及 public API 到 Presentation ABI 的 ownership 边界。
 
 RPG Dialogue v0 **不是剧情脚本引擎**。它不拥有 `next`、branch、condition、quest mutation、inventory mutation、battle launch、map transfer 或任何 Story Flow authority。
 
-业务代码使用普通 TypeScript 控制流程组织连续对话：
+业务代码使用普通 TypeScript 控制连续对话：
 
 ```ts
 const dialogue = new RPGDialogue(scope, frame);
+
+dialogue.setHistory(savedHistory);
 
 const first = await dialogue.openConversation({
   conversation: {
@@ -20,7 +22,13 @@ const first = await dialogue.openConversation({
     choices: [],
   },
   characters,
-  history,
+});
+
+dialogue.appendHistory({
+  entryId: "elder.1",
+  speakerCharacterId: "elder",
+  speakerName: "村长",
+  text: "你终于来了。",
 });
 
 const second = await dialogue.openConversation({
@@ -33,7 +41,6 @@ const second = await dialogue.openConversation({
     ],
   },
   characters: nextCharacters,
-  history: nextHistory,
 });
 
 if (second.type === "submitted" && second.optionId === "yes") {
@@ -52,6 +59,7 @@ dialogue.close();
 ```text
 Frame
 └─ RPGDialogue
+   ├─ session history
    ├─ openConversation(A) -> Result A
    ├─ openConversation(B) -> Result B
    ├─ openConversation(C) -> Result C
@@ -66,7 +74,9 @@ Conversation 完成后：
 current Conversation settles
 → openConversation() Promise resolves
 → RPGDialogue instance remains alive
+→ session history remains alive
 → caller may perform arbitrary business logic
+→ caller may mutate history
 → caller may open another Conversation
 ```
 
@@ -74,6 +84,7 @@ current Conversation settles
 
 ```text
 Conversation completion != RPGDialogue close
+Conversation completion != automatic history append
 ```
 
 RPG Dialogue 不创建独立 Subsystem，也不通过 `frame.call()` 调用自己。它共享 caller 的 `SubsystemScope`、`Frame` lifetime、input authority 与 render ownership context。
@@ -103,6 +114,16 @@ export class RPGDialogue {
     request: ConversationRequestV0,
   ): Promise<ConversationResultV0>;
 
+  setHistory(
+    entries: readonly DialogueHistoryEntryV0[],
+  ): void;
+
+  appendHistory(
+    entry: DialogueHistoryEntryV0,
+  ): void;
+
+  getHistorySnapshot(): readonly DialogueHistoryEntryV0[];
+
   close(): void;
 }
 ```
@@ -128,17 +149,16 @@ DialogueHandler
 
 ## 3. Conversation request
 
-每次 `openConversation()` 接收当前 Conversation 的**完整 retained input snapshot**：
+每次 `openConversation()` 接收当前 Conversation 自己需要的完整 retained input snapshot：
 
 ```ts
 export interface ConversationRequestV0 {
   readonly conversation: ConversationContentV0;
   readonly characters: readonly DialogueCharacterV0[];
-  readonly history: readonly DialogueHistoryEntryV0[];
 }
 ```
 
-这三个部分分别表示：
+两部分分别表示：
 
 ```text
 conversation
@@ -146,12 +166,11 @@ conversation
 
 characters
 → 当前人物列表与 Dialogue-defined semantic hints
-
-history
-→ 已经发生过、当前允许展示的 transcript entries
 ```
 
-调用方不得依赖上一轮 `openConversation()` 隐式保留的 business input。每次 request 都应足以描述当前 Conversation 所需的 retained facts。
+History **不属于单次 Conversation request**。它跨多个 `openConversation()` operation 存活，是 `RPGDialogue` instance 的 session-level retained state。
+
+调用方不得依赖上一轮 `openConversation()` 隐式保留的 conversation / characters business input；每次 request 都应完整描述当前 Conversation 自身需要的 retained facts。
 
 `RPGDialogue` MAY 在内部复用同一个 RenderDomain / WebComponent identity；这属于实现细节，不改变 request 的完整快照语义。
 
@@ -261,33 +280,7 @@ MUST NOT apply defaults inside it
 MUST NOT derive gameplay behavior from it
 ```
 
-因此不同业务可以定义完全不同的 data：
-
-```ts
-interface PortraitCharacterData extends JsonObject {
-  readonly portrait: {
-    readonly namespace: string;
-    readonly key: string;
-  };
-}
-```
-
-或：
-
-```ts
-interface Live2DCharacterData extends JsonObject {
-  readonly model: {
-    readonly namespace: string;
-    readonly key: string;
-  };
-  readonly motion: string;
-  readonly parameters: {
-    readonly mouthOpen: number;
-  };
-}
-```
-
-RPG Dialogue 不理解 `portrait`、`model`、`motion`、Live2D、Spine、Canvas、WebGL 或任何具体 presentation implementation。
+因此不同业务可以定义完全不同的 data，例如 portrait、sprite animation、Live2D、Spine、Canvas、WebGL 或其他 presentation schema。
 
 业务 WebComponent 通过 `receiveRenderData(data)` 接收该对象，并自行使用 `WebPresentationContext.resources` 等能力加载需要的资源。
 
@@ -296,6 +289,8 @@ RPG Dialogue 不理解 `portrait`、`model`、`motion`、Live2D、Spine、Canvas
 ---
 
 ## 6. History
+
+History 是 `RPGDialogue` instance 内部持有的 **session-level retained state**，不是 `ConversationRequestV0` 的字段。
 
 ```ts
 export interface DialogueHistoryEntryV0 {
@@ -306,31 +301,93 @@ export interface DialogueHistoryEntryV0 {
 }
 ```
 
-`history` 的内容 authority 属于 caller。
+### 6.1 Ownership
 
-RPG Dialogue v0：
-
-```text
-MUST render caller supplied history
-MUST preserve caller supplied ordering
-MUST NOT automatically append the current Conversation
-MUST NOT decide whether a submitted choice enters history
-MUST NOT persist Story / Quest history
-```
-
-因此业务可以自行决定：
+History 的 authority 分成三层：
 
 ```text
-旁白是否进历史
-choice 文本是否进历史
-系统提示是否进历史
-哪些 transcript entries 可以回看
-是否将 transcript durable commit 到 Realm State
+caller
+→ 决定 transcript 内容语义
+→ 决定何时 append / replace
+→ 决定 Conversation、choice、旁白、系统提示是否进入 History
+
+RPGDialogue
+→ 持有当前 interaction session 的 history entries
+→ 验证、保存并投影当前 history
+→ 管理 History modal retained interaction state
+
+Realm State（如果游戏需要）
+→ durable history authority
+→ save/load / cross-map / cross-session persistence
 ```
 
-当前 `conversation` 与 `history` 不形成双重 authority：建议 caller 只把**已经完成的 transcript** 放入 `history`；当前正在展示的内容只存在于 `conversation`。
+因此 `RPGDialogue` MUST NOT 自动把当前 Conversation 或提交 choice 写入 History。
 
-History modal 的 open/close、scroll、focus、virtualization 属于 RPG Dialogue / Presentation interaction state，不要求 caller 把这些 UI-local 状态放进 `ConversationRequestV0`。
+### 6.2 `setHistory()`
+
+```ts
+dialogue.setHistory(entries);
+```
+
+`setHistory()` 表示完整 replace：
+
+> 当前 `RPGDialogue` session 的 transcript entries 就是 `entries`。
+
+适用于：
+
+```text
+加载存档后恢复 transcript
+从 Realm State 重建 History
+切换业务 conversation context
+测试建立初始状态
+业务过滤 / 重排后的完整替换
+```
+
+它不是 patch API。
+
+### 6.3 `appendHistory()`
+
+```ts
+dialogue.appendHistory(entry);
+```
+
+`appendHistory()` 是显式 convenience operation，只追加 caller 已经决定应该进入 History 的 entry。
+
+它不得根据当前 Conversation 自动补 speaker、choice、文本或其他业务语义。
+
+### 6.4 `getHistorySnapshot()`
+
+```ts
+const history = dialogue.getHistorySnapshot();
+```
+
+返回当前 History 的 readonly snapshot。caller 不得通过返回值直接 mutate Dialogue 内部状态。
+
+如果游戏需要 durable 保存：
+
+```text
+getHistorySnapshot()
+→ caller writes selected history into Realm State
+→ later new RPGDialogue
+→ setHistory(savedHistory)
+```
+
+### 6.5 History presentation state
+
+History modal 的 open/close、scroll、focus、virtualization 不属于 transcript content：
+
+```text
+history entries
+→ RPGDialogue session retained state
+
+history visible
+→ RPGDialogue / Presentation retained interaction state
+
+history scroll / focus / virtualization
+→ Presentation-local state
+```
+
+这些 UI-local / interaction state 不进入 `ConversationRequestV0`。
 
 ---
 
@@ -366,6 +423,7 @@ Result 只代表**当前 Conversation unit 的用户提交结果**，不代表�
 收到 result 后，caller 可以任意执行：
 
 ```text
+append / replace History
 Realm State commit
 quest update
 inventory update
@@ -376,7 +434,7 @@ another openConversation()
 close()
 ```
 
-RPG Dialogue 不拥有这些后续行为。
+RPG Dialogue 不拥有这些后续业务行为。
 
 ---
 
@@ -405,6 +463,8 @@ DIALOGUE_CONVERSATION_ALREADY_OPEN
 ```
 
 v0 不定义 queue、replace、stack 或 nested Conversation semantics。
+
+History mutation API MAY 在 READY 状态调用；active Conversation 期间是否允许 `setHistory()` / `appendHistory()` 并立即投影，implementation freeze 前仍需明确。v0 API 不应因此把 History 放回 `ConversationRequestV0`。
 
 ---
 
@@ -474,7 +534,9 @@ attrs = characterId / displayName / active / placement / expression
 data = caller supplied JsonObject exactly
 ```
 
-而 Conversation、Text、Choice、Control、History 等 canonical nodes 的 Dialogue-owned facts也应放在 `attrs`，其 `data` 在没有 caller-owned payload 时保持 `{}`。
+Conversation、Text、Choice、Control、History 等 canonical nodes 的 Dialogue-owned facts 放在 `attrs`，其 `data` 在没有 caller-owned payload 时保持 `{}`。
+
+History entries 来自 `RPGDialogue` 当前内部 history snapshot，而不是当前 `ConversationRequestV0`。
 
 该规则的完整 Render Tree 映射见 `RPG_DIALOGUE_V0_PRESENTATION.md`。
 
@@ -494,11 +556,12 @@ inventory mutation nodes
 battle nodes
 map transfer nodes
 arbitrary script execution
+automatic transcript policy
 persistent story transcript authority
 presentation-specific image / Live2D / Spine schema
 ```
 
-业务若希望建立更高级的 dialogue flow helper，可以在 game-side 基于 `RPGDialogue.openConversation()` 自行组合，不改变本模块的 authority 边界。
+业务若希望建立更高级的 dialogue flow helper，可以在 game-side 基于 `RPGDialogue.openConversation()` 与 History mutation API 自行组合，不改变本模块的 authority 边界。
 
 ---
 
@@ -515,6 +578,8 @@ presentation-specific image / Live2D / Spine schema
 6. accessibility / localization / rich-text boundary
 7. voice / auto-advance semantics
 8. choiceId / optionId naming unification
+9. whether History mutation is legal while a Conversation is active
+10. history retention limit / virtualization boundary
 ```
 
 这些 OPEN 不改变已确定的模块结构：
@@ -523,7 +588,9 @@ presentation-specific image / Live2D / Spine schema
 persistent RPGDialogue instance
 + sequential one-shot openConversation() operations
 + caller-owned conversation sequencing
-+ complete characters/history snapshot per Conversation
++ complete conversation/characters snapshot per Conversation
++ session-owned History with explicit caller mutation
++ no automatic transcript policy
 + Dialogue semantics in attrs
 + caller-defined character payload in data
 ```
