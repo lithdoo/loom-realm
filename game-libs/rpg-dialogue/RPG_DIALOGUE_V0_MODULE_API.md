@@ -36,7 +36,7 @@ const second = await dialogue.openConversation({
   history: nextHistory,
 });
 
-if (second.type === "submitted" && second.choiceId === "yes") {
+if (second.type === "submitted" && second.optionId === "yes") {
   // business side effect belongs here
 }
 
@@ -340,7 +340,7 @@ History modal 的 open/close、scroll、focus、virtualization 属于 RPG Dialog
 export type ConversationResultV0 =
   | {
       readonly type: "submitted";
-      readonly choiceId?: string;
+      readonly optionId?: string;
     }
   | {
       readonly type: "cancelled";
@@ -356,8 +356,10 @@ export type ConversationResultV0 =
 选择提交：
 
 ```ts
-{ type: "submitted", choiceId: "yes" }
+{ type: "submitted", optionId: "yes" }
 ```
+
+`optionId` 当前沿用 Presentation Event ABI 的 `submit { optionId }` 命名；其值对应被提交 choice 的稳定 `choiceId`。`choiceId / optionId` 是否在 implementation freeze 前统一命名仍是一个非阻塞命名 OPEN。
 
 Result 只代表**当前 Conversation unit 的用户提交结果**，不代表整个 Dialogue / Story 流程结果。
 
@@ -512,6 +514,7 @@ presentation-specific image / Live2D / Spine schema
 5. exact user-cancel physical interaction
 6. accessibility / localization / rich-text boundary
 7. voice / auto-advance semantics
+8. choiceId / optionId naming unification
 ```
 
 这些 OPEN 不改变已确定的模块结构：
