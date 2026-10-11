@@ -10,8 +10,11 @@
 基本分工：
 
 ```text
+RenderNode.attrs
+→ RPG Dialogue-defined retained semantic facts
+
 RenderNode.data
-→ retained presentation facts
+→ caller-owned WC payload where exposed by Module API
 
 Subsystem → WC
 RenderDomain.emit(...)
@@ -24,6 +27,8 @@ WebPresentationContext.emitCustomEvent(...)
 → business submission intent/result
 ```
 
+当前 v0 caller-owned `data` 明确用于 `lr-dialogue-character`；其他 canonical nodes 的 Dialogue semantics 位于 attrs，其 data 默认 `{}`。
+
 `render.event` 按 `domainId + targetKey` 精确寻址 current live RenderNode，因此 event vocabulary 必须同时规定 **event name + legal target node**；不能只定义全局事件名。
 
 ---
@@ -32,23 +37,23 @@ WebPresentationContext.emitCustomEvent(...)
 
 v0 canonical node-level contract：
 
-| Canonical node | Retained data role | Subsystem → WC `receiveRenderEvent` | WC → Subsystem `emitCustomEvent` |
+| Canonical node | Retained role | Subsystem → WC `receiveRenderEvent` | WC → Subsystem `emitCustomEvent` |
 | --- | --- | --- | --- |
 | `dialogue` | root / version / overall presentation container | none | none |
 | `characters` | character collection container | none | none |
-| `character.<characterId>` | character identity / display / active / placement / expression / visual | none | none |
-| `conversation` | current `conversationId` / speaker; interaction owner | `scroll-up`, `scroll-down`, `option-above`, `option-next`, `commit` | `submit` |
-| `text` | current full text | none | none |
+| `character.<characterId>` | Dialogue semantics in attrs + caller-owned character data | none | none |
+| `conversation` | current internal `conversation-id` / speaker; interaction owner | `scroll-up`, `scroll-down`, `option-above`, `option-next`, `commit` | `submit` |
+| `text` | current full text attr | none | none |
 | `choices` | choice collection container | none | none |
-| `choice.<choiceId>` | `choiceId` / text / enabled | none | none |
+| `choice.<choiceId>` | choice identity / text / enabled attrs | none | none |
 | `controls` | control-hint collection container | none | none |
-| `control.<action>` | action / label / enabled hint | none | none in v0 |
-| `history` | `visible`; history interaction surface | `scroll-up`, `scroll-down`, `scroll-to-latest` | none |
-| `history.<entryId>` | transcript entry | none | none |
+| `control.<action>` | action / label / enabled attrs | none | none in v0 |
+| `history` | `visible` attr; history interaction surface | `scroll-up`, `scroll-down`, `scroll-to-latest` | none |
+| `history.<entryId>` | transcript entry attrs | none | none |
 
 ### 1.1 Targeting rule
 
-`rpg-dialogue` Subsystem MUST only emit an event to a node that declares that event in the table above。
+`rpg-dialogue` MUST only emit an event to a node that declares that event in the table above。
 
 例如：
 
@@ -76,16 +81,16 @@ target=history.line-1,name=scroll-up
 
 未知或投错 target 的 event 属于 producer / implementation bug。Presentation implementation MUST NOT 将其重新解释成其他合法事件；可以忽略并进行本地诊断。
 
-### 1.2 Interactive owner 与 data node
+### 1.2 Interactive owner 与 presentation nodes
 
-v0 明确区分两类节点：
+v0 明确区分：
 
 ```text
 Interactive owner node
   conversation
   history
 
-Presentation data node
+Presentation nodes
   character.*
   text
   choices
@@ -94,7 +99,7 @@ Presentation data node
   history.*
 ```
 
-不是每个 RenderNode 都必须拥有 event contract。大多数节点只通过 `receiveRenderData(...)` 接收 retained facts。
+不是每个 RenderNode 都必须拥有 event contract。大多数节点只消费 retained attrs/data。
 
 `conversation` 是当前 Conversation unit 的唯一 interaction owner；`history` 是 History surface 的 interaction owner。
 
@@ -102,7 +107,7 @@ Presentation data node
 
 ## 2. Conversation 与 descendant nodes 的本地协调
 
-Render Tree 仍保持：
+Render Tree 保持：
 
 ```text
 lr-dialogue-conversation        key=conversation
@@ -111,11 +116,11 @@ lr-dialogue-conversation        key=conversation
    └─ lr-dialogue-choice*       key=choice.<choiceId>
 ```
 
-虽然 `commit` / `option-next` 等事件只投递给 `conversation`，当前 full text 和 option facts 仍分别位于 descendant `text` / `choice.*` nodes。
+虽然 `commit` / `option-next` 等事件只投递给 `conversation`，当前 full text 和 choice facts 仍分别位于 descendant `text` / `choice.*` nodes 的 attrs。
 
 因此 v0 冻结以下行为边界：
 
-> **Conversation WebComponent owns interaction；descendant text / choice nodes provide presentation data and participate only through Window-local presentation coordination.**
+> **Conversation WebComponent owns interaction；descendant text / choice nodes provide retained presentation facts and participate only through Window-local presentation coordination.**
 
 Conversation implementation MUST 能够在本地 Presentation 内完成：
 
@@ -123,7 +128,7 @@ Conversation implementation MUST 能够在本地 Presentation 内完成：
 1. 判断当前 text 是否已经 reveal complete；
 2. 请求当前 text 立即完整显示；
 3. 按 Render Tree 当前顺序读取 descendant choices；
-4. 读取每个 choice 的 choiceId / enabled；
+4. 读取每个 choice 的 choice-id / enabled attrs；
 5. 维护 selectedOptionId；
 6. 将当前 selection 反映到 descendant choice 的视觉状态；
 7. 在需要时保证当前 selection 可见。
@@ -160,15 +165,17 @@ conversation scroll position
 local focus / animation state
 ```
 
-这些状态不进入 Renderer Store，也不持续同步回 Subsystem。
+这些状态不进入 Renderer Store retained facts，也不持续同步回 Subsystem。
 
-当 `conversationId` 改变时，Conversation WC MUST 重置上一 Conversation unit 的 local interaction state：
+当 `conversation-id` attr 改变时，Conversation WC MUST 重置上一 Conversation unit 的 local interaction state：
 
 ```text
 reveal progress → fresh
 selectedOptionId → null
 scroll position → reset according to presentation policy
 ```
+
+`conversation-id` 由 `RPGDialogue.openConversation()` operation 内部分配；caller 不维护该 identity。
 
 存在 options 时：
 
@@ -320,6 +327,8 @@ submit
 { optionId: string }
 ```
 
+`optionId` 当前对应被提交 choice 的稳定 `choice-id`。`choiceId / optionId` exact naming 是否在 implementation freeze 前统一仍为非阻塞命名 OPEN。
+
 `submit` 必须由当前 `conversation` element 自己通过其 `WebPresentationContext.emitCustomEvent(...)` 发出；child `choice.<id>` 不直接向 Subsystem 发 `submit`。
 
 Renderer 会自动附加当前 Presentation identity：
@@ -336,19 +345,21 @@ Subsystem 收到 `submit` 后仍是 business authority，必须重新验证：
 
 ```text
 当前 Conversation 是否仍允许提交
-当前是否存在 options
-若存在 options，optionId 是否存在
-option 是否 enabled
+当前是否存在 choices
+若存在 choices，optionId 是否对应 current choice identity
+该 choice 是否 enabled
 当前 Render target / Session / generation 是否仍 current
 ```
 
 WC 拥有 local selection，但不拥有最终业务合法性。
 
+成功 business submission 只 settle 当前 `openConversation()` Promise；它不关闭 `RPGDialogue` instance，也不决定下一 Conversation。
+
 ---
 
 ## 6. Keyboard / Gamepad
 
-物理输入先由 Dialogue Subsystem Input Handler 接收并解释，再产生针对 interaction owner node 的 Presentation Event。
+物理输入先由 Dialogue Input Handler 接收并解释，再产生针对 interaction owner node 的 Presentation Event。
 
 例如：
 
@@ -407,23 +418,19 @@ submit { optionId }
 
 ## 8. History Node Event Contract
 
-History 是否显示是 retained state：
-
-```ts
-interface DialogueHistoryRenderDataV0 {
-  readonly visible: boolean;
-}
-```
+History 是否显示是 retained Dialogue / Presentation interaction state，表达在 `lr-dialogue-history.attrs.visible`：
 
 ```text
 进入 History
-→ history.data.visible = true
+→ history.attrs.visible = "true"
 
 退出 History
-→ history.data.visible = false
+→ history.attrs.visible = "false"
 ```
 
 因此不存在 canonical `open-history` / `close-history` transient event。
+
+caller 提供的是 History transcript 内容，不提供 modal visibility / scroll / focus 等 UI-local state。
 
 所有 History transient events 的 legal target 均为：
 
@@ -452,11 +459,11 @@ renderDomain.emit({
 打开 History 并定位最新记录时：
 
 ```text
-1. update history.data.visible = true
+1. update history.attrs.visible = "true"
 2. emit target=history, name=scroll-to-latest
 ```
 
-依赖架构层 ordering contract：WC 必须先观察到 `visible=true`，再收到 `scroll-to-latest`。
+依赖架构层 ordering contract：WC 必须先观察到 `visible=true` retained update，再收到 `scroll-to-latest`。
 
 History 的实际 scrollTop、viewport、scrollbar、virtualization 属于 Presentation-local state。
 
@@ -503,20 +510,26 @@ Event names are therefore not globally sufficient；v0 ABI identity is effective
 
 ---
 
-## 10. State / Local State / Event Boundary
+## 10. Retained / Local State / Event Boundary
 
-Retained state：
+RPG Dialogue-defined retained semantics：
 
 ```text
-conversationId
+internal conversation-id
 speaker
 full text
-options
-option enabled state
+choices
+choice enabled state
 history.visible
 history entries
-characters
+character semantic attrs
 control hints
+```
+
+Caller-owned retained WC payload：
+
+```text
+character.data
 ```
 
 Conversation WC local state：
@@ -546,7 +559,7 @@ Business submission：
 conversation.submit
 ```
 
-不得通过 RenderNode `data` 的 commandId 模拟一次性 event；也不得持续同步 `selectedOptionId`、scrollTop 或 typewriter progress。
+不得通过 RenderNode attrs/data 的 `commandId` 模拟一次性 event；也不得持续同步 `selectedOptionId`、scrollTop 或 typewriter progress。
 
 ---
 
@@ -582,9 +595,11 @@ append-dom
 当前闭环模型：
 
 ```text
-Subsystem retained facts
+RPG Dialogue retained semantics
+→ RenderNode.attrs
+
+caller-owned character WC payload
 → RenderNode.data
-→ receiveRenderData(...)
 
 Subsystem transient operation
 → RenderDomain.emit({ targetKey, name, data })
@@ -598,7 +613,8 @@ Conversation Presentation-local coordination
 真正业务提交
 → conversation context.emitCustomEvent("submit", ...)
 → WEB_PRESENTATION_EVENT_CHANNEL_V1
-→ Dialogue Subsystem
+→ current openConversation() settlement
+→ caller business code decides what happens next
 ```
 
 v0 因此冻结：
@@ -606,7 +622,7 @@ v0 因此冻结：
 ```text
 conversation = Dialogue interaction owner
 history      = History interaction owner
-other nodes  = presentation data nodes
+other nodes  = presentation nodes
 ```
 
 这既保留 RenderNode 的精确 target 语义，也避免把 typewriter、current option selection 或滚动位置提升为 Subsystem authority。
