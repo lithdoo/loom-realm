@@ -20,16 +20,22 @@ v0 采用长期 `RPGDialogue` 实例 + 顺序 one-shot `openConversation()` oper
 ```ts
 const dialogue = new RPGDialogue(scope, frame);
 
+dialogue.setHistory(savedHistory);
+
 const res0 = await dialogue.openConversation({
   conversation,
   characters,
-  history,
+});
+
+dialogue.appendHistory({
+  entryId: "elder.1",
+  speakerCharacterId: "elder",
+  text: conversation.text,
 });
 
 const res1 = await dialogue.openConversation({
   conversation: nextConversation,
   characters: nextCharacters,
-  history: nextHistory,
 });
 
 dialogue.close();
@@ -39,15 +45,29 @@ dialogue.close();
 
 同一个 `RPGDialogue` v0 同时最多一个 active Conversation；不定义 queue / stack / replace / nested Conversation。
 
-每次 request 提供完整 retained input snapshot：
+每次 Conversation request 提供：
 
 ```text
 conversation   当前 Conversation 内容与 choices
 characters     当前人物列表
-history        已完成、当前允许展示的 transcript
 ```
 
-History 内容 authority 属于 caller。RPG Dialogue 不自动把当前 Conversation 或 choice 写入 history，也不拥有 durable Story / Quest history。
+History 不再作为每次 request 的重复输入。它是 `RPGDialogue` instance 的 session-level retained state：
+
+```text
+setHistory(entries)
+→ 完整替换当前 session transcript
+
+appendHistory(entry)
+→ 显式追加 caller 已决定应进入 History 的 entry
+
+getHistorySnapshot()
+→ 读取 readonly snapshot，用于业务检查或 durable persistence
+```
+
+History 的内容语义仍属于 caller。RPG Dialogue 不自动把当前 Conversation、choice、旁白或系统提示写入 History，也不拥有 durable Story / Quest history。
+
+如果游戏需要跨地图、存档或跨 session 保存 History，caller 可以将 `getHistorySnapshot()` 的结果写入 Realm State，并在新的 `RPGDialogue` instance 上通过 `setHistory()` 恢复。
 
 ## Presentation ownership
 
@@ -101,6 +121,9 @@ Conversation WC local state
 → typewriter/reveal progress
 → current option selection
 → scroll position
+
+RPGDialogue History
+→ session-level retained transcript state
 
 RenderDomain.emit(...)
 → render.event
@@ -162,6 +185,6 @@ text 已完整显示 + 有 options + 已选择
 
 Choices 不包含 retained `selected`；初始不默认选择任何 option。
 
-History modal 的 open/close 属于 Dialogue / Presentation interaction state；History 内容由 caller 每次作为完整 transcript snapshot 提供。
+History modal 的 open/close 属于 Dialogue / Presentation interaction state；History entries 由 `RPGDialogue` session 持有并由 caller 显式修改。
 
 `receiveRenderEvent()` 的 Web Presentation 投递目前仍是 **DRAFT / REOPEN PROPOSAL**，未实现、未资格；Dialogue 文档不得把该能力声明为已落地。
