@@ -58,6 +58,39 @@ WebComponent emitCustomEvent("submit", ...)
 → final business submission to Dialogue Subsystem
 ```
 
+## Node Event Contract
+
+`render.event` 按 `domainId + targetKey` 精确寻址 RenderNode，因此 v0 明确规定哪些 canonical node 是 interaction owner：
+
+```text
+conversation
+  Subsystem → WC:
+    scroll-up
+    scroll-down
+    option-above
+    option-next
+    commit
+
+  WC → Subsystem:
+    submit {}
+    submit { optionId }
+
+history
+  Subsystem → WC:
+    scroll-up
+    scroll-down
+    scroll-to-latest
+
+  WC → Subsystem:
+    none
+
+其他 canonical nodes
+  inbound event: none
+  outbound custom event: none
+```
+
+`conversation` 统一拥有当前 Conversation unit 的交互：typewriter/reveal、option selection、scroll 和 commit 判断。`text`、`choices`、`choice.*` 等 descendant nodes 仍保存各自 retained presentation data，并通过 Window-local Presentation coordination 与 `conversation` 协作；该协调不得绕回 Subsystem 同步 local state。
+
 Conversation 当前 canonical Subsystem → WC events：
 
 ```text
@@ -70,7 +103,7 @@ commit
 
 其中 `scroll-up / scroll-down` 既可用于内容滚动，也允许 WC 做 option selection 联合优化；`option-above / option-next` 是独立的明确 option 切换操作。
 
-`commit` 的行为由 Conversation WC 根据自己的 reveal / selection local state决定：
+`commit` 的行为由 Conversation WC 根据自己的 reveal / selection local state 决定：
 
 ```text
 text 未完整显示
