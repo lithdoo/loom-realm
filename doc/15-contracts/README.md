@@ -1,25 +1,45 @@
 # 当前正式契约
 
-跨角色、跨进程可观察的身份、时序、失败和版本约束以相应契约正文为准。这里只提供导航：**不复制可能过期的实现 PASS/Closed 状态**。已实现的模块见[核心模块](../20-modules/core/README.md)，资格差距及 M16/M17 见[路线图](../30-implementation/roadmap.md)。
+跨角色、跨进程可观察的 identity、lifecycle、ordering、failure、limits 与 version 约束以相应 Contract 正文为准。本页只提供 Current navigation，不复制实现进度、历史 milestone 或 qualification PASS 状态。
 
-## Runtime、控制、数据
+## Runtime、控制与数据
 
-- [Game Package v1](./game-package-v1.md) · [Hostra Launcher / Node Runner](./nodejs-launcher-profile-v1.md) · [PWA Launcher / Worker Runner](./pwa-launcher-profile-v1.md)。
-- [Realm State v1](./realm-state-v1.md)定义 Session shared business State、OCC、subscription、binding 与 failure evidence；当前实现证据见[独立资格记录](../30-implementation/realm-state-v1-qualification.md)。
-- [Subsystem Control v1](./subsystem-control-protocol-v1.md) · [Runtime Control v1](./runtime-control-profile-v1.md) · [Frame / Call v1](./frame-call-protocol-v1.md)及[Conformance](./frame-call-conformance-v1.md)。
-- [Main ⇄ Renderer Control v1](./main-renderer-control-v1.md) · [Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)。
-- [Renderer Data Profile `/1`](./renderer-data-profile-v1.md)及[Conformance](./renderer-data-profile-conformance-v1.md) · [Viewport State v1](./viewport-state-v1.md)及[Conformance](./viewport-state-conformance-v1.md)。现行四子项实现的精确证据见[Viewport 资格记录](../30-implementation/viewport-profile-v1-qualification.md)；旧三子项原文仅作历史证据，不得部署混配。
-- [User Input v1](./user-input-v1.md) · [Render Update v1](./render-update-v1.md) · [Readonly Content API v1](./content-api-v1.md)。
+- [Game Package v1](./game-package-v1.md)
+- [Hostra Launcher / Node Runner](./nodejs-launcher-profile-v1.md)
+- [PWA Launcher / Worker Runner](./pwa-launcher-profile-v1.md)
+- [Realm State v1](./realm-state-v1.md)
+- [Subsystem Control v1](./subsystem-control-protocol-v1.md)
+- [Runtime Control v1](./runtime-control-profile-v1.md)
+- [Frame / Call v1](./frame-call-protocol-v1.md) · [Conformance](./frame-call-conformance-v1.md)
+- [Main ⇄ Renderer Control v1](./main-renderer-control-v1.md)
+- [Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)
+- [Renderer Data Profile `/1`](./renderer-data-profile-v1.md) · [Conformance](./renderer-data-profile-conformance-v1.md)
+- [Viewport State v1](./viewport-state-v1.md) · [Conformance](./viewport-state-conformance-v1.md)
+- [User Input v1](./user-input-v1.md)
+- [Render Update v1](./render-update-v1.md)
+- [Readonly Content API v1](./content-api-v1.md)
 
 ## Web Presentation
 
-[Config v1](./web-presentation-config-v1.md)描述资源脚本/样式引导；[API v1](./web-presentation-api-v1.md)描述只读投影 Context/Retained Data/ResourceClient。Renderer current Store 与 Main 的 authoritative topology 不因 DOM/业务组件而生成第二份权威。平台有不同物理资源绑定，但不创造第二套公开 Presentation API。
+- [Web Presentation Config v1](./web-presentation-config-v1.md) — Window bootstrap resources / scripts / styles。
+- [Web Presentation API v1](./web-presentation-api-v1.md) — Context、retained Render Data、transient Render Event、reverse Custom Event、Resource capability、currentness、lifecycle 与 failure semantics。
 
-## 如何判断规范是否已交付
+Renderer current Store 与 Main/DataAuthority topology 不因 DOM 或 business WebComponent 生成第二份 authority。平台可以有不同 physical composition，但不创建第二套公开 Presentation ABI。
 
-- **Contract Frozen：** 规范语义被冻结，不自动代表实现或 CI 通过。
-- **Implemented：** 以当前源码和产品测试判断；新功能不能被旧文档中的“not implemented”否决。
-- **Qualified：** 必须有同一 executable subject、适用 Node/浏览器/桌面环境和有效签核；详见[Realm State](../30-implementation/realm-state-v1-qualification.md)、[M11](../30-implementation/m11-qualification.md)、[M14](../30-implementation/m14-qualification.md)、[M15](../30-implementation/m15-qualification.md)及[Viewport](../30-implementation/viewport-profile-v1-qualification.md)记录。
-- **历史设计：** [ADR 索引](../decisions/README.md)与 Git 历史保存原因；不将已取代草案当作接口规范。
+## Contract、Implementation、Qualification
 
-本目录仅收敛导航、不修改上述契约正文或放松兼容义务。
+```text
+Contract Frozen
+→ observable semantics 已冻结
+→ 不自动代表实现存在或测试通过
+
+Implemented
+→ 以当前源码与产品测试判断
+
+Qualified
+→ 必须有适用 executable subject、qualification input、环境与 evidence
+```
+
+Current Contract 不复制 historical PASS ledger。实现状态看[核心模块](../20-modules/core/README.md)；测试、qualification subject/staleness 与性能规则看[开发与资格](../30-development/README.md)。历史 evidence 只在 `30-implementation` 中作为 provenance，不覆盖 Current Contract。
+
+为什么采用当前设计看 [ADR](../decisions/README.md)；正在进行的工作使用 GitHub Issue/PR；已完成且没有独立 evidence 价值的 plan/review/draft 由 Git 历史保存。
