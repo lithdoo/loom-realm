@@ -56,6 +56,28 @@ npm run test:regression
 
 Contract deviations：none。
 
+### 2026-10-12 non-functional type-provenance follow-up
+
+上述 `21438a8d7b0ccbcc183403247085ea678e2f2da1` 继续作为原始 Render Event Delivery executable qualification subject，不被后续提交冒充或覆盖。后续代码质量审查只把 forward Render Event 的 module-local `JsonObject` 来源从等价的 `InputEventV1["payload"]` 改为语义直接的 `RenderEventV1["data"]`；没有改变 public named exports、structural ABI shape、runtime JavaScript、package dependency 或任何 Frozen observable semantics。
+
+该 package declaration artifact 的 follow-up qualification subject 为：
+
+```text
+aa7930470f72cff02fa0c6099877cbd671e46ea1
+```
+
+在该 subject 上实际执行并 PASS：
+
+```text
+npm test -w @loomrealm/renderer
+npm run test:m13:pr
+npm run test:regression
+npm run docs:check-links
+npm run docs:build
+```
+
+`test:m13:pr` 重新生成并检查 TypeScript declarations、执行 Renderer package dry-run pack、architecture boundary 与真实 Chromium qualification。结论：历史 runtime evidence 仍适用，变更后的 declaration/package surface 已重新验证，不存在 qualification staleness。
+
 ## Implemented production chain
 
 ```text
