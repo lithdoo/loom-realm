@@ -1,101 +1,40 @@
-# RPG Dialogue v0 Presentation / Render Tree Design
+# RPG Dialogue v0 Presentation
 
-> 状态：**DRAFT / PREIMPLEMENTATION**  
-> 层级：`game-libs/rpg-dialogue` 业务库内部 Presentation ABI  
-> 非目标：**不是 LoomRealm Core / Renderer / Render Update 的新架构层协议**
+> 层级：`@loomrealm-game/rpg-dialogue` Presentation / Interaction ABI  
+> 状态：Active Design  
+> 稳定程度：Stabilizing  
+> 依赖：[RPG Dialogue v0 API](./RPG_DIALOGUE_V0_API.md)、[Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md)、[Render Update v1](../../doc/15-contracts/render-update-v1.md)
 
-本文定义 `@loomrealm-game/rpg-dialogue` 的 v0 RenderNode Tree 设计方向。
+本文定义 RPG Dialogue v0 的 canonical Render Tree、`attrs/data` ownership、WebComponent local state 与双向 interaction event contract。
 
-RPG Dialogue 使用 LoomRealm 既有 `RenderNode` / `RenderDomain` 作为承载；本文只定义 Dialogue 业务库自己的视觉语义树、canonical node vocabulary、各视觉区域的业务含义，以及默认 / 第三方 WebComponent 的替换边界。
+它不是剧情脚本、DOM 模板或 LoomRealm Core 的新协议。Core 只理解通用 `RenderNode`、Render Update 与 Web Presentation ABI；`character`、`conversation`、`choice`、`history` 等语义只属于 `rpg-dialogue`。
 
-LoomRealm Core 仍只理解通用：
+## 1. Ownership model
 
-```text
-RenderNode
-├─ key
-├─ tag
-├─ attrs
-├─ data
-└─ children
-```
-
-Core 不理解 `character`、`conversation`、`choice`、`history` 等 Dialogue 语义。
-
----
-
-## 1. 设计目标
-
-Dialogue Render Tree 不是剧情脚本，不是 Dialogue Document，也不是 DOM 模板。
-
-它描述的是：
-
-> **当前 RPG Dialogue session 的 retained presentation facts。**
-
-```text
-RPGDialogue
-├─ current Conversation request
-├─ session History
-└─ Presentation interaction state
-        │ projection
-        ▼
-RPG Dialogue Render Tree v0
-        │
-        ▼
-LoomRealm Renderer Store / Web Projector
-        │
-        ▼
-Default WebComponents
-        or
-Third-party WebComponents
-```
-
-第三方实现可以完全改变 DOM、Shadow DOM、Canvas、WebGL、Live2D、CSS 和动画，但仍消费同一份 Dialogue structural / semantic ABI。
-
-Module API 与连续 Conversation lifecycle 见 `RPG_DIALOGUE_V0_MODULE_API.md`。
-
----
-
-## 2. RenderNode ownership rule
-
-v0 对 canonical RenderNode 使用统一 ownership rule：
+Canonical node 统一遵守：
 
 ```text
 RenderNode.tag / tree
-→ RPG Dialogue-defined structural vocabulary
+→ RPG Dialogue structural vocabulary
 
 RenderNode.attrs
-→ RPG Dialogue-defined semantic facts
+→ RPG Dialogue-defined retained semantic facts
 
 RenderNode.data
-→ caller-owned WebComponent payload when the public module API exposes one
+→ caller-owned WebComponent payload only where API explicitly exposes one
 ```
 
-当前 v0 public API 明确暴露 caller-owned payload 的 canonical node 是：
+v0 明确暴露 caller-owned `data` 的 canonical node 只有：
 
 ```text
 lr-dialogue-character
 ```
 
-`DialogueCharacterV0.data` 的字段结构完全由 caller 与其 WebComponent 定义。RPG Dialogue 只要求它满足 LoomRealm `JsonObject` transport shape，并原样放入 character node 的 `data`。
+`DialogueCharacterV0.data` 必须原样进入 character node `data`。RPG Dialogue 不解释、包装、重命名或注入 caller schema。
 
-RPG Dialogue 对 caller-owned `data`：
+其他 canonical nodes 的 Dialogue facts 放在 `attrs`，`data` 保持 `{}`。
 
-```text
-MUST NOT wrap
-MUST NOT interpret
-MUST NOT rename keys
-MUST NOT inject Dialogue-defined fields
-MUST NOT apply semantic defaults inside data
-MUST NOT derive gameplay behavior from data
-```
-
-因此业务可以自行使用 static portrait、sprite animation、Canvas、WebGL、Live2D、Spine、3D avatar 或其他 custom presentation，而无需把这些实现 schema 加入 RPG Dialogue ABI。
-
-未暴露 caller-owned payload 的 canonical nodes，其 `data` 保持 `{}`；Dialogue 自己的语义不得因此回到 `data`。
-
----
-
-## 3. v0 顶层视觉结构
+## 2. Canonical Render Tree
 
 ```text
 lr-dialogue-view
@@ -114,39 +53,35 @@ lr-dialogue-view
    └─ lr-dialogue-history-entry*
 ```
 
-四个主要视觉区域：
+这是视觉语义树，不约束具体 HTML/Shadow DOM/Canvas/WebGL 实现。
+
+## 3. Canonical node ABI
+
+| node / key | Dialogue-owned attrs | `data` owner | Subsystem → WC Render Event | WC → Subsystem Custom Event |
+| --- | --- | --- | --- | --- |
+| `lr-dialogue-view` / `dialogue` | `version` | `{}` | none | none |
+| `lr-dialogue-characters` / `characters` | none | `{}` | none | none |
+| `lr-dialogue-character` / `character.<characterId>` | `character-id`, `display-name?`, `active`, `placement?`, `expression?` | caller | none | none |
+| `lr-dialogue-conversation` / `conversation` | `conversation-id`, `speaker-character-id?` | `{}` | `scroll-up`, `scroll-down`, `choice-previous`, `choice-next`, `commit` | `submit` |
+| `lr-dialogue-text` / `text` | `text` | `{}` | none | none |
+| `lr-dialogue-choices` / `choices` | none | `{}` | none | none |
+| `lr-dialogue-choice` / `choice.<choiceId>` | `choice-id`, `text`, `enabled` | `{}` | none | none |
+| `lr-dialogue-controls` / `controls` | none | `{}` | none | none |
+| `lr-dialogue-control-hint` / `control.<action>` | `action`, `label`, `enabled` | `{}` | none | none |
+| `lr-dialogue-history` / `history` | `visible` | `{}` | `scroll-up`, `scroll-down`, `scroll-to-latest` | none |
+| `lr-dialogue-history-entry` / `history.<entryId>` | `entry-id`, `speaker-character-id?`, `speaker-name?`, `text` | `{}` | none | none |
+
+Event ABI identity 是：
 
 ```text
-characters    人物图 / 立绘 / 角色视觉区域
-conversation  当前会话区域
-controls      操作提示区域
-history       可显示 / 隐藏的历史记录模态区域
+(target node kind, direction, event name, payload shape)
 ```
 
-这是一棵**视觉语义树**，不是默认 HTML 结构。
+Event 不得投到未声明该 event 的 canonical node。
 
----
+## 4. Root and stable identity
 
-## 4. `lr-dialogue-view`
-
-`lr-dialogue-view` 是一个 `RPGDialogue` instance 当前 Presentation session 的 root。
-
-建议稳定 key：
-
-```text
-dialogue
-```
-
-职责：
-
-- 提供 Dialogue Presentation 的整体视觉宿主；
-- 同时容纳人物、当前 Conversation、控制提示和 History；
-- MAY 跨多个顺序 `openConversation()` operation 保持同一 RenderNode / HTMLElement identity；
-- History MAY 在多个 Conversation 之间持续存在；
-- 不拥有剧情业务状态；
-- 不决定 quest、inventory、battle、map transition 或 Realm State mutation。
-
-建议：
+`lr-dialogue-view` 表示一个 `RPGDialogue` instance 的 Presentation session：
 
 ```ts
 {
@@ -158,46 +93,16 @@ dialogue
 }
 ```
 
----
+同一实例可跨多个顺序 `openConversation()` 复用 root、History 与其他仍 live 的 RenderNode identity。
 
-## 5. 人物视觉区域：`lr-dialogue-characters`
+`RPGDialogue` 不拥有 Quest、Inventory、Battle、Map 或 Realm State gameplay authority。
 
-人物区域允许同时存在多个角色：
+## 5. Characters
 
-```text
-lr-dialogue-characters
-├─ lr-dialogue-character
-├─ lr-dialogue-character
-└─ ...
-```
-
-每个 `lr-dialogue-character` 必须拥有独立稳定 `key`：
+每个 character 使用：
 
 ```text
-character.<characterId>
-```
-
-Public character model：
-
-```ts
-interface DialogueCharacterV0 {
-  readonly characterId: string;
-  readonly displayName?: string;
-  readonly active: boolean;
-  readonly placement?: string;
-  readonly expression?: string;
-  readonly data: JsonObject;
-}
-```
-
-Dialogue-defined semantics 映射到 attrs：
-
-```text
-character-id
-active
-display-name?
-placement?
-expression?
+key = character.<characterId>
 ```
 
 概念映射：
@@ -224,17 +129,15 @@ expression?
 }
 ```
 
-`placement` 是业务语义 layout hint，不是 CSS pixel coordinate。`expression` 同样只是 Dialogue semantic hint；具体 WC 可以映射到 portrait frame、Live2D expression、animation state 等实现。
+`placement` 是 semantic layout hint，不是 CSS 坐标。`expression` 是 Dialogue semantic hint；业务 WC 可以映射成 portrait frame、animation state、Live2D expression 等具体实现。
 
-`active` 与当前 speaker identity 不等价；RPG Dialogue 不自动把 speaker 改写成 active character。
+`active` 与当前 speaker 是独立事实。
 
-`RenderNode.data` 必须是 caller 提供的 `DialogueCharacterV0.data`。第三方 `lr-dialogue-character` WebComponent 可以通过 `receiveRenderData(data)` 消费 caller schema，并通过 `WebPresentationContext.resources` 加载实际资源。
+业务 `lr-dialogue-character` 通过 `receiveRenderData(data)` 消费 caller schema，并可使用 `WebPresentationContext.resources` 读取资源。
 
----
+## 6. Conversation
 
-## 6. 会话区域：`lr-dialogue-conversation`
-
-Conversation 是当前一次**可提交的可见会话单元**：
+Conversation 是一次 `openConversation()` 对应的当前可提交 interaction unit：
 
 ```text
 lr-dialogue-conversation
@@ -243,14 +146,7 @@ lr-dialogue-conversation
    └─ lr-dialogue-choice*
 ```
 
-Dialogue-defined semantic attrs：
-
-```text
-conversation-id
-speaker-character-id?
-```
-
-概念形状：
+Conversation node：
 
 ```ts
 {
@@ -267,71 +163,34 @@ speaker-character-id?
 }
 ```
 
-### 6.1 `conversation-id`
+`conversation-id` 由 `RPGDialogue` 为每次成功开始的 `openConversation()` 分配；它不是 Story identity，也不由 caller 提供。
 
-`conversation-id` 标识当前可提交 Conversation unit，而不是整个 `RPGDialogue` instance。
-
-caller 不提供该 identity。每次成功开始新的 `openConversation()` operation 时，`RPGDialogue` 分配新的内部 Presentation identity。
-
-当 `conversation-id` 改变时，Conversation WebComponent MUST 重置至少：
+当 `conversation-id` 改变时，Conversation WC 必须重置至少：
 
 ```text
-typewriter / reveal progress
-current option selection
-conversation-local scroll position
+reveal/typewriter progress
+selectedChoiceId
+conversation-local scroll
+local focus/animation associated with previous Conversation
 ```
 
-### 6.2 Speaker identity
+## 7. Text and choices
 
-当前发言者作为 Conversation semantic fact 表达：
-
-```text
-conversation["speaker-character-id"]
-+
-character["character-id"]
-```
-
-Presentation 可以据此决定发言者名字、视觉强调等行为。
-
----
-
-## 7. 文本：`lr-dialogue-text`
-
-`lr-dialogue-text` 表达当前 Conversation unit 的完整文本事实。
+完整文本事实始终通过 `lr-dialogue-text.attrs.text` 提供：
 
 ```ts
 {
   key: "text",
   tag: "lr-dialogue-text",
-  attrs: {
-    text: conversation.text,
-  },
+  attrs: { text: conversation.text },
   data: {},
   children: [],
 }
 ```
 
-重要原则：
+Runtime/Render Tree 不通过持续发布 partial string 实现 typewriter；逐字显示进度属于 Presentation-local state。
 
-> **Runtime / Render Tree 始终提供完整文本；逐字显示进度属于 Conversation WebComponent 的 Presentation-local state。**
-
-不得为了 typewriter animation 持续发布部分字符串。
-
----
-
-## 8. 选项：`lr-dialogue-choices` / `lr-dialogue-choice`
-
-每个 choice 必须拥有稳定业务 identity。
-
-Dialogue-defined choice attrs：
-
-```text
-choice-id
-text
-enabled
-```
-
-概念映射：
+Choice：
 
 ```ts
 {
@@ -340,117 +199,140 @@ enabled
   attrs: {
     "choice-id": choice.choiceId,
     text: choice.text,
-    enabled: choice.enabled ? "true" : "false",
+    enabled: choice.enabled === false ? "false" : "true",
   },
   data: {},
   children: [],
 }
 ```
 
-选择结果必须面向稳定 choice identity，不得把数组 index 当成业务 identity。
+`choiceId` 是稳定 identity，数组 index 不是 identity。
 
-Presentation Event 文档当前提交 payload 使用 `optionId`；v0 Module API 与 Event ABI 必须在 implementation freeze 前统一该命名。
-
-v0 **不提供 `selected` attr / data field**。当前 option selection 属于 `lr-dialogue-conversation` WebComponent 的 Presentation-local interaction state：
+v0 不发布 retained `selected` attr/data。当前 selection 属于 Conversation WC local state：
 
 ```text
-selectedOptionId = null | choice identity
+selectedChoiceId = null | choiceId
 ```
 
-新 Conversation unit 初始 MUST 为 `null`，不默认选择任何 option。
+新 Conversation 初始必须为 `null`；不默认选择第一项。
 
----
+## 8. Conversation local coordination
 
-## 9. Conversation Presentation-local state
+`conversation` 是当前 Conversation 唯一 interaction owner。Descendant `text` / `choice.*` 只提供 retained presentation facts。
 
-Conversation WebComponent 至少允许拥有：
+Conversation WC 可以使用 Window-local 机制协调 descendants，例如 light-DOM traversal、private controller、local DOM event 或 shared local object，但这些机制不得通过 LoomRealm custom event 来同步 reveal、selection 或 pixel scroll。
+
+Presentation-local state 至少包括：
 
 ```text
-revealComplete / typewriter progress
-selectedOptionId
-scroll position
-local animation / focus state
+reveal/typewriter progress
+selectedChoiceId
+conversation scroll position
+local focus / animation state
 ```
 
-这些状态：
+它们不是 Renderer Store、Subsystem 或 Realm State authority。
 
-- 不进入 Renderer Store retained presentation facts；
-- 不要求 Snapshot / Patch 恢复；
-- 不成为 Subsystem / Realm State authority；
-- 在 `conversation-id` 改变时按 v0 contract 重置。
+## 9. Conversation inbound events
 
-`RPGDialogue` 仍拥有当前 text、choices、enabled state 以及当前 Conversation unit 的合法 submission validation。
-
----
-
-## 10. 控制提示区域：`lr-dialogue-controls`
-
-Control Hint 表达语义 action，不硬编码物理按键。
-
-Dialogue-owned attrs：
+所有以下 Render Event 的 target 都是：
 
 ```text
-action
-label
-enabled
+targetKey = "conversation"
 ```
 
-Module API v0 暂不要求 caller 传 control hints；默认 control hints MAY 由 `RPGDialogue` 根据当前 Conversation interaction state 生成。
+### `scroll-up` / `scroll-down`
 
----
+表示方向性阅读导航，不是 DOM `scrollTop` command。WC 决定 smooth/paged/line-based scrolling、滚动距离与 selection 可见性策略。
 
-## 11. 历史记录模态：`lr-dialogue-history`
+### `choice-previous` / `choice-next`
 
-History 是 `RPGDialogue` session 的稳定视觉区域：
+只要求改变当前 enabled choice selection。
+
+若当前无 selection：
 
 ```text
-lr-dialogue-view
-└─ lr-dialogue-history
-   ├─ lr-dialogue-history-entry
-   ├─ lr-dialogue-history-entry
-   └─ ...
+choice-next     → first enabled choice
+choice-previous → last enabled choice
 ```
 
-History **不来自 `ConversationRequestV0`**。`RPGDialogue` 内部持有当前 session history，并从自身当前 History snapshot 投影 history nodes。
+selection 改变不向 Subsystem 发业务事件。
 
-caller 通过 Module API：
+是否 wrap-around 不属于跨实现 ABI；实现可以选择，但不能改变 choice identity、enabled legality 或最终 submit shape。
+
+### `commit`
+
+`commit` 的行为由当前 Presentation-local reveal/selection state 决定：
 
 ```text
-setHistory(entries)
-appendHistory(entry)
-getHistorySnapshot()
+text reveal incomplete
+→ reveal immediately
+→ no submit
+
+text complete + no choices
+→ submit current conversation
+
+text complete + choices + no selection
+→ no submit
+
+text complete + selected enabled choice
+→ submit current conversation + choiceId
 ```
 
-显式决定 transcript 内容。
+Subsystem 不维护 typewriter progress，因此不能提前替 WC 决定一次 confirm 是 reveal 还是 submit。
 
-`RPGDialogue` MUST NOT 自动把当前 Conversation、提交 choice 或其他业务内容写入 History。
+## 10. Conversation outbound event: `submit`
 
-### 11.1 History ownership
+只有 `conversation` node 可以向 Subsystem 发业务 custom event：
+
+```text
+name = "submit"
+```
+
+Payload 必须携带当前内部 `conversationId` 作为 correlation token：
+
+```ts
+// no choices
+{ conversationId: string }
+
+// selected choice
+{ conversationId: string, choiceId: string }
+```
+
+Child `choice.<id>` 不直接向 Subsystem 发 submit。
+
+`RPGDialogue` 收到 submit 后必须重新验证：
+
+```text
+active Conversation still exists
+payload.conversationId === current internal conversationId
+choiceId absent iff current Conversation has no submitted choice
+choiceId, when present, identifies a current choice
+identified choice is enabled
+current Session / generation / Render target is still current
+```
+
+验证成功只 settle 当前 `openConversation()`；不会自动写 History、关闭 `RPGDialogue` 或决定下一 Conversation。
+
+## 11. History
+
+History entries 来自 `RPGDialogue` session-level History state，而不是当前 `ConversationRequestV0`。
 
 ```text
 caller
 → transcript content semantics / mutation decision
 
 RPGDialogue
-→ current session history state / validation / render projection
+→ current session History state / validation / projection
 
-Realm State（optional）
-→ durable persistence when the game requires save/load or cross-session history
+Realm State (optional)
+→ durable persistence
 
 WebComponent
 → local scroll / focus / virtualization / animation
 ```
 
-History session state 可以跨多个 `openConversation()` operation 保持，而当前 Conversation 每次 operation 都会替换。
-
-### 11.2 History visibility
-
-显示 / 隐藏是 retained Presentation interaction state，表达为 Dialogue-owned attr：
-
-```text
-visible="false"
-visible="true"
-```
+History node：
 
 ```ts
 {
@@ -464,30 +346,7 @@ visible="true"
 }
 ```
 
-**进入 / 退出 History 不使用 Presentation Event。**
-
-History modal open/close 由 `RPGDialogue` / Presentation interaction state 管理，而不是 Story fact。
-
-History WebComponent 可以自行维护 scroll position、virtualization、focus transition 和 local animation。
-
-### 11.3 History entries
-
-Dialogue-owned history entry attrs：
-
-```text
-entry-id
-speaker-character-id?
-speaker-name?
-text
-```
-
-建议 key：
-
-```text
-history.<entryId>
-```
-
-概念映射：
+History entry：
 
 ```ts
 {
@@ -508,137 +367,130 @@ history.<entryId>
 }
 ```
 
-History 记录已经发生过的当前 Dialogue transcript，但 `RPGDialogue` 不拥有 Story / Quest history semantics，也不自动决定哪些内容进入 transcript。
+RPG Dialogue 不自动生成 transcript entry。
 
----
+### 11.1 Visibility and history events
 
-## 12. Canonical v0 Tree 示例
-
-```text
-lr-dialogue-view                    key=dialogue
-├─ lr-dialogue-characters           key=characters
-│  ├─ lr-dialogue-character         key=character.hero
-│  └─ lr-dialogue-character         key=character.elder
-│
-├─ lr-dialogue-conversation         key=conversation
-│  ├─ lr-dialogue-text              key=text
-│  └─ lr-dialogue-choices           key=choices
-│     ├─ lr-dialogue-choice         key=choice.accept
-│     └─ lr-dialogue-choice         key=choice.decline
-│
-├─ lr-dialogue-controls             key=controls
-│  └─ lr-dialogue-control-hint*
-│
-└─ lr-dialogue-history              key=history
-   └─ lr-dialogue-history-entry*
-```
-
-示意：
-
-```ts
-const dialogueTree = {
-  key: "dialogue",
-  tag: "lr-dialogue-view",
-  attrs: { version: "0" },
-  data: {},
-  children: [
-    {
-      key: "characters",
-      tag: "lr-dialogue-characters",
-      attrs: {},
-      data: {},
-      children: [
-        {
-          key: "character.elder",
-          tag: "lr-dialogue-character",
-          attrs: {
-            "character-id": "elder",
-            "display-name": "村长",
-            active: "true",
-            placement: "right",
-            expression: "serious",
-          },
-          data: {
-            model: {
-              namespace: "resource.Live2D",
-              key: "Elder/model3.json",
-            },
-            motion: "talk_01",
-          },
-          children: [],
-        },
-      ],
-    },
-    {
-      key: "conversation",
-      tag: "lr-dialogue-conversation",
-      attrs: {
-        "conversation-id": "conversation.2",
-        "speaker-character-id": "elder",
-      },
-      data: {},
-      children: [
-        {
-          key: "text",
-          tag: "lr-dialogue-text",
-          attrs: { text: "村外最近出现了一只怪物。" },
-          data: {},
-          children: [],
-        },
-      ],
-    },
-    {
-      key: "controls",
-      tag: "lr-dialogue-controls",
-      attrs: {},
-      data: {},
-      children: [],
-    },
-    {
-      key: "history",
-      tag: "lr-dialogue-history",
-      attrs: { visible: "false" },
-      data: {},
-      children: [
-        {
-          key: "history.elder.1",
-          tag: "lr-dialogue-history-entry",
-          attrs: {
-            "entry-id": "elder.1",
-            "speaker-character-id": "elder",
-            "speaker-name": "村长",
-            text: "你终于来了。",
-          },
-          data: {},
-          children: [],
-        },
-      ],
-    },
-  ],
-};
-```
-
-注意：
+History open/close 使用 retained attr：
 
 ```text
-character attrs
-→ Dialogue semantic ABI
-
-character data
-→ caller/WC schema
-
-History children
-→ RPGDialogue current session History snapshot
-
-selected choice
-→ WC local state, not retained attr/data
+history.attrs.visible = "true" | "false"
 ```
 
----
+不存在 `open-history` / `close-history` transient event。
 
-## 13. Default 与第三方 WebComponent
+History transient event 的 target 统一是 `history`：
 
-`@loomrealm-game/rpg-dialogue` 后续可以提供默认 Browser Presentation，注册 canonical tags：
+```text
+scroll-up
+scroll-down
+scroll-to-latest
+```
+
+打开 History 并定位最新记录时顺序必须是：
+
+```text
+retained update: visible=true
+→ Web Presentation reconcile
+→ render.event: scroll-to-latest
+```
+
+依赖 Web Presentation API v1 的 retained-before-event ordering。
+
+History 的 pixel scroll、focus、virtualization 与 animation 都是 WC-local state。
+
+## 12. Input mode
+
+`RPGDialogue` active interaction 至少区分：
+
+```text
+CONVERSATION
+HISTORY
+```
+
+History visible 时，方向输入路由到 `history`；Conversation commit/choice navigation 不应继续作用于被遮挡的 Conversation。
+
+Cancel precedence：
+
+```text
+HISTORY + cancel
+→ close History
+→ return to CONVERSATION
+
+CONVERSATION + cancel + cancelable=true
+→ settle current operation as { type: "cancelled" }
+
+CONVERSATION + cancel + cancelable=false
+→ no business settlement
+```
+
+物理 keyboard/gamepad mapping 属于 Dialogue Input Handler。典型映射：
+
+```text
+Confirm / Gamepad A
+→ conversation.commit
+
+D-Pad Up/Down while choices active
+→ conversation.choice-previous / choice-next
+
+History action
+→ toggle retained history.visible
+```
+
+Pointer/touch 的具体 gesture policy 不属于跨实现 ABI；无论实现采用何种 local gesture，最终 business submit 都必须由 `conversation` 使用 §10 的 `submit` shape 发出。
+
+## 13. Controls
+
+`lr-dialogue-controls` 提供 presentation-only control hints，不是 Story facts。Canonical action vocabulary：
+
+```text
+confirm
+choice-previous
+choice-next
+history
+cancel
+```
+
+`lr-dialogue-control-hint` attrs：
+
+```text
+action
+label
+enabled
+```
+
+v0 public API 不让 caller 直接注入 control hints；RPG Dialogue 根据当前 interaction mode 与 session policy 生成。
+
+## 14. WebComponent lifecycle requirements
+
+Web Presentation API v1 的 retained materialization order 是：
+
+```text
+construct
+→ receiveRenderContext, if implemented
+→ first insertion / connectedCallback may occur
+→ children / attrs
+→ receiveRenderData, if implemented
+```
+
+因此第三方 Dialogue WebComponent：
+
+- 不得在 `connectedCallback()` 假设 initial attrs 已完整；
+- 应通过 attribute observation 或等价机制响应 managed attrs；
+- character element 在 `receiveRenderData(character.data)` 前可以依赖当次 retained attrs 已被应用；
+- `receiveRenderEvent()` 只处理 transient presentation impulse，不把 event 当 retained state 或 replay source。
+
+## 15. Attr/data limits
+
+Dialogue-owned semantic strings进入 `RenderNode.attrs`，必须满足 Render Update v1 的 attr validation/UTF-8 limits。RPG Dialogue 应在 Subsystem boundary 提前拒绝会产生非法 RenderNode 的输入。
+
+Caller-owned `character.data` 必须满足 RenderNode `data` 的 JSON transport limits。
+
+这些限制属于 transport compatibility，不授权 Dialogue 解释 caller schema。
+
+## 16. Default and third-party presentation
+
+默认 Browser Presentation 可以注册 canonical tags：
 
 ```text
 lr-dialogue-view
@@ -654,134 +506,23 @@ lr-dialogue-history
 lr-dialogue-history-entry
 ```
 
-产品可以完全不加载默认 Browser assets，而加载第三方实现。
+产品也可以完全不加载默认 assets，而提供第三方 WebComponents。第三方实现可以自由使用 DOM、Shadow DOM、Canvas、WebGL、Live2D、Spine 等，只要消费相同 structural/semantic/event ABI。
 
-第三方实现必须消费相同的 Render Tree / attrs / Event ABI；对 `lr-dialogue-character.data` 则消费该产品自己定义的 caller-owned schema。
+## 17. Non-goals
 
----
-
-## 14. 与 LoomRealm Core 的边界
-
-本设计不要求 Core 理解 Dialogue vocabulary。
+v0 Presentation ABI 不定义：
 
 ```text
-caller
-    owns Story Flow and transcript content decisions
-
-RPGDialogue
-    owns current Conversation interaction and session History state
-
-RenderDomain
-    carries generic RenderNode tree / RenderEvent
-
-Renderer Store
-    owns current retained render replica
-
-Web Projector
-    mechanically projects generic RenderNode
-
-Business WebComponents
-    own concrete visual realization and permitted presentation-local interaction state
+Story Graph / Dialogue Document
+DOM command protocol
+pixel scroll commands
+CSS class/style mutation commands
+provider-specific portrait/Live2D/Spine schema
+selected choice retained state
+typewriter progress retained state
+durable History persistence
+pointer gesture uniformity across products
+rich text/localization/voice/auto-advance protocol
 ```
 
-Core 不增加 Dialogue-specific vocabulary、History authority、Live2D schema 或 portrait schema。
-
----
-
-## 15. 与 Dialogue Business Model 的边界
-
-```text
-business code
-        ↓
-RPGDialogue.openConversation(request)
-        ↓ projection
-Dialogue Render Tree
-        ↓
-Presentation-local interaction
-        ↓ submit
-ConversationResult
-        ↓
-business code decides:
-  side effects / History mutation / next Conversation / close
-```
-
-连续 Conversation 顺序由 caller 普通 TypeScript flow 决定。
-
-History 与 Conversation 的生命周期不同：
-
-```text
-Conversation
-→ one openConversation() operation
-
-History
-→ RPGDialogue session-level retained state across operations
-```
-
----
-
-## 16. v0 暂不冻结事项
-
-以下内容仍需要后续设计：
-
-```text
-1. exact TypeScript validation limits / string byte limits
-2. canonical placement / expression vocabulary
-3. exact control hint action vocabulary
-4. physical keyboard / gamepad / pointer mapping
-5. pointer/touch 对 option selection / commit 的精确规则
-6. history retention limit / virtualization boundary
-7. accessibility semantics
-8. localization / rich text / markup boundary
-9. voice / auto-advance semantics
-10. whether additional canonical nodes expose caller-owned data in v0
-11. choiceId / optionId naming unification between Module API and Event ABI
-12. whether History mutation is legal while a Conversation is active
-```
-
-以下事项不再属于 OPEN：
-
-```text
-character visual/resource reference shape
-→ intentionally caller-owned JsonObject data schema
-
-Dialogue public module shape
-→ persistent RPGDialogue + sequential openConversation()
-
-Story flow ownership
-→ caller-owned; no built-in Dialogue Program
-
-History lifetime
-→ RPGDialogue session-level state, mutated explicitly by caller
-```
-
----
-
-## 17. 当前设计原则摘要
-
-```text
-Render Tree 是视觉语义树，不是剧情脚本。
-
-View 固定表达：
-Characters / Conversation / Controls / History。
-
-RPGDialogue instance 可跨多个顺序 Conversation 持续存在。
-每次 openConversation() 产生新的 internal conversation-id。
-
-Dialogue-defined facts 放 attrs。
-caller-defined character WC payload 原样放 character data。
-
-Runtime 提供完整文本；typewriter progress 属于 WC local state。
-Choices 不包含 selected retained fact；初始不默认选择任何 option。
-
-History 不再由每次 ConversationRequest 重复提供。
-RPGDialogue 内部持有当前 session History。
-caller 通过 setHistory / appendHistory 明确修改 transcript 内容。
-RPGDialogue 不自动记录 Conversation 或 choice。
-History modal visibility 属于 Dialogue / Presentation retained interaction state。
-
-第三方可以完全替换 WebComponent 视觉实现，
-但消费相同的 Dialogue structural / semantic ABI。
-
-本协议属于 rpg-dialogue game-lib，
-不进入 LoomRealm Core vocabulary。
-```
+这些不是隐藏的待实现 contract；它们明确不属于 v0 cross-implementation ABI。
