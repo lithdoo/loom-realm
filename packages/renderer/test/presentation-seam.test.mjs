@@ -452,7 +452,9 @@ test("Render Events preserve retained ordering, FIFO, presentation isolation, an
         const beforeReverse = inputEvents.length;
         inForwardReceiver = true;
         try {
-          emitNodeEvent({ ...event, name: "reverse-a", data: { order: 1 } });
+          const mutableReverseData = { order: 1 };
+          emitNodeEvent({ ...event, name: "reverse-a", data: mutableReverseData });
+          mutableReverseData.order = 99;
           emitNodeEvent({ ...event, name: "reverse-b", data: { order: 2 } });
           assert.equal(inputEvents.length, beforeReverse, "valid reverse inputs remain staged during callback");
         } finally {
@@ -464,6 +466,16 @@ test("Render Events preserve retained ordering, FIFO, presentation isolation, an
         inForwardReceiver = true;
         assert.throws(() => emitNodeEvent({ ...event, name: "", data: {} }), TypeError);
         inForwardReceiver = false;
+      }
+      if (event.name === "reverse-overflow") {
+        inForwardReceiver = true;
+        try {
+          for (let index = 0; index < 300; index += 1) {
+            emitNodeEvent({ ...event, name: "bounded", data: { index } });
+          }
+        } finally {
+          inForwardReceiver = false;
+        }
       }
     },
   };
@@ -553,6 +565,12 @@ test("Render Events preserve retained ordering, FIFO, presentation isolation, an
   await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "reverse-throw", data: {} });
   await waitFor(() => inputEvents.length === 4, "staged reverse input after receiver throw");
   assert.deepEqual(inputEvents.slice(2).map(({ payload }) => payload.name), ["reverse-a", "reverse-b"]);
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "reverse-overflow", data: {} });
+  await waitFor(() => inputEvents.length === 260, "bounded staged reverse inputs");
+  assert.deepEqual(
+    [inputEvents[4].payload.data.index, inputEvents.at(-1).payload.data.index],
+    [0, 255],
+  );
 
   trace.length = 0;
   await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "before-remove", data: {} });

@@ -76,6 +76,7 @@ interface StagedPresentationInput {
 }
 
 const acceptedDataMessage = Object.freeze({ kind: "accepted" } as const);
+const MAX_STAGED_PRESENTATION_INPUTS = 256;
 
 function sameIdentity(
   left: DesiredDataIdentity | null,
@@ -620,9 +621,10 @@ class ControlHolder implements RendererControlHolder {
       throw new TypeError("Invalid Web Presentation custom event payload");
     }
     if (this.presentationForwardDepth > 0) {
+      if (this.stagedPresentationInputs.length >= MAX_STAGED_PRESENTATION_INPUTS) return;
       this.stagedPresentationInputs.push(Object.freeze({
         subsystemKey: event.subsystemKey,
-        payload,
+        payload: detachedFrozenJson(payload),
       }));
       return;
     }
