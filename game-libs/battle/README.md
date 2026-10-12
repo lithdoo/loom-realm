@@ -19,7 +19,6 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；M
 - [BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md) — Host/Frame、RPGMap 素材兼容与 product composition boundary。
 - [BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md) — Presentation API、Render Tree/Browser ABI、camera/viewport/effects/lifecycle。
 - [BATTLE_V0_TEST_MATRIX.md](./docs/BATTLE_V0_TEST_MATRIX.md) — Rule ID → scenario → expected result。
-- [BATTLE_V0_DESIGN.md](./docs/BATTLE_V0_DESIGN.md) — 文档导航与 historical migration notes；不覆盖以上 current specs。
 
 权威顺序：
 
@@ -33,7 +32,7 @@ SPEC
 → TEST_MATRIX
 ```
 
-README 不复制具体 Rule；遇到语义冲突以对应 current spec 为准。
+README 不复制具体 Rule；旧单体设计、迁移矩阵和阶段状态由 Git 历史保存，不属于 Current normative source。
 
 ## 当前系统边界
 
@@ -48,7 +47,7 @@ README 不复制具体 Rule；遇到语义冲突以对应 current spec 为准。
 - Presentation 只消费 Scene/Projection/Event；browser/camera/animation 不反向推进 Tick 或修改 Simulation。
 - `game-libs/tile-presentation` 提供 Map/Battle 共用的纯 layout/viewport implementation；Battle 不依赖 `@loomrealm-game/map` Runtime。
 
-具体规则、边界条件与 deterministic ordering 只查对应 SPEC/Simulation/Presentation 文档。
+具体规则、边界条件与 deterministic ordering 只查对应 current spec。
 
 ## Product integration boundary
 
