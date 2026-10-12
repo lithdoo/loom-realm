@@ -1,8 +1,8 @@
 # RPG Dialogue v0 API
 
 > 层级：`@loomrealm-game/rpg-dialogue` public module contract  
-> 状态：Active Design  
-> 稳定程度：Stabilizing
+> 状态：Active / Normative / Frozen  
+> 稳定程度：Frozen
 
 本文定义 `RPGDialogue` 的 public TypeScript surface、生命周期、Conversation request/result、人物输入、History session state 与 caller authority。
 
@@ -78,6 +78,15 @@ export class RPGDialogue {
 ```
 
 `cancelable` 是整个 `RPGDialogue` interaction session 的 policy，不是单个 Conversation 的 story fact。
+
+默认值冻结为：
+
+```text
+cancelable === undefined
+→ false
+```
+
+只有显式 `cancelable: true` 才允许 user cancel settlement。
 
 ## 2. Lifetime
 
@@ -359,7 +368,7 @@ ACTIVE
 
 `getHistorySnapshot()` 不修改状态，可在实例未 CLOSED 时调用。
 
-## 6. Cancel / close / abort
+## 6. Cancel / close / abort and failure delivery
 
 User cancel、programmatic close 与 Frame abort 是不同语义：
 
@@ -378,11 +387,34 @@ Frame abort
 → CLOSED
 ```
 
+`openConversation()` 是异步 operation。它的 request validation、preflight、concurrency 与 lifecycle failure 都必须通过 returned Promise rejection 暴露；不得在调用 `openConversation()` 的同一同步栈中把这些 operation failure 作为同步 throw 暴露。
+
+```text
+invalid Conversation request
+second concurrent openConversation()
+openConversation() after CLOSED
+presentation/input establishment failure
+→ reject returned Promise
+
+Frame abort
+→ reject returned Promise with AbortError semantics
+```
+
+具体非-abort Error constructor / numeric code 不属于 v0 compatibility surface；caller 不应依赖其 message 文本。
+
+同步 public API 保持同步 failure semantics：
+
+```text
+constructor invalid arguments
+setHistory() invalid input / illegal state
+appendHistory() invalid input / illegal state
+getHistorySnapshot() after CLOSED
+→ synchronous throw before observable mutation
+```
+
+`close()` 幂等；重复调用不得因实例已 CLOSED 而抛错。CLOSED 后不得再打开 Conversation 或修改 History。
+
 所有 terminal path 都必须 settle-once，并 best-effort cleanup InputListener、session RenderDomain、abort listener 与内部 callbacks。
-
-`close()` 幂等。CLOSED 后不得再打开 Conversation 或修改 History。
-
-具体 Error constructor / numeric code 不属于 v0 compatibility surface；observable contract 是 fail-before-side-effect、settle-once 与上述 terminal classification。
 
 ## 7. Validation
 
@@ -424,3 +456,11 @@ canonical placement / expression vocabulary
 这些不是待实现的隐含功能；它们明确不属于 v0 API。
 
 Presentation Tree、WebComponent interaction 与 event vocabulary 见 [RPG Dialogue v0 Presentation](./RPG_DIALOGUE_V0_PRESENTATION.md)。
+
+## 9. Compatibility rule
+
+本文的 public request/result/model、`cancelable` 默认值、business identity scope、lifecycle、History mutation timing、settlement/failure delivery 与 validation semantics 是 RPG Dialogue v0 compatibility surface。
+
+不兼容修改必须显式修改 contract；implementation private refactor 不得重新解释这些 observable semantics。
+
+实现状态与 qualification evidence 由当前 source/tests 和仓库 qualification records 给出；本文不承载实现计划或进度状态。
