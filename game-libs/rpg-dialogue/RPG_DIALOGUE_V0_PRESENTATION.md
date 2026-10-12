@@ -24,7 +24,7 @@ RenderNode.attrs
 → RPG Dialogue-defined retained semantic facts
 
 RenderNode.data
-→ caller-owned WebComponent payload only where API explicitly exposes one
+→ caller-owned WebComponent payload where API explicitly exposes data
 ```
 
 业务 identity 与 Render lifetime identity 必须分离：
@@ -40,13 +40,37 @@ RenderNode.key
 → MUST NOT be treated as business identity
 ```
 
-v0 明确暴露 caller-owned `data` 的 canonical node 只有：
+v0 暴露 caller-owned `data` 的 canonical nodes 是：
 
 ```text
+lr-dialogue-conversation
 lr-dialogue-character
+lr-dialogue-choice
 ```
 
-`DialogueCharacterV0.data` 必须原样进入 character node `data`。RPG Dialogue 不解释、包装、重命名或注入 caller schema。
+映射固定为：
+
+```text
+ConversationContentV0.data
+→ lr-dialogue-conversation.data
+
+DialogueCharacterV0.data
+→ lr-dialogue-character.data
+
+ConversationChoiceV0.data
+→ lr-dialogue-choice.data
+```
+
+RPG Dialogue 对这些 caller-owned `data` 统一要求：
+
+```text
+MUST NOT wrap
+MUST NOT interpret
+MUST NOT rename keys
+MUST NOT inject Dialogue fields
+MUST NOT apply defaults inside data
+MUST NOT derive gameplay behavior from data
+```
 
 其他 canonical nodes 的 Dialogue facts 放在 `attrs`，`data` 保持 `{}`。
 
@@ -80,14 +104,14 @@ lr-dialogue-view
 | `lr-dialogue-view` / `dialogue` | `version` | `{}` | none | none |
 | `lr-dialogue-characters` / `characters` | none | `{}` | none | none |
 | `lr-dialogue-character` / private live key | `character-id`, `display-name?`, `active`, `placement?`, `expression?` | caller | none | none |
-| `lr-dialogue-conversation` / `conversation` | `conversation-id`, `speaker-character-id?` | `{}` | `scroll-up`, `scroll-down`, `choice-previous`, `choice-next`, `commit` | `submit` |
+| `lr-dialogue-conversation` / `conversation` | `conversation-id`, `speaker-name?` | caller | `scroll-up`, `scroll-down`, `choice-previous`, `choice-next`, `commit` | `submit` |
 | `lr-dialogue-text` / `text` | `text` | `{}` | none | none |
 | `lr-dialogue-choices` / `choices` | none | `{}` | none | none |
-| `lr-dialogue-choice` / private live key | `choice-id`, `text`, `enabled` | `{}` | none | none |
+| `lr-dialogue-choice` / private live key | `choice-id`, `text`, `enabled` | caller | none | none |
 | `lr-dialogue-controls` / `controls` | none | `{}` | none | none |
 | `lr-dialogue-control-hint` / private live key | `action`, `label`, `enabled` | `{}` | none | none |
 | `lr-dialogue-history` / `history` | `visible` | `{}` | `scroll-up`, `scroll-down`, `scroll-to-latest` | none |
-| `lr-dialogue-history-entry` / private live key | `entry-id`, `speaker-character-id?`, `speaker-name?`, `text` | `{}` | none | none |
+| `lr-dialogue-history-entry` / private live key | `entry-id`, `speaker-name?`, `text` | `{}` | none | none |
 
 Event ABI identity 是：
 
@@ -224,9 +248,9 @@ removed semantic presence, then later returns
 
 `placement` 是 semantic layout hint，不是 CSS 坐标。`expression` 是 Dialogue semantic hint；业务 WC 可以映射成 portrait frame、animation state、Live2D expression 等具体实现。
 
-`active` 与当前 speaker 是独立事实。
+Character 与 Conversation speaker 完全解耦。`active` 只描述该 Character 自己的 presentation fact；RPG Dialogue 不依据 `speakerName` 查找、创建、激活或改写 Character。`characters` 可以为空，即使 Conversation 同时存在 `speakerName`。
 
-业务 `lr-dialogue-character` 通过 `receiveRenderData(data)` 消费 caller schema，并可使用 `WebPresentationContext.resources` 读取资源。
+业务 `lr-dialogue-character` 通过 `receiveRenderData(character.data)` 消费 caller schema，并可使用 `WebPresentationContext.resources` 读取资源。
 
 ## 6. Conversation
 
@@ -247,14 +271,16 @@ Conversation structural node：
   tag: "lr-dialogue-conversation",
   attrs: {
     "conversation-id": internalConversationId,
-    ...(speakerCharacterId === undefined
+    ...(conversation.speakerName === undefined
       ? {}
-      : { "speaker-character-id": speakerCharacterId }),
+      : { "speaker-name": conversation.speakerName }),
   },
-  data: {},
+  data: conversation.data,
   children: [...],
 }
 ```
+
+`speaker-name` 是当前 Conversation 自己的显示文本，不是 Character reference。它可以在 `characters=[]` 时存在，也不要求与任何 `display-name` 相等。
 
 `conversation-id` 由 `RPGDialogue` 为每次成功开始的 `openConversation()` 分配；它不是 Story identity，也不由 caller 提供。
 
@@ -268,6 +294,8 @@ local focus/animation associated with previous Conversation
 ```
 
 Conversation settle 后 structural node 继续存活；READY 期间它只是最后一次 retained projection，不代表仍有 active operation。
+
+业务 `lr-dialogue-conversation` 可以通过 `receiveRenderData(conversation.data)` 消费 caller-defined Conversation schema，例如 voice/resource key、窗口样式或其他 presentation metadata。RPG Dialogue 不解释这些字段。
 
 ## 7. Text and choices
 
@@ -296,12 +324,14 @@ Choice 的 `choiceId` 是 business identity；对应 RenderNode 使用 private l
     text: choice.text,
     enabled: choice.enabled === false ? "false" : "true",
   },
-  data: {},
+  data: choice.data,
   children: [],
 }
 ```
 
 `choiceNodeKey` 不是 `choiceId`，也不属于 public ABI。`choiceId` 是稳定 business identity，数组 index 不是 identity。
+
+业务 `lr-dialogue-choice` 可以通过 `receiveRenderData(choice.data)` 消费 caller-defined Choice schema，例如 icon、样式提示或业务 presentation metadata；RPG Dialogue 不解释这些字段。
 
 v0 不发布 retained `selected` attr/data。当前 selection 属于 Conversation WC local state：
 
@@ -457,9 +487,6 @@ History entry 的 `entryId` 是 business identity；对应 RenderNode 使用 pri
   tag: "lr-dialogue-history-entry",
   attrs: {
     "entry-id": entry.entryId,
-    ...(entry.speakerCharacterId === undefined
-      ? {}
-      : { "speaker-character-id": entry.speakerCharacterId }),
     ...(entry.speakerName === undefined
       ? {}
       : { "speaker-name": entry.speakerName }),
@@ -470,7 +497,7 @@ History entry 的 `entryId` 是 business identity；对应 RenderNode 使用 pri
 }
 ```
 
-`historyEntryNodeKey` 是 private presentation lifetime identity；`entryId` 才是业务 identity。
+`historyEntryNodeKey` 是 private presentation lifetime identity；`entryId` 才是业务 identity。History 的 `speaker-name` 与 Conversation 一样只是文本事实，不引用 Character。
 
 RPG Dialogue 不自动生成 transcript entry。
 
@@ -574,7 +601,7 @@ label
 enabled
 ```
 
-v0 public API 不让 caller 直接注入 control hints；RPG Dialogue 根据当前 interaction mode 与 session policy 生成。
+v0 public API 不让 caller 直接注入 control hints；RPG Dialogue 根据当前 interaction mode 与 session policy 生成。`label` 只是 presentation string；业务 Presentation 可以直接使用最终显示文本，也可以把它解释为自己的 i18n key。RPG Dialogue 不拥有业务 localization authority。
 
 ## 14. WebComponent lifecycle requirements
 
@@ -592,7 +619,7 @@ construct
 
 - 不得在 `connectedCallback()` 假设 initial attrs 已完整；
 - 应通过 attribute observation 或等价机制响应 managed attrs；
-- character element 在 `receiveRenderData(character.data)` 前可以依赖当次 retained attrs 已被应用；
+- conversation / character / choice element 在对应 `receiveRenderData(...)` 前可以依赖当次 retained attrs 已被应用；
 - `receiveRenderEvent()` 只处理 transient presentation impulse，不把 event 当 retained state 或 replay source；
 - 不得把 dynamic node 的 private Render key 当作业务 identity 或持久化标识。
 
@@ -600,7 +627,7 @@ construct
 
 Dialogue-owned semantic strings进入 `RenderNode.attrs`，必须满足 Render Update v1 的 attr validation/UTF-8 limits。RPG Dialogue 应在 Subsystem boundary 提前拒绝会产生非法 RenderNode 的输入。
 
-Caller-owned `character.data` 必须满足 RenderNode `data` 的 JSON transport limits。
+Caller-owned Conversation / Character / Choice `data` 必须满足对应 RenderNode `data` 的 JSON transport limits。
 
 这些限制属于 transport compatibility，不授权 Dialogue 解释 caller schema。
 
@@ -630,10 +657,11 @@ v0 Presentation ABI 不定义：
 
 ```text
 Story Graph / Dialogue Document
+Conversation speaker ↔ Character reference relation
 DOM command protocol
 pixel scroll commands
 CSS class/style mutation commands
-provider-specific portrait/Live2D/Spine schema
+provider-specific conversation/choice/portrait/Live2D/Spine data schema
 public dynamic RenderNode key format
 business identity encoded in RenderNode.key
 selected choice retained state
