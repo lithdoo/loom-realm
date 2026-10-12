@@ -306,9 +306,12 @@ Child `choice.<id>` 不直接向 Subsystem 发 submit。
 ```text
 active Conversation still exists
 payload.conversationId === current internal conversationId
-choiceId absent iff current Conversation has no submitted choice
-choiceId, when present, identifies a current choice
-identified choice is enabled
+current Conversation has zero choices
+→ choiceId MUST be absent
+current Conversation has one or more choices
+→ choiceId MUST be present
+→ choiceId MUST identify a current choice
+→ identified choice MUST be enabled
 current Session / generation / Render target is still current
 ```
 
