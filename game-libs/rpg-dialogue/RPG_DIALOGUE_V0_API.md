@@ -36,8 +36,6 @@ export interface DialogueCharacterV0 {
   readonly characterId: string;
   readonly displayName?: string;
   readonly active: boolean;
-  readonly placement?: string;
-  readonly expression?: string;
   readonly data: JsonObject;
 }
 
@@ -149,7 +147,26 @@ Conversation 与 Character 是并列且解耦的 presentation/business input。C
 
 调用方不得依赖上一轮 request 隐式保留 conversation/characters business facts。同一 `RPGDialogue` 必须继续使用其 session RenderDomain；新的 request 更新该 Domain 中的 retained Dialogue projection，并通过新的内部 `conversationId` 标记新的 Conversation operation。
 
-业务 identity 与 RenderNode lifetime identity 是不同概念。`characterId`、`choiceId`、`entryId` 是业务语义 identity；动态 RenderNode 的 `key` 是 RPG Dialogue 私有的 presentation-lifetime identity，遵守 Render Update v1 one-shot key 规则。具体映射见 [RPG Dialogue v0 Presentation](./RPG_DIALOGUE_V0_PRESENTATION.md)。
+业务 identity 与 RenderNode lifetime identity 是不同概念。三类 public business identity 的 scope 明确为：
+
+```text
+characterId
+→ 当前 RPGDialogue session 内的 Character business identity
+
+choiceId
+→ 仅当前 Conversation 内的 Choice business identity
+
+entryId
+→ 当前 RPGDialogue History session state 内的 History entry business identity
+```
+
+因此：
+
+- 相邻 Conversation 都出现 `choiceId = "yes"` 时，它们仍是两个不同 Choice；新的 `conversationId` 开始时，上一轮所有 Choice semantic lifetime 都结束；
+- 同一个 Character 如果在相邻完整 `characters` snapshot 中连续存在，可以继续表示同一 Character business presence；若它离开后再次出现，business `characterId` 可以相同，但新的 presentation node lifetime 必须遵守 Render Update one-shot key 规则；
+- `entryId` 在当前 History state 中唯一；被 `setHistory()` 移除后未来重新出现相同 `entryId`，仍须使用新的 presentation node lifetime。
+
+动态 RenderNode 的 `key` 始终是 RPG Dialogue 私有的 presentation-lifetime identity，具体映射见 [RPG Dialogue v0 Presentation](./RPG_DIALOGUE_V0_PRESENTATION.md)。
 
 ### 3.1 Caller input immutability
 
@@ -184,7 +201,7 @@ data
 
 `speakerName` 是普通显示文本，不是 Character identity，也不要求与任何 `DialogueCharacterV0.displayName` 或 `characterId` 对应。
 
-`choices` 是有序数组；`choiceId` 是稳定 business identity，数组 index 不是业务 identity。`enabled` 省略时等价于 `true`。
+`choices` 是有序数组；`choiceId` 只在当前 Conversation 内作为稳定 business identity，数组 index 不是业务 identity。`enabled` 省略时等价于 `true`。
 
 Choice cardinality 必须在创建任何新的 Conversation interaction side effect 前完成 preflight：
 
@@ -225,25 +242,33 @@ conversation-local scroll
 
 ### 3.3 Characters
 
-`characterId` 在单次 request 内必须唯一。
+`characterId` 在当前 `characters` snapshot 内必须唯一，并作为当前 `RPGDialogue` session 内的 Character business identity。
 
-Dialogue-owned character semantics：
+Dialogue-owned character semantics 只保留跨 Presentation 实现普遍有意义的事实：
 
 ```text
 characterId
 displayName
 active
-placement
-expression
 ```
 
 这些字段映射到 character RenderNode 的 `attrs`。
 
-`DialogueCharacterV0.data` 的字段结构同样完全由 caller 与业务 WebComponent 定义，并遵守 §3.2 的统一 caller-defined `data` 规则。RPG Dialogue 将它原样放入对应 character RenderNode 的 `data`。
+具体立绘布局、表情、动画、模型状态等不是 RPG Dialogue canonical vocabulary；业务需要这些能力时放入 `DialogueCharacterV0.data`，由自己的 WebComponent 解释。例如：
+
+```ts
+{
+  placement: "left",
+  expression: "angry",
+  live2dModel: "alice"
+}
+```
+
+`DialogueCharacterV0.data` 的字段结构完全由 caller 与业务 WebComponent 定义，并遵守 §3.2 的统一 caller-defined `data` 规则。RPG Dialogue 将它原样放入对应 character RenderNode 的 `data`。
 
 因此业务可以使用静态头像、sprite animation、Canvas、WebGL、Live2D、Spine 或其他 schema，而无需扩展 RPG Dialogue API。
 
-Character Presentation 与 Conversation speaker 完全解耦。`active` 只描述 Character 自己的 Dialogue presentation fact；RPG Dialogue 不从 `speakerName` 查找、创建、激活或改写 Character。
+Character Presentation 与 Conversation speaker 完全解耦。`active` 只描述 Character 自己的通用 presentation emphasis fact；RPG Dialogue 不从 `speakerName` 查找、创建、激活或改写 Character。
 
 ## 4. Conversation result
 
@@ -364,10 +389,10 @@ Frame abort
 RPG Dialogue 必须在发布 Render state / input side effect 前验证至少：
 
 ```text
-characterId uniqueness
-choiceId uniqueness
+characterId uniqueness within current characters snapshot
+choiceId uniqueness within current Conversation
 non-empty choices contain at least one enabled choice
-history entryId uniqueness
+history entryId uniqueness within current History state
 finite / valid JsonObject conversation.data
 finite / valid JsonObject choice.data
 finite / valid JsonObject character.data
@@ -392,7 +417,8 @@ battle/map transition nodes
 automatic transcript policy
 durable story transcript authority
 Conversation speaker ↔ Character reference relation
-provider-specific conversation/choice/portrait/Live2D/Spine data schema
+provider-specific conversation/choice/character presentation schema
+canonical placement / expression vocabulary
 ```
 
 这些不是待实现的隐含功能；它们明确不属于 v0 API。
