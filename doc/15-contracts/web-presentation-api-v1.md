@@ -355,6 +355,8 @@ Window teardown
 → cancel in-flight reads
 → affected callers reject CONTENT_CANCELLED
 → later well-formed reads reject CONTENT_CANCELLED
+→ later well-formed reads MUST NOT successfully read
+→ later well-formed reads MUST NOT start a new underlying Content request
 ```
 
 Caller-provided AbortSignal 只取消其单次 read，并映射 `CONTENT_CANCELLED`。
