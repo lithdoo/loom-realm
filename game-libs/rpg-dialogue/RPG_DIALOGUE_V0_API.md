@@ -22,12 +22,14 @@ export interface ConversationChoiceV0 {
   readonly choiceId: string;
   readonly text: string;
   readonly enabled?: boolean;
+  readonly data: JsonObject;
 }
 
 export interface ConversationContentV0 {
-  readonly speakerCharacterId?: string;
+  readonly speakerName?: string;
   readonly text: string;
   readonly choices: readonly ConversationChoiceV0[];
+  readonly data: JsonObject;
 }
 
 export interface DialogueCharacterV0 {
@@ -41,7 +43,6 @@ export interface DialogueCharacterV0 {
 
 export interface DialogueHistoryEntryV0 {
   readonly entryId: string;
-  readonly speakerCharacterId?: string;
   readonly speakerName?: string;
   readonly text: string;
 }
@@ -144,6 +145,8 @@ characters
 → 当前完整人物 presentation snapshot
 ```
 
+Conversation 与 Character 是并列且解耦的 presentation/business input。Conversation 不引用 Character，Character 也不承担“当前 speaker” authority。`speakerName` 只是 Conversation 自己的可选显示文本；即使 `characters` 为空也完全合法。反过来，存在 Character 也不意味着它必须对应 `speakerName`。
+
 调用方不得依赖上一轮 request 隐式保留 conversation/characters business facts。同一 `RPGDialogue` 必须继续使用其 session RenderDomain；新的 request 更新该 Domain 中的 retained Dialogue projection，并通过新的内部 `conversationId` 标记新的 Conversation operation。
 
 业务 identity 与 RenderNode lifetime identity 是不同概念。`characterId`、`choiceId`、`entryId` 是业务语义 identity；动态 RenderNode 的 `key` 是 RPG Dialogue 私有的 presentation-lifetime identity，遵守 Render Update v1 one-shot key 规则。具体映射见 [RPG Dialogue v0 Presentation](./RPG_DIALOGUE_V0_PRESENTATION.md)。
@@ -156,20 +159,30 @@ Caller MUST 将已经交给 `RPGDialogue`、且仍可能影响当前 Dialogue st
 
 ```text
 ConversationRequestV0
-ConversationContentV0
-ConversationChoiceV0[]
-DialogueCharacterV0[]
-DialogueCharacterV0.data
+ConversationContentV0 / ConversationContentV0.data
+ConversationChoiceV0[] / ConversationChoiceV0.data
+DialogueCharacterV0[] / DialogueCharacterV0.data
 DialogueHistoryEntryV0[] / DialogueHistoryEntryV0
 ```
 
 Caller 在这些值仍被 `RPGDialogue` 使用期间私自修改它们属于 API misuse；v0 对这种 mutation 之后的行为不作保证。
 
-这里“`character.data` 原样进入 `RenderNode.data`”只保证业务 JSON semantic value 不被 RPG Dialogue 解释或改写，不保证保留 caller JavaScript object identity。
+这里“caller `data` 原样进入 `RenderNode.data`”只保证业务 JSON semantic value 不被 RPG Dialogue 解释或改写，不保证保留 caller JavaScript object identity。
 
 `getHistorySnapshot()` 仍按 §5.3 明确返回 detached snapshot；它不属于上述 borrowed-input 规则。
 
-### 3.2 Conversation content
+### 3.2 Conversation content and choices
+
+`ConversationContentV0` 定义当前 Conversation 自己的 retained facts：
+
+```text
+speakerName?
+text
+choices
+data
+```
+
+`speakerName` 是普通显示文本，不是 Character identity，也不要求与任何 `DialogueCharacterV0.displayName` 或 `characterId` 对应。
 
 `choices` 是有序数组；`choiceId` 是稳定 business identity，数组 index 不是业务 identity。`enabled` 省略时等价于 `true`。
 
@@ -184,6 +197,21 @@ choices.length > 0
 ```
 
 因此 v0 不允许“存在 choices 但全部 disabled”的 Conversation。违反该规则的 `openConversation()` 必须在发布新的 Render state、注册新的 active input interaction 或改变当前 operation state 前失败。
+
+`ConversationContentV0.data` 与每个 `ConversationChoiceV0.data` 的字段结构完全由 caller 与业务 WebComponent 定义。RPG Dialogue 只要求它们满足 LoomRealm `JsonObject` transport shape，并分别原样投影到 conversation / choice RenderNode 的 `data`。
+
+对 caller-defined `data`，RPG Dialogue 统一遵守：
+
+```text
+MUST NOT wrap
+MUST NOT interpret
+MUST NOT rename keys
+MUST NOT inject Dialogue fields
+MUST NOT apply defaults inside data
+MUST NOT derive gameplay behavior from data
+```
+
+业务可以用这些 `data` 表达 voice/resource key、窗口样式、choice icon、业务 metadata 或其他 WebComponent-specific schema，而无需扩展 RPG Dialogue API。
 
 `RPGDialogue` 为每次成功开始的 `openConversation()` 分配新的内部 `conversationId`。它只用于当前 interaction correlation 与 Presentation-local reset，不由 caller 提供，也不出现在 `ConversationResultV0` 中。
 
@@ -211,20 +239,11 @@ expression
 
 这些字段映射到 character RenderNode 的 `attrs`。
 
-`DialogueCharacterV0.data` 的字段结构完全由 caller 与业务 WebComponent 定义。RPG Dialogue 只要求其满足 LoomRealm `JsonObject` transport shape，并将它原样放入对应 `RenderNode.data`：
-
-```text
-MUST NOT wrap
-MUST NOT interpret
-MUST NOT rename keys
-MUST NOT inject Dialogue fields
-MUST NOT apply defaults inside data
-MUST NOT derive gameplay behavior from data
-```
+`DialogueCharacterV0.data` 的字段结构同样完全由 caller 与业务 WebComponent 定义，并遵守 §3.2 的统一 caller-defined `data` 规则。RPG Dialogue 将它原样放入对应 character RenderNode 的 `data`。
 
 因此业务可以使用静态头像、sprite animation、Canvas、WebGL、Live2D、Spine 或其他 schema，而无需扩展 RPG Dialogue API。
 
-`active` 与 `speakerCharacterId` 是独立事实。RPG Dialogue 不自动把 speaker 改写为 active character。
+Character Presentation 与 Conversation speaker 完全解耦。`active` 只描述 Character 自己的 Dialogue presentation fact；RPG Dialogue 不从 `speakerName` 查找、创建、激活或改写 Character。
 
 ## 4. Conversation result
 
@@ -272,7 +291,7 @@ Realm State（可选）
    承担 durable history authority
 ```
 
-RPG Dialogue 不自动把 Conversation 或 choice 写入 History。
+History 的 `speakerName?` 与 Conversation 一样只是文本事实，不引用 Character Presentation。RPG Dialogue 不自动把 Conversation 或 choice 写入 History。
 
 ### 5.1 `setHistory()`
 
@@ -349,7 +368,8 @@ characterId uniqueness
 choiceId uniqueness
 non-empty choices contain at least one enabled choice
 history entryId uniqueness
-speakerCharacterId references when required by product policy
+finite / valid JsonObject conversation.data
+finite / valid JsonObject choice.data
 finite / valid JsonObject character.data
 RenderNode key/tag/attrs legality
 Web Presentation / Render Update payload limits
@@ -357,7 +377,7 @@ Web Presentation / Render Update payload limits
 
 Dialogue-owned字符串进入 `RenderNode.attrs`，因此必须满足 Render Update v1 的 attr UTF-8 上限；超限输入应在 RPG Dialogue boundary 被拒绝，而不是依赖 Renderer protocol failure。
 
-Caller-owned `character.data` 受 RenderNode `data` 的 JSON transport limits 约束。
+Caller-owned Conversation / Choice / Character `data` 都受对应 RenderNode `data` 的 JSON transport limits 约束。
 
 ## 8. Authority and non-goals
 
@@ -371,7 +391,8 @@ quest/inventory mutation nodes
 battle/map transition nodes
 automatic transcript policy
 durable story transcript authority
-provider-specific portrait/Live2D/Spine schema
+Conversation speaker ↔ Character reference relation
+provider-specific conversation/choice/portrait/Live2D/Spine data schema
 ```
 
 这些不是待实现的隐含功能；它们明确不属于 v0 API。
