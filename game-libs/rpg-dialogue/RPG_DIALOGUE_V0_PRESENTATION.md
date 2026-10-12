@@ -132,9 +132,17 @@ Event 不得投到未声明该 event 的 canonical node。
 
 一个 `RPGDialogue` session 使用一个长期 Dialogue RenderDomain。它可以在第一次 `openConversation()` 时延迟创建；创建后跨 READY / ACTIVE 和多个顺序 Conversation 保持存活，直到 `RPGDialogue.close()`、Frame abort 或其他 session-terminal cleanup。
 
+Dialogue RenderDomain 的固定 stacking value 是：
+
+```ts
+const RPG_DIALOGUE_Z_INDEX = 2_147_483_646;
+```
+
+第一次创建 Domain 时必须以该 `zIndex` 建立 retained state；v0 session lifetime 内不得改变。该值是 int32 合法值，并给 `2_147_483_647` 保留更高一级 modal/overlay stacking 空间；它不建立新的全局 layout authority。
+
 ```text
 RPGDialogue
-└─ one Dialogue RenderDomain
+└─ one Dialogue RenderDomain (zIndex = 2_147_483_646)
    ├─ openConversation(A)
    ├─ READY
    ├─ openConversation(B)
@@ -182,9 +190,9 @@ history
 }
 ```
 
-### 4.2 Dynamic item nodes
+### 4.2 Collection item nodes
 
-以下节点是动态 collection item：
+以下节点是 collection item：
 
 ```text
 lr-dialogue-character
@@ -193,7 +201,7 @@ lr-dialogue-control-hint
 lr-dialogue-history-entry
 ```
 
-它们的 `RenderNode.key` 由 RPG Dialogue 私有分配。v0 不冻结 key 格式，也不允许 business WebComponent 从 key 推导 `characterId`、`choiceId`、`action` 或 `entryId`。
+它们的 `RenderNode.key` 由 RPG Dialogue 私有分配。v0 不冻结 key 字符串格式，也不允许 business WebComponent 从 key 推导 `characterId`、`choiceId`、`action` 或 `entryId`。
 
 Character 与 History entry 在同一 semantic presence 连续存在时 MAY 保留同一 private Render key，从而保持同一个 HTMLElement / presentation-local state。例如 Alice 连续出现在相邻完整 `characters` snapshot 中时，可以继续使用当前 live character node。
 
@@ -209,7 +217,9 @@ choiceId = "yes" → private key K2
 K2 != K1
 ```
 
-对于所有 dynamic node，一旦 RenderNode 被删除，其 key 就按 Render Update v1 规则永久 consumed 于当前 wire Domain lifetime。以后即使相同 business identity 再次出现，也必须分配 fresh Render key：
+Control hint 使用 §13 固定的五个 semantic action。第一次 materialize controls 后，每个 action 分配一个 private live key，并在当前 RenderDomain lifetime 内持续保留该 node/key；mode/state 变化只更新其 attrs，不 remove/reinsert control hint node。
+
+对于会被删除的 dynamic item，一旦 RenderNode 被删除，其 key 就按 Render Update v1 规则永久 consumed 于当前 wire Domain lifetime。以后即使相同 business identity 再次出现，也必须分配 fresh Render key：
 
 ```text
 same continuous eligible semantic presence
@@ -291,7 +301,7 @@ Conversation structural node：
 
 `speaker-name` 是当前 Conversation 自己的显示文本，不是 Character reference。它可以在 `characters=[]` 时存在，也不要求与任何 `display-name` 相等。
 
-`conversation-id` 由 `RPGDialogue` 为每次成功开始的 `openConversation()` 分配；它不是 Story identity，也不由 caller 提供。
+`conversation-id` 由 `RPGDialogue` 为每次成功开始的 `openConversation()` 分配；它不是 Story identity，也不由 caller 提供。同一个 `RPGDialogue` instance lifetime 内不得复用已经成功分配过的 `conversation-id`；具体格式不是 public ABI。
 
 当 `conversation-id` 改变时，Conversation WC 必须重置至少：
 
@@ -550,7 +560,7 @@ History 的 pixel scroll、focus、virtualization 与 animation 都是 WC-local 
 
 ## 12. Input mode and default input policy
 
-`RPGDialogue` active interaction 至少区分：
+`RPGDialogue` active interaction 区分：
 
 ```text
 CONVERSATION
@@ -615,7 +625,7 @@ HISTORY + previous / next
 → history.scroll-up / scroll-down
 
 history
-→ toggle retained history.visible according to current mode
+→ CONVERSATION opens History / HISTORY closes History
 
 cancel
 → apply Cancel precedence above
@@ -631,17 +641,17 @@ v0 不支持通过 pointer/touch 产生 Dialogue business/session interaction。
 
 ## 13. Controls
 
-`lr-dialogue-controls` 提供 presentation-only control hints，不是 Story facts。Canonical action vocabulary：
+`lr-dialogue-controls` 提供 presentation-only control hints，不是 Story facts。Control hint 的 canonical action vocabulary 与 §12 semantic actions 完全相同：
 
 ```text
 confirm
-choice-previous
-choice-next
+previous
+next
 history
 cancel
 ```
 
-每个 `lr-dialogue-control-hint` 使用 private live Render key；`action` 是 semantic fact，不是 Render identity。
+第一次 materialize controls 后，children 固定为上述五个 action，顺序也固定为上述顺序。每个 action 对应一个持续 live 的 `lr-dialogue-control-hint`；其 private Render key 在当前 Dialogue RenderDomain lifetime 内保持不变。`action` 是 semantic fact，不是公开 Render identity。
 
 `lr-dialogue-control-hint` attrs：
 
@@ -651,15 +661,44 @@ label
 enabled
 ```
 
-v0 public API 不让 caller 直接注入 control hints；RPG Dialogue 根据当前 interaction mode 与 session policy 生成。
+v0 public API 不让 caller 直接注入 control hints；RPG Dialogue 根据当前 lifecycle / interaction mode / session policy 更新 attrs。
 
-v0 默认生成规则冻结为：
+默认 label 规则冻结为：
 
 ```text
 label = action
 ```
 
-例如 `action="confirm"` 时默认 `label="confirm"`。`label` 只是 presentation string；业务 Presentation 可以直接显示，也可以把它解释为自己的 i18n key。RPG Dialogue 不拥有业务 localization authority。
+例如 `action="confirm"` 时 `label="confirm"`。`label` 只是 presentation string；业务 Presentation 可以直接显示，也可以把它解释为自己的 i18n key。RPG Dialogue 不拥有业务 localization authority。
+
+`enabled` 规则冻结为：
+
+```text
+READY
+confirm   = false
+previous  = false
+next      = false
+history   = false
+cancel    = false
+
+ACTIVE / CONVERSATION
+confirm   = true
+previous  = conversation.choices.length > 0
+next      = conversation.choices.length > 0
+history   = true
+cancel    = session.cancelable
+
+ACTIVE / HISTORY
+confirm   = false
+previous  = history.length > 0
+next      = history.length > 0
+history   = true
+cancel    = true
+```
+
+HISTORY mode 的 `cancel=true` 表示“关闭 History 并回到 CONVERSATION”，不表示当前 Conversation 本身可取消，因此与 session `cancelable=false` 不冲突。
+
+CLOSED 后 RenderDomain 已关闭，不再存在 control hint projection。
 
 ## 14. WebComponent lifecycle requirements
 
@@ -750,7 +789,7 @@ configurable input-binding public API
 
 ## 18. Compatibility rule
 
-Canonical Render Tree/tag names、Dialogue-owned attrs、caller-owned `data` projection、business/Render identity rules、Render Event 与 Custom Event names/payloads、interaction mode semantics、History projection，以及 §16 Browser artifact entry 是 RPG Dialogue v0 compatibility surface。
+Canonical Render Tree/tag names、fixed Dialogue RenderDomain `zIndex`、Dialogue-owned attrs/control-hint semantics、caller-owned `data` projection、business/Render identity rules、Render Event 与 Custom Event names/payloads、interaction mode semantics、History projection，以及 §16 Browser artifact entry 是 RPG Dialogue v0 compatibility surface。
 
 以下明确不是 cross-implementation compatibility surface：
 
