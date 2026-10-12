@@ -88,10 +88,13 @@ export class RPGDialogue {
 Frame
 └─ RPGDialogue
    ├─ History session state
+   ├─ one persistent Dialogue RenderDomain
    ├─ openConversation(A) → Result A
    ├─ openConversation(B) → Result B
    └─ close()
 ```
+
+Dialogue RenderDomain 可以延迟到第一次需要 Presentation 时创建；一旦创建，它属于整个 `RPGDialogue` session lifetime，而不是某一次 `openConversation()` lifetime。Conversation settle 不关闭这个 RenderDomain；下一次 Conversation 在同一 RenderDomain 中更新 retained projection。只有 `RPGDialogue.close()`、Frame abort 或其他 session-terminal cleanup 才关闭它。
 
 Public lifecycle：
 
@@ -119,13 +122,15 @@ Conversation settle 只结束当前 `openConversation()`：
 Conversation settles
 → Promise resolves
 → RPGDialogue remains READY
+→ Dialogue RenderDomain remains alive
+→ last successful retained Dialogue projection remains available but inactive
 → History remains alive
 → caller may execute arbitrary business logic
 → caller may mutate History
 → caller may open another Conversation
 ```
 
-Conversation completion 不自动关闭 `RPGDialogue`，也不自动写 History。
+READY 状态没有 active Conversation，因此不得接受 Conversation submit。Conversation completion 不自动关闭 `RPGDialogue`，也不自动写 History。
 
 ## 3. `openConversation()` request
 
@@ -139,11 +144,13 @@ characters
 → 当前完整人物 presentation snapshot
 ```
 
-调用方不得依赖上一轮 request 隐式保留 conversation/characters business facts。实现可以复用同一个 RenderDomain / WebComponent identity，但这不改变 request 的完整快照语义。
+调用方不得依赖上一轮 request 隐式保留 conversation/characters business facts。同一 `RPGDialogue` 必须继续使用其 session RenderDomain；新的 request 更新该 Domain 中的 retained Dialogue projection，并通过新的内部 `conversationId` 标记新的 Conversation operation。
+
+业务 identity 与 RenderNode lifetime identity 是不同概念。`characterId`、`choiceId`、`entryId` 是业务语义 identity；动态 RenderNode 的 `key` 是 RPG Dialogue 私有的 presentation-lifetime identity，遵守 Render Update v1 one-shot key 规则。具体映射见 [RPG Dialogue v0 Presentation](./RPG_DIALOGUE_V0_PRESENTATION.md)。
 
 ### 3.1 Conversation content
 
-`choices` 是有序数组；`choiceId` 是稳定 identity，数组 index 不是业务 identity。`enabled` 省略时等价于 `true`。
+`choices` 是有序数组；`choiceId` 是稳定 business identity，数组 index 不是业务 identity。`enabled` 省略时等价于 `true`。
 
 `RPGDialogue` 为每次成功开始的 `openConversation()` 分配新的内部 `conversationId`。它只用于当前 interaction correlation 与 Presentation-local reset，不由 caller 提供，也不出现在 `ConversationResultV0` 中。
 
@@ -240,6 +247,8 @@ RPG Dialogue 不自动把 Conversation 或 choice 写入 History。
 
 典型用途包括从 Realm State 恢复、切换业务 conversation context、测试建立初始状态或业务完成过滤/重排后的完整替换。
 
+若 session RenderDomain 已存在，成功的 READY-state History mutation 同步改变下一份 retained Dialogue projection；它不创建新的 RenderDomain。
+
 ### 5.2 `appendHistory()`
 
 `appendHistory(entry)` 只追加 caller 已经决定应进入 History 的 entry。它不从当前 Conversation 自动补 speaker、choice、文本或其他业务语义。
@@ -292,7 +301,7 @@ Frame abort
 → CLOSED
 ```
 
-所有 terminal path 都必须 settle-once，并 best-effort cleanup InputListener、RenderDomain、abort listener 与内部 callbacks。
+所有 terminal path 都必须 settle-once，并 best-effort cleanup InputListener、session RenderDomain、abort listener 与内部 callbacks。
 
 `close()` 幂等。CLOSED 后不得再打开 Conversation 或修改 History。
 
