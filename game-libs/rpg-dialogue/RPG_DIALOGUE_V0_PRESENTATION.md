@@ -132,17 +132,26 @@ Event 不得投到未声明该 event 的 canonical node。
 
 一个 `RPGDialogue` session 使用一个长期 Dialogue RenderDomain。它可以在第一次 `openConversation()` 时延迟创建；创建后跨 READY / ACTIVE 和多个顺序 Conversation 保持存活，直到 `RPGDialogue.close()`、Frame abort 或其他 session-terminal cleanup。
 
-Dialogue RenderDomain 的固定 stacking value 是：
+Dialogue RenderDomain 的默认 stacking value 是：
 
 ```ts
-const RPG_DIALOGUE_Z_INDEX = 2_147_483_646;
+const DEFAULT_RPG_DIALOGUE_Z_INDEX = 2_147_483_646;
 ```
 
-第一次创建 Domain 时必须以该 `zIndex` 建立 retained state；v0 session lifetime 内不得改变。该值是 int32 合法值，并给 `2_147_483_647` 保留更高一级 modal/overlay stacking 空间；它不建立新的全局 layout authority。
+实际值来自构造 options：
+
+```text
+effective zIndex
+= options.zIndex ?? DEFAULT_RPG_DIALOGUE_Z_INDEX
+```
+
+`options.zIndex` 由 API contract 校验为 Render Update v1 合法 int32。调用方拥有本业务 Presentation composition 的 stacking policy，可以显式选择任意合法 int32；Dialogue 不替业务推断 Map、Battle、overlay 或其他 RenderDomain 的相对层级。
+
+第一次创建 Domain 时必须使用该 effective `zIndex` 建立 retained state；同一 `RPGDialogue` instance lifetime 内不得改变。v0 不提供运行中 `zIndex` setter，也不允许单个 Conversation 覆盖它。默认值保留 `2_147_483_647` 作为更高一级 stacking 空间只是默认 composition convenience；调用方显式覆盖后由调用方自己承担相对 stacking 语义。
 
 ```text
 RPGDialogue
-└─ one Dialogue RenderDomain (zIndex = 2_147_483_646)
+└─ one Dialogue RenderDomain (zIndex = instance effective zIndex)
    ├─ openConversation(A)
    ├─ READY
    ├─ openConversation(B)
@@ -789,7 +798,7 @@ configurable input-binding public API
 
 ## 18. Compatibility rule
 
-Canonical Render Tree/tag names、fixed Dialogue RenderDomain `zIndex`、Dialogue-owned attrs/control-hint semantics、caller-owned `data` projection、business/Render identity rules、Render Event 与 Custom Event names/payloads、interaction mode semantics、History projection，以及 §16 Browser artifact entry 是 RPG Dialogue v0 compatibility surface。
+Canonical Render Tree/tag names、caller-configurable Dialogue RenderDomain effective `zIndex` semantics、Dialogue-owned attrs/control-hint semantics、caller-owned `data` projection、business/Render identity rules、Render Event 与 Custom Event names/payloads、interaction mode semantics、History projection，以及 §16 Browser artifact entry 是 RPG Dialogue v0 compatibility surface。
 
 以下明确不是 cross-implementation compatibility surface：
 
