@@ -26,13 +26,39 @@ test("M13 private implementation stays thin and credential-free at the business 
     "packages/renderer/src/internal/presentation-resource-client.ts",
   ].map(text));
   const joined = sources.join("\n");
-  assert.doesNotMatch(joined, /(PresentationStore|PresentationTopology|EventBus|AssetManager|ComponentRegistry|MutationObserver|RenderEvent)/);
+  assert.doesNotMatch(joined, /(PresentationStore|PresentationTopology|EventBus|AssetManager|ComponentRegistry|MutationObserver)/);
   const declaration = await text("packages/renderer/dist/internal/presentation-resource-client.d.ts");
   assert.doesNotMatch(declaration, /(origin|installationId|token|filesystem|RendererContentAccess)/);
   assert.match(declaration, /CONTENT_CANCELLED/);
   const control = await text("packages/renderer/src/control.ts");
   assert.match(control, /readPresentationFacts\(\)/);
   assert.doesNotMatch(control.match(/private readPresentation\(\)[\s\S]*?\n  }/)?.[0] ?? "", /snapshotForQualification/);
+});
+
+test("Render Event delta adds only the optional transient seam and no retained or wire architecture", async () => {
+  const [seam, store, control, projector, dataModel, publicDeclaration, projectorDeclaration] = await Promise.all([
+    text("packages/renderer/src/internal/presentation-seam.ts"),
+    text("packages/renderer/src/internal/render-store.ts"),
+    text("packages/renderer/src/control.ts"),
+    text("packages/renderer/src/internal/web-projector.ts"),
+    text("packages/data/src/model.ts"),
+    text("packages/renderer/dist/web-presentation.d.ts"),
+    text("packages/renderer/dist/internal/web-projector.d.ts"),
+  ]);
+  assert.match(seam, /deliverRenderEvent\?\(/);
+  assert.match(seam, /interface RendererPresentationRenderEvent/);
+  assert.doesNotMatch(seam.match(/interface RendererPresentationSource[\s\S]*?\n}/)?.[0] ?? "", /events/);
+  assert.doesNotMatch(store, /(MAX_EVENTS|\bprivate events\b|readonly events:)/);
+  assert.match(store, /onApplicable\?\.\(message\)/);
+  assert.doesNotMatch(control, /(instanceof WebProjector|new WebProjector|EventStore|retry|timeout|NACK|\bACK\b|\bResult\b)/);
+  assert.doesNotMatch(projector, /(eventId|sequenceNumber|pendingEvents|replay|retry|timeout|NACK|\bACK\b|\bResult\b)/);
+  assert.match(dataModel, /type RenderUpdateMessageV1 = RenderDomainsV1 \| RenderSnapshotV1 \| RenderPatchV1 \| RenderEventV1/);
+  assert.match(dataModel, /RENDERER_DATA_PROFILE_V1 = "loomrealm\.renderer-data\/1"/);
+  assert.match(publicDeclaration, /type RenderEventReceiver/);
+  assert.match(publicDeclaration, /type WebPresentationRenderEvent/);
+  assert.match(publicDeclaration, /RendererPresentationRenderEvent/);
+  assert.match(projectorDeclaration, /interface RenderEventReceiver/);
+  assert.match(projectorDeclaration, /interface WebPresentationRenderEvent/);
 });
 
 test("Web Presentation capability preserves Chromium, boundary, pack and Node 20 compatibility evidence", async () => {

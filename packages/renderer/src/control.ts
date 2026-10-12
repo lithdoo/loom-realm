@@ -5,6 +5,7 @@ import {
   WEB_PRESENTATION_EVENT_CHANNEL_V1,
   type RendererDataPeer,
   type InputEventV1,
+  type RenderEventV1,
 } from "@loomrealm/data";
 import type { RendererDataBinding } from "@loomrealm/platform-ports";
 import {
@@ -19,6 +20,7 @@ import { RendererRenderStore } from "./internal/render-store.js";
 import { renderQualification } from "./internal/render-qualification.js";
 import {
   presentationAttachment,
+  type RendererPresentationRenderEvent,
   type RendererPresentationEffect,
   type RendererPresentationNodeEvent,
   type RendererPresentationSource,
@@ -66,6 +68,11 @@ interface RendererDataSlot {
   failed: DesiredDataIdentity | null;
   renderHistoryKey: string;
   render: RendererRenderStore;
+}
+
+interface StagedPresentationInput {
+  readonly subsystemKey: string;
+  readonly payload: InputEventV1["payload"];
 }
 
 const acceptedDataMessage = Object.freeze({ kind: "accepted" } as const);
@@ -116,6 +123,23 @@ function validatePresentationEventName(value: unknown): string {
   }
   if (bytes < 1 || bytes > 128) throw new TypeError("Invalid Web Presentation custom event name");
   return value;
+}
+
+function detachedFrozenJson<T>(value: T): T {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map((child) => detachedFrozenJson(child))) as T;
+  }
+  const output: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    Object.defineProperty(output, key, {
+      configurable: true,
+      enumerable: true,
+      value: detachedFrozenJson((value as Record<string, unknown>)[key]),
+      writable: true,
+    });
+  }
+  return Object.freeze(output) as T;
 }
 
 function validateRendererDataBinding(
@@ -186,6 +210,8 @@ class ControlHolder implements RendererControlHolder {
   private presentationEffect: RendererPresentationEffect | null = null;
   private presentationAttachmentToken: object | null = null;
   private presentationEmitNodeEvent: ((event: RendererPresentationNodeEvent) => void) | null = null;
+  private presentationForwardDepth = 0;
+  private readonly stagedPresentationInputs: StagedPresentationInput[] = [];
   private readonly presentationSource: RendererPresentationSource = Object.freeze({
     read: () => this.readPresentation(),
   });
@@ -429,10 +455,7 @@ class ControlHolder implements RendererControlHolder {
           onRenderDomains: (message) => this.commitRenderMessage(slot, peer, () => slot.render.onDomains(message)),
           onRenderSnapshot: (message) => this.commitRenderMessage(slot, peer, () => slot.render.onSnapshot(message)),
           onRenderPatch: (message) => this.commitRenderMessage(slot, peer, () => slot.render.onPatch(message)),
-          onRenderEvent: (message) =>
-            slot.current?.peer === peer
-              ? slot.render.onEvent(message)
-              : acceptedDataMessage,
+          onRenderEvent: (message) => this.onRenderEvent(slot, peer, message),
         },
       });
     } catch {
@@ -491,6 +514,68 @@ class ControlHolder implements RendererControlHolder {
     return outcome;
   }
 
+  private onRenderEvent(
+    slot: RendererDataSlot,
+    peer: RendererDataPeer,
+    message: RenderEventV1,
+  ): ReturnType<RendererRenderStore["onEvent"]> {
+    if (slot.current?.peer !== peer) return acceptedDataMessage;
+    return slot.render.onEvent(message, (applicable) => {
+      this.deliverRenderEvent(slot, peer, applicable);
+    });
+  }
+
+  private deliverRenderEvent(
+    slot: RendererDataSlot,
+    peer: RendererDataPeer,
+    message: RenderEventV1,
+  ): void {
+    const current = this.currentValue;
+    const effect = this.presentationEffect;
+    const attachmentToken = this.presentationAttachmentToken;
+    if (current === null || effect === null || attachmentToken === null) return;
+    let deliver: NonNullable<RendererPresentationEffect["deliverRenderEvent"]>;
+    try {
+      if (typeof effect.deliverRenderEvent !== "function") return;
+      deliver = effect.deliverRenderEvent;
+    } catch {
+      return;
+    }
+    const authority = current.snapshot.dataAuthorities.find(
+      ({ subsystemKey }) => subsystemKey === slot.current?.identity.subsystemKey,
+    );
+    const carrier = slot.current;
+    if (
+      authority === undefined ||
+      carrier === null ||
+      carrier.peer !== peer ||
+      carrier.identity.controlPeer !== current.peer ||
+      carrier.identity.generation !== authority.generation ||
+      carrier.identity.dataProfile !== authority.dataProfile ||
+      !slot.render.isPresentationTargetCurrent(message.domainId, message.targetKey)
+    ) return;
+
+    const event: RendererPresentationRenderEvent = Object.freeze({
+      sessionId: current.snapshot.sessionId,
+      subsystemKey: authority.subsystemKey,
+      generation: authority.generation,
+      domainId: message.domainId,
+      targetKey: message.targetKey,
+      name: message.name,
+      data: detachedFrozenJson(message.data),
+    });
+    this.presentationForwardDepth += 1;
+    try {
+      if (this.presentationAttachmentToken !== attachmentToken || this.presentationEffect !== effect) return;
+      deliver.call(effect, event);
+    } catch {
+      // Render Event receivers/effects are an ordinary presentation-local boundary.
+    } finally {
+      this.presentationForwardDepth -= 1;
+      if (this.presentationForwardDepth === 0) this.flushStagedPresentationInputs();
+    }
+  }
+
   private notifyPresentation(): void {
     const effect = this.presentationEffect;
     const emitNodeEvent = this.presentationEmitNodeEvent;
@@ -534,8 +619,29 @@ class ControlHolder implements RendererControlHolder {
     } catch {
       throw new TypeError("Invalid Web Presentation custom event payload");
     }
+    if (this.presentationForwardDepth > 0) {
+      this.stagedPresentationInputs.push(Object.freeze({
+        subsystemKey: event.subsystemKey,
+        payload,
+      }));
+      return;
+    }
+    this.publishPresentationInput(event.subsystemKey, payload);
+  }
+
+  private flushStagedPresentationInputs(): void {
+    while (this.stagedPresentationInputs.length > 0) {
+      const staged = this.stagedPresentationInputs.shift();
+      if (staged !== undefined) this.publishPresentationInput(staged.subsystemKey, staged.payload);
+    }
+  }
+
+  private publishPresentationInput(
+    subsystemKey: string,
+    payload: InputEventV1["payload"],
+  ): void {
     this.inputGate.emitEventForSubsystem(
-      event.subsystemKey,
+      subsystemKey,
       WEB_PRESENTATION_EVENT_CHANNEL_V1,
       payload,
     );

@@ -405,3 +405,164 @@ test("presentation node events pass currentness and validation before targeted U
   assert.equal(inputEvents.some(({ payload }) => payload.name === "revoked"), false);
   publisher.retire();
 });
+
+test("Render Events preserve retained ordering, FIFO, presentation isolation, and staged reverse-input FIFO", async (t) => {
+  const dataPeers = [];
+  const inputEvents = [];
+  let inForwardReceiver = false;
+  const holder = createRendererControlHolder({
+    async acquire(subsystemKey, generation, dataProfile) {
+      const pair = createMemoryCarrierPair();
+      const peer = createSubsystemDataPeer({
+        binding: { carrier: pair.left, subsystemKey, generation, dataProfile },
+        handlers: {
+          onInputState: () => ({ kind: "accepted" }),
+          onInputEvent: (message) => {
+            assert.equal(inForwardReceiver, false, "Subsystem must not be synchronously re-entered");
+            inputEvents.push(message);
+            return { kind: "accepted" };
+          },
+          onInputReset: () => ({ kind: "accepted" }),
+          onViewportState: () => ({ kind: "accepted" }),
+        },
+      });
+      dataPeers.push(peer);
+      return pair.right;
+    },
+  });
+  t.after(async () => Promise.allSettled(dataPeers.map((peer) => peer.close())));
+
+  const trace = [];
+  const delivered = [];
+  let emitNodeEvent;
+  const effect = {
+    reevaluate(source, emit) {
+      emitNodeEvent = emit;
+      const view = source.read();
+      const target = view?.subsystems[0]?.domains[0]?.roots[0];
+      trace.push(`reconcile:${target?.data?.value ?? "none"}`);
+    },
+    deliverRenderEvent(event) {
+      delivered.push(event);
+      trace.push(`event:${event.name}`);
+      assert.equal(Object.isFrozen(event), true);
+      assert.equal(Object.isFrozen(event.data), true);
+      if (event.name === "effect-throw") throw new Error("presentation-only");
+      if (event.name === "reverse" || event.name === "reverse-throw") {
+        const beforeReverse = inputEvents.length;
+        inForwardReceiver = true;
+        try {
+          emitNodeEvent({ ...event, name: "reverse-a", data: { order: 1 } });
+          emitNodeEvent({ ...event, name: "reverse-b", data: { order: 2 } });
+          assert.equal(inputEvents.length, beforeReverse, "valid reverse inputs remain staged during callback");
+        } finally {
+          inForwardReceiver = false;
+        }
+        if (event.name === "reverse-throw") throw new Error("after-stage");
+      }
+      if (event.name === "reverse-invalid") {
+        inForwardReceiver = true;
+        assert.throws(() => emitNodeEvent({ ...event, name: "", data: {} }), TypeError);
+        inForwardReceiver = false;
+      }
+    },
+  };
+  const detach = attachRendererPresentation(holder, effect);
+  t.after(detach);
+
+  const active = {
+    sessionId: "S",
+    revision: 1,
+    runtimes: [{ subsystemKey: "A", state: "ready" }],
+    stack: [{ frameId: "frame", subsystemKey: "A", lifecycle: "active", activationId: "activation" }],
+    inputTarget: { subsystemKey: "A", frameId: "frame", activationId: "activation" },
+    dataAuthorities: [authority("A")],
+  };
+  const control = createMemoryCarrierPair();
+  const publisher = createMainRendererControlPeer({
+    carrier: control.left,
+    acceptHello() {
+      return { kind: "accepted", snapshot: active, preparedHelloText: prepareRendererHelloResultV1(active) };
+    },
+  });
+  await holder.connect({ carrier: control.right, rendererControlToken: "token" });
+  await waitFor(() => dataPeers.length === 1, "current Data peer");
+  const peer = dataPeers[0];
+  await peer.input.sendInterest({
+    type: "input.interest",
+    frames: [{ frameId: "frame", channels: [WEB_PRESENTATION_EVENT_CHANNEL_V1] }],
+  });
+  await peer.render.sendDomains({ type: "render.domains", domains: ["d1", "d2"] });
+  await peer.render.sendSnapshot({
+    type: "render.snapshot", domainId: "d1", revision: 1, zIndex: 0,
+    roots: [{ key: "target", tag: "lr-node", attrs: {}, data: { value: 1 }, children: [] }],
+  });
+  await peer.render.sendEvent({
+    type: "render.event", domainId: "d1", targetKey: "target", name: "partial", data: {},
+  });
+  assert.equal(delivered.length, 0, "partial rebaseline Event drops");
+  await peer.render.sendSnapshot({
+    type: "render.snapshot", domainId: "d2", revision: 1, zIndex: 0, roots: [],
+  });
+  assert.equal(delivered.length, 0, "dropped Event never replays after complete baseline");
+
+  trace.length = 0;
+  await peer.render.sendPatch({
+    type: "render.patch", domainId: "d1", baseRevision: 1, revision: 2,
+    ops: [{ op: "update", key: "target", data: { set: { value: 2 } } }],
+  });
+  await peer.render.sendEvent({
+    type: "render.event", domainId: "d1", targetKey: "target", name: "after-patch", data: { nested: { n: 1 } },
+  });
+  assert.deepEqual(trace.slice(-2), ["reconcile:2", "event:after-patch"]);
+  assert.equal(Object.isFrozen(delivered.at(-1).data.nested), true);
+
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "A", data: {} });
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "B", data: {} });
+  assert.deepEqual(delivered.slice(-2).map(({ name }) => name), ["A", "B"]);
+
+  const withoutDelivery = { reevaluate() {} };
+  detach();
+  const detachWithoutDelivery = attachRendererPresentation(holder, withoutDelivery);
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "optional-drop", data: {} });
+  detachWithoutDelivery();
+  const detachThrowingCapability = attachRendererPresentation(holder, {
+    reevaluate() {},
+    get deliverRenderEvent() { throw new Error("capability getter failed"); },
+  });
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "getter-throw", data: {} });
+  detachThrowingCapability();
+  const detachAgain = attachRendererPresentation(holder, effect);
+  t.after(detachAgain);
+  assert.equal(delivered.some(({ name }) => name === "optional-drop"), false);
+  assert.equal(delivered.some(({ name }) => name === "getter-throw"), false);
+
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "effect-throw", data: {} });
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "after-throw", data: {} });
+  assert.equal(delivered.at(-1).name, "after-throw", "later presentation work survives effect throw");
+  assert.equal(await Promise.race([peer.terminal.then(() => true), turn().then(() => false)]), false);
+
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "reverse", data: {} });
+  await waitFor(() => inputEvents.length === 2, "staged reverse FIFO");
+  assert.deepEqual(inputEvents.map(({ payload }) => [payload.name, payload.data.order]), [
+    ["reverse-a", 1],
+    ["reverse-b", 2],
+  ]);
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "reverse-invalid", data: {} });
+  assert.equal(inputEvents.length, 2, "invalid reverse input throws synchronously and is not staged");
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "reverse-throw", data: {} });
+  await waitFor(() => inputEvents.length === 4, "staged reverse input after receiver throw");
+  assert.deepEqual(inputEvents.slice(2).map(({ payload }) => payload.name), ["reverse-a", "reverse-b"]);
+
+  trace.length = 0;
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "before-remove", data: {} });
+  await peer.render.sendPatch({
+    type: "render.patch", domainId: "d1", baseRevision: 2, revision: 3,
+    ops: [{ op: "remove", key: "target" }],
+  });
+  assert.deepEqual(trace.slice(0, 2), ["event:before-remove", "reconcile:none"]);
+  const deliveredBeforeRemovedEvent = delivered.length;
+  await peer.render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "removed", data: {} });
+  assert.equal(delivered.length, deliveredBeforeRemovedEvent);
+  publisher.retire();
+});

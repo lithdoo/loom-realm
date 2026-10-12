@@ -5,9 +5,11 @@ import {
 } from "./presentation-resource-client.js";
 import type { RendererResourceClient } from "./resource-client.js";
 import type {
+  DeepReadonly,
   PresentationDomainView,
   RendererPresentationEffect,
   RendererPresentationNodeEvent,
+  RendererPresentationRenderEvent,
   RendererPresentationSource,
   RendererPresentationView,
 } from "./presentation-seam.js";
@@ -15,6 +17,25 @@ import type {
 export interface WebPresentationContext {
   readonly resources: PresentationResourceClient;
   emitCustomEvent(name: string, data?: InputEventV1["payload"]): void;
+}
+
+export interface RenderContextReceiver {
+  receiveRenderContext(context: WebPresentationContext): void;
+}
+
+export interface RenderDataReceiver {
+  receiveRenderData(data: DeepReadonly<InputEventV1["payload"]>): void;
+}
+
+export interface WebPresentationRenderEvent {
+  readonly name: string;
+  readonly data: InputEventV1["payload"];
+}
+
+export interface RenderEventReceiver {
+  receiveRenderEvent(
+    event: DeepReadonly<WebPresentationRenderEvent>,
+  ): void;
 }
 
 export interface WebProjectorOptions {
@@ -142,6 +163,32 @@ export class WebProjector implements RendererPresentationEffect {
       this.reconcile(view);
     } catch (cause) {
       this.options.reportFailure?.(cause);
+    }
+  }
+
+  deliverRenderEvent(
+    event: DeepReadonly<RendererPresentationRenderEvent>,
+  ): void {
+    if (this.ended || this.failed) return;
+    const record = this.live.get(identity(
+      event.sessionId,
+      event.subsystemKey,
+      event.generation,
+      event.domainId,
+      event.targetKey,
+    ));
+    if (record === undefined) return;
+    const receiver = record.element as HTMLElement & Partial<RenderEventReceiver>;
+    if (typeof receiver.receiveRenderEvent !== "function") return;
+    const businessEvent = Object.freeze({
+      name: event.name,
+      data: event.data,
+    });
+    try {
+      receiver.receiveRenderEvent(businessEvent);
+    } catch (cause) {
+      this.options.reportFailure?.(cause);
+      throw cause;
     }
   }
 

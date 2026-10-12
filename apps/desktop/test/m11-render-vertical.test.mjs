@@ -7,12 +7,12 @@ test("real M11 Main → Desktop → Hostra Render vertical converges and rebasel
   assert.equal(trace.initial.domains[0].revision, 1);
   assert.equal(trace.initial.domains[0].roots[0].attrs.phase, "initial");
   assert.equal(trace.updated.domains[0].revision, 2);
-  assert.equal(trace.updated.events[0].targetKey, "hero");
+  assert.deepEqual(trace.deliveredEventsAtUpdate, ["pulse"]);
   assert.equal(trace.retired.currentCarrier, false);
   assert.equal(trace.retired.stalePresentationCache, true);
   assert.equal(trace.rebaselined.domains[0].revision, 1);
   assert.equal(trace.rebaselined.domains[0].roots[0].attrs.phase, "updated");
-  assert.equal(trace.rebaselined.events.length, 0);
+  assert.deepEqual(trace.deliveredEventsAtRebaseline, ["pulse"]);
   assert.equal(trace.reconnected.domains[0].roots[0].attrs.phase, "reconnected");
   assert.equal(trace.activeDuringReconnect, true);
   assert.equal(trace.activeAfterReconnect, true);

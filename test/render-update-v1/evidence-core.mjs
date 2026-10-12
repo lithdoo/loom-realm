@@ -155,7 +155,7 @@ export const baselineEvidence = new Map([
     assert.equal(terminal.kind, "protocol-fatal");
   }],
   ["wellformed-event-before-baseline-drops", () => {
-    const store = newStore(); assertAccepted(store.onEvent(event())); assert.equal(store.snapshotForQualification().events.length, 0);
+    const store = newStore(); let delivered = false; assertAccepted(store.onEvent(event(), () => { delivered = true; })); assert.equal(delivered, false);
   }],
   ["registry-may-change-before-all-domains-baselined", () => {
     const store = newStore(1, ["a", "b"]); assertAccepted(store.onSnapshot(snapshot("a"))); assertAccepted(store.onDomains(domains("a", "b", "c")));
