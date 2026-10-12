@@ -311,6 +311,8 @@ selectedChoiceId = null | choiceId
 
 新 Conversation 初始必须为 `null`；不默认选择第一项。
 
+API preflight 保证：只要当前 Conversation 的 `choices` 非空，就至少存在一个 enabled choice。因此 choice navigation 不需要处理“有 choices 但没有任何合法 selection target”的状态。
+
 ## 8. Conversation local coordination
 
 `conversation` 是当前 Conversation 唯一 interaction owner。Descendant `text` / choice nodes 只提供 retained presentation facts。
@@ -400,6 +402,7 @@ Child choice node 不直接向 Subsystem 发 submit。
 
 ```text
 active Conversation still exists
+current interaction mode === CONVERSATION
 payload.conversationId === current internal conversationId
 current Conversation has zero choices
 → choiceId MUST be absent
@@ -409,6 +412,8 @@ current Conversation has one or more choices
 → identified choice MUST be enabled
 current Session / generation / Render target is still current
 ```
+
+如果当前 mode 是 `HISTORY`，即使 `conversationId` 仍等于当前 active operation，Conversation submit 也必须被拒绝 / drop，且不得 settle `openConversation()`。
 
 验证成功只 settle 当前 `openConversation()`；不会自动写 History、关闭 `RPGDialogue` 或决定下一 Conversation。
 
@@ -543,7 +548,9 @@ History action
 → toggle retained history.visible
 ```
 
-Pointer/touch 的具体 gesture policy 不属于跨实现 ABI；无论实现采用何种 local gesture，最终 business submit 都必须由 `conversation` 使用 §10 的 `submit` shape 发出。
+v0 不支持通过 pointer/touch 产生 Dialogue business/session interaction。Canonical v0 interaction 由 Dialogue Input Handler 驱动；第三方 WebComponent MAY 使用 pointer/touch 做 hover、动画或其他纯 presentation-local 行为，但 MUST NOT 因 pointer/touch 直接产生 Conversation submit、History visibility mutation、user cancel 或其他 Dialogue state mutation。
+
+如果未来产品需要 pointer/touch 驱动上述 semantic action，应通过后续明确的 Dialogue ABI 扩展，而不是由第三方 WC 私自形成第二条 authority path。
 
 ## 13. Controls
 
@@ -632,7 +639,7 @@ business identity encoded in RenderNode.key
 selected choice retained state
 typewriter progress retained state
 durable History persistence
-pointer gesture uniformity across products
+pointer/touch business or session interaction
 rich text/localization/voice/auto-advance protocol
 ```
 
