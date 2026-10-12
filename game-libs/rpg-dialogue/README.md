@@ -10,7 +10,12 @@
 以下代码表示已冻结的 v0 public contract usage；runtime package 落地后实现必须保持这些 observable semantics：
 
 ```ts
-const dialogue = new RPGDialogue(scope, frame);
+const dialogue = new RPGDialogue(scope, frame, {
+  // optional；默认 false
+  cancelable: false,
+  // optional；默认 2_147_483_646，由业务决定相对 stacking
+  zIndex: 100,
+});
 
 dialogue.setHistory(savedHistory);
 
@@ -48,7 +53,7 @@ dialogue.close();
 
 Conversation、Character 与 Choice 是并列且解耦的业务/presentation input：Conversation 的 `speakerName` 只是显示文本，不引用 Character；Character 可以独立存在或完全为空；Choice 只表达当前可选项。
 
-`cancelable` 默认 `false`；`openConversation()` 的 operation/preflight/lifecycle failure 通过 returned Promise rejection 暴露；History 等同步 API 的非法调用保持同步 throw semantics。
+`cancelable` 默认 `false`；`zIndex` 默认 `2_147_483_646`，业务可在构造时传任意合法 int32，并在实例 lifetime 内保持固定；`openConversation()` 的 operation/preflight/lifecycle failure 通过 returned Promise rejection 暴露；History 等同步 API 的非法调用保持同步 throw semantics。
 
 ## Authority 边界
 
@@ -58,6 +63,7 @@ caller
 → Conversation / Character / Choice 内容
 → caller-defined data schema
 → History 内容语义与 durable persistence 决策
+→ Dialogue RenderDomain stacking policy（zIndex）
 → gameplay side effects
 
 RPGDialogue
