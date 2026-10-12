@@ -241,6 +241,8 @@ MUST NOT derive gameplay behavior from data
 
 `RPGDialogue` 为每次成功开始的 `openConversation()` 分配新的内部 `conversationId`。它只用于当前 interaction correlation 与 Presentation-local reset，不由 caller 提供，也不出现在 `ConversationResultV0` 中。
 
+`conversationId` 在同一个 `RPGDialogue` instance lifetime 内 MUST NOT 复用。具体字符串格式、分配算法与 counter/UUID 选择属于 private implementation；只要满足当前 Render attr limits 与 lifetime 内 non-reuse 即可。
+
 新的 `conversationId` 至少重置：
 
 ```text
@@ -339,6 +341,8 @@ History 的 `speakerName?` 与 Conversation 一样只是文本事实，不引用
 
 `appendHistory(entry)` 只追加 caller 已经决定应进入 History 的 entry。它不从当前 Conversation 自动补 speaker、choice、文本或其他业务语义。
 
+如果 `entry.entryId` 已存在于当前 History state，`appendHistory()` 必须在 mutation / projection 前同步失败；v0 不定义 overwrite、merge 或 duplicate-entry semantics。
+
 ### 5.3 `getHistorySnapshot()`
 
 返回当前 History 的 readonly detached snapshot；修改返回值不得改变 `RPGDialogue` 内部状态。
@@ -418,23 +422,121 @@ getHistorySnapshot() after CLOSED
 
 ## 7. Validation
 
-RPG Dialogue 必须在发布 Render state / input side effect 前验证至少：
+### 7.1 Closed public shapes
+
+除 caller-owned `data` 内部字段外，RPG Dialogue v0 的 public value objects 都是 closed shape。未知 own enumerable member 必须拒绝；实现不得静默忽略、保留或 reinterpret 未声明字段。
+
+Frozen shapes：
 
 ```text
-characterId uniqueness within current characters snapshot
-choiceId uniqueness within current Conversation
-non-empty choices contain at least one enabled choice
-history entryId uniqueness within current History state
-finite / valid JsonObject conversation.data
-finite / valid JsonObject choice.data
-finite / valid JsonObject character.data
-RenderNode key/tag/attrs legality
-Web Presentation / Render Update payload limits
+RPGDialogueOptionsV0
+required: none
+optional: cancelable
+
+ConversationRequestV0
+required: conversation, characters
+optional: none
+
+ConversationContentV0
+required: text, choices, data
+optional: speakerName
+
+ConversationChoiceV0
+required: choiceId, text, data
+optional: enabled
+
+DialogueCharacterV0
+required: characterId, active, data
+optional: displayName
+
+DialogueHistoryEntryV0
+required: entryId, text
+optional: speakerName
 ```
 
-Dialogue-owned字符串进入 `RenderNode.attrs`，因此必须满足 Render Update v1 的 attr UTF-8 上限；超限输入应在 RPG Dialogue boundary 被拒绝，而不是依赖 Renderer protocol failure。
+Optional member omitted or explicitly `undefined` is equivalent to absent。若 optional member 提供非-`undefined` 值，则必须满足其声明类型。Required member 缺失或为 `undefined` 必须拒绝；尤其 `data` 不自动 default 为 `{}`。
 
-Caller-owned Conversation / Choice / Character `data` 都受对应 RenderNode `data` 的 JSON transport limits 约束。
+`choices`、`characters` 以及 `setHistory()` 的 `entries` 必须是数组；RPG Dialogue 不接受 array-like/object coercion。`active` 必须是 boolean；`enabled` 提供时必须是 boolean；`cancelable` 提供时必须是 boolean。v0 不做 string/number/boolean coercion。
+
+### 7.2 String and identity rules
+
+所有 Dialogue-owned public string 都必须是 valid Unicode scalar sequence；v0 不做 trim、case folding、Unicode normalization 或其他隐式文本 normalization。
+
+Business identity strings：
+
+```text
+choiceId
+characterId
+entryId
+```
+
+统一要求：
+
+```text
+1..128 UTF-8 bytes
+case-sensitive exact identity
+no normalization
+```
+
+因此空 identity 非法。
+
+直接投影到 `RenderNode.attrs` 的 display strings：
+
+```text
+ConversationContentV0.speakerName
+ConversationContentV0.text
+ConversationChoiceV0.text
+DialogueCharacterV0.displayName
+DialogueHistoryEntryV0.speakerName
+DialogueHistoryEntryV0.text
+```
+
+允许空字符串；提供时必须满足 Render Update v1 attr value 的 `0..4096` UTF-8-byte limit。RPG Dialogue 必须在自身 boundary 提前拒绝超限值，而不是依赖 Renderer protocol failure。
+
+### 7.3 Collection and data rules
+
+业务 identity uniqueness：
+
+```text
+characterId unique within current characters snapshot
+choiceId unique within current Conversation
+entryId unique within current History state
+```
+
+`setHistory()` 输入自身必须满足 `entryId` uniqueness；`appendHistory()` 不得引入与当前 History 重复的 `entryId`。
+
+Choice cardinality：
+
+```text
+choices.length === 0
+→ legal text-only Conversation
+
+choices.length > 0
+→ MUST contain at least one enabled choice
+```
+
+Caller-owned `ConversationContentV0.data`、`ConversationChoiceV0.data`、`DialogueCharacterV0.data` 都是 required plain `JsonObject` transport value，并必须满足 Render Update v1 对 RenderNode `data` 的 JSON validity、depth/member/byte limits。RPG Dialogue 不检查业务 schema 意义，但必须检查其 transport legality。
+
+完整 retained projection 还必须满足 Render Update v1 的 node count、key/tag/attrs、tree depth 与 message/payload limits；超限 request / History replacement 必须在发布对应新的 Render state 前失败。
+
+### 7.4 Atomic preflight
+
+所有 request / History structural validation 必须在对应 observable mutation 前完成：
+
+```text
+invalid openConversation(request)
+→ returned Promise rejects
+→ no new active operation
+→ no new retained Conversation publication
+→ no new Dialogue input interaction
+
+invalid setHistory / appendHistory
+→ synchronous throw
+→ History unchanged
+→ retained History projection unchanged
+```
+
+实现可以私有拆分 validator，但不得通过“先部分接受再回滚”改变上述 observable behavior。
 
 ## 8. Authority and non-goals
 
@@ -459,7 +561,7 @@ Presentation Tree、WebComponent interaction 与 event vocabulary 见 [RPG Dialo
 
 ## 9. Compatibility rule
 
-本文的 public request/result/model、`cancelable` 默认值、business identity scope、lifecycle、History mutation timing、settlement/failure delivery 与 validation semantics 是 RPG Dialogue v0 compatibility surface。
+本文的 public request/result/model、`cancelable` 默认值、closed-shape/validation rules、business identity scope、lifecycle、History mutation timing、settlement/failure delivery 与 validation semantics 是 RPG Dialogue v0 compatibility surface。
 
 不兼容修改必须显式修改 contract；implementation private refactor 不得重新解释这些 observable semantics。
 
