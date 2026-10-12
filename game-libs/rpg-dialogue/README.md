@@ -16,14 +16,19 @@ dialogue.setHistory(savedHistory);
 
 const result = await dialogue.openConversation({
   conversation: {
-    speakerCharacterId: "elder",
+    speakerName: "村长",
     text: "你愿意帮助我们吗？",
     choices: [
-      { choiceId: "yes", text: "愿意" },
-      { choiceId: "no", text: "不了" },
+      { choiceId: "yes", text: "愿意", data: {} },
+      { choiceId: "no", text: "不了", data: {} },
     ],
+    data: {
+      windowStyle: "classic",
+    },
   },
-  characters,
+  // Conversation speaker 与 Character Presentation 完全解耦；
+  // 纯文本/名字牌式对话可以没有任何人物图。
+  characters: [],
 });
 
 if (result.type === "submitted" && result.choiceId === "yes") {
@@ -32,7 +37,6 @@ if (result.type === "submitted" && result.choiceId === "yes") {
 
 dialogue.appendHistory({
   entryId: "elder.question",
-  speakerCharacterId: "elder",
   speakerName: "村长",
   text: "你愿意帮助我们吗？",
 });
@@ -42,12 +46,15 @@ dialogue.close();
 
 `RPGDialogue` 不内建 Story Graph、`next`、branch、condition 或 gameplay mutation。连续对话就是普通 TypeScript control flow。
 
+Conversation、Character 与 Choice 是并列且解耦的业务/presentation input：Conversation 的 `speakerName` 只是显示文本，不引用 Character；Character 可以独立存在或完全为空；Choice 只表达当前可选项。
+
 ## Authority 边界
 
 ```text
 caller
 → Story Flow
-→ Conversation 内容
+→ Conversation / Character / Choice 内容
+→ caller-defined data schema
 → History 内容语义与 durable persistence 决策
 → gameplay side effects
 
@@ -59,9 +66,10 @@ RPGDialogue
 Business WebComponent
 → concrete DOM / Shadow DOM / Canvas / WebGL / Live2D / Spine
 → reveal / selection / scroll / animation 等 presentation-local state
+→ interpretation of caller-defined data
 ```
 
-人物的 Dialogue 语义进入 `RenderNode.attrs`；人物 `data: JsonObject` 完全由调用方及其 WebComponent 定义，并原样进入 `RenderNode.data`。
+Dialogue-owned semantic facts 进入对应 `RenderNode.attrs`。Conversation / Character / Choice 的 `data: JsonObject` 完全由调用方及其业务 WebComponent 定义，并分别原样进入对应 `RenderNode.data`；RPG Dialogue 不解释、包装或注入这些 schema。
 
 ## 规范入口
 
