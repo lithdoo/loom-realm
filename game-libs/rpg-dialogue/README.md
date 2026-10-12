@@ -1,10 +1,13 @@
 # RPG Dialogue 游戏库
 
+> 状态：**Design / Preimplementation**  
+> Current API：**Stabilizing；runtime package 尚未实现**
+
 `@loomrealm-game/rpg-dialogue` 定义可复用的 RPG 对话 interaction session。它负责当前 Conversation 的交互、人物 Presentation、session History 与 WebComponent 投影；剧情流程、分支、Quest/Inventory/Battle/Map side effect 以及 durable story state 始终由调用方拥有。
 
 ## 使用模型
 
-一个 `RPGDialogue` 实例可以顺序打开多个 Conversation；每次 `openConversation()` 只等待当前 Conversation 的用户结果：
+以下代码表示当前设计中的目标 public API；在 runtime package 落地前，它是 contract usage example，不是已交付实现：
 
 ```ts
 const dialogue = new RPGDialogue(scope, frame);
