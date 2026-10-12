@@ -134,7 +134,7 @@ READY 状态没有 active Conversation，因此不得接受 Conversation submit�
 
 ## 3. `openConversation()` request
 
-每次 request 都是当前 Conversation 的完整 retained input snapshot：
+每次 request 都完整声明当前 Conversation 的 retained input：
 
 ```text
 conversation
@@ -148,9 +148,42 @@ characters
 
 业务 identity 与 RenderNode lifetime identity 是不同概念。`characterId`、`choiceId`、`entryId` 是业务语义 identity；动态 RenderNode 的 `key` 是 RPG Dialogue 私有的 presentation-lifetime identity，遵守 Render Update v1 one-shot key 规则。具体映射见 [RPG Dialogue v0 Presentation](./RPG_DIALOGUE_V0_PRESENTATION.md)。
 
-### 3.1 Conversation content
+### 3.1 Caller input immutability
+
+v0 不要求实现对 `openConversation()`、`setHistory()` 或 `appendHistory()` 的 caller-provided object graph 做 defensive deep copy。
+
+Caller MUST 将已经交给 `RPGDialogue`、且仍可能影响当前 Dialogue state / projection 的输入对象视为 immutable：
+
+```text
+ConversationRequestV0
+ConversationContentV0
+ConversationChoiceV0[]
+DialogueCharacterV0[]
+DialogueCharacterV0.data
+DialogueHistoryEntryV0[] / DialogueHistoryEntryV0
+```
+
+Caller 在这些值仍被 `RPGDialogue` 使用期间私自修改它们属于 API misuse；v0 对这种 mutation 之后的行为不作保证。
+
+这里“`character.data` 原样进入 `RenderNode.data`”只保证业务 JSON semantic value 不被 RPG Dialogue 解释或改写，不保证保留 caller JavaScript object identity。
+
+`getHistorySnapshot()` 仍按 §5.3 明确返回 detached snapshot；它不属于上述 borrowed-input 规则。
+
+### 3.2 Conversation content
 
 `choices` 是有序数组；`choiceId` 是稳定 business identity，数组 index 不是业务 identity。`enabled` 省略时等价于 `true`。
+
+Choice cardinality 必须在创建任何新的 Conversation interaction side effect 前完成 preflight：
+
+```text
+choices.length === 0
+→ legal text-only Conversation
+
+choices.length > 0
+→ MUST contain at least one enabled choice
+```
+
+因此 v0 不允许“存在 choices 但全部 disabled”的 Conversation。违反该规则的 `openConversation()` 必须在发布新的 Render state、注册新的 active input interaction 或改变当前 operation state 前失败。
 
 `RPGDialogue` 为每次成功开始的 `openConversation()` 分配新的内部 `conversationId`。它只用于当前 interaction correlation 与 Presentation-local reset，不由 caller 提供，也不出现在 `ConversationResultV0` 中。
 
@@ -162,7 +195,7 @@ current choice selection
 conversation-local scroll
 ```
 
-### 3.2 Characters
+### 3.3 Characters
 
 `characterId` 在单次 request 内必须唯一。
 
@@ -215,7 +248,7 @@ MUST NOT derive gameplay behavior from data
 
 Result 只代表当前 Conversation 的 interaction result。收到 Result 后，caller 才决定 History、Realm State、Quest、Inventory、Battle、Map 或下一次 `openConversation()`。
 
-Presentation → Subsystem 的 `submit` payload 会携带内部 `conversationId`；`RPGDialogue` 必须验证它仍等于当前 active operation，再验证 `choiceId` 属于当前 enabled choice。该内部 correlation 不泄漏到 public Result。
+Presentation → Subsystem 的 `submit` payload 会携带内部 `conversationId`；`RPGDialogue` 必须验证它仍等于当前 active operation，再验证当前 interaction mode 与 `choiceId` legality。该内部 correlation 不泄漏到 public Result。
 
 ## 5. History
 
@@ -314,6 +347,7 @@ RPG Dialogue 必须在发布 Render state / input side effect 前验证至少：
 ```text
 characterId uniqueness
 choiceId uniqueness
+non-empty choices contain at least one enabled choice
 history entryId uniqueness
 speakerCharacterId references when required by product policy
 finite / valid JsonObject character.data
