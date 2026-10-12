@@ -21,19 +21,25 @@ test("impact routing is selective for docs, routes Battle to Browser, and fails 
     schema: false,
     pwa: false,
     battle: false,
+    dialogue: false,
     desktop: false,
     windows: false,
     docs: true,
   });
 
   const foundation = classifyPaths(["packages/foundation/src/index.ts"]);
-  for (const key of ["code", "content", "presentation", "map", "schema", "pwa", "battle", "desktop", "windows"]) {
+  for (const key of ["code", "content", "presentation", "map", "schema", "pwa", "battle", "dialogue", "desktop", "windows"]) {
     assert.equal(foundation[key], true, `foundation must affect ${key}`);
   }
 
   const battle = classifyPaths(["game-libs/battle/src/index.ts"]);
   assert.equal(battle.battle, true);
   assert.equal(requiresBrowser(battle), true);
+
+  const dialogue = classifyPaths(["game-libs/rpg-dialogue/src/index.ts"]);
+  assert.equal(dialogue.dialogue, true);
+  assert.equal(dialogue.presentation, true);
+  assert.equal(requiresBrowser(dialogue), true);
 
   const unknown = classifyPaths(["new-runtime-surface.bin"]);
   assert.equal(unknown.code, true);
@@ -55,6 +61,7 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   assert.match(ci, /if: needs\.impact\.outputs\.browser == 'true'/);
   assert.match(ci, /LOOMREALM_CHROMIUM_PATH/);
   assert.match(ci, /name: Battle browser qualification[\s\S]*run-capability\.mjs battle/);
+  assert.match(ci, /name: RPG Dialogue closed-loop qualification[\s\S]*run-capability\.mjs rpg-dialogue/);
   assert.doesNotMatch(ci.match(/  linux:[\s\S]*?\n  node20:/)?.[0] ?? "", /run-capability\.mjs battle/);
   assert.match(runner, /runWithRetry\(process\.execPath, \["--test", "game-libs\/battle\/test\/browser-e2e\.test\.mjs"\]\)/);
   assert.doesNotMatch(ci, /npm run (?:test|build):m\d+/);

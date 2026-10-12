@@ -1,7 +1,7 @@
 # RPG Dialogue 游戏库
 
-> 状态：**Design Frozen / Implementation Pending**  
-> Current API：**Frozen；runtime package 尚未实现**
+> 状态：**Design Frozen / Implemented / Qualified**
+> Current API：**Frozen；runtime package 与默认 Browser Presentation 已实现并完成 closed-loop qualification**
 
 `@loomrealm-game/rpg-dialogue` 定义可复用的 RPG 对话 interaction session。它负责当前 Conversation 的交互、人物 Presentation、session History 与 WebComponent 投影；剧情流程、分支、Quest/Inventory/Battle/Map side effect 以及 durable story state 始终由调用方拥有。
 
@@ -94,5 +94,6 @@ Dialogue-owned semantic facts 进入对应 `RenderNode.attrs`。Conversation / C
 - [RPG Dialogue v0 Presentation](./RPG_DIALOGUE_V0_PRESENTATION.md) — **Active / Normative / Frozen**；canonical Render Tree、attrs/data、WebComponent 与 interaction ABI。
 - [Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md) — LoomRealm 通用 Web Presentation contract。
 - [Render Update v1](../../doc/15-contracts/render-update-v1.md) — retained Render state 与 transient Render Event wire contract。
+- [RPG Dialogue v0 Qualification](../../doc/30-implementation/rpg-dialogue-v0-qualification.md) — executable subject、命令、PASS 结果与 Frozen contract matrix。
 
 README 只作为模块入口；observable v0 语义以上述 Frozen API / Presentation contract 为准。实现应直接以这些 contract 为依据完成 package、runtime、default Browser Presentation、tests 与 qualification，不应在实现过程中重新设计 v0 observable surface。
