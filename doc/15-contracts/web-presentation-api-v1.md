@@ -126,6 +126,8 @@ interface RendererPresentationEffect {
 
 Event MUST NOT 被加入 `RendererPresentationSource` retained view，也不得通过 `reevaluate()` drain transient queue。
 
+任何从 `RendererPresentationEffect.deliverRenderEvent(...)` 逃逸的 throw MUST 在 Renderer presentation boundary 被捕获并按 ordinary presentation-local failure 隔离；不得逃逸到 Renderer Data handler，也不得仅因该 throw 导致 Data Runtime local-fatal / terminal。
+
 ---
 
 ## 2. Receiver Independence / Ordering
@@ -520,6 +522,8 @@ currentness/arguments MAY validate synchronously
 
 Invalid reverse event still synchronously throws `TypeError` under §8.1。If valid reverse input has been successfully staged and the receiver later throws，that staged input MUST NOT rollback；it proceeds after forward stack ends under normal InputGate rules。
 
+同一次 forward callback 内成功 staged 的多个 reverse inputs MUST 保持 `emitCustomEvent()` 调用 FIFO 进入 InputGate；不得 reorder、coalesce 或 deduplicate。例如 `emitCustomEvent("a")` 后 `emitCustomEvent("b")`，callback 结束后 InputGate 必须先观察 `a`，再观察 `b`。
+
 No new wire message、Renderer Data profile version、Main Control protocol、Frame model、or Render Update version is introduced。
 
 ---
@@ -553,13 +557,14 @@ report Window-local structural failure
 
 ## 10. Ordinary Presentation Failure
 
-Receiver callback throw、resource rejection、ordinary DOM/business presentation exception：
+Receiver callback throw、presentation effect callback throw、resource rejection、ordinary DOM/business presentation exception：
 
 ```text
 presentation-local report/rejection
 no Store rollback
 no Main/Subsystem authority mutation
 no automatic Runtime/Frame failure
+no Data Runtime local-fatal / terminal solely because of presentation throw
 no automatic callback retry
 best-effort continuation where possible
 ```
@@ -570,9 +575,10 @@ best-effort continuation where possible
 receiveRenderContext
 receiveRenderData
 receiveRenderEvent
+RendererPresentationEffect.deliverRenderEvent
 ```
 
-`receiveRenderEvent` throw 不 rollback 已成功 staged 的 valid reverse custom input。
+`receiveRenderEvent` / `deliverRenderEvent` throw 不 rollback 已成功 staged 的 valid reverse custom input。
 
 Structural unregistered-tag failure遵守 §9 更强 fail-closed 规则。
 
@@ -604,6 +610,7 @@ no credential/path/private-client exposure
 
 Render Event forward seam exact type/currentness
 existing effect without deliverRenderEvent remains compatible
+throw escaping deliverRenderEvent is presentation-local and never Data local-fatal/terminal
 Renderer Store has no retained Event/history
 Subsystem emit → exact current business WC receiveRenderEvent
 Patch/Data reconcile → Event ordering
@@ -618,6 +625,7 @@ Event data detached readonly ownership
 receiveRenderEvent throw is ordinary presentation-local failure
 receiveRenderEvent throw has no Store/Runtime/Frame rollback/failure
 receiveRenderEvent→emitCustomEvent has no synchronous Subsystem reentrancy
+multiple staged reverse inputs preserve emitCustomEvent FIFO
 valid staged reverse input survives later receiver throw
 architecture regression: no ACK/result/retry/replay/second Store
 ```
@@ -640,13 +648,15 @@ architecture regression: no ACK/result/retry/replay/second Store
 10. structural ABI 不要求 mandatory business base class；
 11. 不建立 public PresentationState、second Store/topology、loader/registry、AssetManager、layout/layer framework或 global service locator；
 12. Render Event 通过 optional `RendererPresentationEffect.deliverRenderEvent(...)` forward seam，不进入 retained source；
-13. Renderer Store 不保留 Event history，不 replay Event；
-14. partial rebaseline / stale identity / detached / ended / failed presentation 的 Event 直接 drop，不 buffer；
-15. retained commit→Event→later Render Update 的 carrier causality不得被 presentation delivery 重排；
-16. delivered Event/data 与 wire object 隔离为 readonly ownership；
-17. `receiveRenderEvent` 是 synchronous fire-and-forget，callback throw 是 ordinary presentation-local failure；
-18. reverse custom event 继续走 existing InputGate，禁止同步 business reentrancy；
-19. 已成功 staged 的 reverse input 不因随后 receiver throw rollback；
-20. 不增加 Event ACK / Result / retry / persistent queue / DOM command protocol。
+13. `deliverRenderEvent(...)` 逃逸异常必须在 Renderer presentation boundary 隔离，不得导致 Data Runtime local-fatal / terminal；
+14. Renderer Store 不保留 Event history，不 replay Event；
+15. partial rebaseline / stale identity / detached / ended / failed presentation 的 Event 直接 drop，不 buffer；
+16. retained commit→Event→later Render Update 的 carrier causality不得被 presentation delivery 重排；
+17. delivered Event/data 与 wire object 隔离为 readonly ownership；
+18. `receiveRenderEvent` 是 synchronous fire-and-forget，callback throw 是 ordinary presentation-local failure；
+19. reverse custom event 继续走 existing InputGate，禁止同步 business reentrancy；
+20. 同一 forward callback 内 staged reverse inputs 保持 `emitCustomEvent()` FIFO，不重排、不 coalesce、不 deduplicate；
+21. 已成功 staged 的 reverse input 不因随后 receiver throw rollback；
+22. 不增加 Event ACK / Result / retry / persistent queue / DOM command protocol。
 
 除 correctness/security contradiction、cross-contract conflict 或 real consumer failure 外，本 design-frozen ABI 不因 speculative flexibility reopen。Render Event Delivery 在实现与 Chromium qualification 完成前保持 **NOT IMPLEMENTED / NOT QUALIFIED**。
