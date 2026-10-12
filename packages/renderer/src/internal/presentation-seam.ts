@@ -1,6 +1,6 @@
-import type { InputEventV1, RenderNodeV1 } from "@loomrealm/data";
+import type { RenderEventV1, RenderNodeV1 } from "@loomrealm/data";
 
-type JsonObject = InputEventV1["payload"];
+type JsonObject = RenderEventV1["data"];
 
 export type DeepReadonly<T> = T extends (...args: never[]) => unknown
   ? T

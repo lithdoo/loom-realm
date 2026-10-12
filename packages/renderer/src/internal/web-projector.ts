@@ -1,4 +1,4 @@
-import type { InputEventV1, RenderNodeV1 } from "@loomrealm/data";
+import type { InputEventV1, RenderEventV1, RenderNodeV1 } from "@loomrealm/data";
 import {
   createPresentationResourceClient,
   type PresentationResourceClient,
@@ -14,7 +14,7 @@ import type {
   RendererPresentationView,
 } from "./presentation-seam.js";
 
-type JsonObject = InputEventV1["payload"];
+type JsonObject = RenderEventV1["data"];
 
 export interface WebPresentationContext {
   readonly resources: PresentationResourceClient;
