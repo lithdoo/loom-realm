@@ -1,8 +1,8 @@
 # RPG Dialogue v0 Qualification
 
 > 状态：**Implemented / Qualified**
-> 日期：2026-10-12
-> Executable subject：`f7a35843dc58d0e0207f3fc8b97219ae131f1d53`
+> 日期：2026-10-13
+> Executable subject：`9cf5f92d52e365ac868d2dbb0004d765e09140ba`
 > Frozen contract deviations：**None**
 
 本记录验证 `@loomrealm-game/rpg-dialogue` 对以下 Frozen authority 的实现：
@@ -31,7 +31,7 @@ Browser installed Microsoft Edge through Playwright chromium launcher seam
 npm run test:rpg-dialogue
 PASS
   build:rpg-dialogue
-  @loomrealm-game/rpg-dialogue package tests 25/25
+  @loomrealm-game/rpg-dialogue package tests 30/30
   real Chromium closed-loop qualification 1/1
 
 npm test -w @loomrealm/subsystem -w @loomrealm/renderer
@@ -105,6 +105,8 @@ Tests：
 
 Evidence covers closed shapes、unknown members、missing required members、explicit optional `undefined`、boolean/int32 type checks、UTF-8 identity/display limits、duplicate identities、plain bounded JSON data、all-disabled Choice rejection、projection node/message preflight、sync constructor/History failure 与 async `openConversation()` rejection。
 
+Transport byte accounting 使用 `@loomrealm/wire` 的 Wire-compatible `stringifyJson()` 与 `utf8ByteLength()`，并有 regression evidence 证明 inherited `Object.prototype.toJSON` 不会改变合法性或绕过 byte limits。
+
 ## Runtime, lifecycle, History and cleanup evidence
 
 Implementation：
@@ -117,6 +119,8 @@ Tests：
 - `test/rpg-dialogue-v0/qualification.test.mjs`
 
 Evidence covers READY → ACTIVE → READY、sequential Conversation、concurrent open rejection、persistent RenderDomain/InputListener、close READY/ACTIVE、repeated close、open/mutation/snapshot after CLOSED、Frame abort `AbortError`、settle-once、partial establishment cleanup、History set/append/duplicate/restore/detached snapshot/ACTIVE rejection，以及 retained projection after settlement。
+
+Failure-path evidence additionally covers ACTIVE `RenderDomain.emit()` failure、HISTORY mode `RenderDomain.replace()` failure、settlement-time READY projection replacement failure：全部 fail closed、reject active Promise，并保证 listener/domain/unsubscribe terminal cleanup exactly once。CLOSED terminal cleanup 还释放不再需要的 retained request/history/key graph，不改变 Frozen CLOSED observable behavior。
 
 ## Render, identity, input and reverse-event evidence
 
@@ -148,17 +152,19 @@ Tests：
 
 Evidence covers all eleven canonical tag registrations、pre-registration collision failure、connected-before-attrs tolerance、conversation/character/choice `receiveRenderData`、conversation/history `receiveRenderEvent`、new-Conversation reset、enabled selection、reveal-first commit、submit payload shape、History events、pointer/touch non-business behavior、build artifacts、exports/files 与 dry-run packed contents。
 
+Browser lifecycle regression additionally proves：同一个 live Conversation element detach/reconnect 后，未完成的 typewriter reveal 会继续；`conversation-id` 与已选择 choice 不被重置；detach 期间 reveal 停止；reconnect 不产生额外 business/reverse submit。
+
 ## Frozen contract matrix
 
 - Public types/defaults/failure delivery：`src/model.ts`、`src/runtime.ts`、`test/validation.test.mjs`、`test/runtime.test.mjs`；qualified by `npm run test:rpg-dialogue`。
-- Strict validation/atomic preflight：`src/internal/validation.ts`、`test/validation.test.mjs`；qualified by package tests 25/25。
-- Persistent session lifecycle/cleanup：`src/runtime.ts`、`test/runtime.test.mjs`；qualified by package tests and closed-loop test。
+- Strict validation/atomic preflight：`src/internal/validation.ts`、`test/validation.test.mjs`；qualified by package tests 30/30，包括 Wire-compatible byte accounting 与 inherited `toJSON` regression。
+- Persistent session lifecycle/cleanup：`src/runtime.ts`、`test/runtime.test.mjs`；qualified by package tests、Render failure fail-closed/cleanup-once regressions and closed-loop test。
 - Canonical Render Tree/data ownership：`src/runtime.ts`、`test/runtime.test.mjs`；qualified by exact tree/data assertions and real WebProjector projection。
 - Dynamic one-shot identities：`src/runtime.ts`、`test/runtime.test.mjs`；qualified by Choice/Character/History/control key lifecycle assertions。
 - History retained authority：`src/runtime.ts`、`test/runtime.test.mjs`、closed-loop test；qualified by mutation/snapshot/modal ordering assertions。
 - Input/Render Event routing：`src/runtime.ts`、`test/runtime.test.mjs`、closed-loop test；qualified through both isolated mapping assertions and the real carrier path。
 - Reverse Custom Event validation：`src/runtime.ts`、`test/runtime.test.mjs`、closed-loop test；qualified for stale/malformed/wrong-mode/wrong-choice cases and valid InputGate settlement。
-- Default Browser WC local state：`browser/rpg-dialogue.browser.ts`、`test/browser.test.mjs`、closed-loop test；qualified for reveal、selection、scroll/reset and submit behavior。
+- Default Browser WC local state：`browser/rpg-dialogue.browser.ts`、`test/browser.test.mjs`、closed-loop test；qualified for reveal、selection、scroll/reset、detach/reconnect resume and submit behavior。
 - Browser artifact publication：`package.json`、`scripts/build-browser.mjs`、`test/package.test.mjs`；qualified by build、fixture load and package dry-run。
 - Framework authority preservation：no Render Update v1、Web Presentation API v1、Frame、Input protocol or Renderer authority contract source was modified；Subsystem/Renderer/Web Presentation regression suites passed.
 
@@ -169,4 +175,4 @@ Frozen contract deviations: None
 Uncompleted qualification items: None
 ```
 
-Hosted PR CI is tracked by the repository workflow and is separate from this local executable qualification record.
+Hosted PR CI is tracked by the repository workflow and is separate from this local executable qualification record. The hosted PR CI for executable subject `9cf5f92d52e365ac868d2dbb0004d765e09140ba` completed successfully, including the RPG Dialogue closed-loop qualification lane.
