@@ -1,5 +1,5 @@
 import type { RenderDomainState, RenderNode, SubsystemScope, Frame } from "@loomrealm/subsystem";
-import type { JsonObject } from "@loomrealm/wire";
+import { stringifyJson, utf8ByteLength, type JsonObject, type JsonValue } from "@loomrealm/wire";
 import {
   DEFAULT_RPG_DIALOGUE_Z_INDEX,
   type ConversationChoiceV0,
@@ -130,9 +130,7 @@ function validateJsonValue(value: unknown, depth: number, active: Set<object>, p
 }
 
 export function compactJsonBytes(value: unknown): number {
-  const text = JSON.stringify(value);
-  if (text === undefined) throw new TypeError("Value is not JSON encodable");
-  return byteLength(text);
+  return utf8ByteLength(stringifyJson(value as JsonValue));
 }
 
 function validateData(value: unknown, path: string): asserts value is JsonObject {

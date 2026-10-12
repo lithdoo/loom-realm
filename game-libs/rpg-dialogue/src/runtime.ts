@@ -574,6 +574,13 @@ export class RPGDialogue {
     this.lifecycle = "CLOSED";
     this.closeReason = cause;
     this.cleanupSession();
+    this.retainedRequest = undefined;
+    this.retainedConversationId = undefined;
+    this.characterKeys = new Map();
+    this.choiceKeys = new Map();
+    this.history = [];
+    this.historyKeys = new Map();
+    this.controlKeys = undefined;
     active?.reject(cause);
   }
 }

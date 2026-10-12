@@ -133,6 +133,70 @@ test("choice navigation skips disabled choices, new Conversation resets selectio
   assert.equal(result.sameData, true);
 });
 
+test("reconnecting the same conversation resumes reveal without resetting selection or submitting", async (t) => {
+  const page = await pageFixture(t);
+  await page.evaluate(() => {
+    const events = [];
+    const conversation = document.createElement("lr-dialogue-conversation");
+    conversation.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
+    conversation.setAttribute("conversation-id", "reconnect-c1");
+    const text = document.createElement("lr-dialogue-text");
+    text.setAttribute("text", "This deliberately long reconnect line must keep revealing after the exact same element returns to the DOM.");
+    const choices = document.createElement("lr-dialogue-choices");
+    const choice = document.createElement("lr-dialogue-choice");
+    choice.setAttribute("choice-id", "selected");
+    choice.setAttribute("text", "Selected");
+    choice.setAttribute("enabled", "true");
+    choices.append(choice);
+    conversation.append(text, choices);
+    document.body.append(conversation);
+    conversation.receiveRenderEvent({ name: "choice-next", data: {} });
+    globalThis.reconnectFixture = { conversation, choice, text, events };
+  });
+  await page.waitForFunction(() => {
+    const { conversation, text } = globalThis.reconnectFixture;
+    const revealed = text.shadowRoot.querySelector("span").textContent;
+    return revealed.length > 0 && conversation._revealComplete === false;
+  });
+  const detached = await page.evaluate(async () => {
+    const { conversation, choice, text, events } = globalThis.reconnectFixture;
+    const revealedBeforeDetach = text.shadowRoot.querySelector("span").textContent;
+    conversation.remove();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const revealedWhileDetached = text.shadowRoot.querySelector("span").textContent;
+    return {
+      revealedBeforeDetach,
+      revealedWhileDetached,
+      selectedChoiceId: conversation._selectedChoiceId,
+      selected: choice.isSelected(),
+      events: structuredClone(events),
+    };
+  });
+  assert.equal(detached.revealedWhileDetached, detached.revealedBeforeDetach);
+  assert.equal(detached.selectedChoiceId, "selected");
+  assert.equal(detached.selected, true);
+  assert.deepEqual(detached.events, []);
+
+  await page.evaluate(() => document.body.append(globalThis.reconnectFixture.conversation));
+  await page.waitForFunction(() => globalThis.reconnectFixture.conversation._revealComplete === true);
+  const reconnected = await page.evaluate(() => {
+    const { conversation, choice, text, events } = globalThis.reconnectFixture;
+    return {
+      conversationId: conversation.getAttribute("conversation-id"),
+      selectedChoiceId: conversation._selectedChoiceId,
+      selected: choice.isSelected(),
+      revealed: text.shadowRoot.querySelector("span").textContent,
+      full: text.getAttribute("text"),
+      events: structuredClone(events),
+    };
+  });
+  assert.equal(reconnected.conversationId, "reconnect-c1");
+  assert.equal(reconnected.selectedChoiceId, "selected");
+  assert.equal(reconnected.selected, true);
+  assert.equal(reconnected.revealed, reconnected.full);
+  assert.deepEqual(reconnected.events, []);
+});
+
 test("history receives transient events and pointer/touch do not create business events", async (t) => {
   const page = await pageFixture(t);
   const result = await page.evaluate(async () => {

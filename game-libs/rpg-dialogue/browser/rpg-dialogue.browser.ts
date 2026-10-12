@@ -229,6 +229,9 @@ export class DialogueConversationElement extends HTMLElement {
       } else if (this._revealComplete) {
         text.setRevealedText(full);
       }
+      if (this.isConnected && !this._revealComplete && full.length > 0 && this.revealTimer === undefined) {
+        this.startRevealTimer();
+      }
     }
     const selectedStillEnabled = this.choiceElements().some((choice) => choice.choiceId() === this._selectedChoiceId && choice.isEnabled());
     if (!selectedStillEnabled) this._selectedChoiceId = null;

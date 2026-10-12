@@ -111,6 +111,33 @@ test("caller data is required plain bounded JSON and is not coerced", async () =
   await rejectsWithoutSynchronousThrow(request({ conversationData: deep }));
 });
 
+test("transport byte validation ignores inherited toJSON without weakening limits", async () => {
+  const original = Object.getOwnPropertyDescriptor(Object.prototype, "toJSON");
+  try {
+    Object.defineProperty(Object.prototype, "toJSON", {
+      configurable: true,
+      value() { return {}; },
+    });
+    await rejectsWithoutSynchronousThrow(request({ conversationData: { value: "x".repeat(262_145) } }));
+
+    Object.defineProperty(Object.prototype, "toJSON", {
+      configurable: true,
+      value() { return { value: "x".repeat(262_145) }; },
+    });
+    const data = { value: "valid" };
+    const fixture = harness();
+    const pending = fixture.dialogue.openConversation(request({ conversationData: data }));
+    await turn();
+    assert.equal(fixture.states.length, 1);
+    assert.equal(fixture.states[0].roots[0].children[1].data, data);
+    fixture.dialogue.close();
+    await assert.rejects(pending);
+  } finally {
+    if (original === undefined) delete Object.prototype.toJSON;
+    else Object.defineProperty(Object.prototype, "toJSON", original);
+  }
+});
+
 test("History validates closed shapes, uniqueness, data types, and retained projection bounds synchronously", () => {
   const fixture = harness();
   assert.throws(() => fixture.dialogue.setHistory({ length: 0 }));

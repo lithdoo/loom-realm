@@ -257,6 +257,54 @@ test("operation establishment failures reject returned promises and clean partia
   assert.equal(domainFailure.counts().unsubscribeCount, 3);
 });
 
+function assertClosedCleanupOnce(fixture) {
+  assert.deepEqual(fixture.counts(), {
+    listenerCreates: 1,
+    listenerCloses: 1,
+    domainCreates: 1,
+    domainCloses: 1,
+    unsubscribeCount: 3,
+  });
+  fixture.dialogue.close();
+  fixture.frameController.abort();
+  fixture.scopeController.abort();
+  assert.deepEqual(fixture.counts(), {
+    listenerCreates: 1,
+    listenerCloses: 1,
+    domainCreates: 1,
+    domainCloses: 1,
+    unsubscribeCount: 3,
+  });
+}
+
+test("ACTIVE domain emit failure rejects and closes every session resource once", async () => {
+  const cause = new Error("emit failed");
+  const fixture = harness({ domainEmitError: cause });
+  const { pending } = await openStarted(fixture, request());
+  fixture.emit("keyboard.event", { action: "down", code: "Enter", repeat: false });
+  await assert.rejects(pending, (error) => error === cause);
+  assertClosedCleanupOnce(fixture);
+});
+
+test("HISTORY mode replacement failure rejects and fails closed", async () => {
+  const cause = new Error("history replace failed");
+  const fixture = harness({ domainReplaceError: cause });
+  fixture.dialogue.setHistory([history("past")]);
+  const { pending } = await openStarted(fixture, request());
+  fixture.emit("keyboard.event", { action: "down", code: "Tab", repeat: false });
+  await assert.rejects(pending, (error) => error === cause);
+  assertClosedCleanupOnce(fixture);
+});
+
+test("READY retained projection replacement failure rejects instead of resolving settlement", async () => {
+  const cause = new Error("settlement replace failed");
+  const fixture = harness({ domainReplaceError: cause });
+  const { pending } = await openStarted(fixture, request());
+  fixture.submit(conversationId(fixture));
+  await assert.rejects(pending, (error) => error === cause);
+  assertClosedCleanupOnce(fixture);
+});
+
 test("settle-once ignores repeated reverse submit and repeated physical commit", async () => {
   const fixture = harness();
   const { pending } = await openStarted(fixture, request());
