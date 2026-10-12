@@ -9,7 +9,7 @@ Main current Renderer / DataAuthority
 → Renderer ControlHolder
 → per-subsystem/generation Data slot
 → Input gate + Render Store + Viewport publisher
-→ presentation reevaluation
+→ retained presentation reevaluation + transient Event forward seam
 → Web Projector
 → business-owned Custom Elements
 ```
@@ -25,6 +25,8 @@ Renderer 拥有 **readonly/current presentation replica** 与受控 input produc
 - current `renderer-data/1` 包含 Connection、Input、Render、Viewport 四子项；历史三子项 baseline 不可与 current binary/status 混用；
 - Window size 由 trusted product 通过 current Data capability 进入 bounded Viewport publisher，不修改 Main InputTarget，也不创建第二条 Data connection；
 - same Session/generation/render identity 保留既有 HTMLElement；换 logical participant 时退役旧 element；Data-only reconnect 保持 Renderer identity，并在完整 baseline 后恢复。
+- `render.event` 只经过 Store applicability/currentness gate，不进入 Store snapshot/history；eligible Event 在同一 current carrier handler 中同步送达 exact live `receiveRenderEvent`，保持 retained commit→Event→later update 顺序；
+- receiver 内 reverse custom input 在 forward callback 期间本地 FIFO staging，callback 结束后才进入既有 InputGate；presentation throw 不退休 Data carrier，也不回滚 Store。
 
 ## Validation
 

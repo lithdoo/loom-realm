@@ -20,6 +20,64 @@ Node 20.20.2  PASS  88.3s
 Node 24.20.0  PASS  82.3s
 ```
 
+## 2026-10-12 Render Event Delivery delta
+
+Web Presentation Render Event Delivery delta 的历史 M13 evidence 没有自动迁移；本节记录新的 exact qualification subject：
+
+```text
+Executable / qualification-input subject
+21438a8d7b0ccbcc183403247085ea678e2f2da1
+
+Environment
+Windows NT 10.0.26300.0
+Node.js v24.19.0
+npm 11.17.0
+Microsoft Edge / Chromium 154.0.4258.62
+Playwright 1.63.0
+```
+
+在该 subject 上实际执行并 PASS：
+
+```text
+npm test -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer
+npm run test:m11:qualification
+npm run test:m13:pr
+npm run test:regression
+```
+
+`test:m13:pr` 包含 desktop stack build、真实 Chromium qualification、architecture boundary 与 Renderer pack surface。新增真实 Chromium 场景从 `RenderManager` / `RenderDomain.emit(...)` 出发，经真实 Data carrier、Renderer Control/Store、`WebProjector` 到 exact Custom Element `receiveRenderEvent(...)`，并证明：
+
+- retained data reconcile 先于 causally following Event；Event callback 完成先于 later target removal；同 target Event FIFO；
+- receiver 内多个 `emitCustomEvent(...)` 在 callback 期间不会同步进入 Subsystem，调用时 payload 已 detached/deep-frozen，并在 256 项私有上限内按 FIFO 暂存，之后经 InputGate 发布；已 staged input 不因 receiver throw 回滚；
+- effect/receiver throw 不退休 Data Runtime，later Event 仍可投递；
+- partial rebaseline、old generation 与 structurally failed Window 均 drop 且不 replay；
+- delivered business Event 只含 `{ name, data }`，与 wire object 分离且 deep-frozen；
+- Store qualification snapshot 不再含 `events`，architecture regression 明确拒绝 retained event history、second Store、ACK/Result/retry、新 wire kind/profile 或 DOM command protocol。
+
+Contract deviations：none。
+
+### 2026-10-12 non-functional type-provenance follow-up
+
+上述 `21438a8d7b0ccbcc183403247085ea678e2f2da1` 继续作为原始 Render Event Delivery executable qualification subject，不被后续提交冒充或覆盖。后续代码质量审查只把 forward Render Event 的 module-local `JsonObject` 来源从等价的 `InputEventV1["payload"]` 改为语义直接的 `RenderEventV1["data"]`；没有改变 public named exports、structural ABI shape、runtime JavaScript、package dependency 或任何 Frozen observable semantics。
+
+该 package declaration artifact 的 follow-up qualification subject 为：
+
+```text
+aa7930470f72cff02fa0c6099877cbd671e46ea1
+```
+
+在该 subject 上实际执行并 PASS：
+
+```text
+npm test -w @loomrealm/renderer
+npm run test:m13:pr
+npm run test:regression
+npm run docs:check-links
+npm run docs:build
+```
+
+`test:m13:pr` 重新生成并检查 TypeScript declarations、执行 Renderer package dry-run pack、architecture boundary 与真实 Chromium qualification。结论：历史 runtime evidence 仍适用，变更后的 declaration/package surface 已重新验证，不存在 qualification staleness。
+
 ## Implemented production chain
 
 ```text

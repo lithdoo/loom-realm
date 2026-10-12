@@ -18,7 +18,6 @@ const MAX_ATTRS = 256;
 const MAX_CONTAINER_MEMBERS = 16_384;
 const MAX_DATA_BYTES = 262_144;
 const MAX_DATA_DEPTH = 32;
-const MAX_EVENTS = 1_024;
 
 interface MutableNode {
   key: string;
@@ -211,7 +210,6 @@ export interface RenderStoreSnapshot {
   readonly currentCarrier: boolean;
   readonly registrySeen: boolean;
   readonly stalePresentationCache: boolean;
-  readonly events: readonly RenderEventV1[];
   readonly logicalOrder: readonly string[];
   readonly domains: readonly {
     readonly domainId: string;
@@ -257,7 +255,6 @@ export class RendererRenderStore {
   private liveDomainIds = new Set<string>();
   private readonly retiredDomainIds = new Set<string>();
   private readonly identities = new Map<string, DomainIdentity>();
-  private events: RenderEventV1[] = [];
 
   constructor(private readonly generation: number) {}
 
@@ -265,7 +262,6 @@ export class RendererRenderStore {
     this.currentCarrier = true;
     this.registrySeen = false;
     this.stalePresentationCache = false;
-    this.events = [];
     const next = new Map<string, DomainReplica>();
     for (const domainId of this.liveDomainIds) {
       const old = this.domains.get(domainId);
@@ -285,7 +281,6 @@ export class RendererRenderStore {
     this.currentCarrier = false;
     this.registrySeen = false;
     this.stalePresentationCache = true;
-    this.events = [];
   }
 
   onDomains(message: RenderDomainsV1): DataInboundDisposition {
@@ -401,13 +396,15 @@ export class RendererRenderStore {
     }
   }
 
-  onEvent(message: RenderEventV1): DataInboundDisposition {
+  onEvent(
+    message: RenderEventV1,
+    onApplicable?: (message: RenderEventV1) => void,
+  ): DataInboundDisposition {
     if (!this.currentCarrier) return accepted;
     const domain = this.domains.get(message.domainId);
     if (!this.registrySeen || domain === undefined || !domain.baselined) return accepted;
     if (!this.identities.get(message.domainId)?.liveTags.has(message.targetKey)) return accepted;
-    if (this.events.length >= MAX_EVENTS) this.events.shift();
-    this.events.push(Object.freeze({ ...message, data: freezeJson(cloneJson(message.data)) }));
+    onApplicable?.(message);
     return accepted;
   }
 
@@ -440,7 +437,6 @@ export class RendererRenderStore {
       currentCarrier: this.currentCarrier,
       registrySeen: this.registrySeen,
       stalePresentationCache: this.stalePresentationCache,
-      events: Object.freeze([...this.events]),
       logicalOrder: Object.freeze(logicalOrder),
       domains: Object.freeze(domains),
     });

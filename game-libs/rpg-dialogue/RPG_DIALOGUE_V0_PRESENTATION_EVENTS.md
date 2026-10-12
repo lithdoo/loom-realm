@@ -3,7 +3,7 @@
 > 状态：**DRAFT / PREIMPLEMENTATION**  
 > 层级：`game-libs/rpg-dialogue` 业务层 Presentation Event / Interaction ABI  
 > 依赖：[`RPG_DIALOGUE_V0_PRESENTATION.md`](./RPG_DIALOGUE_V0_PRESENTATION.md)  
-> 架构依赖：[`Web Presentation Render Event Delivery Delta`](../../doc/15-contracts/web-presentation-render-event-delta.md)
+> 架构依赖：[`Web Presentation Render Event Delivery Delta`](../../doc/15-contracts/web-presentation-render-event-delta.md)（**IMPLEMENTED / QUALIFIED**）
 
 本文定义 RPG Dialogue 在 Subsystem 与业务 WebComponent 之间的双向交互协议，并冻结 v0 的 **Node Event Contract**：哪些 canonical RenderNode 可以接收哪些 `render.event`，哪些节点可以通过 `emitCustomEvent(...)` 向 Subsystem 回传业务交互结果。
 

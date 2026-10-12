@@ -229,8 +229,8 @@ export const senderRoleEvidence = new Map([
   }],
   ["reconnect-does-not-replay-event", async () => {
     const trace = await realVertical();
-    assert.equal(trace.updated.events.length, 1);
-    assert.equal(trace.rebaselined.events.length, 0);
+    assert.deepEqual(trace.deliveredEventsAtUpdate, ["pulse"]);
+    assert.deepEqual(trace.deliveredEventsAtRebaseline, ["pulse"]);
   }],
   ["reconnect-does-not-fail-runtime", async () => {
     const trace = await realVertical();
@@ -272,7 +272,7 @@ export const receiverRoleEvidence = new Map([
     const store = newStore(1, ["d2"]); assertAccepted(store.onSnapshot(snapshot("d2", 1, [node("durable")]))); assert.equal(committedDomain(store, "d2").roots[0].key, "durable");
   }],
   ["pending-domain-messages-discarded-after-removal", () => {
-    const store = baseline(); assertAccepted(store.onDomains(domains())); assertAccepted(store.onEvent(event())); assert.equal(store.snapshotForQualification().events.length, 0);
+    const store = baseline(); const delivered = []; assertAccepted(store.onDomains(domains())); assertAccepted(store.onEvent(event(), (value) => delivered.push(value))); assert.equal(delivered.length, 0);
   }],
   ["registry-removal-retires-authoritative-replica", async () => {
     const trace = await realVertical();
@@ -283,13 +283,13 @@ export const receiverRoleEvidence = new Map([
     assert.equal((await terminalForRaw(JSON.stringify(snapshot("d1", Number.MAX_SAFE_INTEGER + 1, [])))).kind, "protocol-fatal");
   }],
   ["event-loss-not-replayed", () => {
-    const old = baseline(); assertAccepted(old.onEvent(event("root", { name: "old" }))); const fresh = receiverFreshBaseline([domains("d1"), snapshot()]); assert.equal(fresh.snapshotForQualification().events.length, 0);
+    const old = baseline(); const delivered = []; assertAccepted(old.onEvent(event("root", { name: "old" }), (value) => delivered.push(value))); const fresh = receiverFreshBaseline([domains("d1"), snapshot()]); assert.equal(delivered.length, 1); assert.equal("events" in fresh.snapshotForQualification(), false);
   }],
   ["event-overflow-does-not-block-authoritative-progress", () => {
     const store = baseline(); for (let i = 0; i < 1_500; i += 1) assertAccepted(store.onEvent(event("root", { data: { i } }))); assertAccepted(store.onSnapshot(snapshot("d1", 2, [node("latest")]))); assert.equal(committedDomain(store).roots[0].key, "latest");
   }],
   ["retained-event-blocks-authoritative-coalesce-across-barrier", () => {
-    const store = baseline(); assertAccepted(store.onSnapshot(snapshot("d1", 2, [node("before")]))); assertAccepted(store.onEvent(event("before"))); assertAccepted(store.onSnapshot(snapshot("d1", 3, [node("after")]))); assert.deepEqual(store.snapshotForQualification().events.map(({ targetKey }) => targetKey), ["before"]);
+    const store = baseline(); const delivered = []; assertAccepted(store.onSnapshot(snapshot("d1", 2, [node("before")]))); assertAccepted(store.onEvent(event("before"), (value) => delivered.push(value))); assertAccepted(store.onSnapshot(snapshot("d1", 3, [node("after")]))); assert.deepEqual(delivered.map(({ targetKey }) => targetKey), ["before"]);
   }],
   ["dropped-unemitted-event-releases-coalescing-barrier", () => {
     const store = baseline(); assertAccepted(store.onSnapshot(snapshot("d1", 2, [node("latest")]))); assert.equal(committedDomain(store).roots[0].key, "latest");
@@ -307,7 +307,7 @@ export const receiverRoleEvidence = new Map([
     const store = baseline(); store.retireCarrier(); store.beginCarrier(); assertAccepted(store.onDomains(domains("d1"))); assertAccepted(store.onSnapshot(snapshot())); assert.equal(committedDomain(store).domainId, "d1");
   }],
   ["reconnect-does-not-replay-event", () => {
-    const store = baseline(); assertAccepted(store.onEvent(event())); store.retireCarrier(); store.beginCarrier(); assertAccepted(store.onDomains(domains("d1"))); assertAccepted(store.onSnapshot(snapshot())); assert.equal(store.snapshotForQualification().events.length, 0);
+    const store = baseline(); const delivered = []; assertAccepted(store.onEvent(event(), (value) => delivered.push(value))); store.retireCarrier(); store.beginCarrier(); assertAccepted(store.onDomains(domains("d1"))); assertAccepted(store.onSnapshot(snapshot())); assert.equal(delivered.length, 1); assert.equal("events" in store.snapshotForQualification(), false);
   }],
   ["old-store-becomes-stale-presentation-cache", async () => {
     const trace = await realVertical();

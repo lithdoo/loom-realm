@@ -187,4 +187,4 @@ Choices 不包含 retained `selected`；初始不默认选择任何 option。
 
 History modal 的 open/close 属于 Dialogue / Presentation interaction state；History entries 由 `RPGDialogue` session 持有并由 caller 显式修改。
 
-`receiveRenderEvent()` 的 Web Presentation 投递设计现已 **Design Frozen**，但仍为 **NOT IMPLEMENTED / NOT QUALIFIED**。Dialogue 可以依赖该 frozen contract 进行实现规划，但在 Renderer implementation + Chromium qualification 完成前不得把该能力声明为已落地。
+`receiveRenderEvent()` 的 Web Presentation 投递现已 **Design Frozen / IMPLEMENTED / QUALIFIED**（exact executable subject `21438a8d7b0ccbcc183403247085ea678e2f2da1`）。RPG Dialogue 可以把该 Renderer 能力作为已落地架构依赖；这不改变 `rpg-dialogue` 自身仍为 **DESIGN / PREIMPLEMENTATION**。

@@ -8,6 +8,7 @@ import { createHostraRuntimeHosting as createProductionHostraRuntimeHosting, pre
 import { runMain } from "@loomrealm/main";
 import { createRealmStateAuthority, prepareRealmStateDefinition } from "@loomrealm/realm-state";
 import { createRendererControlHolder } from "@loomrealm/renderer";
+import { attachRendererPresentation } from "@loomrealm/renderer/web-presentation";
 import { inspectRendererRenderForQualification } from "../../../../packages/renderer/dist/internal/render-qualification.js";
 import { DesktopDataConnectionBroker } from "../../dist/index.js";
 
@@ -124,7 +125,11 @@ export async function runM11RenderVertical() {
           },
         });
         const holder = createRendererControlHolder(binding);
-        const host = { holder, outcome: null, failure: null };
+        const host = { holder, outcome: null, failure: null, deliveredEvents: [] };
+        host.detachPresentation = attachRendererPresentation(holder, {
+          reevaluate() {},
+          deliverRenderEvent(event) { host.deliveredEvents.push(event.name); },
+        });
         void holder.connect({ carrier: pair.right, rendererControlToken: token }).then(
           (outcome) => { host.outcome = outcome; },
           (failure) => { host.failure = failure; },
@@ -165,8 +170,9 @@ export async function runM11RenderVertical() {
 
     await writeFile(updatePath, "update");
     await waitFor(() => inspect()?.domains[0]?.roots[0]?.attrs.phase === "updated", "authoritative Render update");
-    await waitFor(() => inspect()?.events.length === 1, "dependent Render Event");
+    await waitFor(() => rendererHosts[0].deliveredEvents.length === 1, "dependent Render Event");
     const updated = structuredClone(inspect());
+    const deliveredEventsAtUpdate = [...rendererHosts[0].deliveredEvents];
 
     await acquiredCarriers[0].close();
     await waitFor(() => acquiredCarriers.length === 2, "replacement Data carrier acquisition");
@@ -177,6 +183,7 @@ export async function runM11RenderVertical() {
     releaseSecondCarrier.resolve();
     await waitFor(() => inspect()?.currentCarrier === true && inspect()?.domains[0]?.baselined, "fresh Registry and Snapshot baseline");
     const rebaselined = structuredClone(inspect());
+    const deliveredEventsAtRebaseline = [...rendererHosts[0].deliveredEvents];
     await writeFile(reconnectPath, "reconnect");
     await waitFor(() => inspect()?.domains[0]?.roots[0]?.attrs.phase === "reconnected", "same Frame post-reconnect publication");
     const reconnected = structuredClone(inspect());
@@ -190,6 +197,7 @@ export async function runM11RenderVertical() {
 
     return Object.freeze({
       initial, updated, retired, rebaselined, reconnected, removed,
+      deliveredEventsAtUpdate, deliveredEventsAtRebaseline,
       activeDuringReconnect, activeAfterReconnect,
       carrierCount: acquiredCarriers.length,
       rendererFailure: rendererHosts[0].failure,

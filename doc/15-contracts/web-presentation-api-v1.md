@@ -4,7 +4,7 @@
 > 状态：Active / Normative / Frozen  
 > 稳定程度：**Design Frozen**  
 > 历史 M13 Base：Implemented / Qualified  
-> Render Event Delivery Delta：**NOT IMPLEMENTED / NOT QUALIFIED**  
+> Render Event Delivery Delta：**IMPLEMENTED / QUALIFIED**
 > Milestone：M13 Web Presentation  
 > 依赖：[Render Update v1](./render-update-v1.md)、[Content API v1](./content-api-v1.md)、[渲染系统](../10-architecture/rendering-system.md)  
 > 增量：[Web Presentation Render Event Delivery Delta](./web-presentation-render-event-delta.md)  
@@ -659,4 +659,4 @@ architecture regression: no ACK/result/retry/replay/second Store
 21. 已成功 staged 的 reverse input 不因随后 receiver throw rollback；
 22. 不增加 Event ACK / Result / retry / persistent queue / DOM command protocol。
 
-除 correctness/security contradiction、cross-contract conflict 或 real consumer failure 外，本 design-frozen ABI 不因 speculative flexibility reopen。Render Event Delivery 在实现与 Chromium qualification 完成前保持 **NOT IMPLEMENTED / NOT QUALIFIED**。
+除 correctness/security contradiction、cross-contract conflict 或 real consumer failure 外，本 design-frozen ABI 不因 speculative flexibility reopen。Render Event Delivery 已在 exact executable subject `21438a8d7b0ccbcc183403247085ea678e2f2da1` 上完成实现与 Chromium qualification；后续 executable 或 qualification-input 变化仍按 subject staleness 规则重新判断。

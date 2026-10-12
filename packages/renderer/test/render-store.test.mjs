@@ -135,14 +135,17 @@ test("node and Domain one-shot identity survives same-generation carrier replace
 
 test("well-formed stale Events are accepted and dropped", () => {
   const store = new RendererRenderStore(1);
+  const delivered = [];
+  const observe = (event) => delivered.push(event);
   store.beginCarrier();
-  assert.deepEqual(store.onEvent({ type: "render.event", domainId: "missing", targetKey: "x", name: "hit", data: {} }), { kind: "accepted" });
+  assert.deepEqual(store.onEvent({ type: "render.event", domainId: "missing", targetKey: "x", name: "hit", data: {} }, observe), { kind: "accepted" });
   store.onDomains(domains("d1"));
-  store.onEvent({ type: "render.event", domainId: "d1", targetKey: "x", name: "hit", data: {} });
+  store.onEvent({ type: "render.event", domainId: "d1", targetKey: "x", name: "hit", data: {} }, observe);
   store.onSnapshot(snapshot("d1", 1, [node("x")]));
-  store.onEvent({ type: "render.event", domainId: "d1", targetKey: "stale", name: "hit", data: {} });
-  store.onEvent({ type: "render.event", domainId: "d1", targetKey: "x", name: "hit", data: { n: 1 } });
-  assert.equal(store.snapshotForQualification().events.length, 1);
+  store.onEvent({ type: "render.event", domainId: "d1", targetKey: "stale", name: "hit", data: {} }, observe);
+  store.onEvent({ type: "render.event", domainId: "d1", targetKey: "x", name: "hit", data: { n: 1 } }, observe);
+  assert.deepEqual(delivered.map(({ name, data }) => ({ name, data })), [{ name: "hit", data: { n: 1 } }]);
+  assert.equal("events" in store.snapshotForQualification(), false);
 });
 
 test("continuity violations are protocol-fatal", () => {

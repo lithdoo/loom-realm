@@ -386,7 +386,7 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
   const eventPeer = peers.find((entry) => entry.subsystemKey === "B");
   await eventPeer.peer.render.sendEvent({ type: "render.event", domainId: "d", targetKey: "same", name: "ignored", data: {} });
   await turn();
-  assert.equal(presentationNotifications, notificationsBeforeEvent, "RenderEvent does not trigger presentation");
+  assert.equal(presentationNotifications, notificationsBeforeEvent, "effect without deliverRenderEvent drops without retained reevaluation");
 
   const a = peers.find((entry) => entry.subsystemKey === "A");
   await within(a.peer.close(), "retire A Data peer");
@@ -616,6 +616,229 @@ test("real Chromium WebPresentationContext emits current node events through Use
     frameId === "browser-frame" &&
     activationId === "browser-activation" &&
     channel === "x.loomrealm.web-presentation.event"));
+});
+
+test("real Chromium qualifies RenderDomain Event delivery, ordering, currentness, failure isolation, and staged reverse input", { timeout: CHROMIUM_TEST_TIMEOUT_MS }, async (t) => {
+  const fixture = await fixtureServer(t);
+  const page = await browserPage(t);
+  await within(page.goto(fixture.origin), "render event qualification navigation");
+
+  const result = await within(page.evaluate(async () => {
+    const [foundation, data, rendererControl, renderer, presentation, subsystem] = await Promise.all([
+      import("@loomrealm/foundation/testing"),
+      import("@loomrealm/data"),
+      import("@loomrealm/renderer-control"),
+      import("@loomrealm/renderer"),
+      import("/packages/renderer/dist/web-presentation.js"),
+      import("/packages/subsystem/dist/internal/render-manager.js"),
+    ]);
+    const waitForBrowser = async (predicate, label) => {
+      const deadline = performance.now() + 5_000;
+      while (performance.now() < deadline) {
+        if (predicate()) return;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      throw new Error(`Timed out waiting for ${label}`);
+    };
+
+    const log = [];
+    const reverseInputs = [];
+    const presentationFailures = [];
+    let inForwardReceiver = false;
+    let mutationTypeError = false;
+    let exactBusinessShape = false;
+    class RenderEventElement extends HTMLElement {
+      receiveRenderContext(context) { this.presentationContext = context; }
+      receiveRenderData(value) { this.value = value.value; log.push(`data:${value.value}`); }
+      receiveRenderEvent(event) {
+        inForwardReceiver = true;
+        try {
+          exactBusinessShape = Object.keys(event).sort().join(",") === "data,name";
+          log.push(`event:${event.name}:start:${this.isConnected}`);
+          if (event.name === "after-update") {
+            try { event.data.nested.value = 99; } catch (error) { mutationTypeError = error instanceof TypeError; }
+          }
+          if (event.name === "reverse") {
+            this.presentationContext.emitCustomEvent("reverse-a", { order: 1 });
+            this.presentationContext.emitCustomEvent("reverse-b", { order: 2 });
+            log.push(`reverse-staged:${reverseInputs.length}`);
+          }
+          if (event.name === "reverse-throw") {
+            this.presentationContext.emitCustomEvent("survives-throw", { order: 3 });
+            throw new Error("receiver presentation failure");
+          }
+          log.push(`event:${event.name}:end`);
+        } finally {
+          inForwardReceiver = false;
+        }
+      }
+      disconnectedCallback() { log.push("disconnected"); }
+    }
+    customElements.define("lr-render-event-qualified", RenderEventElement);
+
+    const peers = [];
+    const holder = renderer.createRendererControlHolder({
+      async acquire(subsystemKey, generation, dataProfile) {
+        const pair = foundation.createMemoryCarrierPair();
+        const peer = data.createSubsystemDataPeer({
+          binding: { carrier: pair.left, subsystemKey, generation, dataProfile },
+          handlers: {
+            onInputState: () => ({ kind: "accepted" }),
+            onInputEvent(message) {
+              reverseInputs.push({ message, synchronous: inForwardReceiver });
+              return { kind: "accepted" };
+            },
+            onInputReset: () => ({ kind: "accepted" }),
+            onViewportState: () => ({ kind: "accepted" }),
+          },
+        });
+        peers.push(peer);
+        return pair.right;
+      },
+    });
+    const projector = new presentation.WebProjector({
+      document,
+      resourceClient: { async resource() { throw new Error("unused"); } },
+      reportFailure(cause) { presentationFailures.push(String(cause)); },
+    });
+    const detach = presentation.attachRendererPresentation(holder, projector);
+    const authority = (generation) => ({
+      subsystemKey: "game",
+      generation,
+      dataProfile: data.RENDERER_DATA_PROFILE_V1,
+    });
+    const controlSnapshot = (revision, generation) => ({
+      sessionId: "event-session",
+      revision,
+      runtimes: [{ subsystemKey: "game", state: "ready" }],
+      stack: [{ frameId: "frame", subsystemKey: "game", lifecycle: "active", activationId: "activation" }],
+      inputTarget: { subsystemKey: "game", frameId: "frame", activationId: "activation" },
+      dataAuthorities: [authority(generation)],
+    });
+    const controlPair = foundation.createMemoryCarrierPair();
+    const publisher = rendererControl.createMainRendererControlPeer({
+      carrier: controlPair.left,
+      acceptHello() {
+        const initial = controlSnapshot(1, 1);
+        return { kind: "accepted", snapshot: initial, preparedHelloText: rendererControl.prepareRendererHelloResultV1(initial) };
+      },
+    });
+    await holder.connect({ carrier: controlPair.right, rendererControlToken: "event-token" });
+    await waitForBrowser(() => peers.length === 1, "generation 1 Data peer");
+    await peers[0].input.sendInterest({
+      type: "input.interest",
+      frames: [{ frameId: "frame", channels: [data.WEB_PRESENTATION_EVENT_CHANNEL_V1] }],
+    });
+
+    const renderState = (value, roots = null) => ({
+      zIndex: 0,
+      roots: roots ?? [{
+        key: "target",
+        tag: "lr-render-event-qualified",
+        attrs: {},
+        data: { value },
+        children: [],
+      }],
+    });
+    const manager = new subsystem.RenderManager();
+    const domain = manager.createDomain(renderState(1));
+    manager.setDataPeer(peers[0]);
+    await waitForBrowser(() => document.querySelector("lr-render-event-qualified")?.value === 1, "initial retained projection");
+
+    domain.replace(renderState(2));
+    domain.emit({ targetKey: "target", name: "after-update", data: { nested: { value: 1 } } });
+    await waitForBrowser(() => log.some((entry) => entry.startsWith("event:after-update")), "RenderDomain event after retained update");
+    const dataBeforeEvent = log.indexOf("data:2") < log.indexOf("event:after-update:start:true");
+
+    domain.emit({ targetKey: "target", name: "A", data: {} });
+    domain.emit({ targetKey: "target", name: "B", data: {} });
+    await waitForBrowser(() => log.includes("event:B:end"), "same target FIFO");
+    const fifo = log.filter((entry) => /^event:[AB]:(start|end)/.test(entry));
+
+    domain.emit({ targetKey: "target", name: "reverse", data: {} });
+    await waitForBrowser(() => reverseInputs.length === 2, "reverse input FIFO");
+    domain.emit({ targetKey: "target", name: "reverse-throw", data: {} });
+    domain.emit({ targetKey: "target", name: "after-throw", data: {} });
+    await waitForBrowser(() => reverseInputs.length === 3 && log.includes("event:after-throw:end"), "throw isolation and staged input survival");
+
+    domain.emit({ targetKey: "target", name: "before-remove", data: {} });
+    domain.replace(renderState(3, []));
+    await waitForBrowser(() => log.includes("disconnected"), "later target removal");
+    const beforeRemoveEnd = log.indexOf("event:before-remove:end");
+    const disconnected = log.indexOf("disconnected");
+
+    const deliveredBeforeGenerationChange = log.filter((entry) => entry.startsWith("event:") && entry.includes(":start:")).length;
+    publisher.publish(controlSnapshot(2, 2));
+    await waitForBrowser(() => peers.length === 2, "generation 2 Data peer");
+    try {
+      await peers[0].render.sendEvent({ type: "render.event", domainId: "d1", targetKey: "target", name: "old-generation", data: {} });
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const oldGenerationDropped = log.filter((entry) => entry.startsWith("event:") && entry.includes(":start:")).length === deliveredBeforeGenerationChange;
+
+    await peers[1].input.sendInterest({
+      type: "input.interest",
+      frames: [{ frameId: "frame", channels: [data.WEB_PRESENTATION_EVENT_CHANNEL_V1] }],
+    });
+    const node = (value) => ({ key: "target", tag: "lr-render-event-qualified", attrs: {}, data: { value }, children: [] });
+    await peers[1].render.sendDomains({ type: "render.domains", domains: ["a", "b"] });
+    await peers[1].render.sendSnapshot({ type: "render.snapshot", domainId: "a", revision: 1, zIndex: 0, roots: [node(20)] });
+    const beforePartial = log.length;
+    await peers[1].render.sendEvent({ type: "render.event", domainId: "a", targetKey: "target", name: "partial", data: {} });
+    await peers[1].render.sendSnapshot({ type: "render.snapshot", domainId: "b", revision: 1, zIndex: 1, roots: [] });
+    await waitForBrowser(() => document.querySelector("lr-render-event-qualified")?.value === 20, "complete generation 2 baseline");
+    const partialDroppedWithoutReplay = !log.slice(beforePartial).some((entry) => entry.startsWith("event:partial"));
+    await peers[1].render.sendEvent({ type: "render.event", domainId: "a", targetKey: "target", name: "fresh-generation", data: {} });
+    await waitForBrowser(() => log.includes("event:fresh-generation:end"), "fresh generation event");
+
+    const eventsBeforeFailure = log.filter((entry) => entry.startsWith("event:") && entry.includes(":start:")).length;
+    await peers[1].render.sendSnapshot({
+      type: "render.snapshot",
+      domainId: "a",
+      revision: 2,
+      zIndex: 0,
+      roots: [node(21), { key: "bad", tag: "lr-not-registered-event", attrs: {}, data: {}, children: [] }],
+    });
+    await peers[1].render.sendEvent({ type: "render.event", domainId: "a", targetKey: "target", name: "failed-window", data: {} });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const failedWindowDropped = projector.structuralFailed() &&
+      log.filter((entry) => entry.startsWith("event:") && entry.includes(":start:")).length === eventsBeforeFailure;
+
+    detach();
+    projector.teardown();
+    publisher.retire();
+    manager.setDataPeer(null);
+    await Promise.allSettled(peers.map((peer) => peer.close()));
+    return {
+      dataBeforeEvent,
+      fifo,
+      exactBusinessShape,
+      mutationTypeError,
+      reverseNames: reverseInputs.map(({ message }) => message.payload.name),
+      reverseSynchronous: reverseInputs.map(({ synchronous }) => synchronous),
+      reverseStagedCount: log.find((entry) => entry.startsWith("reverse-staged:")),
+      beforeRemoveOrder: beforeRemoveEnd >= 0 && beforeRemoveEnd < disconnected,
+      oldGenerationDropped,
+      partialDroppedWithoutReplay,
+      failedWindowDropped,
+      presentationFailures: presentationFailures.length,
+    };
+  }), "browser Render Event delivery qualification", 20_000);
+
+  assert.deepEqual(result, {
+    dataBeforeEvent: true,
+    fifo: ["event:A:start:true", "event:A:end", "event:B:start:true", "event:B:end"],
+    exactBusinessShape: true,
+    mutationTypeError: true,
+    reverseNames: ["reverse-a", "reverse-b", "survives-throw"],
+    reverseSynchronous: [false, false, false],
+    reverseStagedCount: "reverse-staged:0",
+    beforeRemoveOrder: true,
+    oldGenerationDropped: true,
+    partialDroppedWithoutReplay: true,
+    failedWindowDropped: true,
+    presentationFailures: 2,
+  });
 });
 
 test("real Chromium proves structural data delivery and independent optional receivers", { timeout: CHROMIUM_TEST_TIMEOUT_MS }, async (t) => {
