@@ -1,8 +1,8 @@
 # Web Presentation Render Event Delivery Delta
 
 > 状态：**Active / Normative / Design Frozen**  
-> 实现：**NOT IMPLEMENTED**  
-> 资格：**NOT QUALIFIED**  
+> 实现：**IMPLEMENTED**
+> 资格：**QUALIFIED**
 > 层级：Renderer Window-local business presentation ABI delta  
 > 作用对象：[Web Presentation API v1](./web-presentation-api-v1.md)  
 > 复用协议：[Render Update v1](./render-update-v1.md)  
@@ -601,39 +601,39 @@ new Render Update message/profile/version
 标记 Implemented / Qualified 前至少关闭：
 
 ```text
-[ ] exact RenderEventReceiver / WebPresentationRenderEvent type surface
-[ ] exact RendererPresentationRenderEvent forward seam
-[ ] existing effect without deliverRenderEvent remains compatible and drops Event
-[ ] throw escaping deliverRenderEvent is presentation-local and never Data local-fatal/terminal
-[ ] Renderer Store retains no Event/history and exposes no Event retained facts
-[ ] exact Session/subsystem/generation/domain/target currentness
-[ ] partial rebaseline Event drops and never replays
-[ ] detached/ended/structurally-failed Projector Event drops
-[ ] retired/removed target cannot receive old Event
-[ ] Patch/Data delivery → Event ordering
-[ ] Event → later Patch/update/remove ordering
-[ ] same-target Event A → Event B FIFO
-[ ] no Event coalesce / deduplicate / parallel same-target callback
-[ ] missing target drops without buffering
-[ ] missing receiver ignores without fatal
-[ ] delivered event/data is detached readonly ownership
-[ ] callback throw = ordinary presentation-local failure
-[ ] callback throw causes no Store rollback / Runtime / Frame failure
-[ ] callback throw does not auto-retry same Event
-[ ] same-generation reconnect no replay
-[ ] fresh Session/generation no stale delivery
-[ ] Event cannot mutate Renderer Store
-[ ] Event cannot create/remove/reparent RenderNode
-[ ] receiveRenderEvent→emitCustomEvent does not synchronously re-enter Subsystem
-[ ] multiple staged reverse inputs preserve emitCustomEvent FIFO; no reorder/coalesce/deduplicate
-[ ] valid reverse input staged before later callback throw is not rolled back
-[ ] invalid emitCustomEvent inside receiver keeps synchronous TypeError contract
-[ ] Chromium E2E: Subsystem emit → exact business WC callback
-[ ] Chromium E2E: retained update → WC reconcile/data → Event
-[ ] Chromium E2E: Event → later target removal preserves callback-before-removal
-[ ] Chromium E2E: WC callback → emitCustomEvent → InputGate → Subsystem
-[ ] Chromium E2E: WC callback stages reverse A then B → Subsystem observes A then B
-[ ] architecture regression: no ACK / Result / replay / second Store introduced
+[x] exact RenderEventReceiver / WebPresentationRenderEvent type surface
+[x] exact RendererPresentationRenderEvent forward seam
+[x] existing effect without deliverRenderEvent remains compatible and drops Event
+[x] throw escaping deliverRenderEvent is presentation-local and never Data local-fatal/terminal
+[x] Renderer Store retains no Event/history and exposes no Event retained facts
+[x] exact Session/subsystem/generation/domain/target currentness
+[x] partial rebaseline Event drops and never replays
+[x] detached/ended/structurally-failed Projector Event drops
+[x] retired/removed target cannot receive old Event
+[x] Patch/Data delivery → Event ordering
+[x] Event → later Patch/update/remove ordering
+[x] same-target Event A → Event B FIFO
+[x] no Event coalesce / deduplicate / parallel same-target callback
+[x] missing target drops without buffering
+[x] missing receiver ignores without fatal
+[x] delivered event/data is detached readonly ownership
+[x] callback throw = ordinary presentation-local failure
+[x] callback throw causes no Store rollback / Runtime / Frame failure
+[x] callback throw does not auto-retry same Event
+[x] same-generation reconnect no replay
+[x] fresh Session/generation no stale delivery
+[x] Event cannot mutate Renderer Store
+[x] Event cannot create/remove/reparent RenderNode
+[x] receiveRenderEvent→emitCustomEvent does not synchronously re-enter Subsystem
+[x] multiple staged reverse inputs preserve emitCustomEvent FIFO; no reorder/coalesce/deduplicate
+[x] valid reverse input staged before later callback throw is not rolled back
+[x] invalid emitCustomEvent inside receiver keeps synchronous TypeError contract
+[x] Chromium E2E: Subsystem emit → exact business WC callback
+[x] Chromium E2E: retained update → WC reconcile/data → Event
+[x] Chromium E2E: Event → later target removal preserves callback-before-removal
+[x] Chromium E2E: WC callback → emitCustomEvent → InputGate → Subsystem
+[x] Chromium E2E: WC callback stages reverse A then B → Subsystem observes A then B
+[x] architecture regression: no ACK / Result / replay / second Store introduced
 ```
 
 推荐 concrete scenarios：
@@ -673,9 +673,12 @@ Render Update v1 Event wire capability
 
 Web Presentation Render Event Delivery design
 = Design Frozen
-= NOT IMPLEMENTED
-= NOT QUALIFIED
+= IMPLEMENTED
+= QUALIFIED
 ```
+
+Qualification evidence and exact executable subject are recorded in
+[`m13-qualification.md`](../30-implementation/m13-qualification.md#2026-10-12-render-event-delivery-delta)。
 
 只有 code + tests + real Chromium evidence 与本 frozen contract 对齐后，才能分别提升为 Implemented / Qualified。
 

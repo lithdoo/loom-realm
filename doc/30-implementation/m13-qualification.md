@@ -20,6 +20,42 @@ Node 20.20.2  PASS  88.3s
 Node 24.20.0  PASS  82.3s
 ```
 
+## 2026-10-12 Render Event Delivery delta
+
+Web Presentation Render Event Delivery delta 的历史 M13 evidence 没有自动迁移；本节记录新的 exact qualification subject：
+
+```text
+Executable / qualification-input subject
+92b43d563ce80eda588897da5c65611a423db2cc
+
+Environment
+Windows NT 10.0.26300.0
+Node.js v24.19.0
+npm 11.17.0
+Microsoft Edge / Chromium 154.0.4258.62
+Playwright 1.63.0
+```
+
+在该 subject 上实际执行并 PASS：
+
+```text
+npm test -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer
+npm run test:m11:qualification
+npm run test:m13:pr
+npm run test:regression
+```
+
+`test:m13:pr` 包含 desktop stack build、真实 Chromium qualification、architecture boundary 与 Renderer pack surface。新增真实 Chromium 场景从 `RenderManager` / `RenderDomain.emit(...)` 出发，经真实 Data carrier、Renderer Control/Store、`WebProjector` 到 exact Custom Element `receiveRenderEvent(...)`，并证明：
+
+- retained data reconcile 先于 causally following Event；Event callback 完成先于 later target removal；同 target Event FIFO；
+- receiver 内多个 `emitCustomEvent(...)` 在 callback 期间不会同步进入 Subsystem，之后按 FIFO 经 InputGate 发布；已 staged input 不因 receiver throw 回滚；
+- effect/receiver throw 不退休 Data Runtime，later Event 仍可投递；
+- partial rebaseline、old generation 与 structurally failed Window 均 drop 且不 replay；
+- delivered business Event 只含 `{ name, data }`，与 wire object 分离且 deep-frozen；
+- Store qualification snapshot 不再含 `events`，architecture regression 明确拒绝 retained event history、second Store、ACK/Result/retry、新 wire kind/profile 或 DOM command protocol。
+
+Contract deviations：none。
+
 ## Implemented production chain
 
 ```text

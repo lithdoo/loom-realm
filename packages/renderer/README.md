@@ -17,6 +17,10 @@ current Control + Data identity
 → business-owned Web Components
 ```
 
+Eligible `render.event` 不进入 retained replica。它在 current carrier handler 中经过 Store applicability 与完整 Web Presentation currentness gate 后，通过 optional `RendererPresentationEffect.deliverRenderEvent(...)` 同步投递到 exact live element 的 `receiveRenderEvent({ name, data })`。Event value 与 wire object 分离并 deep-frozen；receiver/effect throw 只属于 presentation-local failure。
+
+若 receiver 内调用 `context.emitCustomEvent(...)`，合法 reverse input 会先在当前 forward callback scope 内 FIFO staging；callback return/throw 后才进入既有 bounded InputGate，避免同步 Subsystem business reentry。Store 不保留 Event history，也不 replay、retry 或建立 ACK/Result。
+
 Render Store state is not exported as business authority and is never reverse-synchronized from DOM. Same-generation physical Data replacement preserves logical Renderer identity while requiring fresh current baseline where the relevant contract requires it; stale carrier callbacks are ignored.
 
 `@loomrealm/renderer/resource-client` provides trusted logical Content resource access with expected-version checking. It stays off the package root and remains available only through the **platform-integration subpath**; physical bearer/path/endpoints stay hidden from business components.
