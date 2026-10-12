@@ -659,4 +659,4 @@ architecture regression: no ACK/result/retry/replay/second Store
 21. 已成功 staged 的 reverse input 不因随后 receiver throw rollback；
 22. 不增加 Event ACK / Result / retry / persistent queue / DOM command protocol。
 
-除 correctness/security contradiction、cross-contract conflict 或 real consumer failure 外，本 design-frozen ABI 不因 speculative flexibility reopen。Render Event Delivery 已在 exact executable subject `8b4cfc7bf4cfd852779fc08917bb705eb08de0a4` 上完成实现与 Chromium qualification；后续 executable 或 qualification-input 变化仍按 subject staleness 规则重新判断。
+除 correctness/security contradiction、cross-contract conflict 或 real consumer failure 外，本 design-frozen ABI 不因 speculative flexibility reopen。Render Event Delivery 已在 exact executable subject `21438a8d7b0ccbcc183403247085ea678e2f2da1` 上完成实现与 Chromium qualification；后续 executable 或 qualification-input 变化仍按 subject staleness 规则重新判断。

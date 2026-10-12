@@ -26,7 +26,7 @@ Web Presentation Render Event Delivery delta 的历史 M13 evidence 没有自动
 
 ```text
 Executable / qualification-input subject
-8b4cfc7bf4cfd852779fc08917bb705eb08de0a4
+21438a8d7b0ccbcc183403247085ea678e2f2da1
 
 Environment
 Windows NT 10.0.26300.0
@@ -48,7 +48,7 @@ npm run test:regression
 `test:m13:pr` 包含 desktop stack build、真实 Chromium qualification、architecture boundary 与 Renderer pack surface。新增真实 Chromium 场景从 `RenderManager` / `RenderDomain.emit(...)` 出发，经真实 Data carrier、Renderer Control/Store、`WebProjector` 到 exact Custom Element `receiveRenderEvent(...)`，并证明：
 
 - retained data reconcile 先于 causally following Event；Event callback 完成先于 later target removal；同 target Event FIFO；
-- receiver 内多个 `emitCustomEvent(...)` 在 callback 期间不会同步进入 Subsystem，之后按 FIFO 经 InputGate 发布；已 staged input 不因 receiver throw 回滚；
+- receiver 内多个 `emitCustomEvent(...)` 在 callback 期间不会同步进入 Subsystem，调用时 payload 已 detached/deep-frozen，并在 256 项私有上限内按 FIFO 暂存，之后经 InputGate 发布；已 staged input 不因 receiver throw 回滚；
 - effect/receiver throw 不退休 Data Runtime，later Event 仍可投递；
 - partial rebaseline、old generation 与 structurally failed Window 均 drop 且不 replay；
 - delivered business Event 只含 `{ name, data }`，与 wire object 分离且 deep-frozen；
