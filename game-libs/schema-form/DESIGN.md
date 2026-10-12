@@ -244,6 +244,12 @@ export interface SchemaFormSelectFieldV1 extends SchemaFormFieldBaseV1 {
   readonly default?: string;
   readonly options: readonly SchemaFormSelectOptionV1[];
 }
+
+export type SchemaFormFieldV1 =
+  | SchemaFormStringFieldV1
+  | SchemaFormNumberFieldV1
+  | SchemaFormBooleanFieldV1
+  | SchemaFormSelectFieldV1;
 ```
 
 `option.value` is semantic submitted value; `option.label` is presentation text. String-array shorthand is not part of v1.
@@ -454,6 +460,13 @@ export type SchemaFormErrorCode =
 export class SchemaFormError extends Error {
   readonly code: SchemaFormErrorCode;
   readonly path?: string;
+
+  constructor(
+    code: SchemaFormErrorCode,
+    message: string = code,
+    path?: string,
+    options?: ErrorOptions,
+  );
 }
 ```
 
@@ -713,6 +726,8 @@ modal                     → wa-dialog
 `wa-number-input` is intentionally not used; canonical number authority must not depend on third-party normalization of in-progress lexical text.
 
 Schema Form is always modal in v1. `lr-schema-form` renders a semantic `<form novalidate>` inside `wa-dialog`; native/Web Awesome validity is not submission authority.
+
+`wa-dialog` accessible label = current Schema Form title；title absent 时使用稳定、presentation-only 的 fallback accessible label `"Form"`，且该 fallback 不改变 RenderData。
 
 Layout/scroll invariants：
 
