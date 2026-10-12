@@ -1,8 +1,8 @@
 # RPG Dialogue v0 Presentation
 
 > 层级：`@loomrealm-game/rpg-dialogue` Presentation / Interaction ABI  
-> 状态：Active Design  
-> 稳定程度：Stabilizing  
+> 状态：Active / Normative / Frozen  
+> 稳定程度：Frozen  
 > 依赖：[RPG Dialogue v0 API](./RPG_DIALOGUE_V0_API.md)、[Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md)、[Render Update v1](../../doc/15-contracts/render-update-v1.md)
 
 本文定义 RPG Dialogue v0 的 canonical Render Tree、`attrs/data` ownership、WebComponent local state 与双向 interaction event contract。
@@ -548,7 +548,7 @@ retained update: visible=true
 
 History 的 pixel scroll、focus、virtualization 与 animation 都是 WC-local state。
 
-## 12. Input mode
+## 12. Input mode and default input policy
 
 `RPGDialogue` active interaction 至少区分：
 
@@ -573,18 +573,57 @@ CONVERSATION + cancel + cancelable=false
 → no business settlement
 ```
 
-物理 keyboard/gamepad mapping 属于 Dialogue Input Handler。典型映射：
+Canonical semantic actions 是：
 
 ```text
-Confirm / Gamepad A
+confirm
+previous
+next
+history
+cancel
+```
+
+初始默认实现的 keyboard/gamepad mapping 固定为：
+
+```text
+Enter / Space / gamepad south
+→ confirm
+
+ArrowUp / gamepad dpadUp
+→ previous
+
+ArrowDown / gamepad dpadDown
+→ next
+
+Tab / gamepad select
+→ history
+
+Escape / gamepad east
+→ cancel
+```
+
+Semantic routing 由当前 interaction mode 决定：
+
+```text
+CONVERSATION + confirm
 → conversation.commit
 
-D-Pad Up/Down while choices active
+CONVERSATION + previous / next
 → conversation.choice-previous / choice-next
 
-History action
-→ toggle retained history.visible
+HISTORY + previous / next
+→ history.scroll-up / scroll-down
+
+history
+→ toggle retained history.visible according to current mode
+
+cancel
+→ apply Cancel precedence above
 ```
+
+默认实现只对对应 `keyboard.event` / `gamepad.event` 的按下语义触发 action；具体 key-repeat/debounce 节奏属于 private implementation policy，不是 v0 cross-implementation ABI。
+
+这套默认 physical mapping 是 shipped default implementation policy，不是第三方 Presentation ABI。未来若产品需要可配置键位，可以在不改变本文件 canonical Render/Event ABI 的前提下替换 input mapping policy。
 
 v0 不支持通过 pointer/touch 产生 Dialogue business/session interaction。Canonical v0 interaction 由 Dialogue Input Handler 驱动；第三方 WebComponent MAY 使用 pointer/touch 做 hover、动画或其他纯 presentation-local 行为，但 MUST NOT 因 pointer/touch 直接产生 Conversation submit、History visibility mutation、user cancel 或其他 Dialogue state mutation。
 
@@ -612,7 +651,15 @@ label
 enabled
 ```
 
-v0 public API 不让 caller 直接注入 control hints；RPG Dialogue 根据当前 interaction mode 与 session policy 生成。`label` 只是 presentation string；业务 Presentation 可以直接使用最终显示文本，也可以把它解释为自己的 i18n key。RPG Dialogue 不拥有业务 localization authority。
+v0 public API 不让 caller 直接注入 control hints；RPG Dialogue 根据当前 interaction mode 与 session policy 生成。
+
+v0 默认生成规则冻结为：
+
+```text
+label = action
+```
+
+例如 `action="confirm"` 时默认 `label="confirm"`。`label` 只是 presentation string；业务 Presentation 可以直接显示，也可以把它解释为自己的 i18n key。RPG Dialogue 不拥有业务 localization authority。
 
 ## 14. WebComponent lifecycle requirements
 
@@ -644,7 +691,20 @@ Caller-owned Conversation / Character / Choice `data` 必须满足对应 RenderN
 
 ## 16. Default and third-party presentation
 
-默认 Browser Presentation 可以注册 canonical tags：
+Platform-neutral root module 固定为：
+
+```text
+@loomrealm-game/rpg-dialogue
+```
+
+默认 Browser Presentation artifact 入口固定为：
+
+```text
+@loomrealm-game/rpg-dialogue/browser/rpg-dialogue.browser.js
+@loomrealm-game/rpg-dialogue/browser/rpg-dialogue.browser.css
+```
+
+默认 Browser JS 注册 canonical tags：
 
 ```text
 lr-dialogue-view
@@ -659,6 +719,8 @@ lr-dialogue-control-hint
 lr-dialogue-history
 lr-dialogue-history-entry
 ```
+
+这些 tag 名和 artifact entry 是 v0 Browser packaging / Presentation compatibility surface；具体 DOM 结构、Shadow DOM、CSS layout、动画、字体、颜色和视觉 theme 不是 compatibility surface。
 
 产品也可以完全不加载默认 assets，而提供第三方 WebComponents。第三方实现可以自由使用 DOM、Shadow DOM、Canvas、WebGL、Live2D、Spine 等，只要消费相同 structural/semantic/event ABI。
 
@@ -681,6 +743,27 @@ typewriter progress retained state
 durable History persistence
 pointer/touch business or session interaction
 rich text/localization/voice/auto-advance protocol
+configurable input-binding public API
 ```
 
 这些不是隐藏的待实现 contract；它们明确不属于 v0 cross-implementation ABI。
+
+## 18. Compatibility rule
+
+Canonical Render Tree/tag names、Dialogue-owned attrs、caller-owned `data` projection、business/Render identity rules、Render Event 与 Custom Event names/payloads、interaction mode semantics、History projection，以及 §16 Browser artifact entry 是 RPG Dialogue v0 compatibility surface。
+
+以下明确不是 cross-implementation compatibility surface：
+
+```text
+default physical key mapping
+key repeat/debounce policy
+choice wrap-around policy
+pixel scroll behavior
+typewriter speed/effect
+DOM/Shadow DOM/CSS/layout/theme
+caller-defined data schema interpretation
+```
+
+不兼容修改必须显式修改 contract；implementation private refactor 不得重新解释 compatibility surface。
+
+实现状态与 qualification evidence 由当前 source/tests 和仓库 qualification records 给出；本文不承载实现计划或进度状态。
