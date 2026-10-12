@@ -59,6 +59,7 @@ test("Render Event delta adds only the optional transient seam and no retained o
   assert.match(publicDeclaration, /RendererPresentationRenderEvent/);
   assert.match(projectorDeclaration, /interface RenderEventReceiver/);
   assert.match(projectorDeclaration, /interface WebPresentationRenderEvent/);
+  assert.match(projectorDeclaration, /readonly data: JsonObject/);
 });
 
 test("Web Presentation capability preserves Chromium, boundary, pack and Node 20 compatibility evidence", async () => {

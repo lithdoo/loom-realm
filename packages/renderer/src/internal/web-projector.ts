@@ -14,6 +14,8 @@ import type {
   RendererPresentationView,
 } from "./presentation-seam.js";
 
+type JsonObject = InputEventV1["payload"];
+
 export interface WebPresentationContext {
   readonly resources: PresentationResourceClient;
   emitCustomEvent(name: string, data?: InputEventV1["payload"]): void;
@@ -24,12 +26,12 @@ export interface RenderContextReceiver {
 }
 
 export interface RenderDataReceiver {
-  receiveRenderData(data: DeepReadonly<InputEventV1["payload"]>): void;
+  receiveRenderData(data: DeepReadonly<JsonObject>): void;
 }
 
 export interface WebPresentationRenderEvent {
   readonly name: string;
-  readonly data: InputEventV1["payload"];
+  readonly data: JsonObject;
 }
 
 export interface RenderEventReceiver {

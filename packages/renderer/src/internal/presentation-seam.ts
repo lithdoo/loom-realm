@@ -1,5 +1,7 @@
 import type { InputEventV1, RenderNodeV1 } from "@loomrealm/data";
 
+type JsonObject = InputEventV1["payload"];
+
 export type DeepReadonly<T> = T extends (...args: never[]) => unknown
   ? T
   : T extends readonly (infer U)[]
@@ -47,7 +49,7 @@ export interface RendererPresentationRenderEvent {
   readonly domainId: string;
   readonly targetKey: string;
   readonly name: string;
-  readonly data: DeepReadonly<InputEventV1["payload"]>;
+  readonly data: DeepReadonly<JsonObject>;
 }
 
 export interface RendererPresentationEffect {
