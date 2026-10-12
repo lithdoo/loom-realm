@@ -205,6 +205,11 @@ const capabilities = {
     npm("pack", "-w", "@loomrealm-game/battle", "--dry-run");
   },
 
+  "rpg-dialogue"() {
+    npm("run", "test:rpg-dialogue");
+    npm("pack", "-w", "@loomrealm-game/rpg-dialogue", "--dry-run");
+  },
+
   desktop() {
     buildMapStack();
     runDesktopTests();
@@ -240,6 +245,7 @@ const capabilities = {
     capabilities["schema-form"]();
     capabilities.pwa();
     capabilities.battle();
+    capabilities["rpg-dialogue"]();
     await capabilities.pack();
   },
 

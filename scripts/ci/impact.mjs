@@ -10,6 +10,7 @@ const ALL = {
   schema: true,
   pwa: true,
   battle: true,
+  dialogue: true,
   desktop: true,
   windows: true,
   docs: true,
@@ -18,7 +19,7 @@ const ALL = {
 const FALSE = Object.fromEntries(Object.keys(ALL).map((key) => [key, false]));
 
 const setAllCode = (impact) => {
-  for (const key of ["code", "content", "presentation", "map", "schema", "pwa", "battle", "desktop", "windows"]) {
+  for (const key of ["code", "content", "presentation", "map", "schema", "pwa", "battle", "dialogue", "desktop", "windows"]) {
     impact[key] = true;
   }
 };
@@ -28,7 +29,7 @@ const sourcePath = (path) =>
   path.endsWith(".npmrc");
 
 export function requiresBrowser(impact) {
-  return impact.presentation || impact.map || impact.schema || impact.pwa || impact.battle;
+  return impact.presentation || impact.map || impact.schema || impact.pwa || impact.battle || impact.dialogue;
 }
 
 export function classifyPaths(paths) {
@@ -164,6 +165,13 @@ export function classifyPaths(paths) {
     if (path.startsWith("game-libs/battle/")) {
       impact.code = true;
       impact.battle = true;
+      continue;
+    }
+
+    if (path.startsWith("game-libs/rpg-dialogue/") || path.startsWith("test/rpg-dialogue-v0/")) {
+      impact.code = true;
+      impact.presentation = true;
+      impact.dialogue = true;
       continue;
     }
 

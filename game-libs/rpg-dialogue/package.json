@@ -1,0 +1,40 @@
+{
+  "name": "@loomrealm-game/rpg-dialogue",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "description": "Frozen v0 RPG dialogue interaction session and browser presentation",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser/rpg-dialogue.browser.js": "./dist/browser/rpg-dialogue.browser.js",
+    "./browser/rpg-dialogue.browser.css": "./dist/browser/rpg-dialogue.browser.css"
+  },
+  "files": [
+    "dist/"
+  ],
+  "sideEffects": [
+    "./dist/browser/rpg-dialogue.browser.js",
+    "./dist/browser/rpg-dialogue.browser.css"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json && node scripts/build-browser.mjs",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@loomrealm/data": "0.1.0-alpha.0",
+    "@loomrealm/subsystem": "0.1.0-alpha.0",
+    "@loomrealm/wire": "0.1.0-alpha.0"
+  },
+  "devDependencies": {
+    "@loomrealm/renderer": "0.1.0-alpha.0",
+    "esbuild": "0.25.9",
+    "typescript": "5.9.2"
+  }
+}
