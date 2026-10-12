@@ -16,6 +16,7 @@ import type { Frame, SubsystemScope } from "@loomrealm/subsystem";
 
 export interface RPGDialogueOptionsV0 {
   readonly cancelable?: boolean;
+  readonly zIndex?: number;
 }
 
 export interface ConversationChoiceV0 {
@@ -77,16 +78,21 @@ export class RPGDialogue {
 }
 ```
 
-`cancelable` 是整个 `RPGDialogue` interaction session 的 policy，不是单个 Conversation 的 story fact。
+`cancelable` 与 `zIndex` 都是整个 `RPGDialogue` interaction session 的 policy，不是单个 Conversation 的 story fact。
 
 默认值冻结为：
 
 ```text
 cancelable === undefined
 → false
+
+zIndex === undefined
+→ 2_147_483_646
 ```
 
 只有显式 `cancelable: true` 才允许 user cancel settlement。
+
+`zIndex` 控制该实例唯一 Dialogue RenderDomain 的 stacking value。调用方可以根据自己的业务 Presentation composition 选择任意 Render Update v1 合法 int32；该值只在构造时确定，实例 lifetime 内保持不变。v0 不提供运行中 setter，也不允许单个 Conversation 覆盖 session `zIndex`。
 
 ## 2. Lifetime
 
@@ -431,7 +437,7 @@ Frozen shapes：
 ```text
 RPGDialogueOptionsV0
 required: none
-optional: cancelable
+optional: cancelable, zIndex
 
 ConversationRequestV0
 required: conversation, characters
@@ -456,7 +462,7 @@ optional: speakerName
 
 Optional member omitted or explicitly `undefined` is equivalent to absent。若 optional member 提供非-`undefined` 值，则必须满足其声明类型。Required member 缺失或为 `undefined` 必须拒绝；尤其 `data` 不自动 default 为 `{}`。
 
-`choices`、`characters` 以及 `setHistory()` 的 `entries` 必须是数组；RPG Dialogue 不接受 array-like/object coercion。`active` 必须是 boolean；`enabled` 提供时必须是 boolean；`cancelable` 提供时必须是 boolean。v0 不做 string/number/boolean coercion。
+`choices`、`characters` 以及 `setHistory()` 的 `entries` 必须是数组；RPG Dialogue 不接受 array-like/object coercion。`active` 必须是 boolean；`enabled` 提供时必须是 boolean；`cancelable` 提供时必须是 boolean。`zIndex` 提供时必须是 `-2_147_483_648..2_147_483_647` 范围内的 integer。v0 不做 string/number/boolean coercion，也不 clamp/round `zIndex`。
 
 ### 7.2 String and identity rules
 
@@ -561,7 +567,7 @@ Presentation Tree、WebComponent interaction 与 event vocabulary 见 [RPG Dialo
 
 ## 9. Compatibility rule
 
-本文的 public request/result/model、`cancelable` 默认值、closed-shape/validation rules、business identity scope、lifecycle、History mutation timing、settlement/failure delivery 与 validation semantics 是 RPG Dialogue v0 compatibility surface。
+本文的 public request/result/model、`cancelable`/`zIndex` 默认值与 session policy、closed-shape/validation rules、business identity scope、lifecycle、History mutation timing、settlement/failure delivery 与 validation semantics 是 RPG Dialogue v0 compatibility surface。
 
 不兼容修改必须显式修改 contract；implementation private refactor 不得重新解释这些 observable semantics。
 
