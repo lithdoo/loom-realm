@@ -127,7 +127,7 @@ RPGDialogue History
 
 RenderDomain.emit(...)
 → render.event
-→ proposed WebComponent receiveRenderEvent(...)
+→ WebComponent receiveRenderEvent(...)
 → transient presentation operation
 
 WebComponent emitCustomEvent("submit", ...)
@@ -187,4 +187,4 @@ Choices 不包含 retained `selected`；初始不默认选择任何 option。
 
 History modal 的 open/close 属于 Dialogue / Presentation interaction state；History entries 由 `RPGDialogue` session 持有并由 caller 显式修改。
 
-`receiveRenderEvent()` 的 Web Presentation 投递目前仍是 **DRAFT / REOPEN PROPOSAL**，未实现、未资格；Dialogue 文档不得把该能力声明为已落地。
+`receiveRenderEvent()` 的 Web Presentation 投递设计现已 **Design Frozen**，但仍为 **NOT IMPLEMENTED / NOT QUALIFIED**。Dialogue 可以依赖该 frozen contract 进行实现规划，但在 Renderer implementation + Chromium qualification 完成前不得把该能力声明为已落地。
