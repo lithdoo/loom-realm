@@ -65,6 +65,7 @@ Target author-facing surface：
 
 ```ts
 export interface SessionEvent<T extends JsonValue = JsonValue> {
+  readonly channel: string;
   readonly type: string;
   readonly payload: T;
   readonly source: {
@@ -73,10 +74,14 @@ export interface SessionEvent<T extends JsonValue = JsonValue> {
 }
 
 export interface SessionEventClient {
-  publish(type: string, payload: JsonValue): Promise<void>;
+  publish(
+    channel: string,
+    type: string,
+    payload: JsonValue,
+  ): Promise<void>;
 
   subscribe(
-    type: string,
+    channels: readonly string[],
     listener: (event: SessionEvent) => void | Promise<void>,
   ): Promise<SessionEventSubscription>;
 }
@@ -84,6 +89,19 @@ export interface SessionEventClient {
 export interface SessionEventSubscription {
   close(): void;
 }
+```
+
+v1 将职责明确分为：
+
+```text
+channel
+    Hub routing / delivery scope
+
+type
+    business semantic discriminator inside the channel
+
+payload
+    business event data
 ```
 
 `source.subsystemKey` 是 logical identity。Business-visible event MUST NOT 暴露：
@@ -101,9 +119,69 @@ Exact TypeScript names MAY be adjusted before this candidate is marked Frozen；
 
 ---
 
-## 3. Event Type / Payload
+## 3. Channel / Event Type / Payload
 
-v1 使用 exact string event type。
+### 3.1 Channel
+
+Every published event MUST name exactly one channel。
+
+Every subscription MUST declare one or more exact channels。
+
+Channel is a stable logical routing identity and MUST NOT encode physical Process / Worker / socket identity。
+
+Channel MUST：
+
+```text
+be non-empty
+be valid Unicode scalar-value text
+be compared case-sensitively by exact scalar sequence
+MAY contain '/'
+```
+
+`/` has **no hierarchy or matching semantics in v1**。
+
+For example：
+
+```text
+battle
+battle/main
+battle/encounter/42
+```
+
+are three independent exact channel identities。
+
+Therefore：
+
+```text
+subscribe(["battle"])
+```
+
+MUST NOT match：
+
+```text
+battle/main
+battle/encounter/42
+```
+
+v1 MUST NOT provide：
+
+```text
+channel wildcard
+channel prefix matching
+channel glob
+channel regex
+implicit parent/child subscription
+channel registry
+createChannel()
+deleteChannel()
+listChannels()
+```
+
+Whether leading/trailing `/`、consecutive `//` and the exact UTF-8 byte limit are accepted MUST be frozen before implementation begins；implementations MUST NOT invent platform-specific normalization meanwhile。
+
+### 3.2 Event Type
+
+Event type is a semantic discriminator inside one channel。
 
 Event type MUST：
 
@@ -114,7 +192,36 @@ be compared case-sensitively by exact scalar sequence
 not depend on JS Symbol / constructor identity
 ```
 
-v1 subscription MUST match exact event type only。Wildcard / regex / prefix subscription 不属于 v1。
+**Event type does not participate in v1 Hub routing or subscription filtering.**
+
+A subscription to channel `battle` receives every accepted event routed to `battle`, regardless of whether the event type is：
+
+```text
+enemy-defeated
+turn-started
+damage
+ended
+```
+
+Business listeners MAY branch on `event.type` locally。
+
+Type-filtered subscriptions、type selector sets、type wildcard/prefix/regex routing are explicitly reserved for a future protocol revision and MUST NOT be assumed by v1 implementations。
+
+### 3.3 Subscription Channel Set
+
+`subscribe(channels, listener)` MUST treat the complete `channels` array as one atomic selector set。
+
+```text
+channels.length == 0
+    → INVALID_REQUEST
+
+duplicate exact channel identity
+    → INVALID_REQUEST
+```
+
+The Hub MUST validate the entire set before installing any part of the subscription。There MUST NOT be an author-visible partially installed channel set。
+
+### 3.4 Payload Isolation
 
 Payload MUST be a detached valid `JsonValue`。
 
@@ -136,14 +243,14 @@ Implementation MAY use JSON encode/decode、structured clone、immutable trusted
 `publish()` is an asynchronous logical operation。
 
 ```text
-await client.publish(type, payload)
+await client.publish(channel, type, payload)
 ```
 
 successful resolution means：
 
 ```text
 SessionEventHub accepted the validated event
-and committed its routing admission against the then-current subscriptions
+and committed its routing admission against the then-current matching channel subscriptions
 ```
 
 It does NOT mean：
@@ -174,9 +281,11 @@ After `OUTCOME_UNKNOWN`，framework MUST NOT automatically retry。The event MAY
 
 ---
 
-## 5. Subscription Establishment / Routing Linearization
+## 5. Subscription Establishment / Channel Routing Linearization
 
-`subscribe(type, listener)` establishes an exact-type subscription at one logical linearization point `N` inside SessionEventHub routing state。
+`subscribe(channels, listener)` establishes one multi-channel exact subscription at one logical linearization point `N` inside SessionEventHub routing state。
+
+For an event whose exact `event.channel` belongs to that subscription's channel set：
 
 ```text
 event accepted before N
@@ -186,11 +295,17 @@ event accepted after N
     → eligible for this subscription
 ```
 
+An event whose channel is not in the set MUST NOT be sent to or delivered through that subscription。
+
 The returned Promise MUST resolve before the listener is first invoked。
 
-If an event becomes eligible after subscription linearization but before the subscribe Promise resolves, the binding/runtime delivery layer MUST preserve it in bounded order and invoke only after resolution。
+If a matching-channel event becomes eligible after subscription linearization but before the subscribe Promise resolves, the binding/runtime delivery layer MUST preserve it in bounded order and invoke only after resolution。
 
-Routing recipient set is determined at publish acceptance time from subscriptions current at that point。
+Routing recipient set is determined at publish acceptance time from subscriptions whose exact channel set contains `event.channel`。
+
+Filtering MUST occur at the Hub/routing side。An implementation MUST NOT broadcast every Session Event to every Runtime and rely on business/client-local channel filtering as the normal routing model。
+
+`event.type` MUST NOT affect recipient selection in v1。
 
 Zero matching subscribers MUST NOT make publish fail。
 
@@ -261,6 +376,8 @@ pending logical bytes
 listener delivery concurrency
 physical adapter buffering
 ```
+
+Channel routing exists partly to avoid unnecessary cross-Runtime traffic：an event MUST only consume recipient delivery capacity for matching subscriptions selected by §5，not for unrelated Runtime bindings。
 
 Business event delivery MUST NOT silently drop while leaving the affected subscription apparently healthy。
 
@@ -435,6 +552,8 @@ Diagnostics queue / budget
 
 The exact scheduler is private implementation detail；absence of unbounded starvation/cross-plane queue takeover is normative。
 
+Within the Session Events plane, Hub-side channel routing MUST avoid enqueueing unrelated events onto non-matching Runtime logical bindings merely because those bindings share the same physical carrier。
+
 ### 12.3 Shared Carrier Loss
 
 One shared carrier loss MAY simultaneously produce：
@@ -486,6 +605,7 @@ Shared State
 
 Session Events
     transient notification
+    channel-routed
     no retained current value
 ```
 
@@ -514,7 +634,7 @@ Render Event
     presentation intent inside one Subsystem RenderDomain
 
 Session Event
-    cross-Subsystem transient business notification
+    channel-routed cross-Subsystem transient business notification
 ```
 
 ---
@@ -523,7 +643,7 @@ Session Event
 
 Logging/diagnostics MAY reuse the same physical Session-service carrier and routing implementation, but MUST remain a distinct logical role / QoS domain。
 
-Business code SHOULD consume a logger capability rather than publish a normal business topic named `log`。
+Business code SHOULD consume a logger capability rather than publish a normal business channel/type named `log`。
 
 Diagnostics MAY support sampling / batching / lossy overflow in a future contract；such policy MUST NOT leak into business Session Events or Shared State semantics。
 
@@ -552,8 +672,9 @@ The physical realization MUST preserve the same observable：
 
 ```text
 publish acceptance/evidence
-subscription linearization
-routing semantics
+atomic multi-channel subscription establishment
+exact channel routing
+no v1 type filtering
 payload isolation
 ordering
 binding fencing
@@ -583,7 +704,8 @@ logical contract
 Before this candidate is marked Frozen, the remaining contract work is：
 
 ```text
-exact topic grammar/byte limit
+exact channel grammar edge cases / byte limit
+exact event-type grammar / byte limit
 exact JsonValue size/depth limits
 exact publish/subscription queue limits
 exact failure object shape
@@ -603,6 +725,17 @@ private scheduler / queue data structures
 private binding generation token
 ```
 
+The following v1 semantic direction is already closed and MUST NOT be redesigned during implementation：
+
+```text
+channel is the only Hub routing/filter key
+'/' is permitted in channel text but has no hierarchy semantics
+subscription may include one or more exact channels atomically
+type is delivered metadata / business discriminator, not a routing filter
+no wildcard/prefix/regex channel routing
+no type-filtered subscription in v1
+```
+
 ---
 
 ## 18. Core Invariants
@@ -610,20 +743,25 @@ private binding generation token
 1. one live Session has one logical SessionEventHub；
 2. SessionEventHub owns routing/delivery mechanics, not business truth；
 3. SessionEventClient is Runtime-scoped logical capability, not a process/socket identity；
-4. publish success means Hub accepted/routed, not subscriber handled；
-5. dispatched publish with lost definitive result may be OUTCOME_UNKNOWN and MUST NOT auto-retry；
-6. subscription establishment has a defined routing linearization point；
-7. payload ownership is detached/isolated identically for in-process and cross-process realizations；
-8. same publisher order is preserved for subscriptions receiving the same accepted events；no global publisher order exists；
-9. no history replay / durable subscription / consumer offset / event sourcing in v1；
-10. listener failure is local and never retroactively fails publish；
-11. business delivery is bounded and MUST NOT silently drop while remaining healthy；
-12. physical placement is non-normative；Hub MAY be dedicated or co-located with Shared State/Main；
-13. State and Events MAY use separate carriers or multiplex one physical carrier；
-14. shared carrier never creates shared authority、revision、transaction、retry or public cross-plane ordering；
-15. multiplexed flow control MUST prevent one logical plane from taking unbounded ownership of another plane's capacity；
-16. one shared carrier failure may affect multiple bindings physically, but each protocol derives logical evidence/failure independently；
-17. Shared State + Event atomic transaction does not exist in v1；
-18. Render Event remains a separate presentation-local concept；
-19. Diagnostics may share mechanics/carrier but retain distinct QoS semantics；
-20. Desktop/PWA and co-located/separate realizations MUST be observably equivalent at the logical protocol boundary。
+4. every event names exactly one channel and one type；channel is the v1 routing key；
+5. one subscription atomically registers one or more exact channels；unrelated channels are not delivered to that subscription；
+6. `/` is allowed in channel identity but has no parent/child、prefix or wildcard meaning in v1；
+7. event type is a business discriminator and does not participate in v1 routing/filtering；
+8. publish success means Hub accepted/routed, not subscriber handled；
+9. dispatched publish with lost definitive result may be OUTCOME_UNKNOWN and MUST NOT auto-retry；
+10. subscription establishment has a defined routing linearization point；
+11. payload ownership is detached/isolated identically for in-process and cross-process realizations；
+12. same publisher order is preserved for subscriptions receiving the same accepted events；no global publisher order exists；
+13. no history replay / durable subscription / consumer offset / event sourcing in v1；
+14. listener failure is local and never retroactively fails publish；
+15. business delivery is bounded and MUST NOT silently drop while remaining healthy；
+16. physical placement is non-normative；Hub MAY be dedicated or co-located with Shared State/Main；
+17. State and Events MAY use separate carriers or multiplex one physical carrier；
+18. shared carrier never creates shared authority、revision、transaction、retry or public cross-plane ordering；
+19. multiplexed flow control MUST prevent one logical plane from taking unbounded ownership of another plane's capacity；
+20. Hub-side channel routing MUST avoid normal broadcast of unrelated events to non-matching Runtime bindings；
+21. one shared carrier failure may affect multiple bindings physically, but each protocol derives logical evidence/failure independently；
+22. Shared State + Event atomic transaction does not exist in v1；
+23. Render Event remains a separate presentation-local concept；
+24. Diagnostics may share mechanics/carrier but retain distinct QoS semantics；
+25. Desktop/PWA and co-located/separate realizations MUST be observably equivalent at the logical protocol boundary。
