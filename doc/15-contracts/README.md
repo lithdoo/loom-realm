@@ -8,7 +8,7 @@
 - [Hostra Launcher / Node Runner](./nodejs-launcher-profile-v1.md)
 - [PWA Launcher / Worker Runner](./pwa-launcher-profile-v1.md)
 - [Realm State v1](./realm-state-v1.md)
-- [Session Events v1](./session-events-v1.md) · [Conformance](./session-events-conformance-v1.md) — Session-scoped cross-Subsystem transient event protocol；exact-channel routing，允许与 Shared State 共进程或 multiplex 同一 physical carrier，但保持独立 logical semantics。
+- [Session Events v1](./session-events-v1.md) · [Runtime Integration Profile](./session-events-runtime-profile-v1.md) · [Conformance](./session-events-conformance-v1.md) — Session-scoped cross-Subsystem transient event protocol；exact-channel routing；logical contract允许与 Shared State 共进程/共 carrier，但 current Hostra/PWA v1 profile 冻结为每 Runtime dedicated Events carrier。
 - [Subsystem Control v1](./subsystem-control-protocol-v1.md)
 - [Runtime Control v1](./runtime-control-profile-v1.md)
 - [Frame / Call v1](./frame-call-protocol-v1.md) · [Conformance](./frame-call-conformance-v1.md)
