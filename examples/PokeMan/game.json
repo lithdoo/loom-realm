@@ -1,0 +1,16 @@
+{
+  "formatVersion": 1,
+  "initial": {
+    "subsystem": "system-menu",
+    "input": {
+      "mode": "root"
+    }
+  },
+  "subsystems": [
+    { "key": "system-menu" },
+    { "key": "message" },
+    { "key": "world" },
+    { "key": "dialogue" },
+    { "key": "battle" }
+  ]
+}
