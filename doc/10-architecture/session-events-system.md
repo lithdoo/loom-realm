@@ -2,51 +2,49 @@
 
 > 层级：系统架构  
 > 状态：Active Design / not implemented / not qualified  
-> 稳定程度：Evolving  
-> 主要定义：Session-scoped cross-Subsystem transient event distribution、Channel routing、SessionEventHub、Runtime-scoped SessionEventClient、subscription establishment/close、delivery/failure/backpressure、与 Shared State / Render Event / Control / Diagnostics 的边界  
+> 稳定程度：**Core Semantics Frozen**  
+> 主要定义：Session-scoped cross-Subsystem transient event distribution、Channel routing、SessionEventHub、Runtime-scoped SessionEventClient、subscription lifetime、serial delivery、failure/backpressure、与 Shared State / Render Event / Control / Diagnostics 的边界  
 > 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)、[Subsystem 模型](./subsystem-model.md)、[渲染系统](./rendering-system.md)  
-> 正式化：[Session Events v1](../15-contracts/session-events-v1.md)  
+> 正式化：[Session Events v1](../15-contracts/session-events-v1.md) · [Conformance](../15-contracts/session-events-conformance-v1.md)  
 > 最近复核：2026-10-13
 
 本文定义 LoomRealm 的 **Session Events**：同一 Session 内，不同 Subsystem Runtime 之间的 transient business event distribution capability。
 
-目标 package 名：
+目标 package：
 
 ```text
 @loomrealm/session-events
 ```
 
-目标逻辑角色：
+逻辑角色：
 
 ```text
 SessionEventHub
-    Session-scoped routing / delivery infrastructure
+    Session-scoped routing / bounded delivery infrastructure
 
 SessionEventClient
     Runtime-scoped publish / subscribe capability
 ```
 
-Shared State 重命名工作另见仓库根目录 `TODO-shared-state.md`。在该迁移完成前，现有代码/契约中的 `Realm State` 与本文所称 `Shared State` 指同一 shared business state capability；Session Events 不属于该重命名的一部分。
+Shared State 重命名完成前，现有 `Realm State` contract/code 与本文的 `Shared State` 指同一 shared mutable business-state capability。
 
 ---
 
 ## 1. 核心结论
 
 1. Session Events 是独立于 Main、Shared State、Renderer Data 与 Content 的 logical communication plane；
-2. Session Events 表达 **“Session 中刚刚发生了什么”**，Shared State 表达 **“Session 中当前 authoritative business fact 是什么”**；
-3. `SessionEventHub` 不是 business authority，只拥有 routing、subscription lifetime、bounded delivery 等 mechanics；
-4. event 默认 transient：不保存 current value、不 replay history、不为 late subscriber 重放过去事件；
-5. v1 使用 **Channel** 作为唯一 Hub routing/filter key；每个 publish 指定一个 channel，每个 subscription 原子订阅一个或多个 exact channels；
-6. channel MAY 包含 `/`，但 v1 中 `/` 没有 parent/child、prefix、wildcard 或 pattern 语义；
-7. `type` 只表达某个 channel 内的 business event semantic，不参与 v1 Hub routing/filtering；
-8. `subscribe()` 是异步 establishment；成功 resolve 时 subscription 已经 live，不暴露 half-open handle；
-9. listener 第一次调用 MUST 晚于对应 `subscribe()` Promise resolve；
-10. `SessionEventSubscription.close()` 同步、幂等，本地立即 revoke；remote cleanup MAY 异步完成；
-11. `publish()` 表达 notification，不建立跨 Runtime synchronous call stack，也不等待 subscriber business handler 完成；
-12. subscriber callback failure 必须 local isolate，不得 retroactively fail 已接受 publish；
-13. v1 不提供 request/reply、RPC、consumer group、durable subscription、event journal、exactly-once、automatic retry 或 Shared State transaction coupling；
-14. business event 与 `render.event` 是不同语义；
-15. logging/diagnostics 可复用物理 routing 基础设施，但必须使用独立 logical role / QoS。
+2. Shared State 表达“当前 authoritative fact 是什么”，Session Events 表达“刚刚发生了什么”；
+3. `SessionEventHub` 不是 business authority，只拥有 routing、subscription lifetime、bounded delivery mechanics；
+4. event transient：不保存 current value、不 replay history；
+5. Channel 是 v1 唯一 Hub routing/filter key；type 不参与 v1 routing；
+6. `subscribe()` 异步建立，只返回已经 live 的 subscription；
+7. 每个 subscription 是一条 serial delivery lane，同一时刻最多一个 listener invocation；
+8. business delivery bounded；无法继续保证 delivery 时 subscription 显式 terminal，而不是 silent drop；
+9. subscription unexpected terminal 通过 `closed` Promise 可观察；
+10. `publish()` success 只表示 Hub accepted/routed，不等待 business listener；
+11. source identity 来自绑定的 Runtime identity，publisher 不能伪造；
+12. physical process/carrier placement 非规范；State 与 Events 可共进程、共 carrier，但 logical semantics 独立；
+13. v1 不提供 RPC、replay、durable log、exactly-once、wildcard/type filtering 或 State+Event transaction。
 
 ---
 
@@ -69,32 +67,32 @@ Session composition
           └── Input / Viewport / Frame capabilities
 ```
 
-必须保持：
+职责必须保持：
 
 ```text
 Main
-    "谁正在运行 / active / 当前 control flow 是什么"
+    who is current/running + control flow
 
 Shared State
-    "共享业务事实现在是什么"
+    current shared business truth
 
 Session Events
-    "一个 transient business fact / notification 刚刚发生"
+    transient business notification
 
 Render Event
-    "一个 RenderDomain 的 transient presentation intent"
+    one RenderDomain presentation intent
 
 Content
-    "安装定义是什么"
+    installation definition/resource
 ```
 
-SessionEventHub 不维护游戏世界的第二份状态，不根据事件流重建 authoritative business state，也不拥有 Main lifecycle/control truth。
+SessionEventHub 不根据事件流重建 authoritative world state，也不拥有 Main lifecycle/control truth。
 
 ---
 
-## 3. State vs Event Placement Rule
+## 3. State vs Event Placement
 
-一个事实如果 late joiner / restarted Runtime 必须知道，或者未来业务判断依赖其 current value，它 MUST NOT 只存在于 Session Events。
+如果 late joiner / restarted Runtime 必须知道某事实，或者未来判断依赖其 current value，该事实 MUST NOT 只存在于 Session Events。
 
 典型 Shared State：
 
@@ -114,111 +112,62 @@ type    = "enemy-defeated"
 
 channel = "dialogue"
 type    = "finished"
-
-channel = "achievement"
-type    = "triggered"
 ```
 
 推荐组合：
 
 ```text
-Battle Subsystem
-    publish(channel="battle", type="enemy-defeated")
+Battle publishes battle/enemy-defeated
         ↓
-Quest Subsystem handler
-    decides business consequence
+Quest listener decides consequence
         ↓
 SharedStateClient.commit(...)
         ↓
 quest/progression becomes authoritative
 ```
 
-禁止把 Event Bus 变成隐式 distributed state machine。
+Event delivery success 不是 Shared State commit evidence；两者不原子、不共享 revision/order。
 
 ---
 
-## 4. Session Event vs Render Event
-
-现有 `RenderDomain.emit(renderEvent)` 保持 presentation-local semantic，不升级为 cross-Subsystem event bus。
-
-```text
-Render Event
-    owner/scope: one Subsystem RenderDomain
-    purpose: transient presentation intent / trace
-    transport: Renderer Data plane
-    cross-Subsystem subscription: NO
-
-Session Event
-    owner/scope: one Session
-    purpose: transient cross-Subsystem business notification
-    transport: Session Events plane
-    cross-Subsystem subscription: YES
-```
-
-Render Event MUST NOT 被隐式桥接成 Session Event；Session Event 也 MUST NOT 自动投影为 Render Event。
-
----
-
-## 5. Channel Model
-
-Channel 是 v1 唯一 routing/filter scope：
+## 4. Channel Model
 
 ```text
 channel
     Hub routing identity
 
 type
-    semantic discriminator inside one channel
+    semantic discriminator inside channel
 
 payload
     event business data
 ```
 
-合法示例：
+Channel exact match，允许 `/`：
 
 ```text
 battle
 battle/main
 battle/encounter/42
-dialogue
-quest
 ```
 
-`/` 在 v1 只是 channel 字符内容，不具有层级或匹配语义：
+在 v1 是三个独立 identity。
 
-```text
-"battle"
-!= "battle/main"
-!= "battle/encounter/42"
-```
+`/` 没有 hierarchy、prefix、wildcard、glob、regex 或 parent subscription 语义。
 
-因此：
+订阅 `battle` 不会收到 `battle/main`。
 
-```text
-subscribe(["battle"])
-```
-
-不会收到 `battle/main` 或 `battle/encounter/42`。
-
-v1 不建立 channel hierarchy、prefix/wildcard/glob/regex matching 或 Channel Registry。
-
-同一 channel 可以包含多个 event type；订阅某 channel 的 listener 接收该 channel 下全部事件，再根据 `event.type` 本地判别。v1 不提供 type-filtered subscription。
+Type 不参与 v1 routing；订阅某 channel 会收到该 channel 下所有 types，由 listener 本地判断。
 
 ---
 
-## 6. Author Projection
-
-目标 author-facing capability：
+## 5. Author Projection
 
 ```ts
 interface SubsystemScope {
   readonly events: SessionEventClient;
 }
-```
 
-v1 candidate logical surface：
-
-```ts
 interface SessionEventClient {
   publish(
     channel: string,
@@ -244,258 +193,332 @@ interface SessionEvent {
   };
 }
 
+type SessionEventSubscriptionCloseReason =
+  | "closed"
+  | "overflow"
+  | "binding-terminal"
+  | "client-terminal"
+  | "hub-terminal";
+
 interface SessionEventSubscription {
+  readonly closed: Promise<{
+    readonly reason: SessionEventSubscriptionCloseReason;
+  }>;
   close(): void;
 }
 ```
 
-一个 subscription 的 channel set 必须作为整体建立，不出现 partially installed subscription。
+`source.subsystemKey` 是 authenticated logical publisher identity；publisher 不提供 `source`，Hub/binding 根据 Runtime binding 构造。
 
-Author-facing source identity 只暴露 logical identity，例如 `subsystemKey`；不得泄漏 pid、Worker identity、socket/port、endpoint、generation token 等 physical material。
+Author 不见 process/Worker/socket/port/generation/request-id 等 physical material。
 
 ---
 
-## 7. Subscription Establishment / Close
-
-### Establishment
-
-`subscribe()` 是异步 protocol operation：
+## 6. Subscription Establishment
 
 ```text
-Runtime
-    subscribe(channels, listener)
+Runtime subscribe(channels, listener)
         ↓
-SessionEventHub validates complete channel set
+Hub validates complete exact-channel set
         ↓
-atomically installs subscription @ N
+atomic install @ N
         ↓
-acknowledgement reaches Runtime
+ack
         ↓
-subscribe() Promise resolves with live handle
+subscribe() resolves with already-live handle
 ```
 
-关键 observable semantics：
+匹配事件：
 
 ```text
-subscribe() resolves
-    = Hub-side subscription already live
+accepted before N → not part of subscription
+accepted after N  → eligible
 ```
 
-v1 不暴露：
+如果 event 在 N 后但 subscribe result author-visible 之前到达，必须 bounded retain：
 
 ```text
-subscription.ready
-pending subscription status
-half-open author-visible handle
+subscribe resolves
+→ listener may start
 ```
 
-对于 matching event：
+v1 不暴露 half-open subscription、`ready` 或 pending status。
+
+建立失败/ack ambiguity 时不返回 handle、不调用 listener；Hub-side orphan candidate 必须由 binding/request lifetime fencing 回收。
+
+---
+
+## 7. Subscription Close / Terminal
+
+`close()` 同步、幂等：
 
 ```text
-accepted before N
-    → not delivered through this subscription
-
-accepted after N
-    → eligible
-```
-
-如果 matching event 在 `N` 之后、但 subscribe result 回到 Runtime 之前已经进入 delivery path，framework 必须 bounded retain，并保证：
-
-```text
-subscribe() resolves first
-→ listener may run afterwards
-```
-
-因此 callback 可以安全引用已经返回的 subscription handle。
-
-### Establishment failure
-
-建立失败时不返回可用 handle，也不得产生 callback。
-
-如果 Hub 已内部安装 candidate subscription，但 acknowledgement 因 binding loss 等原因无法完成，framework 必须通过 binding/request lifetime fencing 回收该 orphan candidate，不能留下没有 owner 的隐藏订阅。
-
-这种 subscription establishment ambiguity 不需要暴露成业务 `OUTCOME_UNKNOWN`；publish ambiguity 才可能具有不可撤销的业务通知副作用。
-
-### Close
-
-`close()` 保持同步和幂等：
-
-```text
-subscription.close()
-    ↓
-local handle immediately inert
-    ↓
 close() returns
-    ↓
-listener MUST NOT run again
+→ local subscription inert
+→ no new listener invocation starts
 ```
 
-Hub-side unsubscribe / remote cleanup MAY 在之后异步完成。
+Remote unsubscribe cleanup 可异步完成。
 
-因此即使 physical binding 已失效，`close()` 仍必须能够完成本地 revoke；author 不需要 `await subscription.close()`。
+每个 successful subscription 暴露 non-rejecting one-shot：
 
-Late event / acknowledgement 必须被 closed-subscription fencing 丢弃，不得重新进入 listener。
+```ts
+subscription.closed
+```
+
+原因：
+
+```text
+closed
+    explicit author close
+
+overflow
+    delivery queue cannot preserve guarantee
+
+binding-terminal
+    carrying binding lost/terminal
+
+client-terminal
+    Runtime-scoped client terminal
+
+hub-terminal
+    Hub/Session terminal
+```
+
+这样“business event 不 silent drop”形成闭环：如果系统无法继续交付，业务至少能够观察 subscription 已失效。
+
+已经开始执行的 listener 不因 close/terminal 被强制取消；只保证之后不再启动新 invocation。
 
 ---
 
-## 8. Publish / Delivery Semantics
-
-核心因果关系：
+## 8. Publish / Routing / Multiplicity
 
 ```text
 publisher
-    publish(channel,type,payload)
-        ↓
-SessionEventHub validates + accepts event
-        ↓
-match subscriptions by exact channel
-        ↓
-route only to matching subscriptions
-        ↓
-bounded asynchronous delivery
-        ↓
-Runtime-local listener execution
+→ publish(channel,type,payload)
+→ Hub validates + accepts
+→ snapshot matching exact-channel subscriptions
+→ admit one delivery per matching subscription
+→ async serial subscription lanes
 ```
 
-Hub routing MUST NOT 正常实现为 broadcast-all + Runtime-local channel discard。
+Hub-side filtering 是正常模型；不向 unrelated Runtime broadcast 后再本地丢弃。
 
-必须区分：
+一个 accepted event：
 
 ```text
-publish accepted
-    != every subscriber received
-    != every listener started
-    != every listener succeeded
-    != business consequence committed
+one matching subscription
+    → at most one delivery
+
+two matching subscriptions in same Runtime
+    → one delivery to each
+
+publisher's own matching subscription
+    → eligible self-delivery
+
+zero subscribers
+    → publish still succeeds
 ```
 
-Publisher MUST NOT 等待 remote business listener 完成。Listener throw / rejected thenable local isolate，不 retroactively fail publisher、rollback Shared State 或成为 flow-control ACK。
+Publisher success：
+
+```text
+Hub accepted/routed
+!= listener started/completed/succeeded
+```
+
+Individual subscriber overflow 不 retroactively fail accepted publish。
 
 ---
 
-## 9. Lifetime / Currentness
+## 9. Serial Listener Lane
+
+每个 subscription 一条独立 delivery lane：
 
 ```text
-one Session
-→ one logical SessionEventHub
-→ many Runtime-scoped SessionEventClient bindings
-→ zero or more subscriptions per client
+event A
+→ listener(A)
+→ wait sync return / Promise settle
+→ event B
+→ listener(B)
 ```
 
-`SessionEventClient` lifetime 与 Runtime 绑定，但不与 Frame / Activation / Renderer / Data generation 绑定。
+同一 subscription 同时最多一个 active listener invocation。
+
+这个 await 只是 subscriber-local backpressure，不是 publish ACK。
+
+Listener throw/rejected Promise local isolate + diagnostics；subscription 默认继续下一条，不因此 terminal。
+
+Listener 可以 reenter publish/subscribe，也可以 close 自己，不得 deadlock Hub。
+
+---
+
+## 10. Ordering
+
+同一 publisher binding：
 
 ```text
-Frame suspend / close
+A accepted before B
+→ any subscription receiving both observes A before B
+```
+
+不同 publishers 没有 global total order。不同 subscriptions 也可以以不同速度消费。
+
+不存在：
+
+```text
+Session Event order == Shared State revision
+Session Event order == Main Control order
+Session Event order == Render/Input order
+```
+
+Hub 内部调度 counter 不升级为业务 universal clock。
+
+---
+
+## 11. Backpressure / Limits
+
+v1 logical hard limits：
+
+```text
+channel UTF-8 <= 256 bytes
+type UTF-8 <= 128 bytes
+payload JSON <= 256 KiB
+JsonValue depth <= 64
+channels/subscription <= 64
+live subscriptions/client <= 64
+pending events/subscription <= 64
+pending logical bytes/subscription <= 8 MiB
+```
+
+Slow listener 使 pending queue 增长；would-overflow 时：
+
+```text
+that subscription → overflow terminal
+closed resolves overflow
+no new listener invocation
+accepted publish remains accepted
+```
+
+这提供自然的 consumer backpressure 边界，而不让一个慢 consumer 拖死 publisher。
+
+---
+
+## 12. Failure / Evidence
+
+Stable failure codes：
+
+```text
+INVALID_REQUEST
+LIMIT_EXCEEDED
+TERMINAL
+BINDING_UNAVAILABLE
+OUTCOME_UNKNOWN
+```
+
+Publish：
+
+```text
+pre-dispatch rejection
+    → known not accepted
+
+success
+    → known accepted
+
+post-dispatch definitive result lost
+    → OUTCOME_UNKNOWN
+    → no automatic retry
+```
+
+Subscribe ambiguity 不产生业务 `OUTCOME_UNKNOWN` handle；失败 = no handle + no callbacks + orphan cleanup。
+
+---
+
+## 13. Logical Client / Binding Recovery
+
+`SessionEventClient` 是 Runtime-scoped logical capability，不等于某个 socket/process/MessagePort。
+
+无 usable binding 时：
+
+```text
+new publish → BINDING_UNAVAILABLE, no wait/queue
+new subscribe → BINDING_UNAVAILABLE, no handle/wait
+```
+
+Binding loss：
+
+```text
+old subscriptions → binding-terminal
+logical client remains live if Runtime remains live
+fresh binding MAY be installed
+future operations MAY proceed
+business must fresh subscribe
+no replay / no transparent reattach
+```
+
+Old-binding late events/results/acks 必须被 generation fencing 隔离。
+
+---
+
+## 14. Runtime / Session Lifetime
+
+```text
+Frame suspend/close
 Activation replacement
 Renderer reload
-Renderer Data reconnect
-    != SessionEventClient revoked
-    != Session subscription reset
+Data reconnect
+    != Event client revoke/reset
 ```
 
-Runtime terminal 终止该 Runtime 的 client/subscriptions；Session terminal 终止 Hub 和所有 clients/subscriptions。
+Runtime terminal：
 
-Physical event binding loss 不等于 Shared State reset、Renderer/Data failure 或 Main control transition。Fresh binding 不 replay missed history，也不透明恢复旧 subscription identity；需要继续观察时建立 fresh subscription。
+```text
+client terminal
+future operations TERMINAL
+subscriptions client-terminal
+```
+
+Hub/Session terminal：
+
+```text
+Hub inert
+future operations TERMINAL
+subscriptions hub-terminal
+```
+
+Hub invariant fatal 时先 self-terminal，再向 Main/Session lifecycle owner 报告 Session-fatal fact；Main 仍是唯一 terminal/unwind authority。
+
+Pre-READY Hub construction failure 是 bootstrap failure，不是假造 live-Hub fatal。
 
 ---
 
-## 10. Ordering / Replay / Delivery Guarantees
+## 15. Render / Diagnostics Boundary
 
-v1 baseline：
+`render.event` 属 RenderDomain/presentation plane，不自动桥接 Session Events。
 
-```text
-no history replay
-no durable subscription
-no consumer offset
-no universal Session event log
-no exactly-once delivery
-no automatic application retry
-no cross-plane total order
-```
-
-Same publisher/binding accepted order 对同一个收到两条事件的 subscription 保持；跨 publisher 不建立 global total order。
-
-Session Event order 与 Shared State revision、Main Control、Render/Input 等均不存在 normative total order。
+Diagnostics/logging 可以复用 routing core 或 carrier，但 logical role/QoS 独立；推荐 `scope.log.*` 而不是把 log 当普通 business event。
 
 ---
 
-## 11. Backpressure
+## 16. Physical Realization / Shared Carrier
 
-Session Events MUST bounded。至少限制：
-
-```text
-per-binding ingress
-per-client/subscription queued events
-single event encoded size
-aggregate queued bytes
-listener delivery concurrency
-```
-
-Business event delivery MUST NOT silent drop while subscription remains healthy。
-
-Channel routing MUST ensure unrelated Runtime bindings do not consume delivery queue/byte budget for channels they did not subscribe。
-
-具体 queue count/byte limits 属 formal contract / physical profile 收口项。
-
----
-
-## 12. Failure Boundary
-
-以下均不自动成为 Main Runtime/Frame failure：
+合法 placement：
 
 ```text
-publish rejected before acceptance
-subscribe establishment failure
-subscription callback throws
-subscription close
-binding loss
-subscriber overflow
+Event Hub 独立 Process/Worker
+State + Events 共进程
+Main + State + Events 共 Session host
+in-process direct Hub
 ```
 
-只有 SessionEventHub infrastructure fatal / invariant loss 才 MAY 上报 Session-fatal fact；Session terminal 与 Runtime/Frame unwind 仍由 Main / Session lifecycle owner 提交。
-
-`publish()` 在 dispatch 后丢失 definitive acceptance result 时可能产生 `OUTCOME_UNKNOWN`；framework MUST NOT 自动 retry。
-
-`subscribe()` 建立失败/歧义则必须收敛为“没有 author-visible live subscription”，而不是暴露 half-open object。
-
----
-
-## 13. Diagnostics / Logging
-
-Diagnostics / Log 与 Business Events 可复用 routing core / physical connection，但 logical role 与 QoS 必须分离。
-
-推荐 author API：
-
-```ts
-scope.log.info(message, fields)
-scope.log.warn(message, fields)
-scope.log.error(message, fields)
-```
-
-而不是把日志作为普通 business channel/type。
-
----
-
-## 14. Physical Realization
-
-逻辑设计不依赖 Process/Worker topology，也不要求 Session Events 独占 communication pipe。
-
-合法 realization：
+合法 carrier：
 
 ```text
-A. SessionEventHub 独立 Process / Worker
-B. SessionEventHub 与 SharedStateAuthority 共用 Process / Worker
-C. Main + SharedStateAuthority + SessionEventHub 共用 Session host
-D. same-process / in-process Hub
-```
+State dedicated + Events dedicated
 
-通信可以独立 carrier，也可以：
+or
 
-```text
-Runtime
-    │
-    ▼
-shared Session-service physical carrier
+shared Session-service carrier
     ├── Shared State logical binding
     └── Session Events logical binding
 ```
@@ -504,13 +527,13 @@ shared Session-service physical carrier
 
 > **shared carrier != shared logical protocol != shared authority != shared ordering domain**
 
-共 carrier 时仍必须保持独立 protocol namespace、correlation、flow-control accounting、evidence/error interpretation 与 subscription identity。
+共 carrier 仍需独立 correlation、flow-control、evidence/failure、subscription identity；Event/Diagnostics traffic 不得无限饿死 State。
 
-Session Events 内部的 channel routing 仍发生在 Hub side；共用 carrier 不是广播 unrelated channels 给所有 Runtime 的理由。
+Physical wire order 不创建 State/Event public happens-before。
 
 ---
 
-## 15. Explicit Non-goals
+## 17. Explicit Non-goals
 
 v1 不设计：
 
@@ -518,79 +541,45 @@ v1 不设计：
 request/reply RPC
 service discovery
 command bus
-workflow engine
-saga coordinator
-durable event store
-event sourcing
-history replay / cursor
+workflow/saga
+durable event store / event sourcing
+history replay/cursor
 consumer groups
-exactly-once delivery
+exactly-once
 automatic retry
 global Session sequence
-cross-plane transaction
-Shared State commit + Event publish atomicity
-channel ACL / multi-tenant policy engine
-channel wildcard / prefix / glob / regex subscription
+State+Event transaction
+channel ACL
+channel wildcard/prefix/glob/regex
 channel hierarchy semantics
 type-filtered subscription
-type wildcard / pattern routing
 schema registry
 Renderer direct subscription
 Render Event bridge
-universal application store
+updateChannels()
+universal EventBus
 ```
-
-如果未来出现“调用另一个 Subsystem 并等待明确结果”的需求，应单独设计 command/call contract，不应通过 publish + reply-channel 演化成 RPC。
 
 ---
 
-## 16. Communication Plane Integration
-
-```text
-Control Plane
-    Main ⇄ Subsystem / Renderer
-
-Renderer Data Plane
-    Renderer ⇄ Subsystem
-
-Shared State Plane
-    SharedStateAuthority ⇄ Subsystem Runtime
-
-Session Events Plane
-    SessionEventHub ⇄ Subsystem Runtime
-    exact-channel routed publish / subscribe
-
-Content Plane
-    Content Service ⇄ Main / Renderer / Subsystem
-```
-
-不同 plane MAY share physical primitives，但必须保持独立 logical contracts、lifetime/currentness、backpressure/recovery semantics，且不得发明 cross-plane global ordering。
-
----
-
-## 17. Final Invariants
+## 18. Final Invariants
 
 1. Session Events 只做 Session-scoped transient cross-Subsystem distribution；
-2. SessionEventHub 是 routing infrastructure，不是 business authority；
-3. Shared State 保存 current authoritative fact，Session Events 不保存 current value；
-4. channel 是 v1 唯一 Hub routing/filter key；
-5. subscription 原子订阅一个或多个 exact channels；
-6. channel MAY 包含 `/`，但 `/` 在 v1 没有 hierarchy/prefix/wildcard 语义；
-7. type 是 channel 内 business semantic discriminator，不参与 v1 filtering；
-8. `subscribe()` 异步建立，resolve 时 Hub-side subscription 已 live；
-9. listener 第一次调用 MUST 晚于 subscribe resolve；
-10. 建立失败不返回 half-open handle，也不产生 callback；
-11. `close()` 同步、幂等，本地立即 inert；remote cleanup MAY 异步；
-12. publish acceptance 不等待 subscriber business handler；
-13. listener failure local isolate，不 retroactively fail publisher；
-14. Event delivery 与 Shared State commit 不原子、不共享 revision/sequence；
-15. SessionEventClient 是 Runtime-scoped capability，不消费 Frame/Activation/InputTarget authority；
-16. `render.event` 保持 RenderDomain-local / presentation-oriented；
-17. Business Events 与 Diagnostics/Log 可复用 mechanics，但 logical role / QoS 分离；
-18. queues/buffers 必须 bounded，business event overflow 不允许 silent drop；
-19. SessionEventHub 可以独立进程，也可以和 Shared State/Main 共置；
-20. Shared State 与 Session Events 可以独立 carrier，也可以 multiplex 同一 physical carrier；
-21. shared carrier 不创建 shared authority、transaction、revision、retry 或 public cross-plane ordering；
-22. physical transport 不拥有 application retry、business authority 或 Session terminal；
-23. Desktop/PWA 可采用不同物理 realization，但必须保持相同 logical observable semantics；
-24. v1 不成为 RPC、event sourcing、durable log、workflow engine 或 universal EventBus。
+2. Hub owns routing mechanics, not business truth；
+3. channel 是唯一 v1 routing key，type 不参与过滤；
+4. source 来自 authenticated Runtime binding，不能 spoof；
+5. subscribe async 且只返回 live handle；
+6. first callback after subscribe resolve；
+7. every subscription exposes `closed` terminal evidence；
+8. close synchronous local revoke；
+9. one subscription = one serial listener lane；
+10. listener failure local isolate；
+11. delivery bounded；overflow explicit terminal；
+12. one accepted event at most one delivery per matching subscription；
+13. distinct subscriptions independently receive；self-delivery allowed；
+14. publish success independent of listener/overflow outcome；
+15. no-binding fail-fast；binding recovery requires fresh subscribe and no replay；
+16. Runtime/Hub terminal reasons are explicit and independent of Frame/Renderer/Data；
+17. State/Event non-atomic and no shared revision/order；
+18. process placement and carrier sharing cannot change logical semantics；
+19. v1 remains intentionally smaller than a general message broker。
