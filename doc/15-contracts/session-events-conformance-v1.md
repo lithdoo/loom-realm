@@ -4,7 +4,7 @@
 > 状态：**Active / Normative / Not Implemented / Not Qualified**  
 > 对应契约：[Session Events v1](./session-events-v1.md)  
 > Physical profile：[Session Events Runtime Integration Profile v1](./session-events-runtime-profile-v1.md)  
-> 最近复核：2026-10-13
+> 最近复核：2026-10-14
 
 本文把 Session Events v1 的 normative semantics 转换为实现前必须具备的可执行断言。本文不重新定义协议；若与 [Session Events v1](./session-events-v1.md) 冲突，以契约正文为准。Current Hostra/PWA physical subject 以 [Runtime Integration Profile v1](./session-events-runtime-profile-v1.md) 为准。
 
@@ -37,9 +37,18 @@ State+Events multiplexed carrier is allowed by the logical contract but is **not
 
 ---
 
-## 2. Identity / Validation
+## 2. Capability / Identity / Validation
 
-Automated tests MUST prove：
+Automated tests MUST prove the logical capability cardinality：
+
+```text
+one live Session → exactly one logical SessionEventHub
+one successfully bootstrapped live Subsystem Runtime → exactly one Runtime-scoped SessionEventClient
+scope.events is a required Runtime capability, not an optional feature probe
+current Hostra/PWA business Definition import is blocked until the required initial Event binding is usable
+```
+
+Validation tests MUST prove：
 
 ```text
 channel non-empty
@@ -338,6 +347,8 @@ no replay of missed history
 no automatic retry of ambiguous publish
 ```
 
+Qualification MUST deliberately exercise fresh binding replacement/fencing。It MUST NOT require or infer a particular automatic reconnect scheduler、retry cadence or backoff algorithm；those are concrete product implementation policy outside the logical contract/profile freeze surface。
+
 ---
 
 ## 13. Runtime / Hub Lifetime + Main Fatal Ownership
@@ -387,8 +398,10 @@ required initial Event binding is usable before Definition import
 source.subsystemKey derives from launch/bound Runtime identity
 wrong path/capability cannot consume valid binding
 post-start Event binding loss does not fail Runtime/Frame/Session by itself
-fresh binding uses generation fencing and does not revive old subscriptions/replay history
+fresh binding can be deliberately attached with generation fencing and without old subscription revival/replay
 ```
+
+Hostra qualification MUST NOT require automatic background reconnect as a product behavior unless a later product policy/profile explicitly promotes that behavior into the qualification subject。
 
 ---
 
@@ -405,8 +418,10 @@ provisioningPort never carries publish/subscription/event payload frames
 wrong subsystemKey / duplicate requestId / stale bindingId / late result are fenced
 initial install failure prevents business import
 post-start Event binding loss does not fail Runtime/Frame/Session by itself
-fresh Event port may attach to same logical client without replay/reactivation
+fresh Event port may deliberately attach to same logical client without replay/reactivation
 ```
+
+PWA qualification MUST NOT require automatic replacement scheduling；it only proves that a fresh binding can be installed correctly when composition chooses to do so。
 
 ---
 
@@ -433,6 +448,7 @@ Dedicated-carrier and any future multiplexed-carrier profile MUST expose equival
 Current v1 qualification MUST compare Hostra dedicated WebSocket and PWA dedicated MessagePort subjects for：
 
 ```text
+required Runtime capability cardinality/bootstrap availability
 channel/type validation
 payload limits/detachment
 source authenticity
