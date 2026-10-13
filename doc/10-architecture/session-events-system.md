@@ -2,10 +2,10 @@
 
 > 层级：系统架构  
 > 状态：Active Design / not implemented / not qualified  
-> 稳定程度：**Core Semantics Frozen**  
+> 稳定程度：**Core Semantics + Current Runtime Integration Frozen**  
 > 主要定义：Session-scoped cross-Subsystem transient event distribution、Channel routing、SessionEventHub、Runtime-scoped SessionEventClient、subscription lifetime、serial delivery、failure/backpressure、与 Shared State / Render Event / Control / Diagnostics 的边界  
 > 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)、[Subsystem 模型](./subsystem-model.md)、[渲染系统](./rendering-system.md)  
-> 正式化：[Session Events v1](../15-contracts/session-events-v1.md) · [Conformance](../15-contracts/session-events-conformance-v1.md)  
+> 正式化：[Session Events v1](../15-contracts/session-events-v1.md) · [Runtime Integration Profile](../15-contracts/session-events-runtime-profile-v1.md) · [Conformance](../15-contracts/session-events-conformance-v1.md)  
 > 最近复核：2026-10-13
 
 本文定义 LoomRealm 的 **Session Events**：同一 Session 内，不同 Subsystem Runtime 之间的 transient business event distribution capability。
@@ -37,14 +37,16 @@ Shared State 重命名完成前，现有 `Realm State` contract/code 与本文�
 3. `SessionEventHub` 不是 business authority，只拥有 routing、subscription lifetime、bounded delivery mechanics；
 4. event transient：不保存 current value、不 replay history；
 5. Channel 是 v1 唯一 Hub routing/filter key；type 不参与 v1 routing；
-6. `subscribe()` 异步建立，只返回已经 live 的 subscription；
+6. `subscribe()` 异步建立，只返回已经 live 的 subscription；如果 candidate 在成功返回前已 terminal，则 reject 而不是返回死亡 handle；
 7. 每个 subscription 是一条 serial delivery lane，同一时刻最多一个 listener invocation；
 8. business delivery bounded；无法继续保证 delivery 时 subscription 显式 terminal，而不是 silent drop；
 9. subscription unexpected terminal 通过 `closed` Promise 可观察；
 10. `publish()` success 只表示 Hub accepted/routed，不等待 business listener；
-11. source identity 来自绑定的 Runtime identity，publisher 不能伪造；
-12. physical process/carrier placement 非规范；State 与 Events 可共进程、共 carrier，但 logical semantics 独立；
-13. v1 不提供 RPC、replay、durable log、exactly-once、wildcard/type filtering 或 State+Event transaction。
+11. author-facing logical failure 使用稳定 `SessionEventError` / `isSessionEventFailure()` surface；
+12. source identity 来自绑定的 Runtime identity，publisher 不能伪造；
+13. logical architecture 允许 State/Events 共进程、共 carrier，但 current Hostra/PWA v1 realization 冻结为 dedicated Event carrier；
+14. Hub invariant-fatal 通过独立 `sessionEventsFatal` narrow fact 报 Main，Main 仍独占 Session terminal/unwind；
+15. v1 不提供 RPC、replay、durable log、exactly-once、wildcard/type filtering 或 State+Event transaction。
 
 ---
 
@@ -208,6 +210,22 @@ interface SessionEventSubscription {
 }
 ```
 
+Logical failure author surface：
+
+```ts
+class SessionEventError extends Error {
+  readonly code:
+    | "INVALID_REQUEST"
+    | "LIMIT_EXCEEDED"
+    | "TERMINAL"
+    | "BINDING_UNAVAILABLE"
+    | "OUTCOME_UNKNOWN";
+  readonly path?: readonly (string | number)[];
+}
+```
+
+并提供 structural `isSessionEventFailure()`；caller 不依赖 exact message 或跨 realm `instanceof` 做业务判断。
+
 `source.subsystemKey` 是 authenticated logical publisher identity；publisher 不提供 `source`，Hub/binding 根据 Runtime binding 构造。
 
 Author 不见 process/Worker/socket/port/generation/request-id 等 physical material。
@@ -241,6 +259,16 @@ accepted after N  → eligible
 subscribe resolves
 → listener may start
 ```
+
+但如果 candidate 在成功 result author-visible 前已经 terminal：
+
+```text
+overflow          → subscribe rejects LIMIT_EXCEEDED
+binding terminal  → subscribe rejects BINDING_UNAVAILABLE
+client/Hub term.  → subscribe rejects TERMINAL
+```
+
+此时不返回 handle、不调用 listener；这不是 `OUTCOME_UNKNOWN`。
 
 v1 不暴露 half-open subscription、`ready` 或 pending status。
 
@@ -416,6 +444,8 @@ BINDING_UNAVAILABLE
 OUTCOME_UNKNOWN
 ```
 
+Author-facing failed `publish/subscribe` reject `SessionEventError`，remote transport error 先映射为稳定 failure surface 后再暴露给业务。
+
 Publish：
 
 ```text
@@ -486,7 +516,7 @@ future operations TERMINAL
 subscriptions hub-terminal
 ```
 
-Hub invariant fatal 时先 self-terminal，再向 Main/Session lifecycle owner 报告 Session-fatal fact；Main 仍是唯一 terminal/unwind authority。
+Hub invariant fatal 时先 self-terminal，再通过 `MainSessionEventsFatalSource` 的 latched one-shot fact 向 Main 报告；Main 仍是唯一 terminal/unwind authority。Current composition implementing Session Events 必须在 `runMain()` 前提供 `sessionEventsFatal`。
 
 Pre-READY Hub construction failure 是 bootstrap failure，不是假造 live-Hub fatal。
 
@@ -502,7 +532,7 @@ Diagnostics/logging 可以复用 routing core 或 carrier，但 logical role/QoS
 
 ## 16. Physical Realization / Shared Carrier
 
-合法 placement：
+Logical architecture 合法 placement：
 
 ```text
 Event Hub 独立 Process/Worker
@@ -511,7 +541,7 @@ Main + State + Events 共 Session host
 in-process direct Hub
 ```
 
-合法 carrier：
+Logical contract 合法 carrier：
 
 ```text
 State dedicated + Events dedicated
@@ -530,6 +560,23 @@ shared Session-service carrier
 共 carrier 仍需独立 correlation、flow-control、evidence/failure、subscription identity；Event/Diagnostics traffic 不得无限饿死 State。
 
 Physical wire order 不创建 State/Event public happens-before。
+
+但 current product profile 已冻结：
+
+```text
+Hostra
+    SessionEventHub in LoomRealm Desktop process
+    per Runtime dedicated private Events WebSocket
+
+PWA
+    SessionEventHub in Session Worker
+    per Runtime dedicated private Events MessagePort
+    installed through Runner provisioning control
+```
+
+Hostra 不扩展历史 M6 Control bootstrap，而通过 host-owned `LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT` seam；PWA 保持 `PwaRunnerBootstrapV1` closed schema 不变。精确规则见 [Runtime Integration Profile](../15-contracts/session-events-runtime-profile-v1.md)。
+
+未来 multiplex 是 physical optimization，需要独立 profile/qualification，不改变 author API。
 
 ---
 
@@ -568,18 +615,21 @@ universal EventBus
 2. Hub owns routing mechanics, not business truth；
 3. channel 是唯一 v1 routing key，type 不参与过滤；
 4. source 来自 authenticated Runtime binding，不能 spoof；
-5. subscribe async 且只返回 live handle；
+5. subscribe async 且只返回仍然 live 的 handle；pre-visible terminal 必须 reject；
 6. first callback after subscribe resolve；
-7. every subscription exposes `closed` terminal evidence；
-8. close synchronous local revoke；
-9. one subscription = one serial listener lane；
-10. listener failure local isolate；
-11. delivery bounded；overflow explicit terminal；
-12. one accepted event at most one delivery per matching subscription；
-13. distinct subscriptions independently receive；self-delivery allowed；
-14. publish success independent of listener/overflow outcome；
-15. no-binding fail-fast；binding recovery requires fresh subscribe and no replay；
-16. Runtime/Hub terminal reasons are explicit and independent of Frame/Renderer/Data；
-17. State/Event non-atomic and no shared revision/order；
-18. process placement and carrier sharing cannot change logical semantics；
-19. v1 remains intentionally smaller than a general message broker。
+7. failed logical operation 使用稳定 SessionEventError / structural failure guard；
+8. every successful subscription exposes `closed` terminal evidence；
+9. close synchronous local revoke；
+10. one subscription = one serial listener lane；
+11. listener failure local isolate；
+12. delivery bounded；overflow explicit terminal；
+13. one accepted event at most one delivery per matching subscription；
+14. distinct subscriptions independently receive；self-delivery allowed；
+15. publish success independent of listener/overflow outcome；
+16. no-binding fail-fast；binding recovery requires fresh subscribe and no replay；
+17. Runtime/Hub terminal reasons are explicit and independent of Frame/Renderer/Data；
+18. Hub fatal reports through narrow latched `sessionEventsFatal` fact；Main owns unwind；
+19. State/Event non-atomic and no shared revision/order；
+20. process placement and future carrier sharing cannot change logical semantics；
+21. current Hostra/PWA v1 use dedicated Event carriers；
+22. v1 remains intentionally smaller than a general message broker。
