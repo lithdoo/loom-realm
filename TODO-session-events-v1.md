@@ -19,6 +19,7 @@ limits
 Main fatal ownership
 Hostra/PWA physical Event binding profile
 State/Event atomicity or ordering
+cross-package integration surface listed below
 ```
 
 发现规范缺失时必须停止在该点并修 contract；不得用 platform-specific behavior 静默补洞。
@@ -68,7 +69,100 @@ remote carrier protocol/server/client binding
 MessagePort-capable realization needed by PWA
 ```
 
-Internal file layout is implementation freedom；public observable semantics are not。
+To avoid cross-package API invention during implementation, the package integration surface is fixed to the following naming/model, intentionally paralleling current Realm State conventions：
+
+```ts
+export {
+  SessionEventError,
+  isSessionEventFailure,
+  type SessionEventFailure,
+  type SessionEventFailureCode,
+};
+
+export type {
+  SessionEvent,
+  SessionEventClient,
+  SessionEventListener,
+  SessionEventSubscription,
+  SessionEventSubscriptionClose,
+  SessionEventSubscriptionCloseReason,
+  SessionEventBindingPublishDispatch,
+  SessionEventPhysicalBinding,
+};
+
+export { SESSION_EVENTS_LIMITS };
+
+export {
+  SessionEventHub,
+  createSessionEventHub,
+  createInMemorySessionEventBinding,
+  type SessionEventHubFatalFact,
+  type SessionEventHubOptions,
+};
+
+export {
+  ReplaceableSessionEventClient,
+  createSessionEventClient,
+};
+
+export {
+  createSessionEventCarrierBinding,
+  serveSessionEventCarrier,
+  type SessionEventCarrierServer,
+};
+
+export {
+  createSessionEventMessagePortCarrier,
+  type SessionEventMessagePort,
+};
+```
+
+Physical client binding model MUST preserve publish dispatch evidence：
+
+```ts
+interface SessionEventBindingPublishDispatch {
+  /** resolves only after carrier locally accepts the publish request */
+  readonly dispatched: Promise<void>;
+  /** definitive Hub acceptance result */
+  readonly result: Promise<void>;
+}
+
+interface SessionEventPhysicalBinding
+  extends Omit<SessionEventClient, "publish"> {
+  publish(
+    channel: string,
+    type: string,
+    payload: JsonValue,
+  ): SessionEventBindingPublishDispatch;
+
+  readonly terminal: Promise<void>;
+  close(): void | Promise<void>;
+}
+```
+
+Required factory roles：
+
+```text
+createSessionEventHub(options?)
+    create one Session-scoped Hub
+
+createInMemorySessionEventBinding(hub, { subsystemKey })
+    trusted same-process binding with authenticated logical publisher identity
+
+createSessionEventClient()
+    create one initially-unbound Runtime-scoped ReplaceableSessionEventClient
+
+createSessionEventCarrierBinding(carrier)
+    client-side remote physical binding
+
+serveSessionEventCarrier(hub, carrier, { subsystemKey })
+    server-side remote binding; subsystemKey is trusted binding identity and source authority
+
+createSessionEventMessagePortCarrier(port)
+    PWA MessagePort → MessageCarrier adapter
+```
+
+Exact internal file layout、private wire frame representation、private request/subscription ids、map/index data structure remain implementation freedom。
 
 ## 4. Subsystem integration
 
@@ -80,11 +174,20 @@ interface SubsystemScope {
 }
 ```
 
-Author package SHOULD re-export Session Events author types from `@loomrealm/session-events` in the same style it currently re-exports `RealmStateClient`。
+Author package MUST re-export the author-facing Session Events types and `SessionEventError` / `isSessionEventFailure` from `@loomrealm/session-events` in the same dependency direction it currently uses for Realm State author capability。
 
-`@loomrealm/subsystem/host` MUST require a Runtime Event capability alongside the required State capability。Business Definition import/initialization must occur only after both required initial capabilities are usable。
+`@loomrealm/subsystem/host` MUST require：
 
-Runtime termination MUST terminal the logical Event client and must not leave live listener delivery lanes。
+```ts
+interface SessionEventsRuntimeCapability {
+  readonly client: SessionEventClient;
+  terminate(): void;
+}
+```
+
+alongside the required State capability。Business Definition import/initialization must occur only after both required initial capabilities are usable。
+
+Runtime termination MUST call the Event capability termination path and must not leave live listener delivery lanes。
 
 ## 5. Main integration
 
@@ -137,6 +240,8 @@ post-start binding loss Event-local only
 replaceable client fencing / fresh subscribe / no replay
 ```
 
+Hostra may implement a launcher-local `createSessionEventWebSocketCarrier()` analogous to the existing Realm State WebSocket adapter；that adapter is physical/private and is not part of the author SDK。
+
 Do not add Events fields to the historical M6 Control bootstrap semantic envelope merely for convenience。
 
 ## 7. PWA implementation
@@ -181,6 +286,7 @@ Hostra child process + WebSocket Event carrier
 PWA Dedicated Worker + MessagePort Event carrier
 Main fatal ownership
 pre-resolve subscription terminal races
+SessionEventError structural classification
 OUTCOME_UNKNOWN / no automatic retry
 binding replacement fencing
 serial async listener lanes
@@ -246,6 +352,7 @@ The handoff is complete only when：
 
 ```text
 architecture decision required by implementation Agent = 0
+cross-package integration API decision required by Agent = 0
 contract tests pass
 Hostra product profile passes
 PWA product profile passes
