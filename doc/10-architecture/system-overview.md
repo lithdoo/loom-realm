@@ -8,7 +8,7 @@
 > 细化：[平台组合](./platform-composition-system.md)、[运行承载](./runtime-hosting-system.md)、[Realm State](./realm-state-system.md)、[Session Events](./session-events-system.md)、[渲染](./rendering-system.md)、[Subsystem](./subsystem-model.md)、[存储](./storage-system.md)  
 > 最近复核：2026-10-13
 
-本文描述 Current system-level responsibility / authority / topology。精确 wire、ABI、error、limit 与 conformance semantics 由 [正式契约](../15-contracts/README.md) 拥有。
+本文描述 Current system-level responsibility / authority / topology。精确 wire、ABI、error、limit 与 conformance semantics 由 [正式契约](../15-contracts/README.md) 拥有；实现位置由 [模块文档](../20-modules/README.md) 拥有；qualification 规则由 [30-development](../30-development/qualification.md) 拥有。
 
 ## 1. Logical roles
 
@@ -18,15 +18,15 @@
 | Platform Launcher | current-platform PREPARE、binding、preflight | business semantics |
 | Main | Session / Runtime / Frame / Activation / InputTarget / DataAuthority / failure unwind | shared business state / DOM |
 | Realm State | session shared mutable Records、versions、OCC、commit revision | Frame/InputTarget / persistence policy |
-| Session Events | Session-scoped transient exact-channel routing / bounded delivery | business truth / history / RPC / control flow |
+| Session Events | Session-scoped transient exact-channel routing / bounded serial delivery | business truth / history / RPC / control flow |
 | Subsystem | domain execution、local business state、Input Interest、Render Domains | platform host / Renderer replica |
 | Renderer | current readonly replica、Input producer gate、presentation projection inputs | authoritative game state |
 | Content | readonly prepared installation definitions/resources | mutable session state |
 | Platform composition | Process/Worker/Port/Window/Service Worker wiring | second application authority |
 
-核心原则：**single authority partition**。物理共置不等于 logical owner 合并。
+核心原则：**single authority partition**。物理共置不等于逻辑 owner 合并。
 
-`SessionEventHub` 是 infrastructure owner 而不是 business authority：只拥有 routing、subscription lifetime、serial/bounded delivery mechanics，不拥有事件描述的业务事实。
+Session Events 是“有 infrastructure owner 但不是 business authority”的角色：`SessionEventHub` 只拥有 exact-channel routing、subscription lifetime、serial/bounded delivery 等 mechanics，不拥有事件所描述的业务事实。
 
 ## 2. Bootstrap boundaries
 
@@ -35,104 +35,102 @@ installation/source
 → matching Platform Launcher
 → Game Entry + platform manifest validation
 → exact key-set join
-→ executable/security/hosting preflight
+→ executable / security / hosting preflight
 → immutable PlatformLaunchPlan
-→ logical bootstrap + prepared State
+→ logical bootstrap + prepared capabilities
 → Session composition
 → Realm State READY + SessionEventHub READY
-→ Runtime-scoped State/Event clients
-→ Main / first business Runtime side effect
+→ Runtime-scoped State/Event client capabilities
+→ first business Runtime side effect
 ```
 
-Main 不解析 installation document，也不接触 executable path/URL/module binding。Realm State bootstrap material 与 `LogicalGameBootstrap` 平级，不塞进 Main control model。SessionEventHub 没有 Game Event history/bootstrap payload；它由 Session composition 构造并在业务 Runtime side effect前 READY。
+Main 不解析 installation document，也不接触 executable path/URL/module binding。Realm State bootstrap material 与 `LogicalGameBootstrap` 平级，不塞进 Main control model。SessionEventHub 同样由 Session composition 构造/承载，不进入 Main control state，也不创建第二份 Session authority；它没有 Game event history/bootstrap payload。
 
-## 3. Main、State 与 Session Events
+Web presentation bootstrap独立于 logical game/runtime bootstrap；Window/document lifecycle、CSP/origin、prepared Content binding 属于 concrete platform composition。
+
+## 3. Main、Realm State 与 Session Events
 
 ```text
 Main                           Realm State                     Session Events
 Control Authority              Business State Authority        Transient Distribution
 Session/Runtime/Frame          Records / versions              exact-channel routing
-Activation/InputTarget         OCC / commit revision           subscriptions
-DataAuthority                  state subscriptions             serial bounded delivery
+Activation/InputTarget         OCC / global commit revision    subscriptions
+DataAuthority                  subscriptions                   serial bounded delivery
 failure unwind                 mutation result                 no business truth
 ```
 
-State/Event operations都不创建、消费或验证 Frame/Activation/InputTarget authority。
+Realm State operation 不创建、消费或验证 Frame/Activation/InputTarget authority。Realm State fatal 可以报告 Session-fatal fact，但 **Main 唯一提交 Session terminal 与 Runtime/Frame unwind**。
 
-State/Event infrastructure fatal都只报告 Session-fatal fact；**Main / Session lifecycle owner 唯一提交 Session terminal 与 Runtime/Frame unwind**。
+Session Events 同样不创建、消费或验证 Frame/Activation/InputTarget authority。`SessionEventHub` invariant fatal MUST self-terminal before reporting Session-fatal fact；仍由 Main / Session lifecycle owner 提交 terminal/unwind。
 
-Placement rule：
+State / Event placement rule：
 
 ```text
-当前 authoritative business fact
+需要表达“当前 authoritative business fact 是什么”
 → Realm State（目标命名 Shared State）
 
-刚刚发生的 transient cross-Subsystem business notification
+需要表达“Session 中刚刚发生了什么”且允许 late subscriber 不看历史
 → Session Events
 
-RenderDomain transient presentation intent
+需要表达 RenderDomain 的 transient presentation intent
 → render.event
 ```
 
-如果 restarted / late-joining Runtime 必须知道某信息，它不能只存在 Session Events。
+如果 restarted / late-joining Runtime 必须知道某信息，它不能只存在 Session Events；该信息必须由 Realm State、Main、Content 或其他明确 authority 持有。
 
-## 4. Session Events v1 in one view
+Session Events v1 的核心 author model：
 
 ```text
-publish(channel, type, payload)
-
-subscribe([exactChannel...], listener)
-    → Promise<live subscription>
-
-subscription.closed
-    → closed | overflow | binding-terminal | client-terminal | hub-terminal
-
-subscription.close()
-    → synchronous local revoke
+publish(channel,type,payload)
+subscribe([exactChannel...],listener) → Promise<live subscription>
+subscription.closed → closed | overflow | binding-terminal | client-terminal | hub-terminal
+subscription.close() → synchronous local revoke
 ```
 
-规则：
+固定语义：
 
 ```text
 channel = only v1 Hub routing key
-type = business discriminator, not filter
+type = business discriminator, not routing filter
 '/' = ordinary channel text, no hierarchy semantics
-source.subsystemKey = derived from authenticated Runtime binding
+source.subsystemKey = framework-derived Runtime identity
 one accepted event = at most one delivery per matching subscription
 one subscription = one serial listener lane
-zero subscribers = publish success
+zero matching subscribers = publish success
 self-delivery = allowed
 ```
 
-Slow consumer不会拖死 publisher：若 subscription queue无法继续保持语义，该 subscription `overflow` terminal；accepted publish仍保持 accepted。
+Slow consumer如果无法继续保持 bounded delivery，该 subscription 显式 `overflow` terminal；不会 silent drop while healthy，也不会 retroactively fail accepted publisher。
 
-Publish post-dispatch definitive result丢失 = `OUTCOME_UNKNOWN`，framework不自动 retry。
+Save/Load 是 business workflow，不是 Realm State lifecycle authority：业务 Subsystem 自行读取/解释 persistence data，再使用普通 RealmStateClient read/commit。
 
-无 usable Event binding的新 publish/subscribe fail-fast `BINDING_UNAVAILABLE`，不等待 reconnect。
+## 4. Renderer Data / Input / Render
 
-## 5. Renderer Data / Input / Render
+Renderer Data identity/currentness 建立在 current Session、Renderer、subsystem key、generation 与 profile 上。Same-generation Data reconnect 只替换 Data physical pair；Renderer reload 产生 fresh logical participant。
 
-Renderer Data identity/currentness 建立在 current Session、Renderer、subsystem key、generation/profile 上。Data reconnect/reload不重置 Realm State 或 Session Events。
-
-Input admission仍由 Data × InputTarget × Activation × Interest × producer gate 决定。
+Input admission 必须同时满足 current Data、Main InputTarget、active Activation、Subsystem Interest 与 physical producer gate。
 
 Render authoritative flow：
 
 ```text
 Subsystem RenderDomain
-→ Render Update
-→ Renderer Store
-→ Web Projector
-→ business-owned presentation
+→ Render Update contract
+→ Renderer per-subsystem Store/current replica
+→ thin Web Projector
+→ business-owned Web Components
 ```
 
-`render.event` 不进入 Session Events plane，也不自动跨 Subsystem fan-out。
+DOM/Web Component 私有状态不得 reverse-sync Renderer Store，更不得成为 Main/Realm State/Subsystem authority。
 
-## 6. Content
+`RenderDomain.emit()` 的 Render Event 继续属于 presentation-oriented transient intent；它不进入 Session Events plane，也不自动跨 Subsystem fan-out。需要跨 Subsystem 的业务通知时必须显式使用 Session Events。
 
-Content 是 installation-scoped readonly definition authority。Content readonly、State mutable current、Event transient、Render presentation intent 保持不同边界。
+## 5. Content
 
-## 7. Platform composition
+Content 是 installation-scoped readonly definition authority。业务通过 `ContentClient` 消费 logical record/resource；Runtime 不依赖 importer、filesystem path、FSDB transport、Marshal 或 acquisition mechanics。
+
+Desktop 可使用 FSDB-backed physical service；PWA 可使用 same-origin Service Worker/OPFS realization。两者只要满足 [Content API v1](../15-contracts/content-api-v1.md)，就不需要共享物理实现。
+
+## 6. Platform composition
 
 ### Desktop / Hostra
 
@@ -150,7 +148,9 @@ LoomRealm Desktop process
 Runner → Subsystem Runtime
 ```
 
-SessionEventHub MAY future split into dedicated process without changing protocol。
+External Hostra 是 outer physical owner；LoomRealm Desktop 是 plain Node product composition。Hostra RPC 是 host-control boundary，不成为 game/runtime application protocol。
+
+SessionEventHub MAY later split into dedicated process without changing author/protocol semantics。
 
 ### PWA
 
@@ -162,33 +162,33 @@ Session Worker
     Main + Realm State + SessionEventHub
         ↓
 Dedicated Subsystem Workers
+
+Service Worker
+    Content / executable / runtime-info physical boundary
 ```
 
-PWA也可把 Event Hub拆到独立 Worker。
+PWA 也 MAY 把 Event Hub 放到独立 Worker。PWA 的 worker/port/origin/generation fencing 属于 PWA profile；不能把 browser-specific mechanics 提升为 universal runtime ABI。
 
-State 与 Events 可以 separate carriers，也可以 multiplex one Session-service carrier；共 carrier 不创建 shared authority、transaction、revision 或 public ordering。
+State 与 Events MAY separate carriers，也 MAY multiplex one Session-service physical carrier；共享 carrier 不创建 shared authority、transaction、revision、retry 或 public cross-plane ordering。
 
-## 8. Failure 与 lifetime
+Session Events 在 Desktop/PWA 可以使用不同 physical carrier，但必须保持同一 logical observable semantics；Process、Worker、Port、socket identity 不进入 business event identity。
 
-```text
-Data carrier loss != Runtime/Frame failure
-Renderer reload != State/Event reset
-Frame/Activation change != State/Event client revoke
-```
+## 7. Failure 与 lifetime
 
-State binding loss：old State subscription terminal；logical client可在 fresh binding后继续；no mutation replay。
+- Data carrier loss != Runtime/Frame failure；
+- Renderer reload != Realm State / Session Events reset；
+- presentation/bootstrap error 默认 Window-local，不 rollback authoritative state；
+- Realm State binding loss终止旧 physical subscription，但不自动 fail still-live Runtime logical client；
+- Session Events binding loss使旧 subscriptions `binding-terminal`，但不自动 fail still-live Runtime logical client；fresh binding 不 replay missed history且需要 fresh subscribe；
+- no usable Event binding 的新 publish/subscribe fail-fast `BINDING_UNAVAILABLE`，不等待 reconnect；
+- Session event listener throw/rejected thenable 必须 subscriber-local isolate；subscription默认继续下一条；
+- Session Event subscriber overflow → subscription `closed(reason="overflow")`，accepted publish保持 accepted；
+- ambiguous State mutation / Event publish result 不自动 retry；
+- Runtime terminal 使该 Runtime 的 state/events/data capabilities terminal/inert；Event subscriptions `client-terminal`；
+- Session/Hub terminal 使 Event subscriptions `hub-terminal`；
+- physical host terminal signals 必须汇入既有 Main/RuntimeHosting owner chain，不创建第二套 failure authority。
 
-Event binding loss：old Event subscriptions `binding-terminal`；logical client可在 fresh binding后继续；fresh subscribe required；no replay。
-
-Event listener throw/rejected Promise：subscriber-local containment，subscription继续下一条，除非另有 close/terminal。
-
-Event overflow：subscription `closed` resolves `overflow`；no silent drop while remaining healthy；accepted publisher不被反向失败。
-
-Runtime terminal：该 Runtime 的 State/Event clients terminal；Event subscriptions `client-terminal`。
-
-Session/Hub terminal：Event subscriptions `hub-terminal`；Main拥有整体 unwind。
-
-## 9. Dependency boundaries
+## 8. Dependency boundaries
 
 ```text
 packages/   framework/runtime/protocol/platform seams
@@ -198,18 +198,20 @@ apps/       product/platform compositions
 tools/      import/development tooling
 ```
 
-禁止：
+禁止的典型反向依赖：
 
 ```text
 framework → concrete game/example
-Business Definition → platform/protocol authority
+Business Definition → browser/platform/protocol authority
 Renderer → direct Realm State authority
+Realm State → Main Frame/Activation/InputTarget authority
 Session Events → Main Frame/Activation/InputTarget authority
-Session Events → direct State mutation authority
+Session Events → direct Shared/Realm State mutation authority
 DOM → Store reverse authority
+runtime business code → tools/*
 ```
 
-## 10. Current capability map
+## 9. Current capability map
 
 ```text
 Launch / Hosting       Game Package + Platform profiles + RuntimeHosting
@@ -219,24 +221,30 @@ Cross-domain events    Session Events v1
 Data / Input / Render  Renderer Data + Input + Render Update + Viewport
 Presentation           Web Presentation Config/API + business WC
 Content                Content API + FSDB/PWA physical realizations
-Game domain            game-libs/*
+Game domain            game-libs/map and other game libraries
 Products               Desktop/Hostra + PWA
 ```
 
-## 11. Final invariants
+这些是长期 capability，不是项目阶段。新的实现工作按 capability impact 与 qualification subject 管理。
+
+## 10. Final invariants
 
 1. 一个 application authority 只有一个 owner；
-2. SessionEventHub只拥有 transient routing/delivery mechanics，不成为 business authority；
-3. first business Runtime side effect前 PREPARE + State READY + Event Hub READY；
-4. Main bootstrap不包含 platform executable material、State payload或Event routing state；
-5. State、Events、Renderer Data拥有独立 lifetime/currentness；
-6. Session Events exact-channel only，type不参与v1 filtering；
-7. source由Runtime binding派生，不能spoof；
-8. subscribe只返回live handle，terminal通过`closed`可观察；
-9. one subscription one serial listener lane；overflow显式terminal；
-10. publish acceptance != listener success != State consequence commit；
-11. no-binding fail-fast；binding recovery no replay/no old-subscription reattach；
-12. Render Event与Session Event不自动桥接；
-13. State/Event可共进程、共carrier但不共享authority/transaction/order；
-14. Desktop/PWA physical topology可以不同，但 logical contract 与 observable outcome一致；
-15. `Frozen != Implemented != Qualified`。
+2. SessionEventHub 只拥有 transient routing/delivery mechanics，不成为 business authority；
+3. platform composition 只做 physical assembly/wiring/disposal；
+4. first business Runtime side effect 发生前 PREPARE + Realm State READY + SessionEventHub READY；
+5. Main bootstrap 不包含 platform executable material、Realm State business payload 或 Session event routing state；
+6. Realm State、Session Events 与 Renderer Data 拥有独立 lifetime/currentness；
+7. Session Events exact-channel only；type 不参与v1 filtering；source由 Runtime binding派生；
+8. Session Event subscribe只返回live handle，terminal通过`closed`可观察；one subscription one serial listener lane；
+9. Session Event overflow显式terminal，不silent drop，不retroactively fail accepted publisher；
+10. Session Event publish acceptance != subscriber handler success != Shared State consequence commit；
+11. no-binding新 Event operation fail-fast；binding recovery no replay/no old subscription reattach；
+12. late subscriber 不依赖 Session Events replay 来恢复 authoritative state；
+13. Renderer/DOM 只投影 authoritative state，不反向取得 authority；
+14. Content readonly、State mutable、Event transient、Render replica/presentation intent边界不能混合；
+15. State/Event可以共进程、共carrier，但不共享authority/transaction/revision/order；
+16. Desktop/PWA physical topology 可以不同，但 logical contract 与 observable outcome 必须一致；
+17. current architecture 不从历史 qualification ledger 推导；
+18. 行为或 qualification-input 改变后，PASS 只对重新确定的 subject 有效；
+19. `Frozen != Implemented != Qualified`。
