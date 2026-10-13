@@ -3,9 +3,9 @@
 > 层级：系统架构  
 > 状态：Active Design / not implemented / not qualified  
 > 稳定程度：Evolving  
-> 主要定义：Session-scoped cross-Subsystem transient event distribution、SessionEventHub、Runtime-scoped SessionEventClient、routing/currentness、delivery/failure/backpressure、与 Shared State / Render Event / Control / Diagnostics 的边界  
+> 主要定义：Session-scoped cross-Subsystem transient event distribution、Channel routing、SessionEventHub、Runtime-scoped SessionEventClient、routing/currentness、delivery/failure/backpressure、与 Shared State / Render Event / Control / Diagnostics 的边界  
 > 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)、[Subsystem 模型](./subsystem-model.md)、[渲染系统](./rendering-system.md)  
-> 正式化：尚未建立 `doc/15-contracts` v1；本文只冻结架构方向，不宣称 wire/API contract 已冻结  
+> 正式化：[Session Events v1](../15-contracts/session-events-v1.md)  
 > 最近复核：2026-10-13
 
 本文定义 LoomRealm 的 **Session Events**：同一 Session 内，不同 Subsystem Runtime 之间的 transient business event distribution capability。
@@ -36,12 +36,15 @@ Shared State 重命名工作另见仓库根目录 `TODO-shared-state.md`。在�
 2. Session Events 用于表达 **“Session 中刚刚发生了什么”**，而 Shared State 表达 **“Session 中当前 authoritative business fact 是什么”**；
 3. `SessionEventHub` **不是 business authority**，只拥有 routing、subscription lifetime、bounded delivery 等 mechanics；
 4. event 默认 transient：不保存 current value、不 replay history、不为 late subscriber 重放过去事件；
-5. Session Events 是 cross-Subsystem capability，不依赖 Renderer、Frame、Activation、InputTarget 或 RenderDomain；
-6. `publish()` 表达 notification，不建立跨 Runtime synchronous call stack，也不等待 subscriber business handler 完成；
-7. subscriber callback failure 必须 local isolate，不得 retroactively fail 已接受 publish；
-8. v1 不提供 request/reply、RPC、consumer group、durable subscription、event journal、exactly-once、automatic retry 或 Shared State transaction coupling；
-9. business event 与 `render.event` 是不同语义：前者跨 Subsystem，后者只属于 RenderDomain / presentation-oriented transient intent；
-10. logging/diagnostics 可复用 Session Events 的物理 routing 基础设施，但 MUST 使用独立 logical role / QoS，不得把普通 business topic `log` 当作正式日志 API。
+5. v1 使用 **Channel** 作为唯一 Hub routing/filter key；每个 publish 指定一个 channel，每个 subscription 原子订阅一个或多个 exact channels；
+6. channel MAY 包含 `/`，但 v1 中 `/` 没有 parent/child、prefix、wildcard 或 pattern 语义；
+7. `type` 只表达某个 channel 内的 business event semantic，不参与 v1 Hub routing/filtering；
+8. Session Events 是 cross-Subsystem capability，不依赖 Renderer、Frame、Activation、InputTarget 或 RenderDomain；
+9. `publish()` 表达 notification，不建立跨 Runtime synchronous call stack，也不等待 subscriber business handler 完成；
+10. subscriber callback failure 必须 local isolate，不得 retroactively fail 已接受 publish；
+11. v1 不提供 request/reply、RPC、consumer group、durable subscription、event journal、exactly-once、automatic retry 或 Shared State transaction coupling；
+12. business event 与 `render.event` 是不同语义：前者跨 Subsystem，后者只属于 RenderDomain / presentation-oriented transient intent；
+13. logging/diagnostics 可复用 Session Events 的物理 routing 基础设施，但 MUST 使用独立 logical role / QoS，不得把普通 business channel/type 当作正式日志 API。
 
 ---
 
@@ -107,18 +110,21 @@ party/members
 典型 Session Event：
 
 ```text
-battle.enemy-defeated
-dialogue.finished
-achievement.triggered
-shop.purchase-completed
-combat.character-damaged
+channel = "battle"
+type    = "enemy-defeated"
+
+channel = "dialogue"
+type    = "finished"
+
+channel = "achievement"
+type    = "triggered"
 ```
 
 推荐组合：
 
 ```text
 Battle Subsystem
-    publish battle.enemy-defeated
+    publish(channel="battle", type="enemy-defeated")
         ↓
 Quest Subsystem handler
     decides business consequence
@@ -168,7 +174,9 @@ Session Event
 render.event("character-hit-flash")
     → presentation effect
 
-session event "combat.character-damaged"
+session event
+    channel = "combat"
+    type    = "character-damaged"
     → Battle / Quest / Audio / Achievement 等领域可观察的业务事件
 ```
 
@@ -176,7 +184,87 @@ Render Event MUST NOT 被桥接成 Session Event 的隐式来源；Session Event
 
 ---
 
-## 5. Author Projection
+## 5. Channel Model
+
+Channel 是 v1 的唯一 routing/filter scope。
+
+```text
+channel
+    Hub routing identity
+
+type
+    semantic discriminator inside one channel
+
+payload
+    event business data
+```
+
+例如：
+
+```text
+battle
+battle/main
+battle/encounter/42
+dialogue
+quest
+```
+
+`/` 允许出现在 channel 中，为业务命名和未来协议演进保留空间，但 v1 只进行 exact string matching：
+
+```text
+"battle"
+!= "battle/main"
+!= "battle/encounter/42"
+```
+
+因此：
+
+```text
+subscribe(["battle"])
+```
+
+不会收到：
+
+```text
+battle/main
+battle/encounter/42
+```
+
+v1 不建立：
+
+```text
+channel hierarchy
+parent subscription
+prefix match
+wildcard
+glob
+regex
+Channel Registry
+createChannel/deleteChannel/listChannels
+```
+
+Channel 不是 Process/Worker/Runtime identity，不得包含需要由 physical topology 决定的语义。
+
+### Type does not route in v1
+
+同一 channel 可以包含多个 event type：
+
+```text
+channel = "battle"
+    type = "started"
+    type = "enemy-defeated"
+    type = "turn-started"
+    type = "damage"
+    type = "ended"
+```
+
+订阅 `battle` 的 subscriber 接收该 channel 下的全部 Session Events，然后由 business listener 根据 `event.type` 做本地判别。
+
+v1 不提供 type-filtered subscription。未来如果真实负载要求更细粒度 selector，可以在新 protocol revision 中 add-only 设计，但不得改变 v1 exact-channel semantics。
+
+---
+
+## 6. Author Projection
 
 目标 author-facing capability：
 
@@ -186,19 +274,24 @@ interface SubsystemScope {
 }
 ```
 
-初步逻辑 surface：
+v1 candidate logical surface：
 
 ```ts
 interface SessionEventClient {
-  publish(type: string, payload: JsonValue): void | Promise<void>;
+  publish(
+    channel: string,
+    type: string,
+    payload: JsonValue,
+  ): Promise<void>;
 
   subscribe(
-    type: string,
+    channels: readonly string[],
     listener: (event: SessionEvent) => void | Promise<void>,
-  ): SessionEventSubscription;
+  ): Promise<SessionEventSubscription>;
 }
 
 interface SessionEvent {
+  readonly channel: string;
   readonly type: string;
   readonly payload: JsonValue;
   readonly source: {
@@ -211,32 +304,39 @@ interface SessionEventSubscription {
 }
 ```
 
-以上只表达 architecture intent；exact method return type、error codes、limits、topic grammar、subscription terminal surface 与 wire envelope 由未来 v1 contract 冻结。
+一个 subscription 的 channel set 必须作为整体建立，不出现 partially installed subscription。
 
 Author-facing source identity SHOULD 只暴露 logical identity，例如 `subsystemKey`；MUST NOT 因 Desktop 使用 process、PWA 使用 Worker 而泄漏 pid、Worker identity、socket/port、endpoint、generation token 等 physical material。
 
-v1 SHOULD 使用 stable string topic，因为该 identity 必须可跨 Process / Worker / MessagePort / WebSocket 等 physical boundary。
-
-v1 默认 exact-topic subscription；wildcard/pattern routing 不作为初始架构要求。
-
 ---
 
-## 6. Publish / Delivery Semantics
+## 7. Publish / Delivery Semantics
 
 核心因果关系：
 
 ```text
 publisher
-    publish(event)
+    publish(channel,type,payload)
         ↓
-SessionEventHub accepts valid event
+SessionEventHub validates + accepts event
         ↓
-route to current matching subscriptions
+match subscriptions by exact channel
+        ↓
+route only to matching subscriptions
         ↓
 bounded asynchronous delivery
         ↓
 Runtime-local listener execution
 ```
+
+Hub routing MUST NOT 采用：
+
+```text
+broadcast all Session Events to every Runtime
+→ each Runtime locally discards unrelated channels
+```
+
+作为正常模型。Channel 的目的之一就是在 Hub/broker side 避免无意义的跨 Runtime / cross-process traffic 与序列化成本。
 
 必须区分：
 
@@ -264,7 +364,7 @@ Listener invocation 属 Runtime-local callback execution。Listener synchronous 
 
 ---
 
-## 7. Lifetime / Currentness
+## 8. Lifetime / Currentness
 
 ```text
 one Session
@@ -307,7 +407,7 @@ Physical event binding loss 本身不等于 Shared State reset、Renderer/Data f
 
 ---
 
-## 8. Ordering / Replay / Delivery Guarantees
+## 9. Ordering / Replay / Delivery Guarantees
 
 v1 architecture baseline：
 
@@ -336,7 +436,7 @@ Session Event order == Input order
 
 ---
 
-## 9. Backpressure
+## 10. Backpressure
 
 Session Events MUST bounded。
 
@@ -352,13 +452,15 @@ listener delivery concurrency
 
 普通 business events MUST NOT silent drop。如果实现无法继续保证其声明的 delivery/order semantics，应产生明确 overflow / terminal outcome，而不是悄悄丢事件并继续假装 subscription 健康。
 
-具体 queue count/byte limits 属未来 formal contract / physical profile，不在本文冻结数字。
+Channel routing MUST ensure unrelated Runtime bindings do not consume delivery queue/byte budget for channels they did not subscribe。
+
+具体 queue count/byte limits 属 formal contract / physical profile 收口项。
 
 Publisher 也不得通过 transport-level automatic retry 解决 backpressure，因为 retry 可能重复 business notification。
 
 ---
 
-## 10. Failure Boundary
+## 11. Failure Boundary
 
 以下均不自动成为 Main Runtime/Frame failure：
 
@@ -387,7 +489,7 @@ own persistence policy
 
 ---
 
-## 11. Diagnostics / Logging
+## 12. Diagnostics / Logging
 
 跨 Subsystem 日志聚合是 Session-scoped messaging 的重要 consumer，但 **Diagnostics != Business Event**。
 
@@ -413,7 +515,7 @@ scope.log.error(message, fields)
 而不是：
 
 ```ts
-scope.events.publish("log", ...)
+scope.events.publish("log", "message", ...)
 ```
 
 实现 MAY 在 `@loomrealm/session-events` 内复用同一 routing core / physical connection，但 business events 与 diagnostics MUST 具有独立 logical role、queue/backpressure policy 与 observability semantics。
@@ -431,44 +533,54 @@ Subsystem logger
 
 ---
 
-## 12. Physical Realization
+## 13. Physical Realization
 
-逻辑设计不依赖 Process/Worker topology。
+逻辑设计不依赖 Process/Worker topology，也不要求 Session Events 独占 physical communication pipe。
 
-Desktop / Hostra：
-
-```text
-LoomRealm Desktop process
-    Main
-    SharedStateAuthority
-    SessionEventHub
-    RuntimeHosting
-        │
-        ├── Runner / Subsystem A
-        ├── Runner / Subsystem B
-        └── Runner / Subsystem C
-```
-
-PWA：
+合法 realization 包括：
 
 ```text
-Session Worker
-    Main
-    SharedStateAuthority
-    SessionEventHub
-        │
-        ├── Dedicated Subsystem Worker A
-        ├── Dedicated Subsystem Worker B
-        └── Dedicated Subsystem Worker C
+A. SessionEventHub 独立 Process / Worker
+
+B. SessionEventHub 与 SharedStateAuthority 共用 Process / Worker
+
+C. Main + SharedStateAuthority + SessionEventHub 共用 Session host
+
+D. same-process / in-process Hub
 ```
 
-Desktop 可以使用 IPC / WebSocket / MessagePort / private carrier；PWA 可以使用 MessagePort。Physical carrier 只承载 messages，不成为第二份 subscription registry / business authority / retry owner。
+通信也允许：
 
-Session Events MAY 与其他 planes 复用底层 transport primitive，但 MUST NOT 因此复用它们的 logical namespace、currentness 或 failure semantics。
+```text
+Runtime
+    ├── Shared State dedicated carrier
+    └── Session Events dedicated carrier
+```
+
+或者：
+
+```text
+Runtime
+    │
+    ▼
+shared Session-service physical carrier
+    ├── Shared State logical binding
+    └── Session Events logical binding
+```
+
+核心规则：
+
+> **shared carrier != shared logical protocol != shared authority != shared ordering domain**
+
+即使 State 与 Events 共进程、共 MessagePort/WebSocket/IPC，也必须保持独立 protocol namespace、correlation、flow-control accounting、evidence/error interpretation 与 subscription identity。
+
+同一 physical carrier loss 可以同时影响多个 logical bindings，但这是 common physical cause，不产生 State/Event semantic coupling。
+
+Session Events 内部的 channel routing 仍必须发生在 Hub side；共用 physical carrier 不是广播 unrelated channels 给所有 Runtime 的理由。
 
 ---
 
-## 13. Explicit Non-goals
+## 14. Explicit Non-goals
 
 v1 不设计：
 
@@ -487,19 +599,22 @@ automatic retry
 global Session sequence
 cross-plane transaction
 Shared State commit + Event publish atomicity
-topic ACL / multi-tenant policy engine
-wildcard subscription
+topic/channel ACL / multi-tenant policy engine
+channel wildcard / prefix / glob / regex subscription
+channel hierarchy semantics
+type-filtered subscription
+type wildcard / pattern routing
 schema registry
 Renderer direct subscription
 Render Event bridge
 universal application store
 ```
 
-如果未来出现“调用另一个 Subsystem 并等待明确结果”的需求，应单独设计 command/call contract，不应通过 publish + reply-topic 将 Session Events 偷偷演化成 RPC。
+如果未来出现“调用另一个 Subsystem 并等待明确结果”的需求，应单独设计 command/call contract，不应通过 publish + reply-channel 将 Session Events 偷偷演化成 RPC。
 
 ---
 
-## 14. Communication Plane Integration
+## 15. Communication Plane Integration
 
 LoomRealm logical communication planes 扩展为：
 
@@ -515,6 +630,7 @@ Shared State Plane
 
 Session Events Plane
     SessionEventHub ⇄ Subsystem Runtime
+    exact-channel routed publish / subscribe
 
 Content Plane
     Content Service ⇄ Main / Renderer / Subsystem
@@ -532,20 +648,27 @@ MUST NOT invent cross-plane global ordering
 
 ---
 
-## 15. Final Invariants
+## 16. Final Invariants
 
 1. Session Events 只做 Session-scoped transient cross-Subsystem distribution；
 2. SessionEventHub 是 routing infrastructure，不是 business authority；
 3. Shared State 保存 current authoritative fact，Session Events 不保存 current value；
-4. late subscriber 不 replay 过去事件；
-5. publish acceptance 不等待 subscriber business handler；
-6. listener failure local isolate，不 retroactively fail publisher；
-7. Event delivery 与 Shared State commit 不原子、不共享 revision/sequence；
-8. SessionEventClient 是 Runtime-scoped capability，不消费 Frame/Activation/InputTarget authority；
-9. `render.event` 保持 RenderDomain-local / presentation-oriented，不升级为 Session Event；
-10. Business Events 与 Diagnostics/Log 可以复用 mechanics，但 logical role / QoS 必须分离；
-11. queues/buffers 必须 bounded，business event overflow 不允许 silent drop；
-12. physical transport 不拥有 retry、business authority 或 Session terminal；
-13. SessionEventHub infrastructure fatal 只报告 Session-fatal fact，Main/Session lifecycle owner 提交 terminal/unwind；
-14. Desktop/PWA 可采用不同物理 realization，但必须保持相同 logical observable semantics；
-15. v1 不成为 RPC、event sourcing、durable log、workflow engine 或 universal EventBus。
+4. channel 是 v1 唯一 Hub routing/filter key；每个 event 指定一个 channel；
+5. subscription 原子订阅一个或多个 exact channels；Hub 不向不匹配 channel 的 Runtime 正常推送事件；
+6. channel MAY 包含 `/`，但 `/` 在 v1 没有 hierarchy/prefix/wildcard 语义；
+7. type 是 channel 内 business semantic discriminator，不参与 v1 subscription filtering；
+8. late subscriber 不 replay 过去事件；
+9. publish acceptance 不等待 subscriber business handler；
+10. listener failure local isolate，不 retroactively fail publisher；
+11. Event delivery 与 Shared State commit 不原子、不共享 revision/sequence；
+12. SessionEventClient 是 Runtime-scoped capability，不消费 Frame/Activation/InputTarget authority；
+13. `render.event` 保持 RenderDomain-local / presentation-oriented，不升级为 Session Event；
+14. Business Events 与 Diagnostics/Log 可以复用 mechanics，但 logical role / QoS 必须分离；
+15. queues/buffers 必须 bounded，business event overflow 不允许 silent drop；
+16. SessionEventHub 可以独立进程，也可以和 Shared State/Main 共置；physical placement 不属于 logical protocol；
+17. Shared State 与 Session Events 可以独立 carrier，也可以 multiplex 同一 physical carrier；
+18. shared carrier 不创建 shared authority、transaction、revision、retry 或 public cross-plane ordering；
+19. physical transport 不拥有 application retry、business authority 或 Session terminal；
+20. SessionEventHub infrastructure fatal 只报告 Session-fatal fact，Main/Session lifecycle owner 提交 terminal/unwind；
+21. Desktop/PWA 可采用不同物理 realization，但必须保持相同 logical observable semantics；
+22. v1 不成为 RPC、event sourcing、durable log、workflow engine 或 universal EventBus。
