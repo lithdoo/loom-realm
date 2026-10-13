@@ -8,7 +8,7 @@
 > 架构来源：[Session Events：Session 级跨 Subsystem 事件系统](../10-architecture/session-events-system.md)  
 > 可执行断言：[Session Events v1 Conformance](./session-events-conformance-v1.md)  
 > 相关契约：[Realm State v1](./realm-state-v1.md) · [Session Events Runtime Integration Profile v1](./session-events-runtime-profile-v1.md)  
-> 最近复核：2026-10-13
+> 最近复核：2026-10-14
 
 本文定义 Session Events v1 的 normative logical contract。本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
@@ -23,7 +23,7 @@
 
 一个 live Session MUST 恰好拥有一个 logical `SessionEventHub`。
 
-每个 live Subsystem Runtime MAY 获得一个 Runtime-scoped `SessionEventClient`，用于同一 Session 内的 transient cross-Subsystem business event publish / subscribe。
+每个进入 live business execution 的 Subsystem Runtime MUST 恰好拥有一个 Runtime-scoped `SessionEventClient`，用于同一 Session 内的 transient cross-Subsystem business event publish / subscribe。`SessionEventClient` 是标准 Runtime capability，不是可选 feature probe；current product 如何在 business Definition import 前建立其 initial usable physical binding，由 Runtime Integration Profile 冻结。
 
 ```text
 Main
@@ -38,7 +38,7 @@ SessionEventHub
 
 Subsystem Runtime
     domain execution
-    Runtime-scoped SessionEventClient
+    exactly one Runtime-scoped SessionEventClient
 ```
 
 Session Events 表达：
@@ -757,6 +757,8 @@ old binding terminal
 
 Framework MUST NOT transparently resume an old subscription or retry an ambiguous publish。
 
+Whether a concrete platform automatically attempts to establish a fresh binding is outside this logical contract；logical operations MUST remain fail-fast while no usable binding exists。
+
 ---
 
 ## 13. Client / Hub Lifetime and Fatal Boundary
@@ -995,6 +997,11 @@ If business needs “call another Subsystem and wait for a result”, design a s
 Before implementation can be marked Qualified, automated qualification MUST cover at least：
 
 ```text
+Capability / Identity
+- one live Session owns exactly one logical SessionEventHub
+- every successfully bootstrapped live Subsystem Runtime owns exactly one Runtime-scoped SessionEventClient
+- Event client is available as a standard Runtime capability, not an optional business probe
+
 Identity / Validation
 - exact channel matching; '/' has no hierarchy semantics
 - channel/type UTF-8/control-character limits
@@ -1064,6 +1071,7 @@ Binding / Lifetime
 - fresh binding does not replay or reattach old subscription
 - fresh subscribe required after recovery
 - Frame/Activation/Renderer/Data changes do not revoke Event client
+- qualification proves deliberate fresh-binding replacement; no automatic reconnect scheduler is required
 
 Physical Equivalence
 - in-process and remote profiles expose equivalent observables
@@ -1079,7 +1087,7 @@ Physical Equivalence
 
 Session Events v1 logical contract **and the current Runtime Integration Profile v1** have no remaining architecture or deterministic-surface blocker for implementation。
 
-Implementation MAY choose internal maps/indexes、serialization/framing、private subscription ids、binding generation token、scheduler and queue data structures, provided all normative observable semantics and the frozen current Hostra/PWA binding seams remain unchanged。
+Implementation MAY choose internal maps/indexes、serialization/framing、private subscription ids、binding generation token、scheduler、queue data structures、package-private factory/type names and automatic rebinding strategy, provided all normative observable semantics and the frozen current Hostra/PWA binding seams remain unchanged。
 
 Implementation MUST NOT invent new public behavior for convenience。If implementation finds a genuinely missing observable rule, treat it as a contract defect and deliberately revise this contract rather than choose platform-specific semantics silently。
 
@@ -1088,31 +1096,32 @@ Implementation MUST NOT invent new public behavior for convenience。If implemen
 ## 22. Core Invariants
 
 1. one live Session has one logical SessionEventHub；
-2. SessionEventHub owns routing/delivery mechanics, not business truth；
-3. SessionEventClient is Runtime-scoped logical capability, not a process/socket identity；
-4. every event names exactly one channel and one type；channel alone is v1 routing key；
-5. `/` is ordinary channel text with no hierarchy/prefix/wildcard meaning；
-6. type is delivered business discriminator, not routing filter；
-7. source.subsystemKey is derived from authenticated binding identity and cannot be publisher-spoofed；
-8. one accepted event produces at most one delivery per matching subscription；distinct subscriptions are independent recipients；
-9. self-delivery is allowed；zero-subscriber publish succeeds；
-10. publish success means Hub accepted/routed, not subscriber handled；
-11. dispatched publish with lost definitive result = OUTCOME_UNKNOWN and is never auto-retried；
-12. subscriber overflow does not retroactively fail an accepted publish；
-13. subscribe is async and resolves only after atomic Hub installation while the subscription is still live；
-14. listener cannot start before corresponding subscribe resolves；
-15. failed/ambiguous/pre-visible-terminal establishment exposes no half-open or already-terminal subscription；
-16. author-facing logical failures reject with stable SessionEventError semantics and structural failure guard；
-17. every successful subscription exposes a one-shot non-rejecting `closed` terminal surface；
-18. close() is synchronous/idempotent local revocation；remote cleanup is asynchronous detail；
-19. one subscription has one serial listener lane with at most one active invocation；
-20. listener failure is local and does not terminal the subscription by itself；
-21. bounded delivery overflow terminals explicitly instead of silently dropping while healthy；
-22. no usable binding fails new operations fast without wait/queue；
-23. binding loss terminals old subscriptions but not the still-live logical client；fresh binding requires fresh subscribe and no replay；
-24. Runtime terminal terminals its client/subscriptions；Hub/Session terminal terminals all；
-25. Frame/Activation/Renderer/Data lifetimes do not authorize or revoke Session Events；
-26. Shared State and Events remain non-atomic and share no revision/order；
-27. physical placement/carrier multiplexing is non-normative at logical layer and cannot alter semantics；current Hostra/PWA use dedicated Event carriers；
-28. no RPC、replay、event sourcing、exactly-once、wildcard/type filtering or universal EventBus semantics in v1；
-29. Desktop/PWA/in-process realizations MUST be observably equivalent at the logical boundary。
+2. every live business Subsystem Runtime has exactly one Runtime-scoped SessionEventClient；the client is a standard capability, not optional business configuration；
+3. SessionEventHub owns routing/delivery mechanics, not business truth；
+4. SessionEventClient is Runtime-scoped logical capability, not a process/socket identity；
+5. every event names exactly one channel and one type；channel alone is v1 routing key；
+6. `/` is ordinary channel text with no hierarchy/prefix/wildcard meaning；
+7. type is delivered business discriminator, not routing filter；
+8. source.subsystemKey is derived from authenticated binding identity and cannot be publisher-spoofed；
+9. one accepted event produces at most one delivery per matching subscription；distinct subscriptions are independent recipients；
+10. self-delivery is allowed；zero-subscriber publish succeeds；
+11. publish success means Hub accepted/routed, not subscriber handled；
+12. dispatched publish with lost definitive result = OUTCOME_UNKNOWN and is never auto-retried；
+13. subscriber overflow does not retroactively fail an accepted publish；
+14. subscribe is async and resolves only after atomic Hub installation while the subscription is still live；
+15. listener cannot start before corresponding subscribe resolves；
+16. failed/ambiguous/pre-visible-terminal establishment exposes no half-open or already-terminal subscription；
+17. author-facing logical failures reject with stable SessionEventError semantics and structural failure guard；
+18. every successful subscription exposes a one-shot non-rejecting `closed` terminal surface；
+19. close() is synchronous/idempotent local revocation；remote cleanup is asynchronous detail；
+20. one subscription has one serial listener lane with at most one active invocation；
+21. listener failure is local and does not terminal the subscription by itself；
+22. bounded delivery overflow terminals explicitly instead of silently dropping while healthy；
+23. no usable binding fails new operations fast without wait/queue；
+24. binding loss terminals old subscriptions but not the still-live logical client；fresh binding requires fresh subscribe and no replay；automatic rebinding policy is non-normative；
+25. Runtime terminal terminals its client/subscriptions；Hub/Session terminal terminals all；
+26. Frame/Activation/Renderer/Data lifetimes do not authorize or revoke Session Events；
+27. Shared State and Events remain non-atomic and share no revision/order；
+28. physical placement/carrier multiplexing is non-normative at logical layer and cannot alter semantics；current Hostra/PWA use dedicated Event carriers；
+29. no RPC、replay、event sourcing、exactly-once、wildcard/type filtering or universal EventBus semantics in v1；
+30. Desktop/PWA/in-process realizations MUST be observably equivalent at the logical boundary。
