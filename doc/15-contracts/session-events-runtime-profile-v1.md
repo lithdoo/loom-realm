@@ -5,11 +5,13 @@
 > Profile Version：1  
 > 逻辑协议：[Session Events v1](./session-events-v1.md)  
 > 相关：[Hostra Launcher Profile v1](./nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](./pwa-launcher-profile-v1.md)、[Session Events Conformance](./session-events-conformance-v1.md)  
-> 最近复核：2026-10-13
+> 最近复核：2026-10-14
 
 本文冻结 Session Events v1 在当前 LoomRealm Runtime/Product 中的**实现接缝**。它不改变 Session Events 的 logical semantics，也不扩大 Main 的 application authority。
 
 本 Profile 是 Hostra/PWA 既有冻结 profile 之上的**后续 additive capability profile**：历史 profile 中的 Control/State/Data/Content ABI 与 qualification evidence 不被重写；仅本文件明确列出的 Session Events seam 被新增。若旧 profile 的“当前 capability 枚举”未包含 Session Events，以本文件对 Session Events slice 的更具体规则为准；除此之外旧 profile 继续完整有效。
+
+本 Profile 冻结的是 current product 所需的 physical placement / provisioning / lifecycle seam 与 cross-package observable behavior。它**不冻结** package-private factory/class/function 名称、内部文件布局、map/queue 数据结构、重连 scheduler/backoff 算法或其他不影响 observable semantics 的实现细节。
 
 核心结论：
 
@@ -113,6 +115,8 @@ Hub construction failure before READY is bootstrap failure and MUST NOT be repor
 
 ## 3. Required Runtime Capability Order
 
+Session Events v1 logical contract requires every live Subsystem Runtime to own exactly one Runtime-scoped `SessionEventClient`。This Profile only freezes how the current products make that required logical capability usable before business code runs。
+
 For every Runtime, business Definition import/initialization MUST NOT occur until：
 
 ```text
@@ -215,7 +219,7 @@ fresh subscribe required
 no replay
 ```
 
-Current Hostra implementation SHOULD attempt background reconnection while the Runtime remains live。Retry timing/backoff is private, but it MUST NOT queue author operations or create unbounded resources。
+The concrete Hostra composition MAY attempt background physical rebinding while the Runtime remains live。Automatic rebinding is **not required** by Session Events v1 or by this current physical profile。If implemented, reconnect timing/backoff remains private and MUST NOT queue/retry author operations、revive old subscriptions、replay events or create unbounded resources。
 
 ---
 
@@ -294,6 +298,8 @@ A replacement install attaches a fresh binding to the same logical SessionEventC
 
 If the provisioning seam itself is unavailable, the logical Event client remains live-but-unbound and new author operations fail `BINDING_UNAVAILABLE` until a fresh binding can be installed or Runtime terminates。
 
+The profile does not require automatic replacement scheduling；whether and when composition provisions a fresh binding is private product policy as long as logical fail-fast/fencing/recovery semantics remain unchanged。
+
 ### 5.4 Plane separation
 
 PWA Session Worker ↔ Subsystem Worker current planes become：
@@ -349,17 +355,20 @@ It owns：
 SessionEvent author types
 SessionEventError / failure guards
 validation / logical limits
-SessionEventHub reference implementation
-Runtime-scoped replaceable SessionEventClient
+SessionEventHub realization
+Runtime-scoped replaceable SessionEventClient realization
 binding generation fencing
 carrier protocol
-MessageCarrier-based remote binding/server mechanics
+remote binding/server mechanics
+MessagePort-capable realization needed by PWA
 ```
+
+This Profile freezes those ownership roles and required behaviors, **not** package-private constructor/factory/type names used to realize them。
 
 `@loomrealm/subsystem`：
 
 ```text
-re-exports author-facing Session Events types
+re-exports author-facing Session Events types required by its public author surface
 SubsystemScope.events: SessionEventClient
 @loomrealm/subsystem/host receives a required Runtime Event capability
 business Definition never sees Hub/carrier/process material
@@ -412,6 +421,7 @@ Hostra
 - source identity derives from bound launch subsystemKey
 - required initial binding exists before Definition import
 - binding loss does not fail Runtime by itself
+- fresh binding can be deliberately attached without old subscription revival/replay
 
 PWA
 - PwaRunnerBootstrapV1 remains closed and unchanged
@@ -419,8 +429,10 @@ PWA
 - Event payload never traverses provisioningPort
 - install ack precedes business Definition import
 - stale/wrong binding install/result is fenced
-- binding replacement does not revive subscriptions/replay history
+- fresh replacement binding does not revive subscriptions/replay history
 ```
+
+Qualification MUST prove replacement capability and fencing；it MUST NOT require a particular automatic reconnect scheduler/backoff policy。
 
 ---
 
@@ -431,8 +443,9 @@ PWA
 3. Hostra does not expand the frozen M6 Control bootstrap for Events；
 4. PWA does not expand the frozen `PwaRunnerBootstrapV1` for Events；
 5. initial Event binding is required before business Definition import；
-6. later Event binding loss is Event-local and does not itself fail Runtime/Session；
+6. later Event binding loss is Event-local and does not itself fail Runtime/Session；fresh replacement is supported but automatic reconnect policy is not normative；
 7. source identity is derived from the bound logical Runtime, never publisher payload；
 8. `sessionEventsFatal` is a narrow latched fact into Main, not a second control authority；
 9. Event business traffic never uses Runner provisioning control；
-10. Main、State、Events physical co-location does not merge authority or ordering。
+10. Main、State、Events physical co-location does not merge authority or ordering；
+11. internal factory/class/file naming remains implementation detail unless separately promoted into a public Contract。
