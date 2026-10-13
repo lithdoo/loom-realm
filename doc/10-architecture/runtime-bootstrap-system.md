@@ -2,11 +2,11 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving；Realm State bootstrap semantics synchronized / not implemented / not qualified；Session Events v1 bootstrap/lifetime semantics synchronized / not implemented / not qualified  
+> 稳定程度：Evolving；Realm State bootstrap semantics synchronized / not implemented / not qualified；Session Events v1 bootstrap/lifetime + current runtime integration profile synchronized / not implemented / not qualified  
 > 主要定义：Launcher-owned Game/Platform PREPARE、Main/Realm State prepared projection、Realm State + SessionEventHub READY barrier、Runtime Runner / Renderer 的逻辑启动顺序、Control/Data/State/Events 建立关系与 Platform provisioning  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Realm State](./realm-state-system.md)、[Session Events](./session-events-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)  
 > 被以下文档实现：[程序主系统模块](../20-modules/main-system/README.md)、[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
-> 正式化：[Game Package v1](../15-contracts/game-package-v1.md)、[Realm State v1](../15-contracts/realm-state-v1.md)、[Session Events v1](../15-contracts/session-events-v1.md)、[Hostra Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](../15-contracts/pwa-launcher-profile-v1.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
+> 正式化：[Game Package v1](../15-contracts/game-package-v1.md)、[Realm State v1](../15-contracts/realm-state-v1.md)、[Session Events v1](../15-contracts/session-events-v1.md)、[Session Events Runtime Integration Profile v1](../15-contracts/session-events-runtime-profile-v1.md)、[Hostra Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](../15-contracts/pwa-launcher-profile-v1.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
 > 最近复核：2026-10-13
 
 ---
@@ -168,6 +168,7 @@ select New Game or validated Load sparse current seed
 
 → install private Runtime State client-binding factory
 → install private Runtime Event client-binding factory
+→ install latched Session Events fatal source into Main-facing platform view
 
 runMain({ bootstrap: prepared.main, platform })
 ```
@@ -227,6 +228,7 @@ Main creates current Launch Attempt for key
 → Platform creates Host-owned Runner Container
 → Platform/Runner installs exact Runtime-scoped RealmStateClient binding
 → Platform/Runner installs exact Runtime-scoped SessionEventClient binding
+→ required initial State/Event bindings are usable
 → Runner loads exact planned Definition Module
 → Runner constructs remaining Subsystem-facing capabilities
 → Runtime Control carrier obtained
@@ -238,7 +240,20 @@ Main creates current Launch Attempt for key
 → status(ready)
 ```
 
-Realm State / Session Events bindings MUST be available before any Definition business initialize side effect that can observe `SubsystemScope.state` / `SubsystemScope.events`。
+Realm State / Session Events bindings MUST be available **before Definition Module import/initialization can produce business side effects** and before business code can observe `SubsystemScope.state` / `SubsystemScope.events`。
+
+Current Session Events physical profile：
+
+```text
+Hostra
+    dedicated private Events WebSocket per Runtime
+    endpoint delivered through host-owned LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT
+
+PWA
+    dedicated private Events MessagePort per Runtime
+    transferred/acknowledged through Runner provisioning control
+    Event business traffic never uses provisioningPort
+```
 
 ```text
 PREPARE valid
@@ -251,7 +266,7 @@ PREPARE valid
 != ready
 ```
 
-但 business Runtime side effect requires PREPARE + State READY + Event Hub READY。
+但 business Runtime side effect requires PREPARE + State READY + Event Hub READY + required initial Runtime State/Event binding usable。
 
 Definition Module actual import/default-export ABI validation可发生在 trusted Runner；失败使 required bootstrap失败并统一 cleanup。
 
@@ -266,8 +281,8 @@ Hostra Node Runner / PWA Worker Runner
 M6 RuntimeControlBinding
 M8+ SubsystemDataBinding
 M12+ ContentClient
-RealmStateClient                  (planned candidate)
-SessionEventClient                (planned v1)
+RealmStateClient
+SessionEventClient
         │
         ▼
 @loomrealm/subsystem/host
@@ -283,6 +298,8 @@ Definition Module 不读取 Game Entry/Launch Manifest，不接触 physical boot
 Runner/Subsystem host MUST NOT require Frame/Activation identity to install or authorize RealmStateClient / SessionEventClient operations。
 
 Session Event business-visible `source.subsystemKey` MUST derive from the binding's Runtime identity；business code不能提供/覆盖 source。
+
+Current profile does not require State/Event carrier multiplexing：Hostra/PWA Session Events use dedicated Event carriers；future multiplexing requires a later physical profile and cannot change this author/Runner boundary。
 
 ---
 
@@ -364,6 +381,8 @@ unexpected Runtime termination
 Phase 1 all-required → whole Game Bootstrap失败并统一 cleanup。
 
 RealmStateAuthority fatal / SessionEventHub invariant fatal 是 Session-fatal condition，不作为“仅重启一个 Runtime”恢复点。Service先 self-terminal，再报告；Main/Session lifecycle owner提交 Session terminal/unwind。
+
+SessionEventHub invariant fatal 报告通过 `MainSessionEventsFatalSource` 的 latched one-shot seam；composition implementing Session Events 必须在 `runMain()` 前提供该 source。Pre-READY Hub construction failure 不走该 live-Hub seam。
 
 Platform MUST NOT automatic restart。新 Runtime必须 fresh Launch Attempt/token/Runner/Control lifetime + fresh Runtime-scoped State/Event client bindings。
 
@@ -456,6 +475,8 @@ Provisioning != Realm State binding
 Provisioning != Session Events binding
 ```
 
+Hostra Session Events binding 使用独立 host-owned Events endpoint/environment seam，不依赖 later Renderer Data provisioning。
+
 RealmStateClient / SessionEventClient 是 Runtime bootstrap时已有的 Session capabilities，不依赖 later Renderer Data provisioning。
 
 ---
@@ -472,7 +493,17 @@ Broker creates MessageChannel
 
 Port transfer 是 Platform Data mechanism；Data application unit仍是 JSON text string。
 
-PWA Realm State / Session Events physical bindings MAY 使用 same Worker direct binding、private MessagePort、separate ports 或 multiplexed Session-service carrier；不得与 Renderer Data generation/current replacement混同。
+Current Session Events profile also uses the **provisioning control seam only to transfer/ack a dedicated Event MessagePort**：
+
+```text
+session-events/install {requestId,subsystemKey,bindingId,port}
+→ Runner attaches dedicated Event port
+→ session-events/result
+```
+
+Event `publish` / subscription delivery / business payload MUST NOT travel on `provisioningPort`。`PwaRunnerBootstrapV1` remains closed and unchanged。
+
+Future State/Event multiplexing MAY be defined by a later physical profile, but is not a current PWA v1 implementation choice。
 
 ---
 
@@ -623,7 +654,7 @@ Ordinary Event operation：
 ```text
 INVALID_REQUEST / LIMIT_EXCEEDED
     known not accepted
-    caller-visible
+    caller-visible SessionEventError
     != Runtime failure
 
 BINDING_UNAVAILABLE
@@ -633,6 +664,14 @@ BINDING_UNAVAILABLE
 OUTCOME_UNKNOWN
     publish dispatched + definitive acceptance result lost
     no automatic retry
+```
+
+Subscribe establishment terminal-before-visible：
+
+```text
+overflow          → LIMIT_EXCEEDED / no handle
+binding terminal  → BINDING_UNAVAILABLE / no handle
+client/Hub term.  → TERMINAL / no handle
 ```
 
 Physical Event binding loss：
@@ -667,7 +706,7 @@ SessionEventHub fatal：
 ```text
 Hub self-terminal/inert
 → subscriptions hub-terminal
-→ report Session-fatal condition
+→ latch/report sessionEventsFatal
 → Main / Session lifecycle owner commits Session terminal/unwind
 ```
 
@@ -707,24 +746,26 @@ Main/Session owner提交 Session terminal 后同时使 RealmStateAuthority / Ses
 12 install prepared Game baseline + sparse current overrides; revision/version=0
 13 Realm State READY
 14 composition constructs SessionEventHub; Session Events READY
-15 install private Runtime State + Event binding factories
+15 install private Runtime State + Event binding factories + sessionEventsFatal source
 16 runMain({bootstrap:prepared.main, platform, policy})
 17 Main installs logical registry / initial input
 18 for each required key: generator produces token; Main registers it
-19 RuntimeHosting.launch({subsystemKey,bootstrapToken}) creates Runner lifetime + State/Event client bindings
-20 HostedRuntime.runtimeControl.acquire() establishes Main carrier
-21 hello authentication → identified → initialize → ready
-22 Main starts initial Frame independently from Data
-23 M7+ realize Renderer and publish Renderer Control authority
-24 M8/M9+ publish DataAuthority / provision Data carriers
-25 M10/M11+ establish Input/Render fresh baselines
-26 Realm State operations proceed independently of Renderer Data and Frame/Activation currentness
-27 Session Event publish/subscribe proceeds independently with exact-channel routing + serial subscription delivery
-28 binding recovery remains per-plane; State fresh baseline / Event fresh subscribe, no replay
-29 Main/Session terminal owner commits terminal; State/Event services terminal + graceful Runtime shutdown converge
+19 RuntimeHosting.launch({subsystemKey,bootstrapToken}) creates Runner lifetime + required initial State/Event bindings
+20 Hostra: dedicated Event WS via env seam; PWA: dedicated Event MessagePort via provisioning control
+21 only after required State/Event bindings usable, Runner imports planned Definition Module
+22 HostedRuntime.runtimeControl.acquire() establishes Main carrier
+23 hello authentication → identified → initialize → ready
+24 Main starts initial Frame independently from Data
+25 M7+ realize Renderer and publish Renderer Control authority
+26 M8/M9+ publish DataAuthority / provision Data carriers
+27 M10/M11+ establish Input/Render fresh baselines
+28 Realm State operations proceed independently of Renderer Data and Frame/Activation currentness
+29 Session Event publish/subscribe proceeds independently with exact-channel routing + serial subscription delivery
+30 binding recovery remains per-plane; State fresh baseline / Event fresh subscribe, no replay
+31 Main/Session terminal owner commits terminal; State/Event services terminal + graceful Runtime shutdown converge
 ```
 
-具体 physical creation order 可不同，只要满足 causal/authority/PREPARE/State+Event READY boundary。
+具体 physical creation order 可不同，只要满足 causal/authority/PREPARE/State+Event READY/current integration profile boundary。
 
 ---
 
@@ -740,17 +781,18 @@ Main/Session owner提交 Session terminal 后同时使 RealmStateAuthority / Ses
 8. Session/Platform composition只拥有 physical assembly/binding/disposal，不成为第三 application authority；
 9. Main Runtime launch request仍只携 logical key + bootstrapToken，不携 State/Event payload/transport；
 10. Host-owned Runner加载 plan-selected Definition Module并安装 composition-bound RealmStateClient + SessionEventClient；
-11. launch != loaded != connected != identified != ready；
-12. ready不要求 Renderer Data，但 business Runtime bootstrap要求 State/Event services READY；
-13. Runtime identity由 logical subsystem key / hello binding建立；Event source由当前 Runtime binding派生；
-14. State/Event operations不依赖 Frame/Activation/InputTarget；
-15. stopped只来自 actual Runtime termination；no automatic Runtime restart；
-16. Data Broker负责 Renderer Data carrier，不拥有 State/Event services；
-17. provisioning不污染 Runtime/Renderer Control或 State/Event binding；
-18. same S/G/P可以 sequential Data reconnect；State/Event logical clients保持；
-19. Data failure不等于 Runtime/Frame/State/Event failure；
-20. ordinary State/Event conflict/listener/binding failure不等于 Runtime/Session failure；
-21. Authority/Hub fatal先self-terminal，再报告 Session-fatal condition，由 Main/Session owner terminal/unwind；
-22. State recovery fresh subscribe+baseline；Event recovery fresh subscribe/no replay；old identities不reattach；
-23. Frame/Input/Render/Data/State/Events lifecycles相互独立但受 Main-owned Session terminal上界约束；
-24. Hostra/PWA physical mechanism可不同，但 State/Event logical/business trace语义等价。
+11. current Session Events profile requires dedicated Hostra WS / PWA MessagePort binding before business Definition import；
+12. launch != loaded != connected != identified != ready；
+13. ready不要求 Renderer Data，但 business Runtime bootstrap要求 State/Event services READY；
+14. Runtime identity由 logical subsystem key / hello binding建立；Event source由当前 Runtime binding派生；
+15. State/Event operations不依赖 Frame/Activation/InputTarget；
+16. stopped只来自 actual Runtime termination；no automatic Runtime restart；
+17. Data Broker负责 Renderer Data carrier，不拥有 State/Event services；
+18. provisioning不污染 Runtime/Renderer Control；PWA provisioning control仅转移/确认 dedicated Event port，不承载 Event业务流量；
+19. same S/G/P可以 sequential Data reconnect；State/Event logical clients保持；
+20. Data failure不等于 Runtime/Frame/State/Event failure；
+21. ordinary State/Event conflict/listener/binding failure不等于 Runtime/Session failure；
+22. Authority/Hub fatal先self-terminal，再通过 narrow fatal fact报告，由 Main/Session owner terminal/unwind；
+23. State recovery fresh subscribe+baseline；Event recovery fresh subscribe/no replay；old identities不reattach；
+24. Frame/Input/Render/Data/State/Events lifecycles相互独立但受 Main-owned Session terminal上界约束；
+25. Hostra/PWA physical mechanism可不同，但 State/Event logical/business trace语义等价；future multiplexing requires later profile rather than implementation-time choice。
