@@ -7,7 +7,7 @@
 > 稳定程度：**Architecture + Logical Semantics + Deterministic Surface Frozen**  
 > 架构来源：[Session Events：Session 级跨 Subsystem 事件系统](../10-architecture/session-events-system.md)  
 > 可执行断言：[Session Events v1 Conformance](./session-events-conformance-v1.md)  
-> 相关契约：[Realm State v1](./realm-state-v1.md)  
+> 相关契约：[Realm State v1](./realm-state-v1.md) · [Session Events Runtime Integration Profile v1](./session-events-runtime-profile-v1.md)  
 > 最近复核：2026-10-13
 
 本文定义 Session Events v1 的 normative logical contract。本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
@@ -15,7 +15,7 @@
 > [!IMPORTANT]
 > 本协议定义 logical observable semantics，不定义 Event Hub 必须运行在哪个 Process / Worker，也不要求独占物理通信管道。Session Events MAY 与 Shared State 共进程，也 MAY multiplex 到同一 physical carrier；这些选择不得改变本文定义的逻辑行为。
 >
-> 本文是 Session Events v1 实现的 normative SSOT。实现不得为了进程拓扑、传输便利或性能优化重新设计 routing、ordering、subscription lifetime、failure evidence 或 delivery guarantees。
+> 本文是 Session Events v1 实现的 normative SSOT。当前 Hostra/PWA product realization 的 concrete binding seam 由 [Session Events Runtime Integration Profile v1](./session-events-runtime-profile-v1.md) 冻结；实现不得为了进程拓扑、传输便利或性能优化重新设计 routing、ordering、subscription lifetime、failure evidence 或 delivery guarantees。
 
 ---
 
@@ -134,6 +134,8 @@ physical binding generation
 host process identity
 transport request id
 ```
+
+Author-facing rejected `publish()` / `subscribe()` Promises MUST reject with the stable `SessionEventError` surface defined in §11。
 
 ---
 
@@ -404,7 +406,7 @@ event accepted after N
 
 ### 7.1 Successful establishment
 
-The returned Promise MUST resolve only after the complete channel set has been atomically installed by the Hub。
+The returned Promise MUST resolve only after the complete channel set has been atomically installed by the Hub **and the subscription is still live when the successful result becomes author-visible**。
 
 ```text
 subscribe() Promise resolves
@@ -417,6 +419,7 @@ v1 MUST NOT expose：
 subscription.ready
 pending status
 half-open author-visible subscription
+already-terminal handle as successful establishment
 ```
 
 ### 7.2 First callback ordering
@@ -446,6 +449,29 @@ failure
 ```
 
 If there is no usable binding when subscribe is admitted locally, it MUST fail fast `BINDING_UNAVAILABLE` and MUST NOT wait/queue for a future binding。
+
+### 7.4 Terminal before successful establishment becomes author-visible
+
+A subscription candidate MAY be installed at `N` and then become terminal before the successful subscribe result becomes author-visible—for example because retained post-`N` events overflow the bounded queue or the carrying binding terminals。
+
+In that race, `subscribe()` MUST reject and MUST NOT resolve an already-terminal handle。
+
+Required mapping：
+
+```text
+candidate overflow before successful result becomes author-visible
+    → LIMIT_EXCEEDED
+
+carrying binding terminal before successful result becomes author-visible
+    → BINDING_UNAVAILABLE
+
+owning client or Hub terminal before successful result becomes author-visible
+    → TERMINAL
+```
+
+The candidate MUST be retired/fenced；retained undelivered events MAY be discarded；listener MUST NOT be invoked。
+
+This failure is deterministic establishment failure, not `OUTCOME_UNKNOWN`。
 
 ---
 
@@ -611,7 +637,22 @@ export interface SessionEventFailure {
   readonly message: string;
   readonly path?: readonly (string | number)[];
 }
+
+export class SessionEventError extends Error implements SessionEventFailure {
+  readonly code: SessionEventFailureCode;
+  readonly path?: readonly (string | number)[];
+}
+
+export function isSessionEventFailure(
+  value: unknown,
+): value is SessionEventFailure;
 ```
+
+`@loomrealm/session-events` MUST export `SessionEventError` and `isSessionEventFailure()`。
+
+Every author-facing rejected `publish()` / `subscribe()` Promise MUST reject with a `SessionEventError` whose `.code`、`.message`、`.path` are observably equivalent to the logical failure。Remote wire failures MUST be reconstructed into this local SDK Error surface；transport-private Error objects MUST NOT leak directly to business code。
+
+`isSessionEventFailure()` MUST recognize structurally equivalent failures and MUST NOT require `instanceof SessionEventError`, so callers can safely classify failures across package/realm boundaries。
 
 Rules：
 
@@ -754,6 +795,8 @@ Hub detects fatal
 → Main commits Session terminal / Runtime unwind
 ```
 
+The current exact Main-facing fatal capability and latching semantics are frozen by [Session Events Runtime Integration Profile v1](./session-events-runtime-profile-v1.md)。
+
 SessionEventHub does not own Main control transitions or process termination。
 
 Failure during Hub construction before it reaches READY and joins the live Session is bootstrap failure, not live-Hub fatal reporting。
@@ -840,6 +883,8 @@ Heavy Session Event / Diagnostics traffic MUST NOT indefinitely starve Shared St
 
 Physical wire order MUST NOT become a public State/Event happens-before relation。
 
+Current Hostra/PWA v1 products deliberately use dedicated Event carriers；that current realization is frozen separately by [Session Events Runtime Integration Profile v1](./session-events-runtime-profile-v1.md)。The logical MAY-multiplex rule remains reserved for a future physical profile and does not require current product implementations to multiplex。
+
 ---
 
 ## 17. Logical Binding Protocol Requirements
@@ -908,6 +953,8 @@ failure shape
 
 The protocol MUST NOT be embedded as a semantic child of Renderer Data、Frame/Call or Main control authority。
 
+The current concrete Hostra/PWA binding mechanisms are normative only through [Session Events Runtime Integration Profile v1](./session-events-runtime-profile-v1.md) and do not redefine the logical protocol identifier。
+
 ---
 
 ## 19. Explicit Non-goals
@@ -972,10 +1019,19 @@ Publish Evidence
 Subscription Establishment
 - complete channel set installed atomically
 - empty/duplicate/too-many channels rejected
-- subscribe resolves only after Hub installation
+- subscribe resolves only after Hub installation and only while still live
 - first callback after Promise resolve
 - failed/ambiguous establishment exposes no handle/callback
 - orphan candidate is retired on binding failure
+- overflow before successful result becomes visible → LIMIT_EXCEEDED / no handle
+- binding terminal before successful result becomes visible → BINDING_UNAVAILABLE / no handle
+- client/Hub terminal before successful result becomes visible → TERMINAL / no handle
+
+Failure Surface
+- rejected publish/subscribe uses SessionEventError
+- code/message/path preserve logical failure
+- isSessionEventFailure recognizes structural equivalents without instanceof requirement
+- remote transport-private Error does not leak to business code
 
 Delivery Lane
 - at most one active listener invocation per subscription
@@ -1011,17 +1067,19 @@ Binding / Lifetime
 
 Physical Equivalence
 - in-process and remote profiles expose equivalent observables
-- State/Events shared carrier creates no cross-plane order/transaction
-- Event traffic cannot indefinitely starve Shared State on multiplexed carrier
+- current Hostra dedicated WebSocket profile passes
+- current PWA dedicated MessagePort profile passes
+- State/Events shared carrier, if/when implemented, creates no cross-plane order/transaction
+- Event traffic cannot indefinitely starve Shared State on any future multiplexed carrier
 ```
 
 ---
 
 ## 21. Implementation Freeze Rule
 
-Session Events v1 has no remaining architecture or deterministic-surface blocker for implementation。
+Session Events v1 logical contract **and the current Runtime Integration Profile v1** have no remaining architecture or deterministic-surface blocker for implementation。
 
-Implementation MAY choose internal maps/indexes、process/Worker placement、serialization/framing、private subscription ids、binding generation token、scheduler and queue data structures, provided all normative observable semantics above remain unchanged。
+Implementation MAY choose internal maps/indexes、serialization/framing、private subscription ids、binding generation token、scheduler and queue data structures, provided all normative observable semantics and the frozen current Hostra/PWA binding seams remain unchanged。
 
 Implementation MUST NOT invent new public behavior for convenience。If implementation finds a genuinely missing observable rule, treat it as a contract defect and deliberately revise this contract rather than choose platform-specific semantics silently。
 
@@ -1041,19 +1099,20 @@ Implementation MUST NOT invent new public behavior for convenience。If implemen
 10. publish success means Hub accepted/routed, not subscriber handled；
 11. dispatched publish with lost definitive result = OUTCOME_UNKNOWN and is never auto-retried；
 12. subscriber overflow does not retroactively fail an accepted publish；
-13. subscribe is async and resolves only after atomic Hub installation；
+13. subscribe is async and resolves only after atomic Hub installation while the subscription is still live；
 14. listener cannot start before corresponding subscribe resolves；
-15. failed/ambiguous establishment exposes no half-open subscription；
-16. every subscription exposes a one-shot non-rejecting `closed` terminal surface；
-17. close() is synchronous/idempotent local revocation；remote cleanup is asynchronous detail；
-18. one subscription has one serial listener lane with at most one active invocation；
-19. listener failure is local and does not terminal the subscription by itself；
-20. bounded delivery overflow terminals explicitly instead of silently dropping while healthy；
-21. no usable binding fails new operations fast without wait/queue；
-22. binding loss terminals old subscriptions but not the still-live logical client；fresh binding requires fresh subscribe and no replay；
-23. Runtime terminal terminals its client/subscriptions；Hub/Session terminal terminals all；
-24. Frame/Activation/Renderer/Data lifetimes do not authorize or revoke Session Events；
-25. Shared State and Events remain non-atomic and share no revision/order；
-26. physical placement/carrier multiplexing is non-normative and cannot alter logical semantics；
-27. no RPC、replay、event sourcing、exactly-once、wildcard/type filtering or universal EventBus semantics in v1；
-28. Desktop/PWA/in-process realizations MUST be observably equivalent at the logical boundary。
+15. failed/ambiguous/pre-visible-terminal establishment exposes no half-open or already-terminal subscription；
+16. author-facing logical failures reject with stable SessionEventError semantics and structural failure guard；
+17. every successful subscription exposes a one-shot non-rejecting `closed` terminal surface；
+18. close() is synchronous/idempotent local revocation；remote cleanup is asynchronous detail；
+19. one subscription has one serial listener lane with at most one active invocation；
+20. listener failure is local and does not terminal the subscription by itself；
+21. bounded delivery overflow terminals explicitly instead of silently dropping while healthy；
+22. no usable binding fails new operations fast without wait/queue；
+23. binding loss terminals old subscriptions but not the still-live logical client；fresh binding requires fresh subscribe and no replay；
+24. Runtime terminal terminals its client/subscriptions；Hub/Session terminal terminals all；
+25. Frame/Activation/Renderer/Data lifetimes do not authorize or revoke Session Events；
+26. Shared State and Events remain non-atomic and share no revision/order；
+27. physical placement/carrier multiplexing is non-normative at logical layer and cannot alter semantics；current Hostra/PWA use dedicated Event carriers；
+28. no RPC、replay、event sourcing、exactly-once、wildcard/type filtering or universal EventBus semantics in v1；
+29. Desktop/PWA/in-process realizations MUST be observably equivalent at the logical boundary。
