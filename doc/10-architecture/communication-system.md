@@ -2,16 +2,16 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving；Realm State v1 logical plane + Hostra WS / Worker MessagePort physical realizations implemented and qualified
-> 主要定义：Control Plane、Renderer Data Plane、Realm State Plane、Content Plane、carrier/application mapping、authority/recovery 与 communication-facing Platform responsibilities  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Realm State](./realm-state-system.md)  
+> 稳定程度：Evolving；Realm State v1 logical plane + Hostra WS / Worker MessagePort physical realizations implemented and qualified；Session Events architecture designed / not implemented / not qualified
+> 主要定义：Control Plane、Renderer Data Plane、Realm State Plane、Session Events Plane、Content Plane、carrier/application mapping、authority/recovery 与 communication-facing Platform responsibilities  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Realm State](./realm-state-system.md)、[Session Events](./session-events-system.md)  
 > 被以下文档细化：[渲染系统](./rendering-system.md)、[Subsystem 模型](./subsystem-model.md)、[运行时启动系统](./runtime-bootstrap-system.md)  
-> 正式化：`doc/15-contracts` 对应协议/Profile；Realm State：[Realm State v1](../15-contracts/realm-state-v1.md)  
-> 最近复核：2026-10-05
+> 正式化：`doc/15-contracts` 对应协议/Profile；Realm State：[Realm State v1](../15-contracts/realm-state-v1.md)；Session Events 尚无 frozen v1 contract  
+> 最近复核：2026-10-13
 
 ---
 
-## 1. 四类 Logical Communication Planes
+## 1. 五类 Logical Communication Planes
 
 ```text
 Control Plane
@@ -36,27 +36,45 @@ Realm State Plane
         loomrealm.realm-state/1
         read / readInitial / list / commit / subscribe
 
+Session Events Plane
+    SessionEventHub ⇄ Subsystem Runtime
+        transient cross-Subsystem business event distribution
+        publish / subscribe
+        no replay / no state authority / no RPC
+
 Content Plane
     Main/Renderer/Subsystem ⇄ Readonly Content Service
 ```
 
-这些 planes MAY 共享某些 physical transport primitives，但 authority、lifecycle、failure/recovery 与 retry semantics独立。
+这些 planes MAY 共享某些 physical transport primitives，但 authority、lifecycle、failure/recovery、backpressure 与 retry semantics 独立。
 
 尤其：
 
 ```text
 Renderer Data reconnect
     != Realm State reconnect/reset
+    != Session Events replay/reset
 
 Runtime Control loss
     != ordinary Realm State conflict
+    != ordinary Session Event delivery failure
 
 Realm State binding loss
     != Runtime/Session failure
 
+Session Events binding loss
+    != Realm State reset
+    != Renderer Data failure
+    != Main control transition
+
 RealmStateAuthority fatal
     = Session-fatal condition report
     != binding reconnect event
+    != direct Session unwind ownership
+
+SessionEventHub infrastructure fatal
+    MAY report Session-fatal infrastructure fact
+    != business event
     != direct Session unwind ownership
 ```
 
@@ -89,6 +107,7 @@ reconnect policy
 Runtime failure
 Data generation/profile
 Realm State authority / commit semantics
+Session Events routing/subscription semantics
 Session terminal policy
 ```
 
@@ -103,6 +122,8 @@ PWA / cross-process realization
 ```
 
 如果 Realm State realization 使用 message-oriented carrier，carrier仍只负责 transport facts；MUST NOT 自己 retry/duplicate mutation，也 MUST NOT 把 transport loss擅自解释为 `CONFLICT`、known no-commit、Runtime failure 或 Session terminal。
+
+Session Events 同样不绑定某一种 carrier。Desktop 可使用 IPC / WebSocket / private carrier，PWA 可使用 MessagePort；carrier MUST NOT 自己创建 topic semantics、subscription registry、history replay、business retry 或 business authority。
 
 ---
 
@@ -127,6 +148,8 @@ Structured Clone只用于 Platform bootstrap/Port transfer；existing Control/Da
 
 Realm State v1 当前 Hostra realization 使用独立 JSON-text WebSocket carrier，browser/Worker realization 使用 private MessagePort string units；两者共享 [Realm State v1](../15-contracts/realm-state-v1.md) validation/size/evidence semantics，物理 carrier不是第二套数据模型。合法的大型 logical result 使用 State 专用透明分帧 `loomrealm.realm-state.frame/1`，不会引入 transport-specific logical size limit。
 
+Session Events exact wire encoding尚未冻结。无论最终复用 JSON-text carrier 或其他 private profile，logical event identity/payload、limits、routing semantics MUST 由 Session Events contract 拥有，不能由 Desktop/PWA transport shape 分叉成不同业务模型。
+
 ---
 
 ## 4. Main ⇄ Subsystem Control
@@ -146,6 +169,8 @@ Platform只建立 carrier，不改变 hello/Frame transaction semantics。
 Realm State request MUST NOT 塞进 Runtime Control / Frame Call message namespace；`frame.call()` 继续只表达 control-flow composition。
 
 Realm State request也 MUST NOT 携带或依赖 `frameId` / `activationId` / InputTarget 来建立 State mutation authority。
+
+Session Event publish/subscribe 同样 MUST NOT 塞进 Frame/Call namespace，也 MUST NOT 用 `frame.call()` 模拟普通 event fan-out。Session Events 不拥有 control continuation、child result 或 Runtime supervision。
 
 ---
 
@@ -168,9 +193,12 @@ Interest Registry
 Render State
 Content credential
 Realm State value / Realm State carrier material
+Session Event subscription/topic state
 ```
 
-Control loss使 Renderer失去 current Main authority，并 retire旧 Data connections；MUST NOT 因此 reset RealmStateAuthority。
+Control loss使 Renderer失去 current Main authority，并 retire旧 Data connections；MUST NOT 因此 reset RealmStateAuthority 或要求 SessionEventHub replay。
+
+Renderer 默认不直接订阅 Session Events；如果未来出现 Renderer-side event consumer，必须另行定义 explicit role，而不能借 Renderer Control 旁路。
 
 ---
 
@@ -198,6 +226,8 @@ fresh-carrier child baseline
 Connection Core本身 zero application messages。
 
 Realm State MUST NOT 成为 Renderer Data child protocol：它是 Session business-state authority，不是 current Renderer replica traffic。
+
+Session Events MUST NOT 成为 Renderer Data child protocol：它是 Session-scoped cross-Subsystem event distribution，不依赖 current Renderer/Data generation。
 
 ---
 
@@ -232,6 +262,8 @@ P
 
 Realm State Record identity/version/revision MUST NOT 使用 Data generation/profile 作为业务 identity 或 OCC metadata。
 
+Session Event identity/subscription MUST NOT 使用 Renderer Data generation/profile 作为业务 identity/currentness。Event client lifetime跟随 Runtime/Session，而不是 current Renderer participant。
+
 ---
 
 ## 8. Dynamic Data Provisioning
@@ -254,6 +286,8 @@ Provisioning material不进入 Runtime Control / Renderer Control / business pay
 
 RealmStateClient binding属于 Runtime-scoped Session capability bootstrap，不由 Renderer DataAuthority 动态授权，也不通过 Data Broker candidate/current机制建立。
 
+SessionEventClient 同样属于 Runtime-scoped Session capability；其 binding/provisioning 不由 Renderer DataAuthority 授权，也不通过 Data candidate/current机制建立。
+
 ---
 
 ## 9. Data Failure Boundary
@@ -273,6 +307,7 @@ unwind Frame
 change Main DataAuthority
 reset Realm State
 terminal RealmStateClient
+terminal SessionEventClient
 ```
 
 Data current→retired；仍授权时可以 later fresh carrier。
@@ -304,6 +339,8 @@ Authority first → no send until Interest
 
 Realm State revision不是 Input/Render cross-plane barrier。Subsystem业务可以读取 State 后更新其 local/Render authority，但 Realm State `commit()` 本身不消费 Frame/Activation mutation permit，core也不建立 `Realm State revision == Render revision` 之类全局序列。
 
+Session Event delivery也不是 Input mutation permit。Event listener 可以根据业务语义调用其拥有的 normal capabilities，但事件本身不创建 current Frame、Activation 或 InputTarget authority。
+
 ---
 
 ## 11. Render Communication
@@ -322,7 +359,23 @@ render.domains
 → patch/event
 ```
 
-Data carrier loss只丢 replica transport baseline，不销毁 Subsystem authoritative Domain，也不影响 Realm State authority。
+Data carrier loss只丢 replica transport baseline，不销毁 Subsystem authoritative Domain，也不影响 Realm State authority或 SessionEventHub。
+
+必须区分：
+
+```text
+render.event
+    RenderDomain-local / presentation-oriented transient intent
+    travels on Renderer Data plane
+    no cross-Subsystem subscription
+
+Session Event
+    Session-scoped / cross-Subsystem business notification
+    travels on Session Events plane
+    no automatic Renderer projection
+```
+
+两者 MUST NOT 自动桥接。一个业务动作如果同时需要 cross-Subsystem notification 和 presentation effect，由明确 business owner 分别提交 Session Event 与 Render intent。
 
 ---
 
@@ -367,6 +420,7 @@ transaction ID / dedup journal
 replay cursor
 remote commit cancellation
 Runtime/Session supervision policy in carrier/binding
+Session Event routing/history
 ```
 
 ### Validation / Trust Boundary
@@ -433,6 +487,7 @@ unwind Frame
 terminate Session
 reset RealmStateAuthority
 change DataAuthority
+reset SessionEventHub
 ```
 
 如果 profile 支持后续恢复，必须建立 fresh logical binding，再 fresh subscribe + fresh baseline；不 replay history。
@@ -441,7 +496,114 @@ RealmStateAuthority fatal 则不同：它报告 Session-fatal condition，由 Ma
 
 ---
 
-## 13. Content Plane
+## 13. Session Events Plane
+
+完整架构见 [Session Events](./session-events-system.md)。
+
+Logical role：
+
+```text
+one Session
+→ one logical SessionEventHub
+→ many Runtime-scoped SessionEventClient bindings
+→ zero or more exact-topic subscriptions
+```
+
+Session Events 表达：
+
+```text
+publish transient business event
+subscribe current topic
+bounded asynchronous delivery
+subscription/client terminal
+infrastructure fatal report when routing invariants cannot continue
+```
+
+SessionEventHub 是 routing infrastructure，不是 business authority：
+
+```text
+publish accepted
+    != subscriber handler success
+    != Shared State consequence committed
+
+late subscriber
+    != historical replay
+
+Event Hub
+    != event store
+    != workflow engine
+    != command/RPC bus
+```
+
+### State / Event Boundary
+
+```text
+"current authoritative fact"
+    → Realm/Shared State
+
+"something just happened"
+    → Session Events
+```
+
+如果 restarted / late-joining Runtime 必须知道信息，不能只依赖 Session Events history；该信息必须落在明确 authority 中。
+
+Session Event MAY 导致 subscriber 自己执行 `RealmStateClient.commit()`，但 Event delivery 与 State transaction：
+
+```text
+not atomic
+no shared revision
+no implicit retry
+no causal total order unless business explicitly models it
+```
+
+### Publish / Callback Boundary
+
+Publisher MUST NOT 等待 remote listener completion。
+
+```text
+publisher
+→ event accepted
+→ current matching subscription routing
+→ bounded delivery
+→ Runtime-local listener
+```
+
+Listener sync throw / rejected thenable MUST local isolate/diagnostic，MUST NOT retroactively fail accepted publish、rollback State 或 terminate unrelated subscribers。
+
+### Lifetime / Recovery
+
+SessionEventClient 是 Runtime-scoped capability，不依赖 Frame/Activation/Renderer/Data generation。
+
+```text
+Frame close/suspend
+Renderer reload
+Data reconnect
+    != event client revoked
+```
+
+Runtime terminal终止该 Runtime 的 Event client/subscriptions。Session terminal终止 Event Hub 与所有 bindings。
+
+Physical binding loss 不 replay missed events；future fresh binding若被 profile允许，必须 fresh subscribe。
+
+### No RPC / Replay
+
+v1 architecture baseline：
+
+```text
+no request/reply
+no durable subscription
+no history cursor/replay
+no consumer group
+no exactly-once
+no automatic application retry
+no global Session event sequence
+```
+
+如果业务需要“调用另一个 Subsystem 并等待结果”，应设计独立 command/call contract，不得使用 publish + reply-topic 偷偷建立 RPC。
+
+---
+
+## 14. Content Plane
 
 Content使用 HTTP/Fetch logical API，而不是 MessageCarrier协议。
 
@@ -452,11 +614,43 @@ PWA     → same-origin Fetch/SW
 
 Content credential/bootstrap mechanism属于 Platform implementation；logical route/cache/error/integrity由 Content API定义。
 
-Content 是 readonly definition authority；Realm State 是 mutable Session business-state authority。两者不得因都使用 `(namespace,key)` 风格命名而合并成一个 generic repository protocol。
+Content 是 readonly definition authority；Realm State 是 mutable Session business-state authority；Session Events 是 transient notification plane。它们不得因为都传递 JSON/business data 而合并成 generic repository/event protocol。
 
 ---
 
-## 14. Backpressure
+## 15. Diagnostics / Logging
+
+跨 Subsystem log aggregation MAY 复用 Session Events routing core / physical carrier，但 Diagnostics 与 Business Events 是不同 logical role。
+
+```text
+Business Event
+    missed delivery may change business behavior
+    must not silently drop under declared healthy subscription semantics
+
+Diagnostics / Log
+    may allow batching / sampling / lossy overflow
+    must not indefinitely block critical business events
+```
+
+Author API SHOULD 使用独立 logger capability，例如：
+
+```text
+scope.log.info(...)
+scope.log.warn(...)
+scope.log.error(...)
+```
+
+而不是：
+
+```text
+scope.events.publish("log", ...)
+```
+
+具体 diagnostics schema、sink、retention、sampling 不属于 Session Events business contract；即使实现共享 transport，也必须拥有独立 queue/backpressure policy。
+
+---
+
+## 16. Backpressure
 
 所有 plane必须 bounded，但 policy由对应协议域负责：
 
@@ -465,16 +659,20 @@ Renderer Control → latest full snapshot
 User Input       → state coalesce + bounded event queue
 Render Update    → protocol revision/commit rules
 Realm State      → bounded request/subscription physical profile; commit lane never blocked by listener delivery
+Session Events   → bounded ingress + bounded subscription/client egress; ordinary business event overflow must be explicit
+Diagnostics      → independent policy; MAY batch/sample/drop according to future diagnostics contract
 Content          → HTTP request/concurrency policy
 ```
 
-Transport不得为了缓解 backpressure重试/duplicate application mutation。
+Transport不得为了缓解 backpressure重试/duplicate application mutation/event。
 
 Realm State subscription queue 已按 v1 profile 实现 64 events / 8 MiB 双重上限；Authority 与 carrier delivery 均不得以 unbounded queue 取代该约束。
 
+Session Events 的具体 count/byte/concurrency limits 尚未冻结，但 architecture 要求从 v1 起禁止 unbounded buffering。普通 business event delivery 不允许 silent drop；无法继续保证声明的 order/delivery semantics 时必须产生 explicit overflow/terminal outcome。
+
 ---
 
-## 15. No Cross-plane Global Order
+## 17. No Cross-plane Global Order
 
 不存在整个 LoomRealm Session 的单一 network sequence。
 
@@ -494,30 +692,37 @@ Renderer Control ↛ total order with Renderer Data
 Input ↛ shared revision with Render
 Realm State revision ↛ Main Control revision
 Realm State revision ↛ Renderer Data revision
+Session Event order ↛ Realm State revision
+Session Event order ↛ Main Control revision
+Session Event order ↛ Render revision
 Content version ↛ Realm State revision
 ```
 
-Realm State global revision只在该 RealmStateAuthority 内定义 successful commit order，不升级成整个 Session 的 universal clock。
+Realm State global revision只在该 RealmStateAuthority 内定义 successful commit order，不升级成整个 Session 的 universal clock。Session Events 也不引入 universal Session event sequence。
 
 ---
 
-## 16. Final Invariants
+## 18. Final Invariants
 
-1. Control、Renderer Data、Realm State、Content是独立 logical communication planes；
-2. current Control/Data message-oriented profiles继续统一 UTF-8 JSON text string；Realm State 使用独立 Hostra JSON-text 与 Worker MessagePort realization；
+1. Control、Renderer Data、Realm State、Session Events、Content是独立 logical communication planes；
+2. current Control/Data message-oriented profiles继续统一 UTF-8 JSON text string；Realm State 使用独立 Hostra JSON-text 与 Worker MessagePort realization；Session Events wire 尚未冻结但不得分叉 logical semantics；
 3. Carrier只描述已建立 pipe，不描述 application authority/establishment/Session supervision；
-4. Runtime Control使用 one dispatcher + shared sender ID namespace；Realm State不复用该 dispatcher；
-5. Renderer Control只复制 Main logical authority，不携 Realm State business values；
-6. DataAuthority = S/G/dataProfile，不携物理 material，也不拥有 Realm State binding；
+4. Runtime Control使用 one dispatcher + shared sender ID namespace；Realm State/Session Events不复用 Frame/Call logical namespace；
+5. Renderer Control只复制 Main logical authority，不携 Realm State business values或 Session Event routing state；
+6. DataAuthority = S/G/dataProfile，不携物理 material，也不拥有 Realm State/Event binding；
 7. Renderer Data Profile只拥有 Renderer↔Subsystem connection-local application roles；
-8. Data Broker/provisioning属于 Platform；Realm State binding不使用 Data candidate/current authority；
-9. Data provisioning/loss不等于 Runtime failure/Frame unwind/Realm State reset；
-10. Realm State operations不消费 Frame/Activation/InputTarget authority；
+8. Data Broker/provisioning属于 Platform；Realm State/Event binding不使用 Data candidate/current authority；
+9. Data provisioning/loss不等于 Runtime failure/Frame unwind/Realm State reset/Event replay；
+10. Realm State operations不消费 Frame/Activation/InputTarget authority；Session Event publish/listener同样不创建这些 authority；
 11. Realm State mutation使用 Record-version OCC + explicit evidence；transport不得 retry/duplicate；
 12. Realm State listener delivery在 Authority lane外，callback failure局部隔离且允许安全 reentrancy；
-13. Realm State subscription/binding loss只终止该 State binding，不自动改变 Main Runtime/Session；
-14. RealmStateAuthority fatal只报告 Session-fatal condition，由 Main/Session lifecycle owner提交 terminal/unwind；
-15. Control/Data/Realm State之间无跨连接 global total order；
-16. User Input使用 authority×Interest×Producer交集；Realm State不创建 Input/Frame mutation permit；
-17. Render/Data/Frame/Realm State lifecycles相互独立但都受 Session terminal上界约束；
-18. Transport Adapter不拥有 application retry/recovery 或 Runtime/Session authority。
+13. Session Event publish acceptance不等待 subscriber handler；listener failure不得 retroactively fail publisher；
+14. Session Events不保存 authoritative current value，不提供 late-subscriber replay、RPC 或 event-sourcing semantics；
+15. `render.event` 是 RenderDomain/presentation semantic，不自动桥接为 Session Event；
+16. Business Events 与 Diagnostics/Log 即使复用 mechanics，也必须保持独立 logical role / QoS；
+17. Realm State/Event binding loss只影响对应 capability/binding，不自动改变 Main Runtime/Session；
+18. RealmStateAuthority fatal 或 SessionEventHub infrastructure fatal只报告 Session-fatal fact，由 Main/Session lifecycle owner提交 terminal/unwind；
+19. Control/Data/Realm State/Session Events之间无跨连接 global total order；
+20. User Input使用 authority×Interest×Producer交集；Realm State/Event均不创建 Input/Frame mutation permit；
+21. Render/Data/Frame/Realm State/Session Events lifecycles相互独立但都受 Session terminal上界约束；
+22. Transport Adapter不拥有 application retry/recovery 或 Runtime/Session authority。
