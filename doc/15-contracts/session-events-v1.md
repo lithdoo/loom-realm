@@ -73,6 +73,9 @@ export interface SessionEvent<T extends JsonValue = JsonValue> {
   };
 }
 
+export type SessionEventListener =
+  (event: SessionEvent) => void | Promise<void>;
+
 export interface SessionEventClient {
   publish(
     channel: string,
@@ -82,7 +85,7 @@ export interface SessionEventClient {
 
   subscribe(
     channels: readonly string[],
-    listener: (event: SessionEvent) => void | Promise<void>,
+    listener: SessionEventListener,
   ): Promise<SessionEventSubscription>;
 }
 
@@ -283,7 +286,9 @@ After `OUTCOME_UNKNOWN`，framework MUST NOT automatically retry。The event MAY
 
 ## 5. Subscription Establishment / Channel Routing Linearization
 
-`subscribe(channels, listener)` establishes one multi-channel exact subscription at one logical linearization point `N` inside SessionEventHub routing state。
+`subscribe(channels, listener)` is an asynchronous establishment operation and MUST NOT synchronously return a half-open subscription handle。
+
+It establishes one multi-channel exact subscription at one logical linearization point `N` inside SessionEventHub routing state。
 
 For an event whose exact `event.channel` belongs to that subscription's channel set：
 
@@ -297,9 +302,64 @@ event accepted after N
 
 An event whose channel is not in the set MUST NOT be sent to or delivered through that subscription。
 
-The returned Promise MUST resolve before the listener is first invoked。
+### 5.1 Successful establishment
 
-If a matching-channel event becomes eligible after subscription linearization but before the subscribe Promise resolves, the binding/runtime delivery layer MUST preserve it in bounded order and invoke only after resolution。
+The returned Promise MUST resolve only after the complete channel set has been atomically installed by the Hub。
+
+Author-visible invariant：
+
+```text
+subscribe() Promise resolves
+    = subscription is already live
+```
+
+There MUST NOT be an author-visible state equivalent to：
+
+```text
+subscription object exists
+but remote/Hub establishment is still pending
+```
+
+Therefore v1 MUST NOT require author code to observe or await：
+
+```text
+subscription.ready
+subscription.status == "pending"
+half-open subscription identity
+```
+
+### 5.2 First callback ordering
+
+The listener MUST NOT be invoked before the `subscribe()` Promise has resolved to the corresponding `SessionEventSubscription`。
+
+If a matching event becomes eligible after `N` but before the successful subscribe result is observed by the Runtime：
+
+```text
+Hub/binding/runtime delivery layer
+    → retain the event in bounded order
+    → resolve subscribe()
+    → only then invoke listener
+```
+
+This guarantees that callback code may safely refer to the returned subscription handle after `await subscribe(...)` has completed。
+
+### 5.3 Establishment failure / ambiguity
+
+A failed `subscribe()` MUST NOT expose a usable or half-created author-facing `SessionEventSubscription`。
+
+If the Hub installed an internal candidate subscription but definitive establishment acknowledgement cannot be delivered, the framework MUST retire/fence that orphaned candidate through binding/request lifetime mechanics。It MUST NOT allow an unowned hidden subscription to continue delivering business callbacks。
+
+Unlike `publish()` ambiguity, subscription-establishment ambiguity does not need to become an author-visible `OUTCOME_UNKNOWN` business outcome, because no business event publication has occurred and no author-visible live subscription was returned。
+
+A failed establishment MAY report `BINDING_UNAVAILABLE` or another applicable pre-live subscription failure according to the final failure mapping, but MUST preserve：
+
+```text
+failure
+→ no author-visible live subscription
+→ no listener invocation for that failed establishment
+```
+
+### 5.4 Routing
 
 Routing recipient set is determined at publish acceptance time from subscriptions whose exact channel set contains `event.channel`。
 
@@ -309,11 +369,31 @@ Filtering MUST occur at the Hub/routing side。An implementation MUST NOT broadc
 
 Zero matching subscribers MUST NOT make publish fail。
 
-`SessionEventSubscription.close()` MUST be idempotent。After it returns, that subscription's listener MUST NOT be invoked again。
+---
+
+## 6. Subscription Close Semantics
+
+`SessionEventSubscription.close()` is synchronous and MUST be idempotent。
+
+Its author-visible meaning is local immediate revocation：
+
+```text
+close() returns
+→ this subscription is locally inert
+→ its listener MUST NOT be invoked again
+```
+
+Remote Hub cleanup / unsubscribe transport MAY complete asynchronously after `close()` returns。
+
+`close()` MUST NOT require a usable physical binding in order to make the local handle inert。Therefore v1 does not expose `Promise<void>` from `close()` merely to wait for remote cleanup。
+
+An implementation MAY send best-effort or protocol-defined remote unsubscribe cleanup after local revocation, but late events/acks belonging to the closed subscription MUST be fenced from business callback delivery。
+
+Closing before Runtime teardown, during binding loss, or repeatedly MUST preserve the same local invariant：after `close()` returns, no further listener invocation occurs。
 
 ---
 
-## 6. Ordering
+## 7. Ordering
 
 v1 MUST NOT expose a global Session event revision or universal event sequence。
 
@@ -342,7 +422,7 @@ Internal counters used for routing/queue mechanics MUST NOT become business-visi
 
 ---
 
-## 7. Listener Execution Boundary
+## 8. Listener Execution Boundary
 
 Listener invocation is Runtime-local callback execution and MUST occur outside SessionEventHub routing/admission critical section。
 
@@ -358,11 +438,13 @@ be used as publisher flow-control acknowledgement
 
 Listener MAY reenter SessionEventClient operations without deadlocking Hub routing state。
 
+A listener MAY call its own already-returned subscription `close()`；the local close invariant applies immediately after `close()` returns。
+
 `publish accepted != listener handled` is a normative invariant。
 
 ---
 
-## 8. Backpressure / Overflow
+## 9. Backpressure / Overflow
 
 All Session Events delivery MUST be bounded。
 
@@ -387,7 +469,7 @@ Diagnostics / logging MAY use a separate lossy/sampling policy, but that is a di
 
 ---
 
-## 9. Failure Shape
+## 10. Failure Shape
 
 Candidate logical failure codes：
 
@@ -400,15 +482,17 @@ export type SessionEventFailureCode =
   | "OUTCOME_UNKNOWN";
 ```
 
-`OUTCOME_UNKNOWN` is valid only where publish dispatch may have reached the Hub but definitive acceptance evidence was lost。
+`OUTCOME_UNKNOWN` is reserved for publish dispatch where the Hub may have accepted a business event but definitive acceptance evidence was lost。
 
 A subscription callback failure is NOT a publish failure code。
+
+Subscription-establishment ambiguity MUST NOT create an author-visible half-open subscription or business `OUTCOME_UNKNOWN` handle state；the framework must retire/fence orphan establishment state as defined in §5.3。
 
 Exact stable failure object shape MUST be frozen before implementation begins。
 
 ---
 
-## 10. Logical Client vs Physical Binding
+## 11. Logical Client vs Physical Binding
 
 `SessionEventClient` identity/lifetime MUST NOT equal one physical Process / Worker / MessagePort / WebSocket / IPC connection。
 
@@ -436,9 +520,11 @@ replay missed events
 invent successful publish evidence
 ```
 
+A live subscription attached to a lost binding MAY become terminal according to the final subscription-terminal surface, but the framework MUST NOT silently resume the old subscription on a fresh binding。Business must establish a fresh subscription if continued observation is required。
+
 ---
 
-## 11. Physical Placement Is Non-normative
+## 12. Physical Placement Is Non-normative
 
 The logical contract does not define a required process topology。
 
@@ -470,7 +556,7 @@ A common physical process failure MAY simultaneously make multiple logical plane
 
 ---
 
-## 12. Shared Physical Carrier / Multiplexing
+## 13. Shared Physical Carrier / Multiplexing
 
 Session Events MAY use a dedicated physical carrier or MAY multiplex with Shared State over the same established physical connection。
 
@@ -532,13 +618,13 @@ subscription identities
 application error codes
 ```
 
-### 12.1 Correlation
+### 13.1 Correlation
 
 If multiple logical protocols share one physical request-id space, logical correlation identity MUST include the protocol/plane discriminator or an equivalent collision-proof private mechanism。
 
 A State request and an Event publish with the same numeric private request id MUST never be interpreted as the same logical operation。
 
-### 12.2 Flow-control Isolation
+### 13.2 Flow-control Isolation
 
 Multiplexing MUST NOT allow heavy Session Event or Diagnostics traffic to indefinitely starve Shared State operations。
 
@@ -554,7 +640,7 @@ The exact scheduler is private implementation detail；absence of unbounded star
 
 Within the Session Events plane, Hub-side channel routing MUST avoid enqueueing unrelated events onto non-matching Runtime logical bindings merely because those bindings share the same physical carrier。
 
-### 12.3 Shared Carrier Loss
+### 13.3 Shared Carrier Loss
 
 One shared carrier loss MAY simultaneously produce：
 
@@ -577,7 +663,7 @@ Event publish dispatched + result lost
 
 An Event subscription overflow MUST NOT terminalize an otherwise healthy Shared State logical binding。A State-level logical error MUST NOT terminalize an otherwise healthy Events logical binding unless the common physical carrier itself has become invalid/terminal。
 
-### 12.4 No Cross-plane Ordering from Wire Order
+### 13.4 No Cross-plane Ordering from Wire Order
 
 Physical frame/message order on a shared carrier MUST NOT become a public happens-before relation between State and Events。
 
@@ -594,7 +680,7 @@ There is no shared State/Event revision, global sequence, transaction, barrier, 
 
 ---
 
-## 13. Shared State Interaction
+## 14. Shared State Interaction
 
 Shared State and Session Events are intentionally orthogonal：
 
@@ -623,7 +709,7 @@ Business requiring reconciliation MAY explicitly carry a business operation iden
 
 ---
 
-## 14. Render Event Boundary
+## 15. Render Event Boundary
 
 `RenderDomain.emit()` / `render.event` remains Renderer Data / presentation-local semantics。
 
@@ -639,7 +725,7 @@ Session Event
 
 ---
 
-## 15. Diagnostics Boundary
+## 16. Diagnostics Boundary
 
 Logging/diagnostics MAY reuse the same physical Session-service carrier and routing implementation, but MUST remain a distinct logical role / QoS domain。
 
@@ -649,7 +735,7 @@ Diagnostics MAY support sampling / batching / lossy overflow in a future contrac
 
 ---
 
-## 16. Protocol / Platform Boundary
+## 17. Protocol / Platform Boundary
 
 Logical protocol identifier：
 
@@ -672,6 +758,10 @@ The physical realization MUST preserve the same observable：
 
 ```text
 publish acceptance/evidence
+async subscription establishment
+subscribe resolve only after Hub installation
+first callback only after subscribe resolve
+synchronous local-inert close()
 atomic multi-channel subscription establishment
 exact channel routing
 no v1 type filtering
@@ -687,7 +777,7 @@ The protocol MUST NOT be embedded as a semantic child of Renderer Data、Frame/C
 
 ---
 
-## 17. Implementation Freeze Rule
+## 18. Implementation Freeze Rule
 
 Implementation MUST NOT begin by choosing a process topology and then deriving protocol behavior from that topology。
 
@@ -723,6 +813,7 @@ whether State and Events share a physical carrier
 private multiplexing envelope shape
 private scheduler / queue data structures
 private binding generation token
+remote unsubscribe cleanup timing after local close
 ```
 
 The following v1 semantic direction is already closed and MUST NOT be redesigned during implementation：
@@ -734,11 +825,15 @@ subscription may include one or more exact channels atomically
 type is delivered metadata / business discriminator, not a routing filter
 no wildcard/prefix/regex channel routing
 no type-filtered subscription in v1
+subscribe() is async and returns only an already-live subscription
+listener cannot run before subscribe() resolves
+close() is synchronous local immediate revocation
+failed establishment exposes no half-open subscription
 ```
 
 ---
 
-## 18. Core Invariants
+## 19. Core Invariants
 
 1. one live Session has one logical SessionEventHub；
 2. SessionEventHub owns routing/delivery mechanics, not business truth；
@@ -749,19 +844,23 @@ no type-filtered subscription in v1
 7. event type is a business discriminator and does not participate in v1 routing/filtering；
 8. publish success means Hub accepted/routed, not subscriber handled；
 9. dispatched publish with lost definitive result may be OUTCOME_UNKNOWN and MUST NOT auto-retry；
-10. subscription establishment has a defined routing linearization point；
-11. payload ownership is detached/isolated identically for in-process and cross-process realizations；
-12. same publisher order is preserved for subscriptions receiving the same accepted events；no global publisher order exists；
-13. no history replay / durable subscription / consumer offset / event sourcing in v1；
-14. listener failure is local and never retroactively fails publish；
-15. business delivery is bounded and MUST NOT silently drop while remaining healthy；
-16. physical placement is non-normative；Hub MAY be dedicated or co-located with Shared State/Main；
-17. State and Events MAY use separate carriers or multiplex one physical carrier；
-18. shared carrier never creates shared authority、revision、transaction、retry or public cross-plane ordering；
-19. multiplexed flow control MUST prevent one logical plane from taking unbounded ownership of another plane's capacity；
-20. Hub-side channel routing MUST avoid normal broadcast of unrelated events to non-matching Runtime bindings；
-21. one shared carrier failure may affect multiple bindings physically, but each protocol derives logical evidence/failure independently；
-22. Shared State + Event atomic transaction does not exist in v1；
-23. Render Event remains a separate presentation-local concept；
-24. Diagnostics may share mechanics/carrier but retain distinct QoS semantics；
-25. Desktop/PWA and co-located/separate realizations MUST be observably equivalent at the logical protocol boundary。
+10. `subscribe()` is asynchronous and resolves only after Hub-side atomic installation；
+11. listener invocation MUST occur after the corresponding `subscribe()` Promise resolves；
+12. failed/ambiguous establishment exposes no author-visible half-open subscription and no listener callbacks；
+13. `close()` is synchronous/idempotent and makes the local subscription inert before returning；
+14. remote unsubscribe cleanup MAY be asynchronous and is not part of author-visible close completion；
+15. payload ownership is detached/isolated identically for in-process and cross-process realizations；
+16. same publisher order is preserved for subscriptions receiving the same accepted events；no global publisher order exists；
+17. no history replay / durable subscription / consumer offset / event sourcing in v1；
+18. listener failure is local and never retroactively fails publish；
+19. business delivery is bounded and MUST NOT silently drop while remaining healthy；
+20. physical placement is non-normative；Hub MAY be dedicated or co-located with Shared State/Main；
+21. State and Events MAY use separate carriers or multiplex one physical carrier；
+22. shared carrier never creates shared authority、revision、transaction、retry or public cross-plane ordering；
+23. multiplexed flow control MUST prevent one logical plane from taking unbounded ownership of another plane's capacity；
+24. Hub-side channel routing MUST avoid normal broadcast of unrelated events to non-matching Runtime bindings；
+25. one shared carrier failure may affect multiple bindings physically, but each protocol derives logical evidence/failure independently；
+26. Shared State + Event atomic transaction does not exist in v1；
+27. Render Event remains a separate presentation-local concept；
+28. Diagnostics may share mechanics/carrier but retain distinct QoS semantics；
+29. Desktop/PWA and co-located/separate realizations MUST be observably equivalent at the logical protocol boundary。
