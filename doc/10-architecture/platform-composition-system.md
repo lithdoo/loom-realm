@@ -2,10 +2,10 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M9/M11/M12/M13/M14/M15 current qualification Closed；Realm State v1 implemented / qualified；Session Events v1 logical semantics frozen / not implemented / not qualified；PWA M16/M17 implemented with independent gate
+> 稳定程度：M9/M11/M12/M13/M14/M15 current qualification Closed；Realm State v1 implemented / qualified；Session Events v1 logical semantics + current runtime integration profile frozen / not implemented / not qualified；PWA M16/M17 implemented with independent gate
 > 主要定义：跨平台 physical composition、Launcher PREPARE、Runtime/Renderer/Data/Content/Realm State/Session Events/Web presentation placement  
 > 依赖：[系统架构总览](./system-overview.md)、[Realm State](./realm-state-system.md)、[Session Events](./session-events-system.md)、[渲染系统](./rendering-system.md)  
-> 正式化：[Realm State v1](../15-contracts/realm-state-v1.md)、[Session Events v1](../15-contracts/session-events-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
+> 正式化：[Realm State v1](../15-contracts/realm-state-v1.md)、[Session Events v1](../15-contracts/session-events-v1.md)、[Session Events Runtime Integration Profile v1](../15-contracts/session-events-runtime-profile-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
 > 相关：[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-10-13
 
@@ -123,6 +123,7 @@ physically construct fresh SessionEventHub
 
 create Runtime-scoped RealmStateClient capabilities
 create Runtime-scoped SessionEventClient capabilities
+install latched sessionEventsFatal source in Main-facing platform view
 ```
 
 Realm State bootstrap只有 prepared Game baseline 这一种特殊 value source。Save/Load/restore 不属于 Session State bootstrap；如果业务要恢复持久化数据，由 Subsystem 在 Runtime 启动后通过普通 RealmStateClient read/commit 完成。
@@ -138,6 +139,7 @@ first business Runtime side effect
     ⇒ PREPARE complete
     ∧ Realm State READY
     ∧ SessionEventHub READY
+    ∧ required Runtime State/Event capability binding usable
 ```
 
 Web presentation 不进入 executable join 或 State/Event Session service bootstrap：
@@ -160,6 +162,8 @@ Game Entry、Platform Launch Manifest、LogicalGameBootstrap、PreparedRealmStat
 
 Physical owner取决于真实 platform composition，不要求一个 `apps/*` 进程拥有所有 OS/browser primitive。
 
+Current Session Events v1 product profile：
+
 ```text
 Hostra Desktop
     Hostra shell owns Electron / BrowserWindow / direct HOSTRA_SUBCMD process
@@ -173,13 +177,19 @@ Hostra Desktop
 
 PWA
     browser Window/Worker environment owns browser physical containers
-    LoomRealm PWA composition owns narrow physical bindings
-        Main / Realm State / SessionEventHub placement may share or separate Worker
+    Session Worker owns current LoomRealm Session services
+        Main
+        RealmStateAuthority
+        SessionEventHub
+        RuntimeHosting
+    Dedicated Subsystem Workers own Runtime-local clients
 ```
 
 Main 唯一拥有 Session Control authority。RealmStateAuthority 唯一拥有 Session shared mutable business facts。SessionEventHub只拥有 routing/delivery mechanics。Subsystem/game library拥有 business Render authority。Renderer拥有 current replica与 LoomRealm-managed projection mutation。
 
-Platform physical ownership不产生第二份 application authority。RealmStateAuthority / SessionEventHub MAY 与 Main 或彼此同进程/Worker，但 logical owner/API/lifetime semantics必须分离。
+Architecture remains more general than the current profile：RealmStateAuthority / SessionEventHub MAY in a later profile split from Main or from each other，but logical owner/API/lifetime semantics MUST remain separated。Current implementation Agent MUST NOT choose a different placement for Session Events v1 without revising the Runtime Integration Profile first。
+
+Platform physical ownership不产生第二份 application authority。
 
 Platform/Session composition MUST NOT：
 
@@ -199,7 +209,7 @@ become a generic SessionCoordinator / StateManager / EventBusManager / service l
 
 ## 4. Data / Content / Realm State / Session Events Boundaries
 
-Renderer Data provisioning只实现 current Renderer + Subsystem physical carrier；provisioning/settlement不是 Content、Realm State、Session Events 或 presentation loader channel。
+Renderer Data provisioning只实现 current Renderer + Subsystem physical carrier；provisioning/settlement不是 Content、Realm State 或 presentation loader channel。PWA Runner provisioning control MAY transfer/ack a dedicated Session Events MessagePort as frozen by the Runtime Integration Profile，but Session Event business traffic itself is not provisioning traffic。
 
 M12 Desktop Content：
 
@@ -241,9 +251,22 @@ Main business fields
 Frame/Activation mutation gate
 ```
 
-Desktop MAY 使用 in-process direct binding；PWA MAY 使用 Worker/MessagePort 或其他 bounded private binding。Physical binding差异不得改变 State logical semantics，或 Session Events exact-channel/source/publish-evidence/subscription/serial-delivery/terminal semantics。
+Logical architecture允许不同 bounded physical bindings。Current v1 Session Events realization已经冻结为：
 
-State 与 Events MAY separate carriers，也 MAY multiplex 同一 Session-service physical carrier：
+```text
+Hostra
+    per Runtime dedicated private Events WebSocket
+    endpoint via LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT
+
+PWA
+    per Runtime dedicated private Events MessagePort
+    transferred/acked via Runner provisioning control
+    Event protocol payload stays on the dedicated port
+```
+
+Physical binding差异不得改变 State logical semantics，或 Session Events exact-channel/source/publish-evidence/subscription/serial-delivery/terminal semantics。
+
+State 与 Events **logical contract** MAY in a future profile multiplex 同一 Session-service physical carrier：
 
 ```text
 Runtime
@@ -264,6 +287,8 @@ shared carrier
 ```
 
 Multiplexing必须保持独立 protocol discriminator/correlation、flow-control accounting、failure/evidence、subscription identity；Event/Diagnostics traffic MUST NOT indefinitely starve State。
+
+Current Hostra/PWA Session Events v1 qualification does **not** require multiplexing；implementation Agent MUST use the dedicated carrier profile until a later physical profile deliberately replaces it。
 
 ### 4.1 RealmStateClient vs physical binding
 
@@ -325,9 +350,11 @@ no old subscription reattach
 
 Fresh binding MAY serve the same live client。Business must fresh subscribe。Dispatched publish definitive result lost = `OUTCOME_UNKNOWN`；no automatic retry。
 
+Subscribe candidate若在成功 result author-visible 前 terminal，不返回 already-terminal handle：overflow→`LIMIT_EXCEEDED`，binding terminal→`BINDING_UNAVAILABLE`，client/Hub terminal→`TERMINAL`。
+
 Runtime terminal → client terminal + subscriptions `client-terminal`。Hub/Session terminal → subscriptions `hub-terminal`。
 
-SessionEventHub fatal：Hub self-terminal first → report Session-fatal fact → Main owns Session terminal/unwind。
+SessionEventHub fatal：Hub self-terminal first → latch/report through `MainSessionEventsFatalSource` → Main owns Session terminal/unwind。
 
 When browser Realm executes business code, trusted Content/Data/State/Event physical clients保留 private credentials/endpoints/ports于 lexical/bound capabilities，而不是在 business bootstrap后动态读取可被替换的全局 primitive。
 
@@ -434,8 +461,8 @@ Hostra shell
      ↓
 LoomRealm Desktop plain Node process
 ├─ Main
-├─ RealmStateAuthority             (Session-owned live authority)
-├─ SessionEventHub                 (target v1 Session service)
+├─ RealmStateAuthority
+├─ SessionEventHub
 ├─ RuntimeHosting
 │   └─ Runner
 ├─ Desktop Data Broker
@@ -454,7 +481,20 @@ bundled Electron 44.1.1
 shutdown grace 1000 ms
 ```
 
-Realm State placement shown here is the current v1 realization；其 implementation/qualification 由独立 Realm State ledger 证明，不扩张历史 M15 evidence。SessionEventHub placement是目标设计，尚未实现/qualified，也不 retroactively 扩张 M15 evidence。
+Realm State placement shown here is the current implemented v1 realization。SessionEventHub placement + dedicated Runtime Events WebSocket profile are frozen target design but尚未实现/qualified；它们不 retroactively 扩张历史 M15 evidence。
+
+Per Runtime current Session Events binding：
+
+```text
+RuntimeHosting creates dedicated loopback Events WS listener before Runner spawn
+→ host-owned 256-bit capability path
+→ synthesize LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT
+→ Runner copies + scrubs env
+→ required Event binding usable
+→ only then business Definition import
+```
+
+This WS is distinct from Runtime Control and Realm State WS。Binding source identity comes from the launch Runtime `subsystemKey`, not publisher payload。
 
 Hostra RPC只用于 existing host-control operations：
 
@@ -529,7 +569,7 @@ SessionEventHub fatal report
 startup partial failure
 ```
 
-State/Event service fatal 的 logical policy都是 service self-terminal → report Session-fatal fact to Main；Main提交 Session terminal / Runtime/Frame unwind，concrete Desktop再将 committed terminal汇入同一个 physical cleanup owner chain。Service/Platform不建立第二份 process/Runtime termination authority。
+State/Event service fatal 的 logical policy都是 service self-terminal → report Session-fatal fact to Main；Session Events exact seam是latched `sessionEventsFatal`。Main提交 Session terminal / Runtime/Frame unwind，concrete Desktop再将 committed terminal汇入同一个 physical cleanup owner chain。Service/Platform不建立第二份 process/Runtime termination authority。
 
 LoomRealm通过 existing `runMain` + RuntimeHosting owner chain收敛 Runner，finally-like释放自己的 physical resources；不建立第二份 direct Runner kill authority。
 
@@ -537,19 +577,39 @@ LoomRealm通过 existing `runMain` + RuntimeHosting owner chain收敛 Runner，f
 
 ## 9. PWA Realization
 
-PWA可以使用：
+Current Session Events v1 physical profile：
 
 ```text
-Dedicated Worker
-MessagePort / MessageChannel
-Window
-Fetch / Service Worker / OPFS/Cache
-platform-specific private browser resource binding
+Browser Window
+    presentation/browser-only adapters
+
+Session Worker
+    Main
+    RealmStateAuthority
+    SessionEventHub
+    RuntimeHosting
+
+Dedicated Subsystem Worker × N
+    Runtime-scoped RealmStateClient
+    Runtime-scoped SessionEventClient
 ```
 
-RealmStateAuthority / SessionEventHub MAY 与 Main 位于同一 Worker，也 MAY 使用单独 Worker/port binding；State + Events也 MAY 共 Worker 或分开。选择属于 concrete PWA composition。
+Per Runtime Event binding：
 
-无论 placement，必须保持：
+```text
+Session Worker creates dedicated Event MessageChannel
+→ Hub binds port1 to subsystemKey
+→ provisioningPort transfers port2 using session-events/install
+→ Runner validates/attaches same Runtime-scoped client
+→ session-events/result ACK
+→ only then business Definition import
+```
+
+`PwaRunnerBootstrapV1` remains closed and unchanged。`provisioningPort` only transfers/acks the capability；Event publish/subscription/delivery traffic uses the dedicated Event port。
+
+Architecture MAY later split Hub into another Worker or introduce State/Event multiplexing, but current v1 implementation Agent MUST follow this frozen profile until a later profile revision deliberately changes it。
+
+无论 future placement，必须保持：
 
 ```text
 one Session one logical RealmStateAuthority
@@ -580,6 +640,8 @@ Session Event channel/type/source validation semantics
 Session Event exact-channel routing / multiplicity / self-delivery
 Session Event publish evidence incl OUTCOME_UNKNOWN
 Session Event subscribe live-handle + closed terminal semantics
+Session Event pre-visible terminal establishment rejection semantics
+Session Event stable SessionEventError failure surface
 Session Event one-subscription-one-serial-listener lane
 Session Event bounded overflow limits and no-binding fail-fast
 State/Event ↔ Main/Frame authority separation
@@ -592,19 +654,17 @@ game-library business rules
 business-observable result
 ```
 
-可以不同：
+Current physical differences：
 
 ```text
-module bytes/path
-Process tree vs Worker
-WebSocket vs MessagePort
-State/Event in-process call vs private message binding
-State/Event dedicated vs multiplexed physical carrier
-private multiplex framing / scheduler / binding token
+Hostra Events WebSocket vs PWA Events MessagePort
+Process tree vs Worker tree
 Desktop FSDB/HTTP vs PWA storage/fetch mechanics
 private Config acquisition
 private browser resource binding
 ```
+
+Architecture-level future differences MAY also include Event Hub process/Worker split or State/Event carrier multiplexing, but those are not implementation-time choices for the current v1 profile。
 
 不同 physical validation/copy pass 数量可以接受，只要 logical identity、limits、detachment、source authenticity、evidence semantics等价。
 
@@ -649,9 +709,9 @@ M12 Content
 → M17 PWA Full E2E / Equivalence
 ```
 
-Realm State 是独立 implementation/qualification track；Session Events 同样是独立 implementation/qualification track。Frozen Session Events contract 不 retroactively 修改既有 M10–M17 claims。
+Realm State 是独立 implementation/qualification track；Session Events 同样是独立 implementation/qualification track。Frozen Session Events contract/runtime profile 不 retroactively 修改既有 M10–M17 claims。
 
-Current status summary 见 [`roadmap.md`](../30-implementation/roadmap.md)。M15 physical composition remains frozen and implemented, and its current formal qualification is Closed；historical direct-Electron evidence does not own the claim。M16/M17 PWA physical profile is implemented and covered by its independent qualification gate。
+Current status summary 见 [`roadmap.md`](../30-implementation/roadmap.md)。M15 physical composition remains frozen and implemented, and its current formal qualification is Closed；historical direct-Electron evidence does not own the claim。M16/M17 PWA physical profile is implemented and covered by its independent qualification gate；Session Events additive profile仍是 not implemented/not qualified。
 
 ---
 
@@ -661,22 +721,24 @@ Current status summary 见 [`roadmap.md`](../30-implementation/roadmap.md)。M15
 2. Game Entry validation包含 optional Realm State document；Session Events不增加 event history/channel registry Game document；
 3. Game Package document type不是 RealmStateAuthority/Event Hub bootstrap ABI；
 4. RealmStateAuthority + SessionEventHub在第一项 business Runtime side effect前 READY；
-5. Save/Load/restore 是 business workflow，不是 State/Event service lifecycle；
-6. Platform/Session composition 是 physical construction/binding/disposal/wiring boundary，不是 Main/Render/State/Event business authority；
-7. Hostra shell是 canonical Desktop Electron/BrowserWindow/direct-subprocess owner；
-8. LoomRealm Desktop是 plain Node HOSTRA_SUBCMD，只拥有 LoomRealm physical realizations；
-9. Hostra RPC保持 host-control only；State/Event不得复用 Hostra RPC作为 generic application bus；
-10. Control、Renderer Data、Realm State、Session Events、Content保持 capability/authority separation；
-11. State/Event operations不依赖 Frame/Activation/InputTarget，也不受 Frame mutation gate支配；
-12. Runtime-scoped State/Event logical clients独立于 replaceable physical bindings；
-13. Event source由Runtime binding派生，channel exact routing，type不参与v1 filtering；
-14. Event subscribe只返回live handle，one subscription one serial lane，terminal通过closed可观察；
-15. Event overflow显式terminal，不retroactively fail accepted publisher；
-16. Data Broker仍只拥有 Data candidate/current，不拥有 State/Event services；
-17. reload replaces Renderer identity；Data-only reconnect preserves Renderer identity；二者都不 reset State/Event；
-18. Authority/Hub MAY co-locate with Main/each other，但 logical owner分离；fatal只报告 Session-fatal fact，Main提交 terminal/unwind；
-19. binding recovery不得 auto replay ambiguous mutation/publish；old subscriptions fresh subscribe；
-20. State只承载 current shared mutable facts；Events只承载 transient notification；
-21. State/Events MAY multiplex one physical carrier，但不共享authority/transaction/revision/order；
-22. Hostra/PWA允许不同 physical realization，但保持 State/Event logical/business outcome；
-23. 不为 State/Events materialize generic StateManager/EventBusManager/ChannelRegistry/SessionCoordinator 或 universal transport framework。
+5. current Session Events profile还要求 required Runtime Event binding 在 business Definition import前 usable；
+6. Save/Load/restore 是 business workflow，不是 State/Event service lifecycle；
+7. Platform/Session composition 是 physical construction/binding/disposal/wiring boundary，不是 Main/Render/State/Event business authority；
+8. Hostra shell是 canonical Desktop Electron/BrowserWindow/direct-subprocess owner；
+9. LoomRealm Desktop是 plain Node HOSTRA_SUBCMD，只拥有 LoomRealm physical realizations；
+10. Hostra RPC保持 host-control only；State/Event不得复用 Hostra RPC作为 generic application bus；
+11. Control、Renderer Data、Realm State、Session Events、Content保持 capability/authority separation；
+12. State/Event operations不依赖 Frame/Activation/InputTarget，也不受 Frame mutation gate支配；
+13. Runtime-scoped State/Event logical clients独立于 replaceable physical bindings；
+14. Event source由Runtime binding派生，channel exact routing，type不参与v1 filtering；
+15. Event subscribe只返回live handle；pre-visible terminal rejects，one subscription one serial lane，terminal通过closed可观察；
+16. Event failure surface稳定为SessionEventError/code/path；
+17. Event overflow显式terminal，不retroactively fail accepted publisher；
+18. Data Broker仍只拥有 Data candidate/current，不拥有 State/Event services；
+19. reload replaces Renderer identity；Data-only reconnect preserves Renderer identity；二者都不 reset State/Event；
+20. Authority/Hub物理可co-locate但logical owner分离；Hub fatal通过latched sessionEventsFatal报告，Main提交terminal/unwind；
+21. binding recovery不得 auto replay ambiguous mutation/publish；old subscriptions fresh subscribe；
+22. State只承载 current shared mutable facts；Events只承载 transient notification；
+23. logical architecture MAY later multiplex State/Events，但 current Hostra/PWA v1 Session Events carriers are dedicated；
+24. Hostra/PWA保持同一 Event logical/business outcome while using WS vs MessagePort；
+25. 不为 State/Events materialize generic StateManager/EventBusManager/ChannelRegistry/SessionCoordinator 或 universal transport framework。
