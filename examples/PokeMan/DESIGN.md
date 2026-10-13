@@ -141,7 +141,7 @@ PokeMan Builder / Importer
 ```text
 探索世界（Map）
       ↓
-发现角色 / 事件 / 遭遇
+看见并接触角色 / Encounter Entity / Event
       ↓
 Dialogue / Interaction
       ↓
@@ -524,6 +524,86 @@ Battle 不只是从 Map 打开的独立玩法，也是角色之间的一种 RPG 
 - 为什么战斗；
 - Battle 之后关系如何改变。
 
+### Visible Encounter 是长期基础玩法
+
+PokeMan 的道路与危险区域长期以 **Visible Encounter（可见遭遇）** 作为基础遭遇形式。
+
+核心原则是：
+
+> **战斗对象首先作为 Map 世界里可以被玩家看见的人存在，然后才因为空间接触、发现、主动交互或剧情冲突进入 Dialogue / Challenge / Hostile Battle。**
+
+基础流程为：
+
+```text
+Map 上出现角色 / Encounter Entity
+↓
+玩家能够提前看见对方
+↓
+双方发生空间关系
+├─ 玩家主动靠近 / 交互
+├─ 玩家进入对方视野或警戒范围
+├─ 双方发生接触
+└─ 剧情改变对方状态或位置
+↓
+Dialogue / Hostile Action / Challenge / Event
+↓
+必要时进入 Battle
+↓
+返回同一个世界
+```
+
+因此长期基础体验不是“走若干步后无预兆抽出一个隐藏敌人并直接切 Battle”。道路设计本身应该让玩家能够观察、预判和选择如何接近人物与冲突。
+
+可见 Encounter 可以表现为：
+
+- 混混、盗贼、敌对组织成员在道路上拦路或警戒；
+- 独立修行者停留在某个地点，玩家可以主动接近交流或绕过；
+- 其他主公在道路、城镇入口或训练地点活动，并可能发起 Challenge；
+- 剧情条件满足后，某个角色被放置或移动到 Map 中形成新的 Encounter。
+
+Scripted Encounter 仍然存在，但也应尽量通过“角色真的出现在 Map 中”表达，而不是在没有世界表现的情况下突然弹出 Battle。
+
+### 可见 Encounter Entity 不一定都是长期角色
+
+所有 Battle 对手都属于世界中的人物，但不意味着每个路边敌人都需要拥有永久 Character identity 和完整关系状态。
+
+可以区分：
+
+```text
+Visible Encounter Entity
+├─ ordinary / transient
+│    → 本次或本区域使用
+│    → 可以拥有本次 Dialogue / Battle identity
+│    → 结束后最多记录 defeated / resolved / area state
+│
+└─ persistent character
+     → stable characterId
+     → affinity / hostile
+     → contract / card relationship
+     → story progress
+     → 可以反复相遇、发展关系甚至收服
+```
+
+例如普通混混、一般帮派成员或普通挑战者可以只是区域级 Encounter Entity；宿敌、独立从者、重要主公、功能 NPC 和剧情人物则更适合作为 persistent character。
+
+这保持了“所有人都真实存在于世界中”的体验，同时避免要求每个一次性路人都进入完整长期关系系统。
+
+### 可见遭遇的空间触发
+
+Visible Encounter 可以由地图上的空间关系触发，而不要求统一使用某一种规则：
+
+```text
+玩家主动交互
+玩家进入 NPC 视野
+玩家进入 proximity / contact range
+NPC 已经处于拦路位置
+剧情状态改变角色行为
+```
+
+MVP 不要求普通 NPC 已经具备复杂自主巡逻或追逐移动；例如混混可以先固定站在道路上，在玩家进入其发现范围后直接转入 Dialogue / Hostile Encounter。
+
+长期如果真实剧情需要“NPC 发现玩家后主动走近、追逐或堵路”，再推动 Map 支持更完整的 NPC authoritative movement，而不是为 MVP 提前建立通用 NPC AI 系统。
+
 ### Battle 对手不等于从者
 
 道路、地图事件和剧情中可以存在至少三类常见战斗对象。
@@ -569,7 +649,7 @@ Battle actor 不应与 Character Card 绑定为同一个概念。
 当一方已经处于明确敌对行为中，例如抢劫、袭击、堵路、追杀或剧情冲突，则可以直接进入强制 Battle：
 
 ```text
-Map Encounter
+Visible Encounter
 ↓
 敌对行为
 ↓
@@ -673,13 +753,14 @@ hostile
 2. **让角色卡表达真实的人际契约**：主公 / 从者是关系位置，双向契约真实成立，而不是序章教学特例。
 3. **让“口袋”产生真实陪伴感**：玩家携带的不是纯战斗数据，而是一群会持续回应世界的角色。
 4. **保持地图 RPG 为核心体验**：地图承担旅行、地点、角色、事件、遭遇和世界展开。
-5. **让 Dialogue 成为关系与陪伴的主要玩法**：关系必须通过具体交流与事件被玩家感知。
-6. **让 Battle 成为自主角色战斗与主公战术协作的核心玩法**：从者拥有自己的 Decision，主公通过关系和战术意图逐步影响其判断。
-7. **让 Battle 参与角色和世界推进**：Battle 由真实情境产生，并把结果带回世界。
-8. **让收集建立在人物内容上**：高质量角色可以同时承担 NPC、剧情、陪伴和 Battle 职责。
-9. **让养成同时包含能力与默契**：训练提高从者能力，好感 / 信赖提高战术协作和指令遵循程度。
-10. **延续 `essentials-v21.1` 的 GBA 视觉基础，但保持用户本地构建边界**：先在已有地图与素材上建立产品循环，同时不把原版素材作为 PokeMan 自身分发内容。
-11. **保留完整 RPG 成长空间**：主公、从者、关系、角色卡、探索、事件、战斗和世界状态可以逐步扩展。
+5. **让可见遭遇成为道路基础玩法**：玩家先在 Map 中看到人物，再由空间接触、Dialogue、Challenge 或敌对行为自然进入 Battle。
+6. **让 Dialogue 成为关系与陪伴的主要玩法**：关系必须通过具体交流与事件被玩家感知。
+7. **让 Battle 成为自主角色战斗与主公战术协作的核心玩法**：从者拥有自己的 Decision，主公通过关系和战术意图逐步影响其判断。
+8. **让 Battle 参与角色和世界推进**：Battle 由真实情境产生，并把结果带回世界。
+9. **让收集建立在人物内容上**：高质量角色可以同时承担 NPC、剧情、陪伴和 Battle 职责。
+10. **让养成同时包含能力与默契**：训练提高从者能力，好感 / 信赖提高战术协作和指令遵循程度。
+11. **延续 `essentials-v21.1` 的 GBA 视觉基础，但保持用户本地构建边界**：先在已有地图与素材上建立产品循环，同时不把原版素材作为 PokeMan 自身分发内容。
+12. **保留完整 RPG 成长空间**：主公、从者、关系、角色卡、探索、事件、战斗和世界状态可以逐步扩展。
 
 ## 第一阶段体验目标
 
@@ -695,7 +776,7 @@ Map
 → 再次面对角色本体
 → Pocket Companion
 → Pocket Dialogue
-→ Map Encounter
+→ Visible Encounter
 → 强制 / 可选 Battle
 → Pocket Dialogue
 → 到达新的城镇
@@ -726,6 +807,7 @@ MVP 序章应该像 GBA 时代宝可梦、尤其类似《红宝石 / 蓝宝石�
 - 角色卡可以让从者进入口袋持续陪伴；
 - 角色卡可以在 Battle 中调用从者力量；
 - Battle 中的从者具有自己的行动判断，而不是等待主公逐步遥控；
+- 道路上的 Encounter 以可见人物为基础，玩家能够在进入互动前先看见对方；
 - 道路上存在敌对遭遇、可选挑战和其他角色；
 - 离开出生地之后，还有城镇、人物和新的收服可能性等待探索。
 
@@ -748,9 +830,11 @@ MVP 序章应该像 GBA 时代宝可梦、尤其类似《红宝石 / 蓝宝石�
 【第一条道路】
 第一次 Pocket Dialogue
 → 环境反馈
+→ 看见道路上的敌对人物
 → 第一次敌对遭遇 / 强制 Battle
 → Battle 后 Pocket Dialogue
-→ 独立从者 / 修行者
+→ 看见独立从者 / 修行者
+→ 主动接近或被邀请
 → 可选 Challenge
 
         ↓ 完成第一次旅行
@@ -964,7 +1048,7 @@ Battle 使用 `@loomrealm-game/battle` 当前已有的 Decision / Simulation / P
 安全区
 → 旅行
 → Pocket Companion
-→ Encounter
+→ Visible Encounter
 → Battle
 → Relationship
 → 新人物
@@ -995,12 +1079,14 @@ Battle 使用 `@loomrealm-game/battle` 当前已有的 Decision / Simulation / P
 
 这证明 Pocket Companion 不是远程通讯录，而是在共同经历当前世界。
 
-### 第十一幕：第一次敌对遭遇——强制 Battle
+### 第十一幕：第一次可见敌对遭遇——强制 Battle
 
-第一道路安排一个真正敌对的普通人物，例如混混、太妹、路霸或抢劫者。
+第一道路安排一个玩家能够提前看到的敌对普通人物，例如混混、太妹、路霸或抢劫者。
 
 ```text
-道路遭遇
+玩家在道路上先看到敌对人物
+↓
+继续接近 / 进入对方发现范围
 ↓
 敌对人物拦住玩家
 ↓
@@ -1022,17 +1108,25 @@ hostile 已成立
 这场 Battle 与研究所教学战语义不同：
 
 - 研究所战是在测试角色卡；
-- 这一战是玩家在真正旅行中遇到危险，需要从者帮助自己解决问题。
+- 这一战是玩家在真正旅行中看见并进入一场现实冲突，需要从者帮助自己解决问题。
 
 战斗结束后立即发生 Pocket Dialogue，让宿敌对结果产生反应。
 
-### 第十二幕：第一次可选 Challenge
+MVP 不要求混混已经会在地图上复杂巡逻或追逐。只要玩家能提前看见对方，并在进入其空间触发条件后自然进入冲突即可。
 
-同一条道路上再出现一个非敌对的独立从者 / 修行者。
+### 第十二幕：第一次可见的可选 Challenge
 
-该角色可以主动邀请玩家切磋：
+同一条道路上再放置一个玩家能够提前看见、也可以选择绕过的非敌对独立从者 / 修行者。
+
+玩家主动接近并发生 World Dialogue，或者对方在合适的范围内主动提出切磋：
 
 ```text
+玩家看见修行者
+↓
+可以绕过
+或
+主动接近 / 被邀请
+↓
 World Dialogue
 ↓
 对方邀请 Battle
@@ -1041,20 +1135,20 @@ World Dialogue
 [拒绝]
 ```
 
-MVP 应尽可能允许“拒绝”真正成立，以证明 Battle 不是所有角色交互的强制终点。
+MVP 应尽可能允许“绕过”和“拒绝”真正成立，以证明 Battle 不是所有角色交互的强制终点。
 
 如果玩家接受，则使用同一个 Battle 系统进入一场双方同意的 Challenge；如果玩家拒绝，则关系和世界流程正常继续。
 
-这一人物可以成为序章之后未来能够继续认识、挑战甚至收服的潜在角色，但 MVP 不要求在这里完成其收服。
+这一人物可以成为序章之后未来能够继续认识、挑战甚至收服的 persistent character，但 MVP 不要求在这里完成其收服。
 
 这一幕同时让玩家第一次理解：
 
 ```text
-敌对人物攻击我
-→ 强制 Battle
+地图上看见敌对人物
+→ 接近后可能被强制卷入 Battle
 
-非敌对人物邀请我
-→ 我可以接受或拒绝
+地图上看见非敌对人物
+→ 可以绕过、交谈、接受或拒绝 Challenge
 ```
 
 玩家主动邀请别人或强制发动 Battle 的完整操作入口可以在 MVP 或后续迭代继续补全，但底层语义从序章开始保持一致。
@@ -1120,7 +1214,7 @@ MVP 应尽可能允许“拒绝”真正成立，以证明 Battle 不是所有�
 
 - 从一个 Map 出发；
 - 穿过另一张道路 Map；
-- 经历 Encounter 和 Battle；
+- 看见并经历 Encounter 和 Battle；
 - 到达新的城镇；
 - 世界状态可以持续保存并推进。
 
@@ -1174,13 +1268,17 @@ MVP 应尽可能允许“拒绝”真正成立，以证明 Battle 不是所有�
 ↓
 宿敌第一次环境反馈
 ↓
-敌对普通人物出现
+看见道路上的敌对普通人物
+↓
+进入对方发现 / 拦路范围
 ↓
 强制 Battle
 ↓
 Battle 后 Pocket Dialogue
 ↓
-遇见独立从者 / 修行者
+看见独立从者 / 修行者
+↓
+可以绕过或主动接近
 ↓
 邀请 Challenge
 ├─ 应战 → Battle → Relationship Result
@@ -1224,9 +1322,10 @@ Battle 后 Pocket Dialogue
 
 ```text
 Map
-→ Encounter
+→ 看见 Encounter Entity / Character
+→ 接近、发现或主动交互
 → Dialogue / Hostile Action / Challenge
-→ Battle 或拒绝
+→ Battle、拒绝或绕过
 → Relationship / World State
 → Map
 ```
@@ -1236,7 +1335,7 @@ Map
 ```text
 安全区
 → 道路
-→ 遭遇
+→ 可见遭遇
 → 新城镇
 → 新人物和未来目标
 ```
@@ -1259,6 +1358,7 @@ Map
 - Battle Player Guidance / 战术指令系统；
 - 训练对从者能力的长期成长；
 - 好感度 / 信赖对从者遵循战术指令程度的完整规则；
+- 复杂 NPC 巡逻、追逐和通用地图 AI；
 - 多维复杂关系系统；
 - 完整主线故事；
 - 道馆式长期挑战结构。
@@ -1279,6 +1379,8 @@ Map
 - **三种表现共享核心关系和角色事实。**
 - **角色卡表达正式关系的成立，不规定统一捕获动作。**
 - **角色卡是契约、持续连接和力量调用媒介，不是装着人物的容器。**
+- **道路与危险区域以 Visible Encounter 作为长期基础玩法，人物先存在于 Map，再进入互动或 Battle。**
+- **普通 Encounter Entity 可以是短期 / 区域性人物，重要角色才需要完整长期 Character identity。**
 - **Battle 是 PokeMan 区别于传统 Pokémon 的核心体验之一。**
 - **从者在 Battle 中拥有自身 Decision，不把玩家设计成逐格遥控从者的操作者。**
 - **LLM / Decision 负责形成战术意图和具体 Plan，Simulation 始终拥有 Battle gameplay authority。**
@@ -1311,6 +1413,7 @@ Map
 
 - 完整复刻传统宝可梦规则；
 - 把 Battle 改造成传统 Pokémon 式菜单战；
+- 以无预兆、不可见的随机抽表遇敌作为道路长期基础玩法；
 - 把玩家设计成逐步直接控制从者每一个 Battle 行动的操作者；
 - 为 MVP 序章提前完成 Player Guidance / 战术指令系统；
 - 为 MVP 序章提前完成训练、等级、完整属性和好感度影响 Decision 的养成规则；
