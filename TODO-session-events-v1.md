@@ -5,168 +5,127 @@
 
 本文只用于当前实现交接。实现完成并进入 Current module docs 后应删除本文件；规范事实仍由 `doc/15-contracts` 与 `doc/10-architecture` 拥有。
 
+本文**不是新的 Contract**。它可以给出推荐实现形状，但不得把 package-private 命名、文件布局、测试脚本名称、workflow 文件名或 reconnect scheduler 误升级成公共 ABI。
+
 ## 1. Agent mandate
 
 Agent MUST implement and qualify the frozen design。Agent MUST NOT redesign：
 
 ```text
+required Runtime scope.events capability
 channel/type author API
 routing/filter semantics
 subscription lifecycle
 publish evidence
-failure codes
+failure codes / SessionEventError surface
 limits
 Main fatal ownership
 Hostra/PWA physical Event binding profile
 State/Event atomicity or ordering
-cross-package integration surface listed below
 ```
 
-发现规范缺失时必须停止在该点并修 contract；不得用 platform-specific behavior 静默补洞。
+Agent MAY choose：
+
+```text
+package-private factory/class/type names
+internal file layout
+map/index/queue structures
+private wire frame representation
+private request/subscription/binding identifiers
+reconnect scheduler/backoff or no automatic reconnect
+root npm script names
+CI workflow filename/matrix layout
+```
+
+provided the normative contracts、repository testing policy and current physical profile are preserved。
+
+发现真正的 observable semantic / public ABI / frozen physical-seam 缺失时必须停止在该点并修 Contract/Profile；不得用 platform-specific behavior 静默补洞。
 
 ## 2. Executable subject
 
-Implementation subject MUST include：
+Implementation/qualification subject MUST cover the affected behavior owners，至少包括：
 
 ```text
-packages/session-events
-packages/subsystem
-packages/main
-packages/game-launcher-hostra
-apps/desktop
-apps/pwa
-test/session-events-v1
-package.json
-.github/workflows/session-events.yml
+@loomrealm/session-events implementation
+@loomrealm/subsystem author + host integration
+@loomrealm/main fatal integration
+Hostra Runner/RuntimeHosting + Desktop composition
+PWA Runner/RuntimeHosting + Session Worker composition
+Session Events v1 qualification tests
+root build/test/qualification integration
+CI coverage for the exact subject
 ```
+
+Current repository locations are expected to include `packages/session-events`、`packages/subsystem`、`packages/main`、`packages/game-launcher-hostra`、`apps/desktop`、`apps/pwa` and a Session Events qualification test area；exact test/workflow filenames are implementation organization, not protocol ABI。
 
 `packages/game-package`、Game Entry、Hostra/PWA launch manifests MUST NOT gain Session Event channel registry/history/configuration。
 
-## 3. Target package surface
+## 3. Target package boundary
 
-Create：
-
-```text
-packages/session-events
-```
-
-Package name：
+Create package：
 
 ```text
 @loomrealm/session-events
 ```
 
-The package MUST own：
+Its **public author-facing exports** MUST include the Contract-defined：
 
 ```text
-SessionEvent / SessionEventClient / SessionEventSubscription public types
-SessionEventError + isSessionEventFailure
-validation and exact logical limits
-SessionEventHub
-replaceable Runtime-scoped SessionEventClient
-binding generation fencing
-remote carrier protocol/server/client binding
-MessagePort-capable realization needed by PWA
+SessionEvent
+SessionEventClient
+SessionEventListener
+SessionEventSubscription
+SessionEventSubscriptionClose / reason
+SessionEventFailure / SessionEventFailureCode
+SessionEventError
+isSessionEventFailure
 ```
 
-To avoid cross-package API invention during implementation, the package integration surface is fixed to the following naming/model, intentionally paralleling current Realm State conventions：
-
-```ts
-export {
-  SessionEventError,
-  isSessionEventFailure,
-  type SessionEventFailure,
-  type SessionEventFailureCode,
-};
-
-export type {
-  SessionEvent,
-  SessionEventClient,
-  SessionEventListener,
-  SessionEventSubscription,
-  SessionEventSubscriptionClose,
-  SessionEventSubscriptionCloseReason,
-  SessionEventBindingPublishDispatch,
-  SessionEventPhysicalBinding,
-};
-
-export { SESSION_EVENTS_LIMITS };
-
-export {
-  SessionEventHub,
-  createSessionEventHub,
-  createInMemorySessionEventBinding,
-  type SessionEventHubFatalFact,
-  type SessionEventHubOptions,
-};
-
-export {
-  ReplaceableSessionEventClient,
-  createSessionEventClient,
-};
-
-export {
-  createSessionEventCarrierBinding,
-  serveSessionEventCarrier,
-  type SessionEventCarrierServer,
-};
-
-export {
-  createSessionEventMessagePortCarrier,
-  type SessionEventMessagePort,
-};
-```
-
-Physical client binding model MUST preserve publish dispatch evidence：
-
-```ts
-interface SessionEventBindingPublishDispatch {
-  /** resolves only after carrier locally accepts the publish request */
-  readonly dispatched: Promise<void>;
-  /** definitive Hub acceptance result */
-  readonly result: Promise<void>;
-}
-
-interface SessionEventPhysicalBinding
-  extends Omit<SessionEventClient, "publish"> {
-  publish(
-    channel: string,
-    type: string,
-    payload: JsonValue,
-  ): SessionEventBindingPublishDispatch;
-
-  readonly terminal: Promise<void>;
-  close(): void | Promise<void>;
-}
-```
-
-Required factory roles：
+The package MUST own realization roles for：
 
 ```text
-createSessionEventHub(options?)
-    create one Session-scoped Hub
-
-createInMemorySessionEventBinding(hub, { subsystemKey })
-    trusted same-process binding with authenticated logical publisher identity
-
-createSessionEventClient()
-    create one initially-unbound Runtime-scoped ReplaceableSessionEventClient
-
-createSessionEventCarrierBinding(carrier)
-    client-side remote physical binding
-
-serveSessionEventCarrier(hub, carrier, { subsystemKey })
-    server-side remote binding; subsystemKey is trusted binding identity and source authority
-
-createSessionEventMessagePortCarrier(port)
-    PWA MessagePort → MessageCarrier adapter
+logical limits/validation
+one Session-scoped SessionEventHub
+trusted in-process Runtime binding
+one Runtime-scoped replaceable SessionEventClient
+binding generation/currentness fencing
+remote client binding
+remote Hub-side serving binding
+publish dispatched-vs-result evidence
+MessageCarrier-compatible remote protocol
+PWA MessagePort carrier adaptation
 ```
 
-Exact internal file layout、private wire frame representation、private request/subscription ids、map/index data structure remain implementation freedom。
+Those **roles and behaviors are required**；their package-private symbol names are not frozen by this handoff。Following existing Realm State naming conventions is recommended where it improves consistency, but consistency does not create a new public contract。
+
+A conforming physical binding must expose behavior equivalent to：
+
+```text
+publish request
+    local dispatch evidence separate from definitive Hub result
+
+subscribe request
+    definitive establishment result
+
+binding terminal observation
+    fences old results/events/subscriptions
+
+close
+    retires the physical binding
+```
+
+The implementation needs enough dispatch evidence to map：
+
+```text
+not dispatched + binding loss → BINDING_UNAVAILABLE
+already dispatched + definitive publish result lost → OUTCOME_UNKNOWN
+```
+
+Exact internal TypeScript interface/class/function names remain implementation freedom。
 
 ## 4. Subsystem integration
 
-`@loomrealm/subsystem` MUST：
+`@loomrealm/subsystem` public author surface MUST expose：
 
 ```ts
 interface SubsystemScope {
@@ -174,24 +133,24 @@ interface SubsystemScope {
 }
 ```
 
-Author package MUST re-export the author-facing Session Events types and `SessionEventError` / `isSessionEventFailure` from `@loomrealm/session-events` in the same dependency direction it currently uses for Realm State author capability。
+`scope.events` is required for every successfully bootstrapped live business Runtime；it is not optional feature detection。
 
-`@loomrealm/subsystem/host` MUST require：
+The author package MUST make the Contract-defined author-facing Session Events types/error classification available in the normal `@loomrealm/subsystem` dependency direction so business Definition source need not import host/platform internals。
 
-```ts
-interface SessionEventsRuntimeCapability {
-  readonly client: SessionEventClient;
-  terminate(): void;
-}
+`@loomrealm/subsystem/host` MUST receive a required Runtime Event capability that provides：
+
+```text
+one Runtime-scoped SessionEventClient
+Runtime-terminal convergence for that client/subscriptions
 ```
 
-alongside the required State capability。Business Definition import/initialization must occur only after both required initial capabilities are usable。
+The exact package-private capability type/name is implementation freedom。
 
-Runtime termination MUST call the Event capability termination path and must not leave live listener delivery lanes。
+Business Definition import/initialization MUST occur only after required State + Event initial capabilities are usable。Runtime termination MUST terminal the Event client and must not leave live listener delivery lanes。
 
 ## 5. Main integration
 
-Add and export：
+Add and export the frozen public platform seam：
 
 ```ts
 interface MainSessionEventsFatalSource {
@@ -211,7 +170,7 @@ Main MUST treat the first Event Hub fatal fact like another Session-fatal infras
 
 ## 6. Hostra implementation
 
-Current v1 target：
+Current frozen v1 target：
 
 ```text
 LoomRealm Desktop process
@@ -228,7 +187,7 @@ Use the frozen host-owned environment seam：
 LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT
 ```
 
-Required implementation points：
+Required behavior：
 
 ```text
 RuntimeHosting listener ready before Runner spawn
@@ -237,16 +196,19 @@ Runner copies + scrubs env before business import
 required initial Event binding before Definition import
 source.subsystemKey bound from launch request/runtime identity
 post-start binding loss Event-local only
-replaceable client fencing / fresh subscribe / no replay
+fresh physical binding can attach to same logical client
+old subscriptions stay terminal / no replay / generation fencing
 ```
 
-Hostra may implement a launcher-local `createSessionEventWebSocketCarrier()` analogous to the existing Realm State WebSocket adapter；that adapter is physical/private and is not part of the author SDK。
+Hostra MAY attempt automatic background physical rebinding, but this is not required。If implemented it MUST NOT queue/retry author operations、revive subscriptions、replay events or create unbounded resources。
+
+A launcher-local WebSocket carrier adapter analogous to Realm State is a reasonable implementation choice；its exact symbol name is private。
 
 Do not add Events fields to the historical M6 Control bootstrap semantic envelope merely for convenience。
 
 ## 7. PWA implementation
 
-Current v1 target：
+Current frozen v1 target：
 
 ```text
 Session Worker
@@ -258,7 +220,7 @@ per Runtime
 
 `PwaRunnerBootstrapV1` MUST remain closed and unchanged。
 
-Extend the existing Runner provisioning control with the frozen messages from the Runtime Integration Profile：
+Extend the existing Runner provisioning control with the frozen physical messages from the Runtime Integration Profile：
 
 ```text
 session-events/install
@@ -267,21 +229,16 @@ session-events/result
 
 The transferred MessagePort carries all Session Events logical traffic。The provisioning port carries only installation/result control and MUST NOT carry business Event payloads。
 
-Initial Event install acknowledgement MUST complete before Definition import。Replacement binding may be provisioned later to the same logical client；old subscriptions remain terminal and there is no replay。
+Initial Event install acknowledgement MUST complete before Definition import。A fresh replacement binding may later be provisioned to the same logical client；old subscriptions remain terminal and there is no replay。
+
+Automatic replacement scheduling is not required；the implementation must only preserve the capability to install a fresh binding correctly when composition chooses to do so。
 
 ## 8. Qualification tests
-
-Create：
-
-```text
-test/session-events-v1/qualification.test.mjs
-```
-
-Package tests SHOULD be split by behavior where useful, including validation、Hub/routing、client/binding、carrier、overflow and platform adapters。
 
 Qualification MUST execute all assertions in `session-events-conformance-v1.md`, including real physical boundaries for：
 
 ```text
+required scope.events capability/bootstrap barrier
 Hostra child process + WebSocket Event carrier
 PWA Dedicated Worker + MessagePort Event carrier
 Main fatal ownership
@@ -294,9 +251,28 @@ overflow bounds
 payload isolation/source authenticity
 ```
 
-## 9. Canonical root gates to add
+Tests SHOULD be split by the nearest behavior owner where useful：validation、Hub/routing、client/binding、carrier、overflow、Subsystem/Main integration and platform adapters。
 
-Root `package.json` MUST add canonical commands with these names：
+A path such as：
+
+```text
+test/session-events-v1/
+```
+
+is recommended for current repository consistency, but the exact filename/layout is not normative。Qualification validity comes from exact subject + coverage + evidence, not a filename。
+
+## 9. Root gates
+
+The Agent MUST add discoverable root-level gates that provide these functions：
+
+```text
+build affected Session Events stack
+test package + integration behavior
+run qualification against already-built exact subject
+build + run full Session Events qualification
+```
+
+Recommended names for consistency：
 
 ```text
 build:session-events-stack
@@ -305,33 +281,21 @@ test:session-events:qualification:run
 test:session-events:qualification
 ```
 
-Expected intent：
-
-```text
-build:session-events-stack
-    build @loomrealm/session-events + all directly affected framework/product subjects
-
-test:session-events
-    package + integration tests for the implementation subject
-
-test:session-events:qualification:run
-    execute frozen Session Events v1 qualification assertions against already-built subject
-
-test:session-events:qualification
-    build stack + run qualification
-```
+These names are implementation/CI interface recommendations, **not Session Events protocol invariants**。Equivalent repository-consistent names are acceptable if documentation/CI use one canonical source of truth。
 
 The Agent MUST also run applicable existing regression/desktop/PWA/docs gates according to `doc/30-development/testing.md` and qualification staleness rules。
 
 ## 10. CI
 
-Create：
+CI MUST execute the frozen package/integration/qualification subject on repository-supported environments and include platform-appropriate Hostra/PWA coverage。
+
+A dedicated workflow such as：
 
 ```text
 .github/workflows/session-events.yml
 ```
 
-It MUST run the frozen package/qualification subject on repository-supported Node environments and include platform-appropriate coverage for Hostra and PWA。Exact matrix should follow current repository CI policy rather than copy historical Realm State evidence blindly。
+is recommended, not contractually required。Exact workflow filename and matrix layout SHOULD follow current repository CI policy；coverage/evidence is normative, filename is not。
 
 ## 11. Documentation completion
 
@@ -351,8 +315,9 @@ Do not mark Qualified before same-subject executable evidence exists。
 The handoff is complete only when：
 
 ```text
-architecture decision required by implementation Agent = 0
-cross-package integration API decision required by Agent = 0
+architecture/public-contract decision required by implementation Agent = 0
+frozen physical-profile decision required by Agent = 0
+internal naming/structure remains implementation freedom
 contract tests pass
 Hostra product profile passes
 PWA product profile passes
