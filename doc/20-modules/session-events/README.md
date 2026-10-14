@@ -1,7 +1,8 @@
 # Session Events：当前实现
 
-> 状态：**Implemented / qualification pending**  
+> 状态：**Implemented / Qualified**
 > Normative SSOT：[Session Events v1](../../15-contracts/session-events-v1.md) · [Runtime Integration Profile](../../15-contracts/session-events-runtime-profile-v1.md) · [Conformance](../../15-contracts/session-events-conformance-v1.md)
+> Exact-subject evidence：[Session Events v1 qualification](../../30-implementation/session-events-v1-qualification.md)
 
 `packages/session-events` 实现一个 Session-scoped `SessionEventHub`、trusted in-process binding、Runtime-scoped replaceable `SessionEventClient`、remote binding/server protocol 与 MessagePort adapter。它只拥有 transient exact-channel routing、subscription lifetime、bounded serial delivery 和 publish evidence；不拥有 business truth、RPC、history/replay、workflow 或 State transaction。
 

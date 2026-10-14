@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving overall / **M10 Input closed + M11 Render surface frozen/current subject requalification pending / M12 Content author slice frozen**；Viewport v1 **Core Docs Frozen / not implemented / not qualified**；Realm State v1 **Core Semantics Closed / contract candidate / not implemented / not qualified**；Session Events v1 **Core Semantics Frozen / implemented / qualification pending**
+> 稳定程度：Evolving overall / **M10 Input closed + M11 Render surface frozen/current subject requalification pending / M12 Content author slice frozen**；Viewport v1 **Core Docs Frozen / not implemented / not qualified**；Realm State v1 **Core Semantics Closed / contract candidate / not implemented / not qualified**；Session Events v1 **Core Semantics Frozen / implemented / qualified**
 > 主要定义：Subsystem logical role、Definition Module ABI、Runtime/Frame local context、FrameOutcome、Input/Render/Content/Viewport/Realm State/Session Events author projections与 error/lifetime boundary  
 > 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[渲染系统](./rendering-system.md)、[存储与内容系统](./storage-system.md)、[Realm State](./realm-state-system.md)、[Session Events](./session-events-system.md)、[ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
 > 正式 Input：[User Input v1](../15-contracts/user-input-v1.md) · [ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
@@ -32,7 +32,7 @@ Runtime-scoped RealmStateClient usage for Session shared mutable business facts
 Runtime-scoped SessionEventClient usage for Session transient cross-Subsystem events
 ```
 
-新增的**待实施**角色能力：
+标准 Runtime 角色能力：
 
 ```text
 scope.viewport
@@ -47,7 +47,7 @@ scope.events
     exact-channel publish / subscribe / observable subscription terminal
 ```
 
-Viewport 精确 API 与 terminal 行为以 [Viewport v1](../15-contracts/viewport-state-v1.md) 为准。Realm State 精确 logical semantics 以 [Realm State v1](../15-contracts/realm-state-v1.md) 为准。Session Events 精确 routing、delivery、failure/lifetime semantics 以 [Session Events v1](../15-contracts/session-events-v1.md) 为准；其 current implementation 已存在，但只有 exact-subject evidence 完成后才可标记 Qualified。
+Viewport 精确 API 与 terminal 行为以 [Viewport v1](../15-contracts/viewport-state-v1.md) 为准。Realm State 精确 logical semantics 以 [Realm State v1](../15-contracts/realm-state-v1.md) 为准。Session Events 精确 routing、delivery、failure/lifetime semantics 以 [Session Events v1](../15-contracts/session-events-v1.md) 为准；current implementation 的 Qualified 状态由 [exact-subject evidence](../30-implementation/session-events-v1-qualification.md) 支撑。
 
 Subsystem不负责 Game/Platform manifest、executable selection、Process/Worker、Main public authority、Renderer hosting、DataConnectionBroker、Content physical service/credential/storage、RealmStateAuthority hosting/transport/persistence policy、SessionEventHub hosting/transport/process placement。
 
