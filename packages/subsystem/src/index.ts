@@ -55,3 +55,17 @@ export type {
   ViewportSize,
 } from "./viewport.js";
 export type { RealmStateClient } from "@loomrealm/realm-state";
+export {
+  SessionEventError,
+  isSessionEventFailure,
+} from "@loomrealm/session-events";
+export type {
+  SessionEvent,
+  SessionEventClient,
+  SessionEventFailure,
+  SessionEventFailureCode,
+  SessionEventListener,
+  SessionEventSubscription,
+  SessionEventSubscriptionClose,
+  SessionEventSubscriptionCloseReason,
+} from "@loomrealm/session-events";

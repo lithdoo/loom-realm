@@ -11,6 +11,11 @@ import {
   prepareRealmStateDefinition,
 } from "@loomrealm/realm-state";
 import {
+  createInMemorySessionEventBinding,
+  createSessionEventClient,
+  createSessionEventHub,
+} from "@loomrealm/session-events";
+import {
   FrameCallRejectedError,
   completed,
   defineSubsystem,
@@ -59,7 +64,7 @@ async function waitFor(predicate, message = "condition") {
   assert.fail(`Timed out waiting for ${message}`);
 }
 
-async function createSession(factory, mainOverrides = {}, policy = defaultPolicy, data, state) {
+async function createSession(factory, mainOverrides = {}, policy = defaultPolicy, data, state, events) {
   const pair = createMemoryCarrierPair();
   const statuses = [];
   const calls = [];
@@ -113,6 +118,10 @@ async function createSession(factory, mainOverrides = {}, policy = defaultPolicy
       const client = createRealmStateClient();
       return Object.freeze({ client, terminate: () => client.terminate() });
     })(),
+    events: events ?? (() => {
+      const client = createSessionEventClient();
+      return Object.freeze({ client, terminate: () => client.terminate() });
+    })(),
   });
   void runtime.catch(() => {});
 
@@ -161,6 +170,62 @@ test("production runSubsystem rejects a missing State capability before business
   }), TypeError);
   assert.equal(definitionCalls, 0);
   assert.equal(controlAcquires, 0);
+});
+
+test("production runSubsystem rejects a missing Session Events capability before business side effects", async () => {
+  let definitionCalls = 0;
+  let controlAcquires = 0;
+  const stateClient = createRealmStateClient();
+  await assert.rejects(runSubsystem({
+    definition: () => {
+      definitionCalls += 1;
+      return { frame: () => completed(null) };
+    },
+    runtimeControl: {
+      async acquire() {
+        controlAcquires += 1;
+        throw new Error("must not acquire");
+      },
+    },
+    runtimePolicy: defaultPolicy,
+    launch: {
+      subsystemKey: "demo",
+      bootstrapToken: "secret",
+      controlProtocolVersions: [1],
+    },
+    state: Object.freeze({ client: stateClient, terminate: () => stateClient.terminate() }),
+  }), TypeError);
+  assert.equal(definitionCalls, 0);
+  assert.equal(controlAcquires, 0);
+  stateClient.terminate();
+});
+
+test("SubsystemScope.events is Runtime-scoped, Frame-independent, and terminal with the Runtime", async () => {
+  const hub = createSessionEventHub();
+  const client = createSessionEventClient(createInMemorySessionEventBinding(hub, "demo"));
+  let scopeEvents;
+  const session = await createSession(
+    defineSubsystem((scope) => {
+      scopeEvents = scope.events;
+      return { frame: () => new Promise(() => {}) };
+    }),
+    {},
+    defaultPolicy,
+    undefined,
+    undefined,
+    Object.freeze({ client, terminate: () => client.terminate() }),
+  );
+  const seen = [];
+  await scopeEvents.subscribe(["runtime"], (event) => seen.push(event));
+  await session.main.frame.initialize({ frameId: "root", input: null });
+  await session.main.frame.activate({ frameId: "root", activationId: "a1" });
+  await session.main.frame.suspend({ frameId: "root", activationId: "a1" });
+  assert.equal(scopeEvents, client);
+  await scopeEvents.publish("runtime", "before-terminal", null);
+  await waitFor(() => seen.length === 1, "Session Event delivery");
+  await shutdown(session);
+  await assert.rejects(scopeEvents.publish("runtime", "after-terminal", null), { code: "TERMINAL" });
+  hub.terminate();
 });
 
 test("SubsystemScope.state is Runtime-scoped, Frame-independent, and terminal with the Runtime", async () => {
@@ -840,6 +905,10 @@ test("terminal cleanup is bounded and hook failure never replaces the primary ca
     },
     state: (() => {
       const client = createRealmStateClient();
+      return Object.freeze({ client, terminate: () => client.terminate() });
+    })(),
+    events: (() => {
+      const client = createSessionEventClient();
       return Object.freeze({ client, terminate: () => client.terminate() });
     })(),
   });

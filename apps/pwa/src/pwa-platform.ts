@@ -1,7 +1,12 @@
 import type { PwaLaunchPlan } from "@loomrealm/game-launcher-pwa";
-import type { MainPlatform, MainRealmStateFatalSource } from "@loomrealm/main";
+import type {
+  MainPlatform,
+  MainRealmStateFatalSource,
+  MainSessionEventsFatalSource,
+} from "@loomrealm/main";
 import type { RendererControlBinding } from "@loomrealm/platform-ports";
 import type { RealmStateAuthority } from "@loomrealm/realm-state";
+import type { SessionEventHub } from "@loomrealm/session-events";
 import type { PwaInstallRendererControlV1 } from "./bootstrap-protocol.js";
 import { PwaDataBroker } from "./data-broker.js";
 import { createMessagePortCarrier } from "./message-port-carrier.js";
@@ -27,6 +32,8 @@ export class PwaPlatform {
     readonly bridgePort: MessagePort;
     readonly realmStateAuthority: RealmStateAuthority;
     readonly realmStateFatal: MainRealmStateFatalSource;
+    readonly sessionEventHub: SessionEventHub;
+    readonly sessionEventsFatal: MainSessionEventsFatalSource;
     readonly observe?: (event: Readonly<Record<string, unknown> & { type: string }>) => void;
   }) {
     this.bridge = new SessionWindowBridge(options.bridgePort, options.sessionEpoch);
@@ -47,6 +54,7 @@ export class PwaPlatform {
       launchPlan: options.launchPlan,
       sessionEpoch: options.sessionEpoch,
       realmStateAuthority: options.realmStateAuthority,
+      sessionEventHub: options.sessionEventHub,
       onRuntimeDataProvisioner: this.broker.onRuntimeDataProvisioner,
       observe: options.observe,
     });
@@ -57,6 +65,7 @@ export class PwaPlatform {
       rendererControl,
       dataConnections: this.broker.sink,
       realmStateFatal: options.realmStateFatal,
+      sessionEventsFatal: options.sessionEventsFatal,
     });
   }
 

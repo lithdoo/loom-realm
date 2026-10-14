@@ -9,7 +9,7 @@ Hostra shell
   Electron / BrowserWindow / host RPC
   └─ HOSTRA_SUBCMD
       LoomRealm Desktop plain Node process
-        ├─ Main / RealmStateAuthority / RuntimeHosting → Runner
+        ├─ Main / RealmStateAuthority / SessionEventHub / RuntimeHosting → Runner
         ├─ Desktop Data Broker
         ├─ Content Service + trusted shell
         ├─ Renderer Control carrier
@@ -20,6 +20,8 @@ Hostra shell
 Hostra shell 唯一拥有 Electron、BrowserWindow、preload 与 direct child lifecycle；`apps/desktop` 不能重新创建独立 Electron main 或复制 Main authority。`@loomrealm/game-launcher-hostra` 负责 Game Entry + launch manifest PREPARE 与 Node Runner realization；Hostra outer shell 不是 logical Game Launcher。
 
 Hostra JSON-RPC 仅用于 bounded host control（例如 window open/close/event），不承载 Renderer Control/Data application/Content/Input/Render protocol。
+
+每个 Runner 使用独立、host-generated、loopback capability-path Events WebSocket。该 carrier 不复用 Runtime Control、Realm State、Renderer Data、Content 或 Hostra RPC；Runner 在 business Definition import 前完成初始绑定并清除 `LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT`。
 
 ## Identity / lifetime / security
 

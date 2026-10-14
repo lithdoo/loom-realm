@@ -100,6 +100,24 @@ export interface PwaRunnerDataResultV1 {
   readonly ok: boolean;
 }
 
+export interface PwaInstallSessionEventsV1 {
+  readonly formatVersion: 1;
+  readonly type: "session-events/install";
+  readonly requestId: string;
+  readonly subsystemKey: string;
+  readonly bindingId: string;
+  readonly port: MessagePort;
+}
+
+export interface PwaSessionEventsResultV1 {
+  readonly formatVersion: 1;
+  readonly type: "session-events/result";
+  readonly requestId: string;
+  readonly subsystemKey: string;
+  readonly bindingId: string;
+  readonly ok: boolean;
+}
+
 function object(value: unknown, fields: readonly string[], label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`Invalid ${label}`);
   const record = value as Record<string, unknown>;
@@ -208,4 +226,53 @@ export function parseRunnerDataResult(value: unknown, subsystemKey: string, requ
   const item = object(value, ["formatVersion", "type", "requestId", "subsystemKey", "connectionId", "ok"], "Runner Data result");
   if (item.formatVersion !== 1 || item.type !== "data/result" || item.requestId !== requestId || item.subsystemKey !== subsystemKey || typeof item.ok !== "boolean") throw new TypeError("Invalid Runner Data result");
   return Object.freeze({ formatVersion: 1, type: item.type, requestId, subsystemKey, connectionId: text(item.connectionId, "connectionId"), ok: item.ok });
+}
+
+export function parseInstallSessionEvents(
+  value: unknown,
+  subsystemKey: string,
+): PwaInstallSessionEventsV1 {
+  const item = object(
+    value,
+    ["formatVersion", "type", "requestId", "subsystemKey", "bindingId", "port"],
+    "Session Events install",
+  );
+  if (
+    item.formatVersion !== 1 || item.type !== "session-events/install" ||
+    item.subsystemKey !== subsystemKey
+  ) throw new TypeError("Invalid Session Events install");
+  return Object.freeze({
+    formatVersion: 1,
+    type: "session-events/install",
+    requestId: text(item.requestId, "requestId"),
+    subsystemKey,
+    bindingId: text(item.bindingId, "bindingId"),
+    port: port(item.port),
+  });
+}
+
+export function parseSessionEventsResult(
+  value: unknown,
+  subsystemKey: string,
+  requestId: string,
+  bindingId: string,
+): PwaSessionEventsResultV1 {
+  const item = object(
+    value,
+    ["formatVersion", "type", "requestId", "subsystemKey", "bindingId", "ok"],
+    "Session Events result",
+  );
+  if (
+    item.formatVersion !== 1 || item.type !== "session-events/result" ||
+    item.requestId !== requestId || item.subsystemKey !== subsystemKey ||
+    item.bindingId !== bindingId || typeof item.ok !== "boolean"
+  ) throw new TypeError("Invalid Session Events result");
+  return Object.freeze({
+    formatVersion: 1,
+    type: "session-events/result",
+    requestId,
+    subsystemKey,
+    bindingId,
+    ok: item.ok,
+  });
 }

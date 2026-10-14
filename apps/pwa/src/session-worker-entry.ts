@@ -1,6 +1,7 @@
 import { preparePwaGame } from "@loomrealm/game-launcher-pwa";
 import { runMain } from "@loomrealm/main";
 import { createRealmStateAuthority } from "@loomrealm/realm-state";
+import { createSessionEventFatalLatch, createSessionEventHub } from "@loomrealm/session-events";
 import { parsePwaRuntimeInfoV1, parsePwaSessionBootstrapV1, sameServiceWorkerGeneration } from "./bootstrap-protocol.js";
 import { getInstallation, readInstallationObject } from "./installation-store.js";
 import { PwaPlatform } from "./pwa-platform.js";
@@ -60,8 +61,19 @@ async function start(raw: unknown): Promise<void> {
   let fatal = false;
   const authority = createRealmStateAuthority(prepared.state, { onFatal() { fatal = true; fatalListener?.(); } });
   const realmStateFatal = Object.freeze({ subscribe(listener: () => void) { fatalListener = listener; if (fatal) queueMicrotask(listener); return () => { if (fatalListener === listener) fatalListener = null; }; } });
+  const sessionEventsFatal = createSessionEventFatalLatch();
+  const sessionEventHub = createSessionEventHub({ onFatal: () => sessionEventsFatal.report() });
   const controller = new AbortController();
-  const platform = new PwaPlatform({ launchPlan: prepared.launchPlan, sessionEpoch: bootstrap.sessionEpoch, bridgePort: bootstrap.windowBridgePort, realmStateAuthority: authority, realmStateFatal, observe: (event) => session.postMessage(Object.freeze({ type: "loomrealm.pwa.observation", version: 1, sessionEpoch: bootstrap.sessionEpoch, event })) });
+  const platform = new PwaPlatform({
+    launchPlan: prepared.launchPlan,
+    sessionEpoch: bootstrap.sessionEpoch,
+    bridgePort: bootstrap.windowBridgePort,
+    realmStateAuthority: authority,
+    realmStateFatal,
+    sessionEventHub,
+    sessionEventsFatal: sessionEventsFatal.source,
+    observe: (event) => session.postMessage(Object.freeze({ type: "loomrealm.pwa.observation", version: 1, sessionEpoch: bootstrap.sessionEpoch, event })),
+  });
   const onShutdown = (event: MessageEvent<unknown>) => {
     const value = event.data as Record<string, unknown> | null;
     if (value !== null && typeof value === "object" && Object.keys(value).length === 3 && value.type === "loomrealm.pwa.session-shutdown" && value.version === 1 && value.sessionEpoch === bootstrap.sessionEpoch) controller.abort();
@@ -80,6 +92,7 @@ async function start(raw: unknown): Promise<void> {
     session.removeEventListener("message", onShutdown);
     await platform.close();
     authority.terminate();
+    sessionEventHub.terminate();
     session.postMessage(Object.freeze({ type: "loomrealm.pwa.session-status", version: 1, status: "closed", sessionEpoch: bootstrap.sessionEpoch }));
   }
 }

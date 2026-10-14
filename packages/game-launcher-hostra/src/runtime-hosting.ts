@@ -23,6 +23,13 @@ import {
 import { CONTENT_ACCESS_ENV_KEY, encodeHostraContentAccess, validateHostraContentAccess, type HostraContentAccess } from "./content-access.js";
 import { createRealmStateWebSocketCarrier } from "./realm-state-websocket-carrier.js";
 import { createWebSocketCarrier } from "./websocket-carrier.js";
+import {
+  serveSessionEventCarrier,
+  type SessionEventCarrierServer,
+  type SessionEventHub,
+} from "@loomrealm/session-events";
+import { createSessionEventWebSocketCarrier } from "./session-events-websocket-carrier.js";
+import { SESSION_EVENTS_ENDPOINT_ENV_KEY } from "./runner/session-events.js";
 
 const ENV_ALLOWLIST = [
   "PATH",
@@ -72,6 +79,7 @@ export function buildRunnerEnvironment(
   parent: NodeJS.ProcessEnv,
   encodedBootstrap: string,
   encodedContentAccess?: string,
+  sessionEventsEndpoint?: string,
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
   if (process.platform === "win32") {
@@ -90,6 +98,7 @@ export function buildRunnerEnvironment(
   }
   environment[BOOTSTRAP_ENV_KEY] = encodedBootstrap;
   if (encodedContentAccess !== undefined) environment[CONTENT_ACCESS_ENV_KEY] = encodedContentAccess;
+  if (sessionEventsEndpoint !== undefined) environment[SESSION_EVENTS_ENDPOINT_ENV_KEY] = sessionEventsEndpoint;
   if (typeof process.versions.electron === "string") {
     environment[ELECTRON_RUN_AS_NODE_ENV_KEY] = "1";
   }
@@ -153,6 +162,7 @@ async function launchAttempt(
   request: RuntimeLaunchRequest,
   signal: AbortSignal,
   realmStateAuthority: RealmStateClient,
+  sessionEventHub: SessionEventHub,
   onRuntimeDataProvisioner?: (
     runtime: HostedRuntime,
     provisioner: HostraRuntimeDataProvisioner,
@@ -187,9 +197,21 @@ async function launchAttempt(
     path: stateCapabilityPath,
     verifyClient: ({ req }, done) => done(req.url === stateCapabilityPath),
   });
+  const eventsCapabilityPath = `/${randomBytes(32).toString("base64url")}`;
+  const eventsServer = new WebSocketServer({
+    host: "127.0.0.1",
+    port: 0,
+    path: eventsCapabilityPath,
+    verifyClient: ({ req }, done) => done(req.url === eventsCapabilityPath),
+  });
   let realmStateCarrierServer: RealmStateCarrierServer | null = null;
+  let sessionEventCarrierServer: SessionEventCarrierServer | null = null;
   const closeRealmStateCarrier = () => {
     const active = realmStateCarrierServer;
+    if (active !== null) void active.close().catch(() => {});
+  };
+  const closeSessionEventCarrier = () => {
+    const active = sessionEventCarrierServer;
     if (active !== null) void active.close().catch(() => {});
   };
   server.on("error", () => {
@@ -199,27 +221,39 @@ async function launchAttempt(
   try {
     await listen(server);
     await listen(stateServer);
+    await listen(eventsServer);
   } catch (error) {
     closeServer(server);
     closeServer(stateServer);
+    closeServer(eventsServer);
     void error;
     throw launcherError("LAUNCH_RUNTIME_UNAVAILABLE");
   }
   if (signal.aborted) {
     closeServer(server);
     closeServer(stateServer);
+    closeServer(eventsServer);
     throw signal.reason;
   }
   const address = server.address();
   if (address === null || typeof address === "string") {
     closeServer(server);
     closeServer(stateServer);
+    closeServer(eventsServer);
     throw launcherError("LAUNCH_RUNTIME_UNAVAILABLE");
   }
   const stateAddress = stateServer.address();
   if (stateAddress === null || typeof stateAddress === "string") {
     closeServer(server);
     closeServer(stateServer);
+    closeServer(eventsServer);
+    throw launcherError("LAUNCH_RUNTIME_UNAVAILABLE");
+  }
+  const eventsAddress = eventsServer.address();
+  if (eventsAddress === null || typeof eventsAddress === "string") {
+    closeServer(server);
+    closeServer(stateServer);
+    closeServer(eventsServer);
     throw launcherError("LAUNCH_RUNTIME_UNAVAILABLE");
   }
 
@@ -242,6 +276,7 @@ async function launchAttempt(
 
   const controlEndpoint = `ws://127.0.0.1:${address.port}${capabilityPath}`;
   const realmStateEndpoint = `ws://127.0.0.1:${stateAddress.port}${stateCapabilityPath}`;
+  const sessionEventsEndpoint = `ws://127.0.0.1:${eventsAddress.port}${eventsCapabilityPath}`;
   const bootstrap: RunnerBootstrapV1 = Object.freeze({
     version: 1,
     subsystemKey: request.subsystemKey,
@@ -262,6 +297,7 @@ async function launchAttempt(
   } catch (error) {
     closeServer(server);
     closeServer(stateServer);
+    closeServer(eventsServer);
     throw error;
   }
 
@@ -293,6 +329,30 @@ async function launchAttempt(
       if (realmStateCarrierServer === served) realmStateCarrierServer = null;
     });
   });
+  eventsServer.on("error", () => {
+    pendingServerFailure = true;
+    convergeServerFailure?.();
+  });
+  eventsServer.on("connection", (socket: WebSocket) => {
+    if (sessionEventCarrierServer !== null || exited || attempt.ownership === "abandoned") {
+      socket.terminate();
+      return;
+    }
+    let served: SessionEventCarrierServer;
+    try {
+      served = serveSessionEventCarrier(
+        sessionEventHub.createBinding(request.subsystemKey),
+        createSessionEventWebSocketCarrier(socket),
+      );
+    } catch {
+      socket.terminate();
+      return;
+    }
+    sessionEventCarrierServer = served;
+    void served.closed.then(() => {
+      if (sessionEventCarrierServer === served) sessionEventCarrierServer = null;
+    });
+  });
 
   const forceTerminate = () => {
     if (exited) return;
@@ -307,6 +367,7 @@ async function launchAttempt(
     attempt.ownership = "abandoned";
     closeServer(server);
     closeServer(stateServer);
+    closeServer(eventsServer);
     acquireWaiter?.reject(signal.reason);
     acquireWaiter = null;
     if (typeof child !== "undefined") forceTerminate();
@@ -318,6 +379,7 @@ async function launchAttempt(
     serverFailure = launcherError("LAUNCH_RUNTIME_UNAVAILABLE");
     closeServer(server);
     closeServer(stateServer);
+    closeServer(eventsServer);
     acquireWaiter?.reject(serverFailure);
     acquireWaiter = null;
     if (attempt.ownership === "pending" && spawnStarted) {
@@ -336,7 +398,12 @@ async function launchAttempt(
     child = spawn(plan.canonicalNodeExecutable, [plan.runnerEntry], {
       shell: false,
       cwd: plan.canonicalInstallationRoot,
-      env: buildRunnerEnvironment(process.env, encodedBootstrap, encodedContentAccess),
+      env: buildRunnerEnvironment(
+        process.env,
+        encodedBootstrap,
+        encodedContentAccess,
+        sessionEventsEndpoint,
+      ),
       stdio: onRuntimeDataProvisioner === undefined
         ? "ignore"
         : ["ignore", "ignore", "ignore", "ipc"],
@@ -345,7 +412,9 @@ async function launchAttempt(
     signal.removeEventListener("abort", abandon);
     closeServer(server);
     closeServer(stateServer);
+    closeServer(eventsServer);
     closeRealmStateCarrier();
+    closeSessionEventCarrier();
     void error;
     throw launcherError("PROCESS_SPAWN_FAILED");
   }
@@ -369,7 +438,9 @@ async function launchAttempt(
     }
     closeServer(server);
     closeServer(stateServer);
+    closeServer(eventsServer);
     closeRealmStateCarrier();
+    closeSessionEventCarrier();
     void controlCarrier?.close().catch(() => {});
     acquireWaiter?.reject(launcherError("PROCESS_EXITED_DURING_BOOTSTRAP"));
     acquireWaiter = null;
@@ -384,7 +455,9 @@ async function launchAttempt(
     signal.removeEventListener("abort", abandon);
     closeServer(server);
     closeServer(stateServer);
+    closeServer(eventsServer);
     closeRealmStateCarrier();
+    closeSessionEventCarrier();
     throw error;
   }
   if (attempt.ownership === "abandoned") {
@@ -394,6 +467,7 @@ async function launchAttempt(
   if (outcome === "exited" || exited) {
     signal.removeEventListener("abort", abandon);
     closeServer(stateServer);
+    closeServer(eventsServer);
     throw launcherError("PROCESS_EXITED_DURING_BOOTSTRAP");
   }
   attempt.ownership = "returned";
@@ -469,6 +543,7 @@ export function createHostraRuntimeHosting(options: {
     provisioner: HostraRuntimeDataProvisioner,
   ) => void;
   readonly realmStateAuthority: RealmStateClient;
+  readonly sessionEventHub: SessionEventHub;
 }): RuntimeHosting {
   if (options === null || typeof options !== "object" || options.launchPlan === null) {
     throw new TypeError("Invalid Hostra RuntimeHosting options");
@@ -492,6 +567,14 @@ export function createHostraRuntimeHosting(options: {
   ) {
     throw new TypeError("Invalid Realm State Authority capability");
   }
+  if (
+    options.sessionEventHub === null ||
+    typeof options.sessionEventHub !== "object" ||
+    typeof options.sessionEventHub.createBinding !== "function" ||
+    options.sessionEventHub.ready !== true
+  ) {
+    throw new TypeError("Invalid Session Event Hub capability");
+  }
   const contentAccess = options.contentAccess === undefined ? undefined : validateHostraContentAccess(options.contentAccess);
   const runtimes = new Map(plan.runtimes.map((runtime) => [runtime.subsystemKey, runtime] as const));
   return Object.freeze({
@@ -502,6 +585,7 @@ export function createHostraRuntimeHosting(options: {
         request,
         signal,
         options.realmStateAuthority,
+        options.sessionEventHub,
         options.onRuntimeDataProvisioner,
         contentAccess,
       );

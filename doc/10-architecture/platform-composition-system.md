@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M9/M11/M12/M13/M14/M15 current qualification Closed；Realm State v1 implemented / qualified；Session Events v1 logical semantics + current runtime integration profile frozen / not implemented / not qualified；PWA M16/M17 implemented with independent gate
+> 稳定程度：M9/M11/M12/M13/M14/M15 current qualification Closed；Realm State v1 implemented / qualified；Session Events v1 logical semantics + current runtime integration profile implemented / qualification pending；PWA M16/M17 implemented with independent gate
 > 主要定义：跨平台 physical composition、Launcher PREPARE、Runtime/Renderer/Data/Content/Realm State/Session Events/Web presentation placement  
 > 依赖：[系统架构总览](./system-overview.md)、[Realm State](./realm-state-system.md)、[Session Events](./session-events-system.md)、[渲染系统](./rendering-system.md)  
 > 正式化：[Realm State v1](../15-contracts/realm-state-v1.md)、[Session Events v1](../15-contracts/session-events-v1.md)、[Session Events Runtime Integration Profile v1](../15-contracts/session-events-runtime-profile-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
@@ -711,7 +711,7 @@ M12 Content
 
 Realm State 是独立 implementation/qualification track；Session Events 同样是独立 implementation/qualification track。Frozen Session Events contract/runtime profile 不 retroactively 修改既有 M10–M17 claims。
 
-Current status summary 见 [`roadmap.md`](../30-implementation/roadmap.md)。M15 physical composition remains frozen and implemented, and its current formal qualification is Closed；historical direct-Electron evidence does not own the claim。M16/M17 PWA physical profile is implemented and covered by its independent qualification gate；Session Events additive profile仍是 not implemented/not qualified。
+Current status summary 见 [`roadmap.md`](../30-implementation/roadmap.md)。M15 physical composition remains frozen and implemented, and its current formal qualification is Closed；historical direct-Electron evidence does not own the claim。M16/M17 PWA physical profile is implemented and covered by its independent qualification gate；Session Events additive profile is implemented and awaits exact-subject qualification evidence。
 
 ---
 

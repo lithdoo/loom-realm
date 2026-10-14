@@ -8,6 +8,7 @@ export type {
   MainPolicy,
   MainRuntimeFailure,
   MainRealmStateFatalSource,
+  MainSessionEventsFatalSource,
   MainSessionResult,
   RunMainOptions,
 } from "./model.js";

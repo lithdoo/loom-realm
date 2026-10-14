@@ -120,6 +120,9 @@ jobs:
       - name: PWA
         if: needs.impact.outputs.pwa == 'true'
         run: node scripts/ci/run-capability.mjs pwa
+      - name: Session Events v1 qualification
+        if: needs.impact.outputs.pwa == 'true'
+        run: node scripts/ci/run-capability.mjs session-events
       - name: Battle browser qualification
         if: needs.impact.outputs.battle == 'true'
         run: node scripts/ci/run-capability.mjs battle

@@ -16,6 +16,7 @@ import {
   type PwaRunnerDataResultV1,
 } from "./bootstrap-protocol.js";
 import { createMessagePortCarrier } from "./message-port-carrier.js";
+import { RunnerSessionEventsBinding } from "./runner-session-events.js";
 
 interface DataTuple { readonly subsystemKey: string; readonly generation: number; readonly dataProfile: string }
 interface CurrentData { readonly tuple: DataTuple; readonly connectionId: string; readonly carrier: MessageCarrier; delivered: boolean }
@@ -130,6 +131,8 @@ async function run(raw: unknown): Promise<void> {
   if (!sameServiceWorkerGeneration(runtimeInfo, bootstrap.expectedServiceWorker)) throw new Error("Service Worker generation mismatch");
   const stateClient = createRealmStateClient(createRealmStateCarrierBinding(createRealmStateMessagePortCarrier(bootstrap.realmStatePort)));
   const data = new RunnerDataBinding(bootstrap.provisioningPort, bootstrap.subsystemKey);
+  const events = new RunnerSessionEventsBinding(bootstrap.provisioningPort, bootstrap.subsystemKey);
+  await events.initial;
   let acquired = false;
   const runtimeControl: RuntimeControlBinding = Object.freeze({
     acquire(signal: AbortSignal) {
@@ -153,11 +156,13 @@ async function run(raw: unknown): Promise<void> {
       data: data.binding,
       content,
       state: Object.freeze({ client: stateClient, terminate: () => stateClient.terminate() }),
+      events: Object.freeze({ client: events.client, terminate: () => events.client.terminate() }),
     });
   } finally {
     self.removeEventListener("message", onShutdown);
     lifetime.abort();
     stateClient.terminate();
+    await events.close();
     await data.close();
     await new Promise((resolve) => setTimeout(resolve, 0));
     self.postMessage(Object.freeze({ type: "loomrealm.pwa.runner-terminal", version: 1, sessionEpoch: bootstrap.sessionEpoch, bootstrapToken: bootstrap.bootstrapToken }));

@@ -197,6 +197,14 @@ function validateOptions(options: RunMainOptions): LogicalGameBootstrap {
   ) {
     throw new TypeError("Invalid Realm State fatal source");
   }
+  if (
+    platform.sessionEventsFatal !== undefined &&
+    (platform.sessionEventsFatal === null ||
+      typeof platform.sessionEventsFatal !== "object" ||
+      typeof platform.sessionEventsFatal.subscribe !== "function")
+  ) {
+    throw new TypeError("Invalid Session Events fatal source");
+  }
 
   const policy = options.policy;
   if (policy === null || typeof policy !== "object") {
@@ -301,6 +309,7 @@ class MainSessionRuntime {
   private mutationTail: Promise<void> = Promise.resolve();
   private detachExternalAbort: () => void = () => {};
   private detachRealmStateFatal: () => void = () => {};
+  private detachSessionEventsFatal: () => void = () => {};
 
   constructor(private readonly options: RunMainOptions) {
     this.bootstrap = validateOptions(options);
@@ -316,6 +325,14 @@ class MainSessionRuntime {
         void this.mutate(() => this.beginFatal(failure(
           "REALM_STATE_AUTHORITY_FATAL",
           "Realm State Authority became terminal",
+        )));
+      });
+    }
+    if (this.options.platform.sessionEventsFatal !== undefined) {
+      this.detachSessionEventsFatal = this.options.platform.sessionEventsFatal.subscribe(() => {
+        void this.mutate(() => this.beginFatal(failure(
+          "SESSION_EVENT_HUB_FATAL",
+          "Session Event Hub became terminal",
         )));
       });
     }
@@ -1617,6 +1634,7 @@ class MainSessionRuntime {
     );
     this.detachExternalAbort();
     this.detachRealmStateFatal();
+    this.detachSessionEventsFatal();
 
     if (terminal.kind === "fatal") {
       this.done.reject(new MainRuntimeFatalError(terminal.failure));

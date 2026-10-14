@@ -1,7 +1,7 @@
 # LoomRealm Session Events v1 Runtime Integration Profile
 
 > 层级：正式契约 / Runtime Integration Profile  
-> 状态：**Active / Normative / Frozen / Not Implemented / Not Qualified**  
+> 状态：**Active / Normative / Frozen / Implemented / Not Qualified**
 > Profile Version：1  
 > 逻辑协议：[Session Events v1](./session-events-v1.md)  
 > 相关：[Hostra Launcher Profile v1](./nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](./pwa-launcher-profile-v1.md)、[Session Events Conformance](./session-events-conformance-v1.md)  

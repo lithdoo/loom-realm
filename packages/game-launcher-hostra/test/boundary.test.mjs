@@ -41,6 +41,7 @@ test("package keeps the frozen dependency and authority boundary", async () => {
     "@loomrealm/game-package",
     "@loomrealm/platform-ports",
     "@loomrealm/realm-state",
+    "@loomrealm/session-events",
     "@loomrealm/subsystem",
     "@loomrealm/wire",
     "ws",

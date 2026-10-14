@@ -7,9 +7,20 @@ import {
   type RealmStateClient,
   type RealmStateCarrierServer,
 } from "@loomrealm/realm-state";
+import {
+  createSessionEventMessagePortCarrier,
+  serveSessionEventCarrier,
+  type SessionEventCarrierServer,
+  type SessionEventHub,
+} from "@loomrealm/session-events";
 import { createMessagePortCarrier } from "./message-port-carrier.js";
-import { parseRunnerDataResult } from "./bootstrap-protocol.js";
-import type { PwaInstallSubsystemDataV1, PwaRevokeSubsystemDataV1, PwaRunnerBootstrapV1 } from "./bootstrap-protocol.js";
+import { parseRunnerDataResult, parseSessionEventsResult } from "./bootstrap-protocol.js";
+import type {
+  PwaInstallSessionEventsV1,
+  PwaInstallSubsystemDataV1,
+  PwaRevokeSubsystemDataV1,
+  PwaRunnerBootstrapV1,
+} from "./bootstrap-protocol.js";
 
 export interface PwaRuntimeDataProvisioner {
   install(request: Omit<PwaInstallSubsystemDataV1, "port">, port: MessagePort, signal?: AbortSignal): Promise<void>;
@@ -121,6 +132,123 @@ export class RunnerDataProvisioner implements PwaRuntimeDataProvisioner {
   private readonly onMessageError = () => this.close();
 }
 
+export interface PwaRuntimeSessionEventProvisioner {
+  disconnect(): Promise<void>;
+  replace(signal?: AbortSignal): Promise<void>;
+}
+
+export class RunnerSessionEventProvisioner {
+  private readonly pending = new Map<string, {
+    readonly bindingId: string;
+    readonly timer: ReturnType<typeof setTimeout>;
+    resolve(): void;
+    reject(cause: unknown): void;
+    cleanup(): void;
+  }>();
+  private readonly seenRequests = new Set<string>();
+  private readonly seenBindings = new Set<string>();
+  private currentBindingId: string | null = null;
+  private closed = false;
+
+  constructor(
+    private readonly port: MessagePort,
+    private readonly subsystemKey: string,
+    private readonly requestTimeoutMs = 10_000,
+  ) {
+    port.addEventListener("message", this.onMessage);
+    port.addEventListener("messageerror", this.onMessageError);
+    port.start();
+  }
+
+  install(
+    request: Omit<PwaInstallSessionEventsV1, "port">,
+    port: MessagePort,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (
+      this.closed || signal?.aborted || request.subsystemKey !== this.subsystemKey ||
+      this.pending.has(request.requestId) || this.seenRequests.has(request.requestId) ||
+      this.seenBindings.has(request.bindingId) || this.currentBindingId !== null
+    ) {
+      port.close();
+      return Promise.reject(signal?.reason ?? new Error("Invalid Session Events provisioning request"));
+    }
+    this.seenRequests.add(request.requestId);
+    this.seenBindings.add(request.bindingId);
+    this.currentBindingId = request.bindingId;
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const fail = (cause: unknown) => {
+        if (!this.pending.delete(request.requestId)) return;
+        if (this.currentBindingId === request.bindingId) this.currentBindingId = null;
+        cleanup();
+        reject(cause);
+      };
+      const onAbort = () => fail(signal!.reason);
+      const timer = setTimeout(
+        () => fail(new Error("Session Events provisioning timed out")),
+        this.requestTimeoutMs,
+      );
+      this.pending.set(request.requestId, {
+        bindingId: request.bindingId,
+        timer,
+        resolve,
+        reject,
+        cleanup,
+      });
+      signal?.addEventListener("abort", onAbort, { once: true });
+      try { this.port.postMessage(Object.freeze({ ...request, port }), [port]); }
+      catch (cause) { fail(cause); }
+    });
+  }
+
+  retire(bindingId: string): void {
+    if (this.currentBindingId === bindingId) this.currentBindingId = null;
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.port.removeEventListener("message", this.onMessage);
+    this.port.removeEventListener("messageerror", this.onMessageError);
+    for (const [requestId, pending] of this.pending) {
+      this.pending.delete(requestId);
+      pending.cleanup();
+      pending.reject(new Error("Session Events provisioning closed"));
+    }
+    this.currentBindingId = null;
+  }
+
+  private readonly onMessage = (event: MessageEvent<unknown>) => {
+    const candidate = event.data as { requestId?: unknown } | null;
+    if (candidate === null || typeof candidate !== "object" || typeof candidate.requestId !== "string") return;
+    const pending = this.pending.get(candidate.requestId);
+    if (pending === undefined) return;
+    try {
+      const result = parseSessionEventsResult(
+        event.data,
+        this.subsystemKey,
+        candidate.requestId,
+        pending.bindingId,
+      );
+      if (!result.ok) throw new Error("Runner rejected Session Events provisioning");
+      this.pending.delete(candidate.requestId);
+      pending.cleanup();
+      pending.resolve();
+    } catch (cause) {
+      this.pending.delete(candidate.requestId);
+      if (this.currentBindingId === pending.bindingId) this.currentBindingId = null;
+      pending.cleanup();
+      pending.reject(cause);
+    }
+  };
+
+  private readonly onMessageError = () => this.close();
+}
+
 interface Deferred<T> { readonly promise: Promise<T>; resolve(value: T): void; reject(cause: unknown): void }
 function deferred<T>(): Deferred<T> {
   let settled = false; let resolvePromise!: (value: T) => void; let rejectPromise!: (cause: unknown) => void;
@@ -136,7 +264,12 @@ export function createPwaRuntimeHosting(options: {
   readonly launchPlan: PwaLaunchPlan;
   readonly sessionEpoch: string;
   readonly realmStateAuthority: RealmStateClient;
+  readonly sessionEventHub: SessionEventHub;
   readonly onRuntimeDataProvisioner?: (runtime: HostedRuntime, provisioner: PwaRuntimeDataProvisioner) => void;
+  readonly onRuntimeSessionEventProvisioner?: (
+    runtime: HostedRuntime,
+    provisioner: PwaRuntimeSessionEventProvisioner,
+  ) => void;
   readonly observe?: (event: Readonly<Record<string, unknown> & { type: string }>) => void;
 }): RuntimeHosting {
   const runtimes = new Map(options.launchPlan.runtimes.map((runtime) => [runtime.subsystemKey, runtime] as const));
@@ -154,20 +287,29 @@ export function createPwaRuntimeHosting(options: {
       const state = new MessageChannel();
       const provisioning = new MessageChannel();
       const provisioner = new RunnerDataProvisioner(provisioning.port1, request.subsystemKey);
+      const eventProvisioner = new RunnerSessionEventProvisioner(provisioning.port1, request.subsystemKey);
       let stateServer: RealmStateCarrierServer | null = serveRealmStateCarrier(options.realmStateAuthority, createRealmStateMessagePortCarrier(state.port1));
+      let eventServer: SessionEventCarrierServer | null = null;
       const worker = new Worker(new URL("./worker-runner.js", import.meta.url), { type: "module", name: `loomrealm-${request.subsystemKey}` });
       const ended = deferred<void>();
       let terminal = false;
       let controlAcquired = false;
+      let eventBindingId: string | null = null;
       const close = () => {
         if (terminal) return;
         terminal = true;
         worker.terminate();
         provisioner.close();
+        eventProvisioner.close();
         const closingStateServer = stateServer;
         stateServer = null;
         if (closingStateServer !== null) {
           void closingStateServer.close().catch((cause) => report({ type: "runtime-cleanup-error", subsystemKey: request.subsystemKey, detail: cause instanceof Error ? cause.message : String(cause) }));
+        }
+        const closingEventServer = eventServer;
+        eventServer = null;
+        if (closingEventServer !== null) {
+          void closingEventServer.close().catch((cause) => report({ type: "runtime-cleanup-error", subsystemKey: request.subsystemKey, detail: cause instanceof Error ? cause.message : String(cause) }));
         }
         ended.resolve(undefined);
       };
@@ -219,7 +361,55 @@ export function createPwaRuntimeHosting(options: {
           close();
         },
       });
+      const installEventBinding = async (installSignal?: AbortSignal): Promise<void> => {
+        if (terminal || eventServer !== null || eventBindingId !== null) {
+          throw new Error("Session Events binding is already current or Runtime is terminal");
+        }
+        const events = new MessageChannel();
+        const bindingId = crypto.randomUUID();
+        const eventBinding = options.sessionEventHub.createBinding(request.subsystemKey);
+        const served = serveSessionEventCarrier(
+          eventBinding,
+          createSessionEventMessagePortCarrier(events.port1),
+        );
+        eventServer = served;
+        eventBindingId = bindingId;
+        void served.closed.then(() => {
+          eventProvisioner.retire(bindingId);
+          if (eventServer === served) eventServer = null;
+          if (eventBindingId === bindingId) eventBindingId = null;
+        });
+        try {
+          await eventProvisioner.install(Object.freeze({
+            formatVersion: 1,
+            type: "session-events/install",
+            requestId: crypto.randomUUID(),
+            subsystemKey: request.subsystemKey,
+            bindingId,
+          }), events.port2, installSignal);
+        } catch (cause) {
+          if (eventServer === served) eventServer = null;
+          if (eventBindingId === bindingId) eventBindingId = null;
+          await served.close().catch(() => {});
+          throw cause;
+        }
+      };
+      const eventReplacement: PwaRuntimeSessionEventProvisioner = Object.freeze({
+        async disconnect() {
+          const active = eventServer;
+          const activeId = eventBindingId;
+          eventServer = null;
+          eventBindingId = null;
+          if (activeId !== null) eventProvisioner.retire(activeId);
+          if (active !== null) await active.close();
+        },
+        replace: installEventBinding,
+      });
+      try { await installEventBinding(signal); }
+      catch (cause) { close(); throw cause; }
       try { options.onRuntimeDataProvisioner?.(hosted, provisioner); }
+      catch (cause) { close(); throw cause; }
+      try { options.onRuntimeSessionEventProvisioner?.(hosted, eventReplacement); }
       catch (cause) { close(); throw cause; }
       report({ type: "runtime-created", subsystemKey: request.subsystemKey });
       return hosted;

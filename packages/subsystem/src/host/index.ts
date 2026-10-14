@@ -7,6 +7,7 @@ export type {
   SubsystemLaunchContext,
   SubsystemRuntimeControlPolicy,
   RealmStateRuntimeCapability,
+  SessionEventsRuntimeCapability,
 } from "./run-subsystem.js";
 export {
   createBoundContentClient,

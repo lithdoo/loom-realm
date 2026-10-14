@@ -1,0 +1,115 @@
+import type { CarrierClosed, MessageCarrier } from "@loomrealm/foundation";
+
+const CLOSE_SENTINEL = "\u001eloomrealm.session-events.port.close/1";
+const MAX_QUEUED_MESSAGES = 128;
+const MAX_QUEUED_BYTES = 32 * 1024 * 1024;
+
+interface PortMessageEvent { readonly data: unknown }
+
+export interface SessionEventMessagePort {
+  postMessage(message: string): void;
+  addEventListener(type: "message", listener: (event: PortMessageEvent) => void): void;
+  addEventListener(type: "messageerror", listener: (event: unknown) => void): void;
+  removeEventListener(type: "message", listener: (event: PortMessageEvent) => void): void;
+  removeEventListener(type: "messageerror", listener: (event: unknown) => void): void;
+  start?(): void;
+  close?(): void;
+}
+
+interface Waiter { resolve(value: IteratorResult<string>): void }
+
+export function createSessionEventMessagePortCarrier(
+  port: SessionEventMessagePort,
+): MessageCarrier {
+  if (
+    port === null || typeof port !== "object" ||
+    typeof port.postMessage !== "function" ||
+    typeof port.addEventListener !== "function" ||
+    typeof port.removeEventListener !== "function"
+  ) throw new TypeError("Invalid Session Event MessagePort");
+
+  const queue: string[] = [];
+  const waiters: Waiter[] = [];
+  let queuedBytes = 0;
+  let terminal: CarrierClosed | null = null;
+  let settleClosed!: (fact: CarrierClosed) => void;
+  const closed = new Promise<CarrierClosed>((resolve) => { settleClosed = resolve; });
+
+  const finish = (fact: CarrierClosed) => {
+    if (terminal !== null) return;
+    terminal = Object.freeze(fact);
+    port.removeEventListener("message", onMessage);
+    port.removeEventListener("messageerror", onMessageError);
+    while (waiters.length > 0) waiters.shift()!.resolve({ done: true, value: undefined });
+    settleClosed(terminal);
+    try { port.close?.(); } catch {}
+  };
+  const onMessage = (event: PortMessageEvent) => {
+    if (terminal !== null) return;
+    if (event.data === CLOSE_SENTINEL) {
+      finish({ kind: "closed" });
+      return;
+    }
+    if (typeof event.data !== "string") {
+      finish({ kind: "lost", cause: new TypeError("Session Event MessagePort received a non-string unit") });
+      return;
+    }
+    const waiter = waiters.shift();
+    if (waiter !== undefined) {
+      waiter.resolve({ done: false, value: event.data });
+      return;
+    }
+    const bytes = new TextEncoder().encode(event.data).byteLength;
+    if (queue.length + 1 > MAX_QUEUED_MESSAGES || queuedBytes + bytes > MAX_QUEUED_BYTES) {
+      finish({ kind: "lost", cause: new Error("Session Event MessagePort receive buffer exceeded") });
+      return;
+    }
+    queue.push(event.data);
+    queuedBytes += bytes;
+  };
+  const onMessageError = (event: unknown) => finish({ kind: "lost", cause: event });
+  port.addEventListener("message", onMessage);
+  port.addEventListener("messageerror", onMessageError);
+  port.start?.();
+
+  let readerClaimed = false;
+  return Object.freeze({
+    async send(message: string) {
+      if (terminal !== null) throw new Error("Session Event MessagePort is closed");
+      if (typeof message !== "string" || message === CLOSE_SENTINEL) {
+        throw new TypeError("Invalid Session Event MessagePort unit");
+      }
+      port.postMessage(message);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    },
+    messages(): AsyncIterable<string> {
+      if (readerClaimed) throw new Error("Session Event MessagePort stream already acquired");
+      readerClaimed = true;
+      return Object.freeze({
+        [Symbol.asyncIterator]() {
+          return Object.freeze({
+            next(): Promise<IteratorResult<string>> {
+              const value = queue.shift();
+              if (value !== undefined) {
+                queuedBytes -= new TextEncoder().encode(value).byteLength;
+                return Promise.resolve({ done: false, value });
+              }
+              if (terminal !== null) return Promise.resolve({ done: true, value: undefined });
+              if (waiters.length >= 1) {
+                finish({ kind: "lost", cause: new Error("Session Event MessagePort reader over-acquired") });
+                return Promise.resolve({ done: true, value: undefined });
+              }
+              return new Promise((resolve) => waiters.push({ resolve }));
+            },
+          });
+        },
+      });
+    },
+    closed,
+    async close() {
+      if (terminal !== null) return;
+      try { port.postMessage(CLOSE_SENTINEL); } catch {}
+      finish({ kind: "closed" });
+    },
+  });
+}

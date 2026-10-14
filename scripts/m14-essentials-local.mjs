@@ -10,6 +10,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
 import { createRealmStateClient } from "@loomrealm/realm-state";
+import { createSessionEventClient } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
 import { createBoundContentClient, runSubsystem } from "@loomrealm/subsystem/host";
@@ -223,6 +224,10 @@ try {
         content: production.content,
         state: (() => {
           const client = createRealmStateClient();
+          return Object.freeze({ client, terminate: () => client.terminate() });
+        })(),
+        events: (() => {
+          const client = createSessionEventClient();
           return Object.freeze({ client, terminate: () => client.terminate() });
         })(),
       });

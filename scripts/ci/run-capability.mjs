@@ -57,6 +57,7 @@ function buildMapStack() {
     "-w", "@loomrealm/foundation",
     "-w", "@loomrealm/wire",
     "-w", "@loomrealm/realm-state",
+    "-w", "@loomrealm/session-events",
     "-w", "@loomrealm/game-package",
     "-w", "@loomrealm/platform-ports",
     "-w", "@loomrealm/runtime-control",
@@ -78,6 +79,7 @@ function buildPwaStack() {
     "-w", "@loomrealm/foundation",
     "-w", "@loomrealm/wire",
     "-w", "@loomrealm/realm-state",
+    "-w", "@loomrealm/session-events",
     "-w", "@loomrealm/game-package",
     "-w", "@loomrealm/platform-ports",
     "-w", "@loomrealm/runtime-control",
@@ -190,6 +192,10 @@ const capabilities = {
     buildPwaStack();
     npm("test", "-w", "@loomrealm/game-launcher-pwa");
     npm("test", "-w", "@loomrealm/pwa");
+  },
+
+  "session-events"() {
+    npm("run", "test:session-events:qualification");
   },
 
   battle() {

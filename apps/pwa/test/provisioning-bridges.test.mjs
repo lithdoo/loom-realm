@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { RunnerDataProvisioner } from "../dist/types/runtime-hosting.js";
+import { RunnerDataProvisioner, RunnerSessionEventProvisioner } from "../dist/types/runtime-hosting.js";
+import { RunnerSessionEventsBinding } from "../dist/types/runner-session-events.js";
 import { SessionWindowBridge } from "../dist/types/window-bridge.js";
+import {
+  createSessionEventHub,
+  createSessionEventMessagePortCarrier,
+  serveSessionEventCarrier,
+} from "@loomrealm/session-events";
 
 function windowRevoke(requestId, connectionId) {
   return Object.freeze({
@@ -88,4 +94,179 @@ test("Runner provisioner cancellation fences a late ack and permits rollback", a
   await next;
   provisioner.close();
   channel.port2.close();
+});
+
+function eventInstall(requestId, bindingId, subsystemKey = "demo") {
+  return Object.freeze({
+    formatVersion: 1,
+    type: "session-events/install",
+    requestId,
+    subsystemKey,
+    bindingId,
+  });
+}
+
+function eventResult(request, overrides = {}) {
+  return Object.freeze({
+    formatVersion: 1,
+    type: "session-events/result",
+    requestId: request.requestId,
+    subsystemKey: request.subsystemKey,
+    bindingId: request.bindingId,
+    ok: true,
+    ...overrides,
+  });
+}
+
+async function nextMessage(messages, count) {
+  while (messages.length < count) await new Promise((resolve) => setTimeout(resolve, 0));
+  return messages[count - 1];
+}
+
+test("Session Events provisioner requires an exact ack and permits a fresh retired binding", async () => {
+  const channel = new MessageChannel();
+  const provisioner = new RunnerSessionEventProvisioner(channel.port1, "demo", 1_000);
+  const messages = [];
+  channel.port2.addEventListener("message", (event) => messages.push(event.data));
+  channel.port2.start();
+
+  const firstPort = new MessageChannel();
+  const first = eventInstall("event-request-1", "event-binding-1");
+  const installed = provisioner.install(first, firstPort.port1);
+  const receivedFirst = await nextMessage(messages, 1);
+  channel.port2.postMessage(eventResult(receivedFirst));
+  await installed;
+
+  const blockedPort = new MessageChannel();
+  await assert.rejects(
+    provisioner.install(eventInstall("event-request-2", "event-binding-2"), blockedPort.port1),
+    /Invalid Session Events provisioning request/,
+  );
+
+  provisioner.retire(first.bindingId);
+  const replacementPort = new MessageChannel();
+  const replacement = eventInstall("event-request-3", "event-binding-3");
+  const replaced = provisioner.install(replacement, replacementPort.port1);
+  const receivedReplacement = await nextMessage(messages, 2);
+  channel.port2.postMessage(eventResult(receivedReplacement));
+  await replaced;
+
+  provisioner.close();
+  channel.port2.close();
+  firstPort.port2.close();
+  blockedPort.port2.close();
+  replacementPort.port2.close();
+});
+
+test("Session Events provisioner fences wrong and late results plus reused identities", async () => {
+  const channel = new MessageChannel();
+  const provisioner = new RunnerSessionEventProvisioner(channel.port1, "demo", 1_000);
+  const messages = [];
+  channel.port2.addEventListener("message", (event) => messages.push(event.data));
+  channel.port2.start();
+
+  const firstPort = new MessageChannel();
+  const first = eventInstall("event-request-stale", "event-binding-stale");
+  const pending = provisioner.install(first, firstPort.port1);
+  const received = await nextMessage(messages, 1);
+  channel.port2.postMessage(eventResult(received, { bindingId: "wrong-binding" }));
+  await assert.rejects(pending, /Invalid Session Events result/);
+
+  channel.port2.postMessage(eventResult(received));
+  const reusedRequestPort = new MessageChannel();
+  await assert.rejects(
+    provisioner.install(eventInstall(first.requestId, "event-binding-fresh"), reusedRequestPort.port1),
+    /Invalid Session Events provisioning request/,
+  );
+  const reusedBindingPort = new MessageChannel();
+  await assert.rejects(
+    provisioner.install(eventInstall("event-request-fresh", first.bindingId), reusedBindingPort.port1),
+    /Invalid Session Events provisioning request/,
+  );
+  const wrongSubsystemPort = new MessageChannel();
+  await assert.rejects(
+    provisioner.install(eventInstall("event-request-wrong", "event-binding-wrong", "other"), wrongSubsystemPort.port1),
+    /Invalid Session Events provisioning request/,
+  );
+
+  provisioner.close();
+  channel.port2.close();
+  firstPort.port2.close();
+  reusedRequestPort.port2.close();
+  reusedBindingPort.port2.close();
+  wrongSubsystemPort.port2.close();
+});
+
+test("Session Events provisioner abort and close settle pending installs without accepting late acks", async () => {
+  const channel = new MessageChannel();
+  const provisioner = new RunnerSessionEventProvisioner(channel.port1, "demo", 1_000);
+  const messages = [];
+  channel.port2.addEventListener("message", (event) => messages.push(event.data));
+  channel.port2.start();
+
+  const controller = new AbortController();
+  const abortedPort = new MessageChannel();
+  const request = eventInstall("event-request-abort", "event-binding-abort");
+  const pending = provisioner.install(request, abortedPort.port1, controller.signal);
+  const received = await nextMessage(messages, 1);
+  controller.abort(new Error("superseded"));
+  await assert.rejects(pending, /superseded/);
+  channel.port2.postMessage(eventResult(received));
+
+  const closePort = new MessageChannel();
+  const closing = provisioner.install(eventInstall("event-request-close", "event-binding-close"), closePort.port1);
+  await nextMessage(messages, 2);
+  provisioner.close();
+  await assert.rejects(closing, /provisioning closed/);
+
+  channel.port2.close();
+  abortedPort.port2.close();
+  closePort.port2.close();
+});
+
+test("production PWA Runner controller replaces a dedicated Event port on the same logical client", async () => {
+  const provisioning = new MessageChannel();
+  const host = new RunnerSessionEventProvisioner(provisioning.port1, "demo", 1_000);
+  const runner = new RunnerSessionEventsBinding(provisioning.port2, "demo");
+  const hub = createSessionEventHub();
+
+  const install = async (requestId, bindingId) => {
+    const events = new MessageChannel();
+    const served = serveSessionEventCarrier(
+      hub.createBinding("demo"),
+      createSessionEventMessagePortCarrier(events.port1),
+    );
+    await host.install(eventInstall(requestId, bindingId), events.port2);
+    return served;
+  };
+
+  const firstServer = await install("event-request-a", "event-binding-a");
+  await runner.initial;
+  const seen = [];
+  const old = await runner.client.subscribe(["replacement"], (event) => seen.push(event.type));
+  await runner.client.publish("replacement", "before-loss", null);
+  await nextMessage(seen, 1);
+
+  await firstServer.close();
+  assert.deepEqual(await old.closed, { reason: "binding-terminal" });
+  await assert.rejects(
+    runner.client.publish("replacement", "known-not-accepted", null),
+    { code: "BINDING_UNAVAILABLE" },
+  );
+  host.retire("event-binding-a");
+
+  const secondServer = await install("event-request-b", "event-binding-b");
+  await runner.client.publish("replacement", "no-replay-without-fresh-subscription", null);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(seen, ["before-loss"]);
+  const fresh = await runner.client.subscribe(["replacement"], (event) => seen.push(event.type));
+  await runner.client.publish("replacement", "after-replacement", null);
+  await nextMessage(seen, 2);
+  assert.deepEqual(seen, ["before-loss", "after-replacement"]);
+
+  fresh.close();
+  await runner.close();
+  host.close();
+  await secondServer.close();
+  hub.terminate();
 });
