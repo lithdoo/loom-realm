@@ -8,6 +8,7 @@
 - [30-battle.md](./30-battle.md) — Battle、Card Integrity、1v1 与长期养成方向
 - [40-encounter-loop.md](./40-encounter-loop.md) — Visible Encounter、Challenge、Hostile 与核心游戏循环
 - [50-mvp-prologue.md](./50-mvp-prologue.md) — MVP 序章场景与验证循环
+- [60-data-placement.md](./60-data-placement.md) — Content、Realm State 与临时内存的模块归宿
 - [90-scope-principles.md](./90-scope-principles.md) — MVP 非要求、设计原则与当前非目标
 
-后续架构设计应新增独立文档，不再继续扩大单文件 `DESIGN.md`。
+`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60-data-placement.md` 是其后新增的技术设计，不回写 `DESIGN.md`。后续架构设计继续新增独立文档。
