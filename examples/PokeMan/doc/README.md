@@ -10,6 +10,7 @@
 - [50-mvp-prologue.md](./50-mvp-prologue.md) — MVP 序章场景与验证循环
 - [60-data-placement.md](./60-data-placement.md) — Content、Realm State 与临时内存的模块归宿
 - [61-character.md](./61-character.md) — 人物 Content、好感，以及临时位置 / 事件位置 / 默认位置
+- [62-event.md](./62-event.md) — 事件 id 与 states
 - [90-scope-principles.md](./90-scope-principles.md) — MVP 非要求、设计原则与当前非目标
 
-`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60-data-placement.md` 与 `61-character.md` 是其后新增的技术设计，不回写 `DESIGN.md`。后续架构设计继续新增独立文档。
+`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`62` 是其后新增的技术设计，不回写 `DESIGN.md`。后续架构设计继续新增独立文档。
