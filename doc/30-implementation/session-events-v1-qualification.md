@@ -2,11 +2,11 @@
 
 > Evidence date: 2026-10-15
 >
-> Executable / qualification-input subject: `da2ce5cbe963bb63c27604d6be15ff726812638b`
+> Executable / qualification-input subject: pending requalification after the qualification-input reliability repair
 >
-> Result: **Qualified**
+> Result: **Requalification pending**
 
-This ledger records evidence for the exact implementation commit above. The later documentation-only qualification-signature commit does not change executable behavior or qualification inputs and does not transfer this result to future behavior or qualification-input changes. The previously qualified `5722ce56c7d9722e695ebd2e211340442acb15da` subject is historical only.
+The previously qualified `da2ce5cbe963bb63c27604d6be15ff726812638b` and `5722ce56c7d9722e695ebd2e211340442acb15da` subjects are historical only. The qualification-input reliability repair must be qualified as a new exact subject before this ledger can return to **Qualified**.
 
 ## Environment
 
@@ -53,4 +53,4 @@ Evidence includes the author surface and required `SubsystemScope.events`, valid
 
 Architecture review found no business truth in the Hub, no duplicated Main authority, no physical identity exposed as logical identity, no Events multiplexing into Control/Data/State, no hidden retry/replay or silent healthy drop, no unbounded queue/Promise accumulation, no stale-binding currentness bypass, no unintended business-facing implementation ABI, and no known contract/implementation divergence.
 
-Known Session Events v1 implementation/qualification gaps: none.
+Known Session Events v1 implementation/qualification gap: exact-subject requalification is pending after the qualification-input reliability repair.

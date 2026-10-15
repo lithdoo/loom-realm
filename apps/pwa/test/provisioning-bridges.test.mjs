@@ -22,20 +22,27 @@ function windowRevoke(requestId, connectionId) {
   });
 }
 
-test("Window bridge ignores a timed-out late result and remains usable", async () => {
+test("Window bridge ignores a timed-out late result and remains usable", async (t) => {
   const channel = new MessageChannel();
   const bridge = new SessionWindowBridge(channel.port1, "epoch-1", 5);
+  t.after(() => {
+    bridge.close();
+    channel.port2.close();
+  });
   let first;
   channel.port2.addEventListener("message", (event) => {
     if (first === undefined) { first = event.data; return; }
     channel.port2.postMessage(Object.freeze({ formatVersion: 1, type: "install/result", requestId: event.data.requestId, sessionEpoch: "epoch-1", ok: true }));
   });
   channel.port2.start();
-  await assert.rejects(bridge.request(windowRevoke("request-1", "connection-1")), /timed out/);
+  const timedOut = assert.rejects(
+    bridge.request(windowRevoke("request-1", "connection-1")),
+    /timed out/,
+  );
+  while (first === undefined) await new Promise((resolve) => setTimeout(resolve, 0));
+  await timedOut;
   channel.port2.postMessage(Object.freeze({ formatVersion: 1, type: "install/result", requestId: first.requestId, sessionEpoch: "epoch-1", ok: true }));
   await bridge.request(windowRevoke("request-2", "connection-2"));
-  bridge.close();
-  channel.port2.close();
 });
 
 test("Window bridge cancellation fences a late result without closing the bridge", async () => {
@@ -58,9 +65,13 @@ test("Window bridge cancellation fences a late result without closing the bridge
   channel.port2.close();
 });
 
-test("Runner provisioner rejects timeout, ignores its late ack, and correlates the next request", async () => {
+test("Runner provisioner rejects timeout, ignores its late ack, and correlates the next request", async (t) => {
   const channel = new MessageChannel();
   const provisioner = new RunnerDataProvisioner(channel.port1, "demo", 5);
+  t.after(() => {
+    provisioner.close();
+    channel.port2.close();
+  });
   let first;
   channel.port2.addEventListener("message", (event) => {
     if (first === undefined) { first = event.data; return; }
@@ -68,11 +79,14 @@ test("Runner provisioner rejects timeout, ignores its late ack, and correlates t
   });
   channel.port2.start();
   const request = (requestId, connectionId) => Object.freeze({ formatVersion: 1, type: "data/revoke", requestId, subsystemKey: "demo", generation: 1, dataProfile: "data-v1", connectionId });
-  await assert.rejects(provisioner.revoke(request("request-1", "connection-1")), /timed out/);
+  const timedOut = assert.rejects(
+    provisioner.revoke(request("request-1", "connection-1")),
+    /timed out/,
+  );
+  while (first === undefined) await new Promise((resolve) => setTimeout(resolve, 0));
+  await timedOut;
   channel.port2.postMessage(Object.freeze({ formatVersion: 1, type: "data/result", requestId: first.requestId, subsystemKey: "demo", connectionId: first.connectionId, ok: true }));
   await provisioner.revoke(request("request-2", "connection-2"));
-  provisioner.close();
-  channel.port2.close();
 });
 
 test("Runner provisioner cancellation fences a late ack and permits rollback", async () => {
