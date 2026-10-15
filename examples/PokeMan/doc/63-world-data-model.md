@@ -55,6 +55,7 @@ CharacterDefinition
 │  ├─ occupation
 │  ├─ personality
 │  └─ history
+├─ fixed AI character text
 ├─ tags
 ├─ default scene instances
 ├─ battle profile reference
@@ -65,9 +66,11 @@ CharacterDefinition
 
 - `id` 是人物身份的稳定 key；
 - 性格、职业、经历等作者定义的静态资料属于 Content；
+- Character 可以提供一段固定 AI 人物描述文本，用自然语言表达性格、说话习惯、背景、价值观等不需要拆成规则字段的信息；
+- 固定 AI 人物描述属于 immutable Content，游戏规则不依赖解析这段文本；
 - 所有持久角色都准备好形成角色卡和进入 Battle 所需的静态素材与数据；
 - 这只是 **Content 完备性规则**，不表示游戏规则当前允许与这个人物建立契约；
-- Character 不保存当前 affinity、hostile、Contract、Card Integrity 等运行中事实。
+- Character 不保存当前 affinity、hostile、动态关系描述、Contract、Card Integrity 等运行中事实。
 
 Character 可以没有默认 Map 实例，也可以有多个默认 Map 实例。
 
@@ -322,22 +325,34 @@ NPCPlacement[]
 @loomrealm-game/map
 ```
 
-## Relationship：两个人现在是什么关系
+## Relationship：变化的“我怎么看你”
 
 Relationship 是 Realm State 中的人与人关系事实，不属于 Character，也不属于 Card。
 
-当前已经确认的最小语义：
+Relationship 采用有方向语义：
+
+```text
+A → B
+= A 当前怎么看待 / 对待 B
+```
+
+因此 `A → B` 与 `B → A` 是两份不同的 Relationship，不要求对称。
+
+当前确认的最小语义：
 
 ```text
 Relationship
-├─ participant identities
+├─ directed participant identities
 ├─ affinity
-└─ hostile
+├─ hostile
+└─ dynamic relationship text
 ```
 
 `affinity` 与 `hostile` 独立，不使用 `affinity < 0` 推导 hostile。
 
-Relationship identity、方向性（有向或双向）与最终 Record shape 留到后续专门设计。
+动态关系描述文本是一段自然语言，用于表达这一局里 A 对 B 当前形成的关系语境。它属于 Realm State，并随存档恢复。游戏规则仍读取结构化的 affinity / hostile 等事实，不依赖解析这段文本；这段文本主要供 AI 自由对话理解当前关系。
+
+初始 Relationship 可以由 Game Entry `state.records` baseline 安装。最终 Realm State Record 的精确 key / shape 后续再冻结。
 
 ## Contract：正式关系已经成立
 
@@ -373,9 +388,40 @@ Card
 └─ carried / managed state
 ```
 
-Card Integrity 是 Battle Manifestation 的持久运行状态。Relationship affinity / hostile 仍属于 Relationship，不应复制到 Card。
+Card Integrity 是 Battle Manifestation 的持久运行状态。Relationship affinity / hostile / dynamic relationship text 仍属于 Relationship，不应复制到 Card。
 
 训练/成长的精确归属仍未最终冻结，不在这里声明成独立 card level。
+
+## Card 自由对话：组合已有上下文
+
+Card 模式的 AI 自由对话不新增一套独立的人格或关系 authority。
+
+概念上：
+
+```text
+Character Content
+固定人物资料 + 固定 AI 人物描述
+
++
+
+Relationship State
+说话者 → 对方
+affinity + hostile + 动态关系描述
+
++
+
+必要的当前剧情 / Contract / Card context
+
+↓
+
+LLM 自由对话
+```
+
+例如 represented Character 是宿敌、对话对象是玩家时，AI 读取宿敌 Character 的固定人物信息，并读取 `rival → player` 的 Relationship，而不是把人格和关系复制进 Card。
+
+LLM 当次生成内容默认只是一次对话输出，不会因为说出某句话就自动成为 Character Content、Relationship State 或其他 Realm State。是否根据一次对话更新动态关系描述或其他业务事实，由游戏逻辑明确提交。
+
+当前不单独定义 Conversation Memory 数据对象；只有实际玩法证明 Relationship 的动态文本不足时，再增加新的长期数据模型。
 
 ## Battle：不要直接把 NPC 当 Battle Actor
 
@@ -410,6 +456,7 @@ Battle Simulation 仍然只拥有本场模拟权威；World 在 Battle 完成后
 ```text
 Content
 ├─ Character definitions
+│  └─ fixed AI character text
 ├─ Character Battle / Card static profiles
 ├─ Visual definitions/resources
 ├─ NPC definitions
@@ -424,7 +471,10 @@ Realm State
 ├─ current map / player position
 ├─ Event current state
 ├─ player choices / story facts that cannot be recomputed
-├─ Relationship
+├─ directed Relationship
+│  ├─ affinity
+│  ├─ hostile
+│  └─ dynamic relationship text
 ├─ Contract
 ├─ Card / Card Integrity / carried-managed state
 ├─ Encounter generated results that must persist
@@ -432,6 +482,7 @@ Realm State
 
 Frame / Runtime local
 ├─ current Dialogue node
+├─ current AI free-dialogue working context
 ├─ current Battle simulation
 ├─ current Message/System Menu interaction
 ├─ Story Resolver working set
@@ -468,7 +519,7 @@ Builder 不应因为以下情况失败：
 
 - Character / NPC / Visual 的精确 JSON schema 与 Content namespace/key；
 - Event 的精确剧情顺序表示和多个 Event 冲突规则；
-- Relationship identity 与方向性；
+- Relationship 的最终 Realm State Record key / shape，以及动态关系文本具体如何由业务更新；
 - Contract / Card 的最终 Realm State Record shape；
 - Encounter re-entry 是否重 roll、哪些生成实例必须持久化；
 - 训练、成长、Guidance 的精确数据模型；
