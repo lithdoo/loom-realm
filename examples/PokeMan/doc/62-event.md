@@ -12,7 +12,9 @@ Realm State 只保存这一局真正的动态进度，例如：
 eventId → currentStateId
 ```
 
-Event Content 定义合法的 `stateId`、当前状态下的 Map / NPC 投影，以及当前 NPC 交互从哪段固定 Dialogue 开始。World 负责真正执行 Dialogue / Battle / Relationship / Card 等业务，并在需要时提交 Event state 变化。
+Event Content 定义合法的 `stateId`、当前状态下的 Map / NPC 投影，以及当前 NPC 交互从哪段固定 Dialogue 开始。
+
+Event state 的变化不硬编码成 `if (state === A) state = B`。变化规则单独写成 immutable `EventStateMutation` Content，由明确的 Dialogue completion 或其他 World 业务结果引用并应用。
 
 当前坚持：
 
@@ -20,12 +22,16 @@ Event Content 定义合法的 `stateId`、当前状态下的 Map / NPC 投影，
 Event
 = 持久剧情阶段 + 当前阶段的场景 / 交互定义
 
-Event != 通用 Trigger / Action / Command / Flow engine
+EventStateMutation
+= 一组 Event state 前置条件 + 一组 Event state 原子赋值
+
+Event / Mutation
+!= 通用 Trigger / Action / Command / Flow engine
 ```
 
-## 基本结构
+## Event 基本结构
 
-当前概念结构收成：
+当前概念结构：
 
 ```text
 Event
@@ -40,8 +46,8 @@ Event
                   ├─ placement
                   └─ interaction?
                      ├─ dialogue
-                     └─ transitions?
-                        └─ terminalDialogueId → nextStateId
+                     └─ mutations?
+                        └─ terminalDialogueId → EventStateMutation ref
 ```
 
 这首先表达职责，不冻结最终 JSON namespace / Record key。
@@ -67,9 +73,8 @@ states:
               direction: 2
             interaction:
               dialogue: professor-intro
-              transitions:
-                professor-contract-accept: contracted
-                professor-contract-refuse: waiting
+              mutations:
+                professor-contract-accept: professor-contract-accepted
 
           rival:
             characterId: rival
@@ -96,7 +101,158 @@ states:
               direction: 4
 ```
 
-示例中的字段名仍是概念写法；重点是数据关系。
+其中 `professor-contract-accepted` 是独立的 EventStateMutation Content reference，不是 `nextStateId`。
+
+## EventStateMutation
+
+Event state mutation 是独立 Content。Mutation identity 由 Content key / reference 提供，概念数据本身只需要两个字段：
+
+```text
+EventStateMutation
+├─ from
+└─ to
+```
+
+其中 `from` / `to` 都是：
+
+```text
+eventId → stateId
+```
+
+例如：
+
+```yaml
+from:
+  professor-intro: waiting
+  rival-story: before-contract
+
+to:
+  professor-intro: contracted
+  rival-story: contracted
+  tutorial-battle: ready
+```
+
+### `from` 是 AND 前置集合
+
+同一个 Mutation 的多个 `from` 项全部是 **并且 / AND**：
+
+```text
+professor-intro == waiting
+AND
+rival-story == before-contract
+```
+
+全部匹配，Mutation 才允许执行。
+
+Mutation 内不增加：
+
+```text
+or
+anyOf
+allOf
+not
+嵌套 condition tree
+通用表达式
+```
+
+如果业务需要 OR：
+
+```text
+条件分支 A
+OR
+条件分支 B
+```
+
+则为每个分支分别定义独立 Mutation：
+
+```text
+Mutation A
+from: 分支 A 的 AND 条件
+
+Mutation B
+from: 分支 B 的 AND 条件
+```
+
+调用方 / interaction 在对应分支引用对应 Mutation。OR 不进入单条 Mutation 的 schema。
+
+### `from` 与 `to` 不要求一一对应
+
+`from` 和 `to` 的 Event 集合与数量完全不要求相同。
+
+例如：
+
+```yaml
+from:
+  professor-intro: waiting
+  rival-story: ready
+
+to:
+  tutorial-battle: active
+```
+
+表示前两个 Event 只是执行前提，Mutation 成功后只更新 `tutorial-battle`。
+
+反过来也合法：
+
+```yaml
+from:
+  tutorial-battle: completed
+
+to:
+  professor-intro: after-battle
+  rival-story: after-battle
+  town-route: open
+```
+
+语义上：
+
+```text
+只在 from 中出现
+= 只作为前置条件
+
+同时在 from / to 出现
+= 检查旧 state 后写入新 state
+
+只在 to 中出现
+= 不要求与某个 from 项配对，直接写入目标 state
+```
+
+### `to` 原子写入
+
+应用 Mutation 时：
+
+1. 读取 `from` 中所有 Event current state；
+2. 全部匹配才继续；
+3. `to` 中所有 Event state 在一次 Realm State commit 中一起更新。
+
+不允许产生业务可见的半完成结果：
+
+```text
+event A 已更新
++
+event B 未更新
+```
+
+Mutation 是一组 Event state 的原子状态变化。
+
+### Mutation 只拥有 Event state
+
+EventStateMutation 只允许检查和写入 Event current state。
+
+不在 Mutation 中增加：
+
+```text
+setAffinity
+setHostile
+createContract
+createCard
+startBattle
+modifyIntegrity
+movePlayer
+任意 Realm State path/value mutation
+```
+
+Relationship / Contract / Card / Battle 等仍由各自业务 owner 处理。EventStateMutation 不演化成通用 Realm State mutation DSL。
 
 ## Event State NPC：当前阶段这个 NPC 在哪、怎么交互
 
@@ -183,8 +339,6 @@ Dialogue 自己不直接修改 Event State。
 terminalDialogueId
 ```
 
-也就是“本次固定 Dialogue 最终结束在哪个 Dialogue”。
-
 例如：
 
 ```text
@@ -206,14 +360,14 @@ terminalDialogueId = professor-contract-accept
 terminalDialogueId = professor-contract-refuse
 ```
 
-当前不再为这个目的增加一层通用 `outcome` / `result` Content。已有 Dialogue identity 就足以作为固定对话分支的窄结果。
+当前不再为这个目的增加一层通用 Dialogue `outcome` / `result` Content。已有 Dialogue identity 就足以作为固定对话分支的窄结果。
 
-## Dialogue 驱动的 Event State 切换
+## Dialogue completion → Mutation
 
-Event State NPC 的 `interaction.transitions` 只负责一件事：
+Event State NPC 的 `interaction.mutations` 把 terminal Dialogue 分支关联到独立 EventStateMutation：
 
 ```text
-terminalDialogueId → nextStateId
+terminalDialogueId → EventStateMutation ref
 ```
 
 执行流程：
@@ -227,90 +381,65 @@ World 找到当前 Event / state / mapId / npcId
 ↓
 frame.call(Dialogue)
 ↓
-Dialogue 内完成 lines / choices / target Dialogue 跳转
-↓
 Dialogue 返回 terminalDialogueId
 ↓
-World 查 interaction.transitions[terminalDialogueId]
+查 interaction.mutations[terminalDialogueId]
 ↓
-有 nextStateId？
-├─ 否 → Event state 不变
-└─ 是 → World 提交 eventId → nextStateId
+有 Mutation ref？
+├─ 否 → 不自动改变 Event state
+└─ 是 → 读取 EventStateMutation Content
          ↓
-       Story Resolver 按新 state 重新解析场景
+       校验全部 from（AND）
+         ↓
+       一次 Realm State commit 写入全部 to
+         ↓
+       Story Resolver 按新 Event states 重新解析场景
 ```
 
-如果 `interaction` 没有 `transitions`，或者返回的 `terminalDialogueId` 没有对应 mapping，这次对话不会自动推进 Event。
-
-这使普通 NPC 日常对话可以反复执行而不改变剧情状态。
-
-## Transition 只切 Event State，不执行任意业务动作
-
-`interaction.transitions` 不扩成 action list。
-
-不在 Event Content 中增加：
+这样 Runtime 不需要知道：
 
 ```text
-setAffinity
-setHostile
-createContract
-createCard
-startBattle
-movePlayer
-arbitrary Realm State mutation
+waiting 应该变 contracted
+哪几个 Event 应该一起推进
+某个具体剧情 state 的名字是什么意思
 ```
 
-例如博士对话最终走到：
+这些状态关系都来自 Content。
+
+拒绝分支如果不需要状态变化，可以不配置 Mutation：
 
 ```text
-professor-contract-accept
+professor-contract-refuse
+→ no mutation
+→ Event states 保持不变
 ```
 
-产品业务可能需要同时完成：
+如果两个 Dialogue / Event 分支在剧情上是 OR，不把 OR 写进 Mutation；每个分支各自引用独立 Mutation。
+
+## Runtime 不扫描 Mutation
+
+EventStateMutation 是被引用的数据，不是自动监听规则。
+
+Runtime **不会**：
 
 ```text
-player → rival contract
-rival → player contract
-创建当前随身 rival Card
-Event state → contracted
+每次 State 变化后扫描全部 Mutation
+→ 找到所有 from 恰好匹配的 Mutation
+→ 自动执行
 ```
 
-这些 Relationship / Card 后果由 World 明确解释和提交；Event Content 只提供本次固定 Dialogue 对应的 `nextStateId`。
+否则会产生隐式触发链、执行顺序和循环问题。
 
-如果实现需要保证这些业务事实与 Event state 一起成立，应由 World 的业务提交过程负责一致性，而不是把它们编码成 Event action DSL。
-
-## 非 Dialogue 原因的 Event State 切换
-
-不是所有 Event state 变化都来自 NPC Dialogue。
-
-例如未来可能有：
+正确模型是：
 
 ```text
-Battle 完成
-到达某处
-完成中心操作
-其他明确的 World 业务结果
+明确业务结果
+→ 明确 Mutation ref
+→ 校验 from
+→ 应用 to
 ```
 
-第一版不为这些来源设计统一 `trigger` schema。对应业务发生后，由 World 明确提交：
-
-```text
-eventId → nextStateId
-```
-
-因此当前有两条推进路径：
-
-```text
-NPC 固定 Dialogue
-→ terminalDialogueId
-→ interaction.transitions
-→ nextStateId
-
-其他 World 业务
-→ World 明确决定 nextStateId
-```
-
-等实际剧情出现大量重复模式以后，再判断是否值得抽取新的窄 Content 能力。
+当前最直接的引用来源是固定 Dialogue completion。未来 Battle 完成、到达地点等业务如果需要使用同一 Mutation 数据结构，也由对应 World 业务明确选择 Mutation ref，而不是让 Mutation 自己拥有 trigger。
 
 ## NPC 出现规则
 
@@ -446,13 +575,7 @@ Map Enter
 → 得到 NPC Instance / NPCPlacement 集合
 ```
 
-Story Index：
-
-- 是 Builder 生成的派生 Content；
-- 不是真相的第二份 authority；
-- 不进入 Realm State；
-- 不进入 Save；
-- 可以随 Content 重新构建。
+Story Index 是 Builder 生成的派生 Content，不进入 Realm State / Save，可以随源 Content 重建。
 
 ## Builder 与 Runtime 检查
 
@@ -462,8 +585,10 @@ Builder 应检查能够静态确定的问题，例如：
 - 同一个 Event state 内重复 `(mapId, npcId)`；
 - 单个定义中的重复 `instanceId`；
 - `interaction.dialogue` 引用了不存在的 Dialogue；
-- `interaction.transitions` 的 `terminalDialogueId` 引用了不存在的 Dialogue；
-- `interaction.transitions` 的 `nextStateId` 不属于当前 Event；
+- `interaction.mutations` 的 `terminalDialogueId` 引用了不存在的 Dialogue；
+- `interaction.mutations` 引用了不存在的 EventStateMutation；
+- Mutation `from` / `to` 引用了不存在的 Event 或 state；
+- Mutation 同一个 `from` 或 `to` 中不能重复定义同一个 eventId；
 - 引用不存在的 Character / NPC / Map；
 - 非法 placement；
 - 派生 Story Index 与源定义不一致。
@@ -471,17 +596,28 @@ Builder 应检查能够静态确定的问题，例如：
 Builder **不因为以下情况失败**：
 
 ```text
+Mutation.from 包含多个 Event
+Mutation.to 包含多个 Event
+Mutation.from / to 的 Event key 集合不同
+多个独立 Mutation 表达 OR 分支
 同一个 npcId 被多个不同 Event 引用
 同一个 npcId 在同一个 Event state 中出现在多个不同 Map
 同一个 Character 被多个 Event 引用
 同一个 Character 出现在多个 Map
-Dialogue 图存在合法 cycle
 ```
 
-Runtime 在合并当前所有来源后必须检查：
+Runtime 应保证：
 
-```text
-对每个 mapId：npcId 唯一
-```
+- 被引用 Mutation 的全部 `from` 当前值必须同时匹配；
+- 成功 Mutation 的全部 `to` 在一次 commit 中原子写入；
+- Runtime 不主动扫描未被引用的 Mutation；
+- 合并当前场景来源后，每张最终 Map 内 `npcId` 唯一。
 
-不同 Event 最终同时产生同一 `(mapId, npcId)` 时，Story Resolver 必须确定性处理为冲突；当前不定义隐式 last-wins。
+## 当前仍未冻结
+
+- Event / EventStateMutation 的最终 Content namespace / key；
+- Event placement / `instanceId` 的最终 schema；
+- Mutation `from` 校验失败时，对具体 UI / Message 的错误呈现；
+- 非 Dialogue 业务如何在各自 Content 中引用 Mutation；
+- `absent` 与跨 Event 出现定义同时命中的解析；
+- 是否未来需要显式 NPC override。
