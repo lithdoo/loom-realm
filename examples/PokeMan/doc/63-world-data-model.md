@@ -1,6 +1,6 @@
 # 世界数据模型
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文汇总当前已经确认的 Character、NPC、Visual、Story、Dialogue、EventStateMutation、Encounter、Relationship、Card 与 Battle 数据职责。精确 JSON schema、Realm State namespace/key 和持久化格式仍可继续细化。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文汇总当前已经确认的 Character、NPC、Visual、Story、Dialogue、EventStateMutation、Encounter、Relationship、Card 与 Battle 数据职责。精确 Content namespace/key 与部分 Realm State key 仍可继续细化。
 
 归宿总表见 [数据落点](./60-data-placement.md)，人物细节见 [人物](./61-character.md)，Event 见 [事件](./62-event.md)，固定 Dialogue 见 [固定对话](./64-dialogue.md)，总览图见 [数据模型图](./65-data-model-diagram.md)。
 
@@ -9,16 +9,17 @@
 当前模型坚持几个边界：
 
 1. **Character identity 与 Map 表现分离。** Character 不是 NPC，NPC Instance 也不要求一定对应持久 Character。
-2. **Relationship 保存人与人的长期关系与契约事实。** Contract 不建立独立 authority。
-3. **Card 与 Relationship 分离。** 技术数据模型里的 Card 只表示当前随身、主要服务 Pocket / Battle 的卡片状态。
+2. **Relationship 保存有向长期关系、契约和契约级长期状态。** affinity / hostile / contract / integrity / progression 都属于 Relationship。
+3. **Card 与 Relationship 分离。** Card 只表示当前随身，以及 holder / servant / slot；不保存 Integrity / Progression。
 4. **Battle Runtime 独立。** Battle 当前运行状态只由 `@loomrealm-game/battle` Simulation authority 拥有。
 5. **PokeMan 不重复定义 BattleActor / BattleSkill。** 战斗静态数据直接复用 `@loomrealm-game/battle` 当前 Content contract。
 6. **Event 保持为剧情状态与场景 / 交互定义。** 不扩成通用 Trigger / Action / Command / Flow engine。
-7. **Event current state 是稀疏 `stateId | null`。** 没有当前状态 / `null` 表示 Event 当前未启动或已清空，不参与 Event State 投影。
-8. **Event state 的声明式变化独立为 EventStateMutation Content。** `from` 是 AND 前置集合，`to` 是原子赋值集合；OR 用多条 Mutation 表达。
-9. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以在完成时引用一个 EventStateMutation。
-10. **`choices` 与 `mutation` 互斥。** 需要状态变化的 Choice 必须先跳到新的无 Choice Dialogue，再由新 Dialogue 触发 Mutation。
-11. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
+7. **Event current state 使用一个 EventStateList Realm State Record。** 列表只保存非空 state；没有 entry 等价于 `null`。
+8. **Event state 的声明式变化独立为 EventStateMutation Content。** `from` 是 AND 前置集合，`to` 是赋值集合；OR 用多条 Mutation 表达。
+9. **Content 只定义，Subsystem 执行。** PokeMan Dialogue Subsystem 读取 Dialogue / Mutation Content 并通过 `scope.state` 更新 EventStateList。
+10. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以引用一个 EventStateMutation。
+11. **`choices` 与 `mutation` 互斥。** 需要状态变化的 Choice 必须先跳到新的无 Choice Dialogue，再由新 Dialogue 触发 Mutation。
+12. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
 
 ## 总体关系
 
@@ -29,32 +30,35 @@ Character Content
       │                 └─ skills[] → BattleSkill Content
       │
       ├────────────→ Relationship A → B
-      │                 └─ contract?
+      │                 ├─ affinity / hostile / contract
+      │                 └─ integrity / progression
       │
       ├────────────→ NPC Instance → NPC Definition → Visual
       │
       └────────────→ current carried Card
-                        holder / servant / slot / integrity
+                        holder / servant / slot
 
-Sparse Event current states
-→ eventId → stateId | null
-→ null Event 跳过
+Realm State EventStateList
+→ eventId → stateId（只有非空项）
+→ 缺 entry = null
 → active Event State
 → mapId / npcId / placement
 → interaction.dialogue
-→ Dialogue Frame
+→ PokeMan Dialogue Subsystem
 → choices? → target Dialogue
 → terminal Dialogue
 → mutation?
-→ EventStateMutation
-→ validate all from（包括 null）
-→ atomically commit all to
+→ EventStateMutation Content
+→ Dialogue Subsystem validate from
+→ Dialogue Subsystem 计算新 EventStateList
+→ scope.state.commit() 替换整个列表
 → Story Resolver re-resolve
 
-BattleActor Content
+Current Card
 +
-current carried Card state（如果来源是随身 Card）
-或 Story / Encounter battle source
+Relationship(holder → servant).integrity / progression
++
+Character servant → BattleActor Content
 ↓
 @loomrealm-game/battle Runtime Actor
 ↓
@@ -79,7 +83,7 @@ CharacterDefinition
 └─ presentation references
 ```
 
-Character 不保存当前 affinity、hostile、contract、Card Integrity 或 Battle Runtime hp。所有持久 Character 都准备好 Card / Battle 所需静态素材，但这不等于 `canContract`。
+Character 不保存当前 affinity、hostile、contract、Integrity 或 Battle Runtime hp。所有持久 Character 都准备好 Card / Battle 所需静态素材，但这不等于 `canContract`。
 
 ## BattleActor / BattleSkill
 
@@ -163,38 +167,17 @@ Dialogue A
         └─ no mutation
 ```
 
-没有 `choices` 的 Dialogue 播放完成，并在需要时成功应用 `mutation` 后，是 terminal Dialogue。Dialogue Frame 正常完成仍可返回：
+Dialogue Content 不执行 Mutation。PokeMan Dialogue Subsystem 是 Runtime executor；`@loomrealm-game/rpg-dialogue` 只是底层 Conversation interaction / presentation library。
+
+没有 `choices` 的 Dialogue 播放完成，并在需要时由 Dialogue Subsystem 成功应用 `mutation` 后，是 terminal Dialogue。Dialogue Frame 正常完成仍可返回：
 
 ```text
 terminalDialogueId
 ```
 
-但 Event state mutation 不再由 caller 根据 `terminalDialogueId` 查映射；Mutation 由 terminal Dialogue 自己引用。
-
 ## Event / Story
 
-Event 是 immutable Content。Realm State 只保存当前真正有业务意义的 Event state，逻辑模型是稀疏表：
-
-```text
-CurrentEventStates
-= Partial<eventId, stateId>
-
-等价读取语义：
-eventId → stateId | null
-```
-
-其中：
-
-```text
-stateId != null
-→ Event 当前已启动，读取对应 Event State Content
-
-stateId == null
-→ Event 当前为空状态 / 未启动
-→ 不参与 Event State 场景投影
-```
-
-安装初始化 Realm State baseline 只需要声明开局已启动的 Event；不需要把 Content 中所有 Event 都写入 State，也不要求人为增加 `inactive` state。
+Event 是 immutable Content：
 
 ```text
 EventDefinition
@@ -214,11 +197,8 @@ EventDefinition
 职责：
 
 ```text
-Event current state
-= stateId | null
-
 Event State
-= 非空 current state 对应的剧情阶段 Content
+= 某个合法剧情阶段的 Content
 
 Event State NPC
 = 当前阶段这个 NPC 在哪、入口 Dialogue 是什么
@@ -229,21 +209,124 @@ Dialogue
 
 Event State NPC 不维护 `terminalDialogueId → Mutation` 映射。
 
-### 空状态不是 Realm State Record membership
+# Realm State
 
-`null` 是 Event 的业务值，不是“底层 Record 一定不存在”。Realm State v1 的 `put(null)` 不会 dematerialize Record，所以：
+## EventStateList
+
+所有 Event current state 使用**一个 Realm State Record**：
 
 ```text
-从未启动过
-和
-曾经启动过，后来 current state 写回 null
+EventStateList
+[
+  { eventId: "professor-intro", stateId: "waiting" },
+  { eventId: "home-intro", stateId: "active" }
+]
 ```
 
-在 Event 业务层都表示当前空状态。
+业务读取：
 
-Story Resolver 不依赖 `list()` / Record membership 判断 Event 是否启动。稀疏 Event state 最终使用一个总表 Record 还是多个 Record 仍未冻结。
+```text
+有 entry
+→ current state = entry.stateId
 
-## EventStateMutation
+无 entry
+→ current state = null
+→ Event 当前未启动 / 空状态
+```
+
+列表约束：
+
+- `eventId` 唯一；
+- 只保存非空 `stateId`；
+- `stateId` 必须属于对应 Event；
+- `null` 不作为列表项存储。
+
+安装初始化 Realm State baseline 直接安装 EventStateList，只列出开局已启动的 Event。
+
+Event lifecycle 不单独建 API：
+
+```text
+null → stateId
+= 新增 entry / 启动 Event
+
+stateA → stateB
+= 修改 entry / 推进 Event
+
+stateId → null
+= 删除 entry / 清空 Event
+```
+
+EventStateList Realm State Record 的最终 namespace / key 名字仍待 schema 冻结，但“一个列表 Record”已经确认。
+
+## Relationship
+
+Relationship 是有方向的长期业务状态：
+
+```text
+Relationship
+├─ fromCharacterId
+├─ toCharacterId
+├─ affinity
+├─ hostile
+├─ dynamic relationship text
+├─ contract?
+├─ integrity?
+└─ progression / training?
+```
+
+`A → B` 与 `B → A` 是独立 Relationship。
+
+`contract` 表示 A 以主公身份与 B 建立正式契约。Integrity、训练 / Progression 也属于这份有向契约的长期状态，所以即使当前 Card 不存在，它们仍然存在。
+
+同一个 Character 被不同主公契约时，各自 Relationship 的 affinity、Integrity、Progression 相互独立。
+
+Contract 不建立独立 Realm State object。
+
+## Card
+
+Card 是独立 Realm State 对象，但只表示当前随身：
+
+```text
+Card
+├─ holderCharacterId
+├─ servantCharacterId
+└─ slot
+```
+
+语义：
+
+```text
+Relationship(A → B).contract = true
+→ 契约长期存在
+
+Card(A, B) exists
+→ 当前随身
+
+Card(A, B) absent
+→ 当前不随身
+→ Relationship / integrity / progression 不受影响
+```
+
+Card 不保存 Integrity、Progression 或 BattleActor / BattleSkill 数据。
+
+Card 的独立 `cardId` 是否需要存在尚未冻结。
+
+## 其他 Realm State
+
+```text
+Realm State
+├─ player current map / position / direction
+├─ EventStateList Record
+├─ Relationship[]
+├─ current carried Card[]
+├─ Encounter generated results that must persist
+├─ Pocket / story committed facts
+└─ player choices / random facts that cannot be recomputed
+```
+
+Event、Dialogue 与 EventStateMutation definitions 都是 Content；Save 只保存实际 mutable facts。
+
+# EventStateMutation
 
 EventStateMutation 是独立 Content，不嵌在某个 Event 内成为专属 transition。
 
@@ -255,9 +338,9 @@ EventStateMutation
    └─ eventId → stateId | null
 ```
 
-### `from`：AND
+## `from`：AND
 
-一条 Mutation 的所有 `from` 项必须全部满足。`null` 可以作为明确的空状态前置条件：
+一条 Mutation 的所有 `from` 项必须全部满足。`null` 表示 EventStateList 当前没有该 `eventId` entry：
 
 ```text
 eventA == stateA
@@ -267,17 +350,17 @@ eventB == null
 
 Mutation 不拥有 `or / anyOf / condition tree`。需要 OR 时，为每个分支定义独立 Mutation，由对应 Dialogue / 业务分支引用。
 
-### `from` / `to` 不一一对应
+## `from` / `to` 不一一对应
 
 ```text
 只在 from
 = 前置条件
 
 同时在 from / to
-= 检查旧 state 后写入新 state / null
+= 检查旧 state 后修改 / 删除 entry
 
 只在 to
-= 直接写入目标 state / null
+= 直接新增 / 修改 / 删除 entry
 ```
 
 例如：
@@ -293,9 +376,7 @@ to:
   tutorial-battle: ready
 ```
 
-这同时完成：检查一个 Event 尚未启动、推进已有 Event、启动新的 Event。
-
-清空 Event 也只是普通 Mutation：
+清空 Event：
 
 ```yaml
 from:
@@ -306,47 +387,69 @@ to:
   town-route: open
 ```
 
-### `to`：原子 commit
+## 原子 commit
 
-Runtime 先验证全部 `from`，成功后把全部 `to` 在一次 Realm State commit 中一起写入。写入 `null` 表示逻辑上清空 Event，不要求物理 Record 被删除。
+对应 PokeMan Subsystem 执行 Mutation 时：
+
+```text
+read EventStateList + version
+↓
+校验全部 from
+↓
+生成新 EventStateList
+  to = stateId → upsert entry
+  to = null    → delete entry
+↓
+state.commit()
+  condition = EventStateList version
+  write     = 新 EventStateList
+```
+
+全部 Event 变化通过一个 Record replacement 原子提交。
 
 Mutation 只拥有 Event current state，不扩展到 Relationship / Contract / Card / Battle / player position / arbitrary Realm State path/value。
 
-## Dialogue → EventStateMutation
+# Dialogue → EventStateMutation
 
 固定 NPC Dialogue 的运行链：
 
 ```text
 玩家与 NPC 交互
 ↓
-World 找到当前非空 Event state / mapId / npcId
+World 根据 EventStateList 找到当前 Event state / mapId / npcId
 ↓
 interaction.dialogue
 ↓
-frame.call(Dialogue)
+frame.call(PokeMan Dialogue Subsystem)
 ↓
-播放 lines
+Dialogue Subsystem 读取 Dialogue Content
+↓
+使用 @loomrealm-game/rpg-dialogue 展示当前 Conversation
 ↓
 有 choices？
 ├─ 是 → 选择 target Dialogue，继续 Dialogue graph
 └─ 否 → 有 mutation？
          ├─ 否 → complete
-         └─ 是 → validate Mutation.from（全部 AND，包括 null）
+         └─ 是 → Dialogue Subsystem 读取 EventStateMutation
                   ↓
-                atomically commit Mutation.to
+                scope.state.read(EventStateList)
                   ↓
-                Story Resolver 按新稀疏 Event states 重新解析场景
+                validate from
+                  ↓
+                生成新 EventStateList
+                  ↓
+                scope.state.commit()
                   ↓
                 complete
 ↓
 返回 terminalDialogueId
 ```
 
-Runtime 不硬编码具体 Event state 名称，也不扫描全部 Mutation 自动执行。Mutation 必须被明确 Dialogue 或其他业务结果引用。
+Runtime 不扫描全部 Mutation 自动执行。Mutation 必须被明确 Dialogue 或其他业务结果引用，并由对应 PokeMan Subsystem 执行。
 
-未来 Battle 完成、到达地点等业务也可以显式引用同一种 Mutation，但 Mutation 本身不拥有 trigger。
+未来 Battle 完成、到达地点等业务也可以显式引用同一种 Mutation，但 Mutation Content 本身不拥有 trigger，也不参与执行。
 
-## Event NPC source 与最终 Map 唯一性
+# Event NPC source 与最终 Map 唯一性
 
 不同 Event 可以都声明同一个 NPC；同一个 Event state 也可以让同一 `npcId` 出现在多个不同 Map。
 
@@ -357,10 +460,10 @@ Runtime 不硬编码具体 Event state 名称，也不扫描全部 Mutation 自�
 不同 Event
 → 允许重复引用同一个 npcId
 
-currentState == null 的 Event
+EventStateList 无该 Event entry
 → 不参与投影
 
-Runtime 合并当前所有非空 Event 来源
+Runtime 合并当前 active Event 来源
 → 每张最终 Map 内 npcId 必须唯一
 ```
 
@@ -377,7 +480,7 @@ Story Index
 
 它可以重建，不进入 Save。
 
-## Encounter
+# Encounter
 
 Visible Encounter Content 至少表达：
 
@@ -393,55 +496,6 @@ EncounterDefinition
 ```
 
 Encounter 可以生成 transient NPC Instance，也可以提供临时 Battle 输入；不要求为临时敌人建立 Character Relationship 或 Card。
-
-# Realm State
-
-## Relationship
-
-```text
-Relationship
-├─ fromCharacterId
-├─ toCharacterId
-├─ affinity
-├─ hostile
-├─ dynamic relationship text
-└─ contract?
-```
-
-`A → B` 与 `B → A` 是独立 Relationship。Contract 不建立独立 Realm State object。
-
-## Card
-
-Card 是独立 Realm State 对象，只表示当前随身角色卡：
-
-```text
-Card
-├─ holderCharacterId
-├─ servantCharacterId
-├─ slot
-└─ battleState
-   └─ integrity
-```
-
-契约存在不意味着当前一定存在 Card。Card 的独立 `cardId` 尚未冻结。
-
-从者有 contract 但当前不随身时，Integrity / training / progression 的长期 owner 仍待设计。
-
-## 其他 Realm State
-
-```text
-Realm State
-├─ player current map / position / direction
-├─ sparse Event current states
-│  └─ eventId → stateId | null
-├─ Relationship[]
-├─ current carried Card[]
-├─ Encounter generated results that must persist
-├─ Pocket / story committed facts
-└─ player choices / random facts that cannot be recomputed
-```
-
-Event、Dialogue 与 EventStateMutation definitions 都是 Content；Save 只保存实际 mutable facts。Event 空状态的逻辑语义是 `null`，不要求 Save / Realm State 枚举所有 Content Event。
 
 # Runtime / Projection
 
@@ -466,13 +520,13 @@ Map Enter：
 ```text
 Story Index
 +
-稀疏 Event current states
+EventStateList
 +
 Character / Event Content
 +
 Encounter generated state
 ↓
-跳过 currentState == null 的 Event
+只读取有 EventStateList entry 的相关 Event
 ↓
 Story Resolver
 ↓
@@ -490,16 +544,18 @@ NPCPlacement[]
 PokeMan 不定义平行 Runtime BattleActor schema；本场 actor state 直接以 `@loomrealm-game/battle` Simulation contract 为准。
 
 ```text
-Character
-→ BattleActor Content
+Card(holder=A, servant=B)
 +
-Card battleState（随身 Card 来源时）
-或 Story / Encounter Battle source
+Relationship(A → B).integrity / progression
++
+Character B → BattleActor Content
 ↓
 Battle Runtime Actor
 ```
 
-临时敌人不需要 contract / Card。Battle 结束以后 Runtime actor 丢弃，World 只提交明确需要长期存在的业务后果。
+Card Battle Manifestation 的初始 HP 来自 Relationship.integrity；Battle 结束后长期 Integrity 写回同一 Relationship。
+
+临时敌人不需要 contract / Card。Battle 结束以后 Runtime actor 丢弃，游戏业务只提交明确需要长期存在的后果。
 
 因此：
 
@@ -525,24 +581,23 @@ Builder 应检查：
 
 - Character / NPC / Visual / Event / EventStateMutation / Map / Dialogue / BattleActor / BattleSkill 等静态引用不存在；
 - Event/state / Dialogue identity 重复；
-- 安装初始化 State 中非空 Event state 引用了不存在的 Event / state；
+- 安装初始化 EventStateList 重复 `eventId`；
+- EventStateList 中的 `eventId / stateId` 引用了不存在的 Event / state；
 - Dialogue Choice target 不存在；
 - 同一个 Dialogue 同时存在 `choices` 与 `mutation`；
 - Dialogue `mutation` 引用了不存在的 EventStateMutation；
 - `interaction.dialogue` 不存在；
 - Mutation `from` / `to` 中非空 `stateId` 引用了不存在的 Event state；
-- Mutation 中 `null` 是合法 Event 空状态；
 - Mutation 单侧重复 eventId；
 - Character / BattleActor / BattleSkill 引用不合法；
-- 同一个 Event state 内重复 `(mapId, npcId)`；
+- 同一个 Event state 内重复 `(mapId,npcId)`；
 - placement 非法；
 - Story Index 与源 Content 不一致。
 
 Builder 不应因为以下情况失败：
 
 ```text
-安装初始化 State 不包含全部 Event
-Event current state 为 null
+安装 EventStateList 不包含全部 Event
 Mutation.from 有多个 Event
 Mutation.to 有多个 Event
 Mutation.from / to 的 Event key 集合不同
@@ -558,13 +613,17 @@ Dialogue 之间形成合法 cycle
 
 Runtime：
 
-- Event current state 逻辑上是稀疏的 `stateId | null`；
-- `null` Event 不参与 Event State 投影；
-- 不以 Realm State Record materialization / membership 判断 Event 是否启动；
+- EventStateList 是 Event current state 的 Realm State authority；
+- EventStateList 内 `eventId` 唯一；
+- 缺 entry 等价于 Event current state `null`；
+- 缺 entry 的 Event 不参与 Event State 投影；
 - 只应用被明确引用的 Mutation；
+- Content 不执行 Mutation；对应 PokeMan Subsystem 执行；
 - Mutation 的全部 `from` 必须同时匹配，包括显式 `null`；
-- Mutation 的全部 `to` 必须原子提交；
+- Mutation 用 EventStateList Record version 做 OCC；
+- Mutation 的全部 `to` 通过一次 EventStateList replacement 原子提交；
 - 不扫描 Mutation 自动触发；
+- Battle 的契约级长期 Integrity / Progression 回写 Relationship，而不是 Card；
 - 合并当前 NPC 来源后，每张最终 Map 内 `npcId` 唯一。
 
 # 当前继续设计的问题
@@ -572,15 +631,15 @@ Runtime：
 - Character / NPC / Visual 的精确 Content schema / namespace；
 - Character 到 BattleActor Content 的最终引用编码；
 - Event / EventStateMutation 的最终 Content namespace / key；
-- 稀疏 Event current state 的最终 Realm State namespace / key / Record shape；
-- 非 Dialogue 业务如何引用 Mutation；
-- Dialogue mutation `from` 校验失败的产品错误表现；
+- EventStateList Realm State Record 的最终 namespace / key 名字；
+- 非 Dialogue Subsystem 如何在各自 Content 中引用 Mutation；
+- Mutation `from` mismatch / OCC conflict 的产品错误表现；
 - `absent` 与跨 Event NPC 冲突 / 显式 override 规则；
 - Dialogue condition、本地化与 presentation metadata；
-- Relationship 的最终 Realm State key / shape；
+- Relationship 的最终 Realm State key / 精确 progression shape；
 - Card 的最终 key / 是否需要独立 `cardId`；
-- 非随身契约从者的 Integrity / Progression 长期 owner；
 - Skill 学习 / 成长如何影响 BattleActor `skills[]` 的长期业务状态；
+- Encounter transient speaker identity；
 - Encounter re-entry / persistence；
 - Guidance、训练和多卡编队；
 - NPC patrol / chase / 独立移动。
