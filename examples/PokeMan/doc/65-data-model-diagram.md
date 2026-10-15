@@ -103,13 +103,18 @@ classDiagram
       <<Content>>
       id
       lines[]
-      terminalChoices[]
+      choices[]
     }
 
     class DialogueChoice {
       <<Content>>
       text
       targetDialogueId
+    }
+
+    class DialogueCompletion {
+      <<Runtime result>>
+      terminalDialogueId
     }
 
     class EventDefinition {
@@ -121,8 +126,21 @@ classDiagram
     class EventState {
       <<Content>>
       stateId
-      dialogueRefs[]
-      npcInstanceDefs[]
+      maps
+    }
+
+    class EventStateNPC {
+      <<Content>>
+      npcId
+      characterId?
+      placement
+      interaction?
+    }
+
+    class EventNPCInteraction {
+      <<Content>>
+      dialogueId
+      transitions
     }
 
     class EventCurrentState {
@@ -166,13 +184,18 @@ classDiagram
     CharacterDefinition "1" <-- "0..*" Card : servant
 
     CharacterDefinition --> DialogueDefinition : speaker refs
-    DialogueDefinition "1" *-- "0..*" DialogueChoice : terminal choices
+    DialogueDefinition "1" *-- "0..*" DialogueChoice : choices
     DialogueChoice --> DialogueDefinition : target
+    DialogueDefinition --> DialogueCompletion : returns terminal id
 
     EventDefinition "1" *-- "1..*" EventState : states
     EventCurrentState --> EventDefinition : eventId
-    EventState --> DialogueDefinition : references
-    EventState --> NPCInstance : defines source projection
+    EventState "1" *-- "0..*" EventStateNPC : map/npc entries
+    EventStateNPC --> NPCInstance : defines source projection
+    EventStateNPC "1" *-- "0..1" EventNPCInteraction : interaction
+    EventNPCInteraction --> DialogueDefinition : entry dialogue
+    DialogueCompletion --> EventNPCInteraction : transition lookup
+    EventNPCInteraction --> EventState : terminal id to next state
 
     EncounterDefinition --> NPCInstance : generates
     EncounterDefinition --> BattleActorContent : temporary opponent actor
@@ -185,6 +208,49 @@ classDiagram
     BattleActorContent --> BattleRuntimeActor : static battle definition
     EncounterDefinition --> BattleRuntimeActor : temporary actor source
 ```
+
+## Event State / NPC / Dialogue 链路
+
+```mermaid
+flowchart LR
+    ES[Event current state] --> MAP[mapId]
+    MAP --> NPC[npcId + placement]
+    NPC --> I{interaction?}
+
+    I -->|无| SCENE[只作为场景 NPC]
+    I -->|有| D[entry Dialogue]
+
+    D --> DF[Dialogue Frame]
+    DF --> T[terminalDialogueId]
+    T --> TR{interaction.transitions}
+
+    TR -->|没有 mapping| SAME[Event state 不变]
+    TR -->|terminal id -> nextStateId| W[World commit Event currentState]
+    W --> RESOLVE[Story Resolver 重新解析场景]
+```
+
+关键边界：
+
+```text
+Event State
+= 当前剧情阶段
+
+Event State NPC
+= 这个阶段 NPC 在哪、入口 Dialogue 是什么
+
+Dialogue
+= 实际台词与内部 Choice 跳转
+
+Dialogue completion
+= terminalDialogueId
+
+Event transition
+= terminalDialogueId → nextStateId
+```
+
+Relationship / Contract / Card / Battle 等业务 mutation 不进入 `interaction.transitions`。需要这些后果时，由 World 在解释 Dialogue result 时明确提交。
+
+非 Dialogue 原因的 Event state 切换，例如 Battle 完成或其他 World 业务结果，也由 World 直接提交 `eventId → nextStateId`；当前不增加通用 Trigger / Action DSL。
 
 ## NPC / Event / Map 唯一性
 
@@ -299,7 +365,8 @@ PokeMan Skill
 - 从者有 contract 但不随身时，Integrity / Progression 长期状态最终由谁拥有；
 - Character → BattleActor Content 的最终引用编码；
 - 技能学习 / 成长如何改变某个角色长期可用的 `skills[]`；
-- Event currentState 的推进触发；
+- Event 最终 JSON namespace / key 与 placement / instanceId 的精确编码；
+- 非 Dialogue 的重复 Event transition 模式是否未来值得抽取窄的 Content 能力；
 - 跨 Event 的同一 `(mapId, npcId)` 冲突未来是否需要显式 override；
 - `absent` 与其他 Event 出现定义同时命中时的解析；
 - Encounter re-entry 与生成结果持久化细节。
