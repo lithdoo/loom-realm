@@ -4,6 +4,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createRendererDataPeer } from "@loomrealm/data";
 import { createMainRuntimeControlPeer } from "@loomrealm/runtime-control";
 import { createRealmStateClient } from "@loomrealm/realm-state";
+import { createSessionEventClient } from "@loomrealm/session-events";
 import { completed, defineSubsystem } from "../dist/index.js";
 import { runSubsystem } from "../dist/host/index.js";
 import { ViewportManager } from "../dist/internal/viewport-manager.js";
@@ -150,6 +151,10 @@ test("Runtime scope.viewport receives Data state and goes inert after shutdown",
     },
     state: (() => {
       const client = createRealmStateClient();
+      return Object.freeze({ client, terminate: () => client.terminate() });
+    })(),
+    events: (() => {
+      const client = createSessionEventClient();
       return Object.freeze({ client, terminate: () => client.terminate() });
     })(),
   });

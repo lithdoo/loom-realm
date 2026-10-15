@@ -14,6 +14,7 @@ import {
   createRealmStateAuthority,
   prepareRealmStateDefinition,
 } from "@loomrealm/realm-state";
+import { createSessionEventHub } from "@loomrealm/session-events";
 
 const policy = Object.freeze({
   helloDeadlineMs: 30_000,
@@ -28,6 +29,7 @@ function createHostraRuntimeHosting(options) {
   return createProductionHostraRuntimeHosting({
     ...options,
     realmStateAuthority: createRealmStateAuthority(prepareRealmStateDefinition([])),
+    sessionEventHub: createSessionEventHub(),
   });
 }
 
@@ -274,6 +276,55 @@ test("wrong capability paths do not consume the one valid connection", async (t)
   await hosted.terminated;
   await carrier.closed;
   valid.terminate();
+});
+
+test("dedicated Events endpoint rejects a wrong path and accepts a fresh sequential binding", async (t) => {
+  const game = await prepared(t);
+  const fixtureEntry = path.join(game.launchPlan.canonicalInstallationRoot, "events-rebind-runner.mjs");
+  const wsModule = import.meta.resolve("ws");
+  await writeFile(fixtureEntry, `
+    import { writeFile } from "node:fs/promises";
+    import WebSocket from ${JSON.stringify(wsModule)};
+    const bootstrap = JSON.parse(process.env.LOOMREALM_HOSTRA_RUNNER_BOOTSTRAP);
+    const endpoint = process.env.LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT;
+    delete process.env.LOOMREALM_HOSTRA_RUNNER_BOOTSTRAP;
+    delete process.env.LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT;
+    const open = (url) => new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      socket.once("open", () => resolve(socket));
+      socket.once("error", reject);
+    });
+    const rejected = (url) => new Promise((resolve) => {
+      const socket = new WebSocket(url);
+      socket.once("unexpected-response", () => { socket.terminate(); resolve(true); });
+      socket.once("error", () => resolve(true));
+      socket.once("open", () => { socket.terminate(); resolve(false); });
+    });
+    const parsed = new URL(endpoint);
+    const wrongRejected = await rejected(parsed.origin + "/wrong");
+    const first = await open(endpoint);
+    await new Promise((resolve) => { first.once("close", resolve); first.close(); });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const second = await open(endpoint);
+    await writeFile("events-rebind.json", JSON.stringify({
+      wrongRejected,
+      distinct: endpoint !== bootstrap.controlEndpoint && endpoint !== bootstrap.realmStateEndpoint,
+      scrubbed: process.env.LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT === undefined
+    }));
+    await new Promise((resolve) => { second.once("close", resolve); second.close(); });
+    setInterval(() => {}, 1000);
+  `);
+  const plan = Object.freeze({ ...game.launchPlan, runnerEntry: fixtureEntry });
+  const hosted = await createHostraRuntimeHosting({ launchPlan: plan }).launch(
+    { subsystemKey: "root", bootstrapToken: "token" },
+    new AbortController().signal,
+  );
+  const evidence = JSON.parse(await waitForFile(
+    path.join(game.launchPlan.canonicalInstallationRoot, "events-rebind.json"),
+  ));
+  assert.deepEqual(evidence, { wrongRejected: true, distinct: true, scrubbed: true });
+  await hosted.requestTermination(new AbortController().signal);
+  await hosted.terminated;
 });
 
 test("spawn failure is mapped without returning HostedRuntime", async (t) => {

@@ -75,6 +75,7 @@ export function classifyPaths(paths) {
 
     if (
       path.startsWith("packages/realm-state/") ||
+      path.startsWith("packages/session-events/") ||
       path.startsWith("packages/game-package/")
     ) {
       impact.code = true;

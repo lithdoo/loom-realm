@@ -4,6 +4,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { prepareRendererHelloResultV1 } from "@loomrealm/renderer-control";
 import { createRealmStateClient } from "@loomrealm/realm-state";
+import { createSessionEventClient } from "@loomrealm/session-events";
 import {
   FrameCallRejectedError,
   completed,
@@ -110,6 +111,10 @@ function createFakePlatform(definitions, options = {}) {
             const client = createRealmStateClient();
             return Object.freeze({ client, terminate: () => client.terminate() });
           })(),
+          events: (() => {
+            const client = createSessionEventClient();
+            return Object.freeze({ client, terminate: () => client.terminate() });
+          })(),
           ...(options.subsystemDataBinding === undefined
             ? {}
             : { data: options.subsystemDataBinding(request.subsystemKey) }),
@@ -176,6 +181,9 @@ function createFakePlatform(definitions, options = {}) {
     ...(options.realmStateFatal === undefined
       ? {}
       : { realmStateFatal: options.realmStateFatal }),
+    ...(options.sessionEventsFatal === undefined
+      ? {}
+      : { sessionEventsFatal: options.sessionEventsFatal }),
   };
 
   return {
@@ -212,6 +220,33 @@ test("Realm State fatal fact enters Main's sole Session terminal/unwind path", a
   await assert.rejects(result, (error) => {
     assert.ok(error instanceof MainRuntimeFatalError);
     assert.equal(error.failure.code, "REALM_STATE_AUTHORITY_FATAL");
+    return true;
+  });
+  assert.equal(fake.runtimes.get("root").terminated, true);
+  assert.equal(listener, null);
+});
+
+test("Session Events fatal fact enters Main's sole Session terminal/unwind path", async () => {
+  let listener = null;
+  const source = Object.freeze({
+    subscribe(next) {
+      listener = next;
+      return () => { if (listener === next) listener = null; };
+    },
+  });
+  const fake = createFakePlatform({
+    root: defineSubsystem(() => ({ frame: () => new Promise(() => {}) })),
+  }, { sessionEventsFatal: source });
+  const result = runMain({
+    bootstrap: bootstrap(["root"], "root"),
+    platform: fake.platform,
+    policy,
+  });
+  await waitFor(() => fake.runtimes.has("root"), "root Runtime bootstrap");
+  listener();
+  await assert.rejects(result, (error) => {
+    assert.ok(error instanceof MainRuntimeFatalError);
+    assert.equal(error.failure.code, "SESSION_EVENT_HUB_FATAL");
     return true;
   });
   assert.equal(fake.runtimes.get("root").terminated, true);

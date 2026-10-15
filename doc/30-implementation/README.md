@@ -7,6 +7,7 @@
 - 当前产品入口：[核心模块](../20-modules/core/README.md)
 - 当前 qualification 规则：[Qualification 与 Subject](../30-development/qualification.md)
 - 当前 performance profile：[性能资格](../30-development/performance.md)
+- Session Events v1 exact-subject evidence：[session-events-v1-qualification.md](./session-events-v1-qualification.md)
 - 历史最终关闭快照：[final-qualification-closure.md](./final-qualification-closure.md)
 
 **本目录不再新增 roadmap、M18/M19、阶段计划或 live status dashboard。**

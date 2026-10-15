@@ -7,6 +7,7 @@
 | Foundation / Wire / Game Package | [核心模块](./core/README.md) · [Game Package](./game-package/README.md) | `packages/foundation`、`packages/wire`、`packages/game-package` |
 | Main / Runtime / Subsystem | [Main](./main-system/README.md) · [Subsystem 架构](../10-architecture/subsystem-model.md) | `packages/main`、`packages/runtime-control`、`packages/subsystem` |
 | Realm State | [Realm State 架构](../10-architecture/realm-state-system.md) | `packages/realm-state` |
+| Session Events | [Session Events module](./session-events/README.md) | `packages/session-events` + Subsystem/Main/Hostra/PWA integration |
 | Renderer / Input / Web Presentation | [Web Renderer](./web-renderer/README.md) · [渲染架构](../10-architecture/rendering-system.md) | `packages/renderer` 与相关 control/data packages |
 | FSDB / Content | [Content / FSDB](./fsdb-content-service/README.md) | `packages/fsdb`、`packages/fsdb-http`、平台 Content realization |
 | Map Game Library | [Map / Terrain](./loom-map/README.md) | `game-libs/map` + concrete examples |

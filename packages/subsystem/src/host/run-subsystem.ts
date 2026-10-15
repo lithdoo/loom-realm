@@ -6,6 +6,7 @@ import type {
 import {
   type RealmStateClient,
 } from "@loomrealm/realm-state";
+import type { SessionEventClient } from "@loomrealm/session-events";
 import {
   createSubsystemDataPeer,
   RENDERER_DATA_PROFILE_V1,
@@ -55,10 +56,16 @@ export interface RunSubsystemOptions {
   readonly data?: SubsystemDataBinding;
   readonly content?: ContentClient;
   readonly state: RealmStateRuntimeCapability;
+  readonly events: SessionEventsRuntimeCapability;
 }
 
 export interface RealmStateRuntimeCapability {
   readonly client: RealmStateClient;
+  terminate(): void;
+}
+
+export interface SessionEventsRuntimeCapability {
+  readonly client: SessionEventClient;
   terminate(): void;
 }
 
@@ -186,6 +193,17 @@ function validateOptions(options: RunSubsystemOptions): void {
   ) {
     throw new TypeError("Invalid Realm State Runtime capability");
   }
+  if (
+    options.events === null ||
+    typeof options.events !== "object" ||
+    options.events.client === null ||
+    typeof options.events.client !== "object" ||
+    typeof options.events.client.publish !== "function" ||
+    typeof options.events.client.subscribe !== "function" ||
+    typeof options.events.terminate !== "function"
+  ) {
+    throw new TypeError("Invalid Session Events Runtime capability");
+  }
   const policy = options.runtimePolicy;
   if (
     policy === null ||
@@ -270,9 +288,11 @@ class SubsystemHost {
   private readonly render = new RenderManager();
   private readonly viewport = new ViewportManager();
   private readonly runtimeState: RealmStateRuntimeCapability;
+  private readonly runtimeEvents: SessionEventsRuntimeCapability;
 
   constructor(private readonly options: RunSubsystemOptions) {
     this.runtimeState = options.state;
+    this.runtimeEvents = options.events;
   }
 
   run(): Promise<void> {
@@ -290,6 +310,7 @@ class SubsystemHost {
     const scope: SubsystemScope = Object.freeze({
       signal: this.scopeController.signal,
       state: this.runtimeState.client,
+      events: this.runtimeEvents.client,
       content: this.options.content ?? unavailableContent,
       viewport: this.viewport,
       createInputListener: (options: CreateInputListenerOptions) =>
@@ -598,6 +619,7 @@ class SubsystemHost {
     if (this.terminal?.kind !== "graceful") return;
     this.scopeController.abort();
     this.runtimeState.terminate();
+    this.runtimeEvents.terminate();
     this.frames?.abortAll();
     this.input.closeAll();
     this.render.closeAll();
@@ -615,6 +637,7 @@ class SubsystemHost {
 
   private async finishFatal(primary: RuntimeFailure): Promise<void> {
     this.runtimeState.terminate();
+    this.runtimeEvents.terminate();
     await this.bounded(
       this.bestEffortStatus({ state: "failed", error: primary }),
     );

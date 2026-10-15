@@ -19,6 +19,7 @@
     "@loomrealm/main": "0.1.0-alpha.0",
     "@loomrealm/platform-ports": "0.1.0-alpha.0",
     "@loomrealm/realm-state": "0.1.0-alpha.0",
+    "@loomrealm/session-events": "0.1.0-alpha.0",
     "@loomrealm/renderer": "0.1.0-alpha.0",
     "@loomrealm/subsystem": "0.1.0-alpha.0",
     "@loomrealm/wire": "0.1.0-alpha.0"

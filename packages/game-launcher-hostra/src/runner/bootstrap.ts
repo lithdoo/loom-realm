@@ -8,9 +8,14 @@ import {
   createRealmStateCarrierBinding,
   createRealmStateClient,
 } from "@loomrealm/realm-state";
+import {
+  createSessionEventCarrierBinding,
+  createSessionEventClient,
+} from "@loomrealm/session-events";
 import WebSocket from "ws";
 import { createWebSocketCarrier } from "../websocket-carrier.js";
 import { createRealmStateWebSocketCarrier } from "../realm-state-websocket-carrier.js";
+import { createSessionEventWebSocketCarrier } from "../session-events-websocket-carrier.js";
 import { createRunnerDataProvisioning } from "./data-provisioning.js";
 import type { HostraContentAccess } from "../content-access.js";
 
@@ -117,7 +122,7 @@ export function parseRunnerBootstrap(encoded: string): RunnerBootstrapV1 {
 function connect(
   endpoint: string,
   signal: AbortSignal,
-  statePlane = false,
+  plane: "control" | "state" | "events" = "control",
 ): Promise<MessageCarrier> {
   if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise((resolve, reject) => {
@@ -136,9 +141,13 @@ function connect(
       if (settled) return;
       settled = true;
       signal.removeEventListener("abort", onAbort);
-      resolve(statePlane
-        ? createRealmStateWebSocketCarrier(socket)
-        : createWebSocketCarrier(socket));
+      resolve(
+        plane === "state"
+          ? createRealmStateWebSocketCarrier(socket)
+          : plane === "events"
+            ? createSessionEventWebSocketCarrier(socket)
+            : createWebSocketCarrier(socket),
+      );
     });
     socket.once("error", finishReject);
   });
@@ -146,6 +155,7 @@ function connect(
 
 export async function runBootstrap(
   bootstrap: RunnerBootstrapV1,
+  sessionEventsEndpoint: string,
   earlyDataProvisioning = createRunnerDataProvisioning(),
   contentAccess?: HostraContentAccess,
 ): Promise<void> {
@@ -168,7 +178,7 @@ export async function runBootstrap(
       const carrier = await connect(
         bootstrap.realmStateEndpoint,
         stateLifetime.signal,
-        true,
+        "state",
       );
       if (stateLifetime.signal.aborted) {
         await carrier.close();
@@ -189,6 +199,50 @@ export async function runBootstrap(
     }
   };
   await installStateBinding(true);
+  const eventLifetime = new AbortController();
+  const eventClient = createSessionEventClient();
+  const eventCarriers = new Set<MessageCarrier>();
+  let eventReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let installEventBinding!: (required: boolean) => Promise<void>;
+  const scheduleEventRebind = () => {
+    if (eventLifetime.signal.aborted || eventClient.isTerminal || eventReconnectTimer !== null) return;
+    eventReconnectTimer = setTimeout(() => {
+      eventReconnectTimer = null;
+      void installEventBinding(false);
+    }, 25);
+    eventReconnectTimer.unref();
+  };
+  installEventBinding = async (required: boolean): Promise<void> => {
+    if (eventLifetime.signal.aborted) return;
+    try {
+      const carrier = await connect(sessionEventsEndpoint, eventLifetime.signal, "events");
+      if (eventLifetime.signal.aborted) {
+        await carrier.close();
+        return;
+      }
+      eventCarriers.add(carrier);
+      const binding = createSessionEventCarrierBinding(carrier);
+      eventClient.attach(binding);
+      void binding.terminal.then(() => {
+        eventCarriers.delete(carrier);
+        if (!eventLifetime.signal.aborted && !eventClient.isTerminal) scheduleEventRebind();
+      });
+    } catch (error) {
+      if (required) throw error;
+      scheduleEventRebind();
+    }
+  };
+  try {
+    await installEventBinding(true);
+  } catch (error) {
+    eventLifetime.abort();
+    eventClient.terminate();
+    stateLifetime.abort();
+    if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+    stateClient.terminate();
+    await Promise.allSettled([...stateCarriers].map((carrier) => carrier.close()));
+    throw error;
+  }
   const dataProvisioning = earlyDataProvisioning;
   const contentLifetime = new AbortController();
   try {
@@ -217,6 +271,7 @@ export async function runBootstrap(
       ...(dataProvisioning === null ? {} : { data: dataProvisioning.binding }),
       ...(content === undefined ? {} : { content }),
       state: Object.freeze({ client: stateClient, terminate: () => stateClient.terminate() }),
+      events: Object.freeze({ client: eventClient, terminate: () => eventClient.terminate() }),
       runtimePolicy: {
         scheduler,
         helloDeadlineMs: bootstrap.helloDeadlineMs,
@@ -234,6 +289,10 @@ export async function runBootstrap(
     if (reconnectTimer !== null) clearTimeout(reconnectTimer);
     stateClient.terminate();
     await Promise.allSettled([...stateCarriers].map((carrier) => carrier.close()));
+    eventLifetime.abort();
+    if (eventReconnectTimer !== null) clearTimeout(eventReconnectTimer);
+    eventClient.terminate();
+    await Promise.allSettled([...eventCarriers].map((carrier) => carrier.close()));
     contentLifetime.abort();
     dataProvisioning?.close();
   }

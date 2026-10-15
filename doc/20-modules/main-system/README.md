@@ -17,6 +17,8 @@ DataAuthority / unwind         commit revision / subscriptions
 
 Realm State 不拥有 Frame/Activation/InputTarget；Main 不拥有 business record values/OCC。Realm State fatal 只报告无法维持自身 invariant 的 fact，**Main 唯一提交 Session terminal 与 Runtime/Frame unwind**。
 
+Session Events 同样是 sibling infrastructure plane。`SessionEventHub` 只拥有 transient routing/delivery mechanics；Main 仅通过 `MainSessionEventsFatalSource` 接收 latched fatal fact，不读取 channel、type、payload、subscription 或 physical binding。Hub 先 self-terminal，Main 再独占提交 Session terminal/unwind。
+
 ## Bootstrap / runtime composition
 
 ```text

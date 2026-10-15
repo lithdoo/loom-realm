@@ -23,9 +23,14 @@ export interface MainPlatform {
   readonly rendererControl?: RendererControlBinding;
   readonly dataConnections?: DataConnectionAuthoritySink;
   readonly realmStateFatal?: MainRealmStateFatalSource;
+  readonly sessionEventsFatal?: MainSessionEventsFatalSource;
 }
 
 export interface MainRealmStateFatalSource {
+  subscribe(listener: () => void): () => void;
+}
+
+export interface MainSessionEventsFatalSource {
   subscribe(listener: () => void): () => void;
 }
 

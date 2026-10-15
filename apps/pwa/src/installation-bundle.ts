@@ -23,6 +23,13 @@ export interface PwaInstallationBundleV1 {
 export const DEMO_EXECUTABLE = `
 export default (scope) => ({
   async frame(frame) {
+    let resolveSessionEvent;
+    const sessionEventReceived = new Promise((resolve) => { resolveSessionEvent = resolve; });
+    const sessionEventSubscription = await scope.events.subscribe(["demo/session"], resolveSessionEvent);
+    await scope.events.publish("demo/session", "frame-started", { source: frame.params.source });
+    const sessionEvent = await sessionEventReceived;
+    sessionEventSubscription.close();
+    const sessionEventClosed = await sessionEventSubscription.closed;
     const content = await scope.content.record("struct.demo", "config");
     const key = { namespace: "demo", key: "visits" };
     const snapshot = await scope.state.read([key]);
@@ -60,7 +67,21 @@ export default (scope) => ({
       };
       input.on("keyboard.event", (event) => {
         if (event.action === "down" && event.code === "Enter") {
-          finish({ type: "completed", value: { result: "demo-complete", visits, content: content.value.message } });
+          finish({
+            type: "completed",
+            value: {
+              result: "demo-complete",
+              visits,
+              content: content.value.message,
+              sessionEvent: {
+                channel: sessionEvent.channel,
+                type: sessionEvent.type,
+                payload: sessionEvent.payload,
+                source: sessionEvent.source,
+                closed: sessionEventClosed
+              }
+            }
+          });
         }
       });
       frame.signal.addEventListener("abort", () => finish({ type: "cancelled" }), { once: true });

@@ -6,6 +6,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
 import { createRealmStateAuthority } from "@loomrealm/realm-state";
+import { createSessionEventHub } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { inspectRendererRenderForQualification } from "../../../../packages/renderer/dist/internal/render-qualification.js";
 import { createDesktopContentService, DesktopDataConnectionBroker, prepareDesktopContentView } from "../../../desktop/dist/index.js";
@@ -69,6 +70,7 @@ export async function runDesktopEquivalenceReference() {
     const runtimeHosting = createHostraRuntimeHosting({
       launchPlan: prepared.launchPlan,
       realmStateAuthority: authority,
+      sessionEventHub: createSessionEventHub(),
       contentAccess: { origin: access.origin.href, installationId: access.installationId, token: access.token },
       onRuntimeDataProvisioner: broker.onRuntimeDataProvisioner,
     });

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MainRuntimeFatalError, runMain } from "@loomrealm/main";
 import { createRealmStateAuthority } from "@loomrealm/realm-state";
+import { createSessionEventHub } from "@loomrealm/session-events";
 import {
   createHostraRuntimeHosting,
   prepareHostraGame,
@@ -33,10 +34,28 @@ const scheduler = Object.freeze({
 
 function mainPlatform(prepared) {
   const authority = createRealmStateAuthority(prepared.state);
+  let eventsFatal = false;
+  const eventFatalListeners = new Set();
+  const sessionEventHub = createSessionEventHub({ onFatal() {
+    eventsFatal = true;
+    for (const listener of eventFatalListeners) queueMicrotask(listener);
+  } });
+  const sessionEventsFatal = Object.freeze({
+    subscribe(listener) {
+      eventFatalListeners.add(listener);
+      if (eventsFatal) queueMicrotask(listener);
+      return () => { eventFatalListeners.delete(listener); };
+    },
+  });
   return Object.freeze({
     scheduler,
     opaqueMaterial: Object.freeze({ generate: () => randomBytes(32).toString("base64url") }),
-    runtimeHosting: createHostraRuntimeHosting({ launchPlan: prepared.launchPlan, realmStateAuthority: authority }),
+    runtimeHosting: createHostraRuntimeHosting({
+      launchPlan: prepared.launchPlan,
+      realmStateAuthority: authority,
+      sessionEventHub,
+    }),
+    sessionEventsFatal,
   });
 }
 
@@ -206,6 +225,71 @@ test("real Game Package → Hostra → Runner State plane shares one Authority a
   assert.equal(value.child.value.current.records[0].value, 1);
   assert.equal(value.scan.revision, 1);
   assert.deepEqual(value.scan.records.map((record) => record.value), [["key"], 1]);
+});
+
+test("real Hostra child processes use a dedicated Session Events WebSocket before Definition import", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "loomrealm-events-e2e-"));
+  t.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(root, { recursive: true, force: true });
+  });
+  await mkdir(path.join(root, "subsystems"));
+  await writeFile(path.join(root, "game.json"), JSON.stringify({
+    formatVersion: 1,
+    initial: { subsystem: "root", input: null },
+    subsystems: [{ key: "root" }, { key: "child" }],
+  }));
+  await writeFile(path.join(root, "launch.hostra.json"), JSON.stringify({
+    formatVersion: 1,
+    subsystems: [
+      { key: "root", module: "subsystems/root.mjs" },
+      { key: "child", module: "subsystems/child.mjs" },
+    ],
+  }));
+  await writeFile(path.join(root, "subsystems", "root.mjs"), `
+    const endpointVisibleAtImport = Object.prototype.hasOwnProperty.call(
+      process.env,
+      "LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT",
+    );
+    export default (scope) => ({
+      async frame(frame) {
+        let resolveEvent;
+        const received = new Promise((resolve) => { resolveEvent = resolve; });
+        const subscription = await scope.events.subscribe(["battle/main"], resolveEvent);
+        const child = await frame.call("child", null);
+        const event = await received;
+        subscription.close();
+        return {
+          type: "completed",
+          value: { endpointVisibleAtImport, child, event, closed: await subscription.closed }
+        };
+      }
+    });
+  `);
+  await writeFile(path.join(root, "subsystems", "child.mjs"), `
+    export default (scope) => ({
+      async frame() {
+        await scope.events.publish("battle/main", "enemy-defeated", { enemyId: "slime-1" });
+        return { type: "completed", value: "published" };
+      }
+    });
+  `);
+  const prepared = await prepareHostraGame({ source: { installationRoot: root }, runnerPolicy });
+  const result = await runMain({
+    bootstrap: prepared.logicalBootstrap,
+    platform: mainPlatform(prepared),
+    policy: mainPolicy,
+  });
+  assert.equal(result.kind, "root-outcome");
+  assert.equal(result.outcome.value.endpointVisibleAtImport, false);
+  assert.equal(result.outcome.value.child.value, "published");
+  assert.deepEqual(result.outcome.value.event, {
+    channel: "battle/main",
+    type: "enemy-defeated",
+    payload: { enemyId: "slime-1" },
+    source: { subsystemKey: "child" },
+  });
+  assert.deepEqual(result.outcome.value.closed, { reason: "closed" });
 });
 
 test("business module load failure converges through existing Main bootstrap authority", async (t) => {

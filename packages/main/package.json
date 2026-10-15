@@ -27,6 +27,7 @@
     "@loomrealm/wire": "0.1.0-alpha.0"
   },
   "devDependencies": {
+    "@loomrealm/session-events": "0.1.0-alpha.0",
     "@loomrealm/foundation": "0.1.0-alpha.0",
     "@loomrealm/renderer": "0.1.0-alpha.0",
     "@loomrealm/subsystem": "0.1.0-alpha.0",

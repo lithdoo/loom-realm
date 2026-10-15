@@ -100,6 +100,24 @@ export interface PwaRunnerDataResultV1 {
   readonly ok: boolean;
 }
 
+export interface PwaInstallSessionEventsV1 {
+  readonly formatVersion: 1;
+  readonly type: "session-events/install";
+  readonly requestId: string;
+  readonly subsystemKey: string;
+  readonly bindingId: string;
+  readonly port: MessagePort;
+}
+
+export interface PwaSessionEventsResultV1 {
+  readonly formatVersion: 1;
+  readonly type: "session-events/result";
+  readonly requestId: string;
+  readonly subsystemKey: string;
+  readonly bindingId: string;
+  readonly ok: boolean;
+}
+
 function object(value: unknown, fields: readonly string[], label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`Invalid ${label}`);
   const record = value as Record<string, unknown>;
@@ -208,4 +226,89 @@ export function parseRunnerDataResult(value: unknown, subsystemKey: string, requ
   const item = object(value, ["formatVersion", "type", "requestId", "subsystemKey", "connectionId", "ok"], "Runner Data result");
   if (item.formatVersion !== 1 || item.type !== "data/result" || item.requestId !== requestId || item.subsystemKey !== subsystemKey || typeof item.ok !== "boolean") throw new TypeError("Invalid Runner Data result");
   return Object.freeze({ formatVersion: 1, type: item.type, requestId, subsystemKey, connectionId: text(item.connectionId, "connectionId"), ok: item.ok });
+}
+
+const SESSION_EVENT_IDENTITY_PREFIX = "se1";
+
+export function sessionEventProvisioningIdentity(
+  generation: number,
+  nonce: string,
+): string {
+  if (!Number.isSafeInteger(generation) || generation <= 0) {
+    throw new TypeError("Invalid Session Events provisioning generation");
+  }
+  const validNonce = text(nonce, "Session Events provisioning nonce");
+  if (validNonce.includes(":")) {
+    throw new TypeError("Invalid Session Events provisioning nonce");
+  }
+  return `${SESSION_EVENT_IDENTITY_PREFIX}:${generation}:${validNonce}`;
+}
+
+export function sessionEventProvisioningGeneration(
+  requestId: string,
+  bindingId: string,
+): number {
+  const parse = (value: string, label: string): number => {
+    const identity = text(value, label);
+    const match = /^se1:([1-9][0-9]*):([^:]+)$/.exec(identity);
+    if (match === null) throw new TypeError(`Invalid ${label}`);
+    const generation = Number(match[1]);
+    if (!Number.isSafeInteger(generation)) throw new TypeError(`Invalid ${label}`);
+    return generation;
+  };
+  const requestGeneration = parse(requestId, "Session Events requestId");
+  const bindingGeneration = parse(bindingId, "Session Events bindingId");
+  if (requestGeneration !== bindingGeneration) {
+    throw new TypeError("Mismatched Session Events provisioning generation");
+  }
+  return requestGeneration;
+}
+
+export function parseInstallSessionEvents(
+  value: unknown,
+  subsystemKey: string,
+): PwaInstallSessionEventsV1 {
+  const item = object(
+    value,
+    ["formatVersion", "type", "requestId", "subsystemKey", "bindingId", "port"],
+    "Session Events install",
+  );
+  if (
+    item.formatVersion !== 1 || item.type !== "session-events/install" ||
+    item.subsystemKey !== subsystemKey
+  ) throw new TypeError("Invalid Session Events install");
+  return Object.freeze({
+    formatVersion: 1,
+    type: "session-events/install",
+    requestId: text(item.requestId, "requestId"),
+    subsystemKey,
+    bindingId: text(item.bindingId, "bindingId"),
+    port: port(item.port),
+  });
+}
+
+export function parseSessionEventsResult(
+  value: unknown,
+  subsystemKey: string,
+  requestId: string,
+  bindingId: string,
+): PwaSessionEventsResultV1 {
+  const item = object(
+    value,
+    ["formatVersion", "type", "requestId", "subsystemKey", "bindingId", "ok"],
+    "Session Events result",
+  );
+  if (
+    item.formatVersion !== 1 || item.type !== "session-events/result" ||
+    item.requestId !== requestId || item.subsystemKey !== subsystemKey ||
+    item.bindingId !== bindingId || typeof item.ok !== "boolean"
+  ) throw new TypeError("Invalid Session Events result");
+  return Object.freeze({
+    formatVersion: 1,
+    type: "session-events/result",
+    requestId,
+    subsystemKey,
+    bindingId,
+    ok: item.ok,
+  });
 }
