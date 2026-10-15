@@ -140,7 +140,13 @@ classDiagram
     class EventNPCInteraction {
       <<Content>>
       dialogueId
-      transitions
+      terminalMutationRefs
+    }
+
+    class EventStateMutation {
+      <<Content>>
+      from: eventId->stateId
+      to: eventId->stateId
     }
 
     class EventCurrentState {
@@ -194,8 +200,9 @@ classDiagram
     EventStateNPC --> NPCInstance : defines source projection
     EventStateNPC "1" *-- "0..1" EventNPCInteraction : interaction
     EventNPCInteraction --> DialogueDefinition : entry dialogue
-    DialogueCompletion --> EventNPCInteraction : transition lookup
-    EventNPCInteraction --> EventState : terminal id to next state
+    DialogueCompletion --> EventNPCInteraction : terminal lookup
+    EventNPCInteraction --> EventStateMutation : mutation ref
+    EventStateMutation --> EventCurrentState : validate from / commit to
 
     EncounterDefinition --> NPCInstance : generates
     EncounterDefinition --> BattleActorContent : temporary opponent actor
@@ -209,7 +216,7 @@ classDiagram
     EncounterDefinition --> BattleRuntimeActor : temporary actor source
 ```
 
-## Event State / NPC / Dialogue 链路
+## Event State / NPC / Dialogue / Mutation 链路
 
 ```mermaid
 flowchart LR
@@ -222,11 +229,17 @@ flowchart LR
 
     D --> DF[Dialogue Frame]
     DF --> T[terminalDialogueId]
-    T --> TR{interaction.transitions}
+    T --> LOOKUP{interaction.mutations}
 
-    TR -->|没有 mapping| SAME[Event state 不变]
-    TR -->|terminal id -> nextStateId| W[World commit Event currentState]
-    W --> RESOLVE[Story Resolver 重新解析场景]
+    LOOKUP -->|无 mutation ref| SAME[Event states 不变]
+    LOOKUP -->|有 mutation ref| M[EventStateMutation]
+
+    M --> F[from<br/>eventId -> stateId]
+    F --> CHECK{全部 from 匹配?}
+    CHECK -->|否| FAIL[mutation 不成立]
+    CHECK -->|是| TO[to<br/>eventId -> stateId]
+    TO --> COMMIT[一次 Realm State commit<br/>原子写入全部 to]
+    COMMIT --> RESOLVE[Story Resolver 重新解析场景]
 ```
 
 关键边界：
@@ -244,13 +257,62 @@ Dialogue
 Dialogue completion
 = terminalDialogueId
 
-Event transition
-= terminalDialogueId → nextStateId
+EventStateMutation
+= from: 多个 Event state 前置条件（全部 AND）
++ to: 多个 Event state 原子赋值
 ```
 
-Relationship / Contract / Card / Battle 等业务 mutation 不进入 `interaction.transitions`。需要这些后果时，由 World 在解释 Dialogue result 时明确提交。
+`from` 与 `to` 不要求一一对应：
 
-非 Dialogue 原因的 Event state 切换，例如 Battle 完成或其他 World 业务结果，也由 World 直接提交 `eventId → nextStateId`；当前不增加通用 Trigger / Action DSL。
+```text
+只在 from
+= 前置条件
+
+同时在 from / to
+= 检查旧 state 后写入新 state
+
+只在 to
+= 直接赋值目标 state
+```
+
+需要 OR 时不在 Mutation 内增加 `or / anyOf`，而是为每个分支定义独立 Mutation，并由对应业务分支引用对应 Mutation。
+
+EventStateMutation 只拥有 Event current state，不修改 Relationship / Contract / Card / Battle / player position 等其他 Realm State。
+
+Runtime 也不会扫描全部 Mutation 自动执行。必须由明确的 Dialogue completion 或其他 World 业务结果引用 Mutation。
+
+## Mutation 的多 Event 语义
+
+```mermaid
+flowchart TB
+    M[EventStateMutation]
+    M --> F1[from: eventA = a1]
+    M --> F2[from: eventB = b3]
+    F1 --> AND[AND]
+    F2 --> AND
+    AND --> OK{全部满足}
+    OK -->|是| T1[to: eventA = a2]
+    OK -->|是| T2[to: eventC = c1]
+    T1 --> ATOMIC[同一次 commit]
+    T2 --> ATOMIC
+```
+
+例如：
+
+```text
+from
+  professor-intro = waiting
+  rival-story = before-contract
+
+AND 全部满足后
+
+to
+  professor-intro = contracted
+  rival-story = contracted
+  tutorial-battle = ready
+```
+
+Mutation 是“一组前置状态 → 一组状态赋值”，不是一组必须一一配对的 `A → B` 边。
 
 ## NPC / Event / Map 唯一性
 
@@ -331,6 +393,10 @@ Card
 = 当前随身 Card
 = holder / servant / slot / 当前 Card battle-facing state
 
+EventStateMutation
+= 只读写 Event current state
+= from 全 AND，to 原子写入
+
 BattleActor / BattleSkill Content
 = @loomrealm-game/battle 的静态战斗定义
 
@@ -355,8 +421,6 @@ PokeMan Skill
 = 直接使用 BattleSkill
 ```
 
-剧情 / Encounter 可以直接构造临时 Battle Runtime Actor，不需要伪造 Relationship 或 Card。
-
 ## 图中故意没有解决的问题
 
 以下仍然留白：
@@ -365,8 +429,9 @@ PokeMan Skill
 - 从者有 contract 但不随身时，Integrity / Progression 长期状态最终由谁拥有；
 - Character → BattleActor Content 的最终引用编码；
 - 技能学习 / 成长如何改变某个角色长期可用的 `skills[]`；
-- Event 最终 JSON namespace / key 与 placement / instanceId 的精确编码；
-- 非 Dialogue 的重复 Event transition 模式是否未来值得抽取窄的 Content 能力；
+- Event / EventStateMutation 的最终 Content namespace / key；
+- 非 Dialogue 业务如何引用 Mutation；
+- Mutation `from` 校验失败时的产品错误表现；
 - 跨 Event 的同一 `(mapId, npcId)` 冲突未来是否需要显式 override；
 - `absent` 与其他 Event 出现定义同时命中时的解析；
 - Encounter re-entry 与生成结果持久化细节。
