@@ -242,7 +242,7 @@ terminalDialogueId = rival-challenge-refuse
 
 ## Event 如何使用 terminalDialogueId
 
-Event State NPC 可以把当前入口 Dialogue 和少量 Event state transition 绑定在一起：
+Event State NPC 可以把当前入口 Dialogue 与独立 `EventStateMutation` Content 关联：
 
 ```text
 Event current state
@@ -250,17 +250,38 @@ Event current state
 → interaction.dialogue
 → frame.call(Dialogue)
 → terminalDialogueId
-→ interaction.transitions[terminalDialogueId]
-→ nextStateId?
+→ interaction.mutations[terminalDialogueId]
+→ EventStateMutation ref?
 ```
 
-这里只允许：
+这里不再直接写：
 
 ```text
 terminalDialogueId → nextStateId
 ```
 
-Event 不因此获得任意 action list。Relationship、Contract、Card、Battle 等业务后果仍由 World 明确解释和提交。
+而是：
+
+```text
+terminalDialogueId
+→ EventStateMutation ref
+→ from: 多个 eventId → stateId   // 全部 AND
+→ to:   多个 eventId → stateId   // 一次原子写入
+```
+
+`from` 与 `to` 的 Event 集合不要求一一对应。需要 OR 时不在单条 Mutation 中增加条件表达式，而是为每个分支定义独立 Mutation，并在对应的 Dialogue / Event 分支引用对应 Mutation。
+
+例如：
+
+```text
+professor-contract-accept
+→ professor-contract-accepted Mutation
+
+professor-contract-refuse
+→ no mutation
+```
+
+Mutation 只负责 Event current state。Relationship、Contract、Card、Battle 等其他业务后果仍由 World / 对应业务 owner 明确处理。
 
 详细边界见 [事件](./62-event.md)。
 
@@ -312,7 +333,9 @@ Content
 
 Realm State 不保存 Dialogue 的展开副本，也不保存当前播放到第几句。
 
-如果玩家的某次选择最终造成长期世界变化，例如 Relationship、Event progress、Contract、Card 或其他业务事实，由调用方使用 `terminalDialogueId` 等上下文解释，并把真正需要持久化的结果提交到 Realm State。
+EventStateMutation 也是 Content，不属于 Dialogue definition。Event interaction 只是根据 `terminalDialogueId` 引用它。
+
+如果玩家的某次选择最终造成 Relationship、Contract、Card 或其他长期业务变化，Dialogue 不直接拥有这些 mutation；调用方使用 `terminalDialogueId` 等上下文解释，并把真正需要持久化的业务事实提交到 Realm State。
 
 ## Builder 检查
 
@@ -324,7 +347,7 @@ Builder 应检查能够静态确定的固定 Dialogue 内容错误：
 - Line 缺少需要的文本；
 - Choice 缺少显示文本或 target。
 
-Event 如果把某个 Dialogue id 用作 `interaction.dialogue` 或 transition key，也由 Event / Builder 的跨引用检查保证该 Dialogue 存在。
+Event 如果把某个 Dialogue id 用作 `interaction.dialogue` 或 `interaction.mutations` 的 terminal key，也由 Event / Builder 的跨引用检查保证该 Dialogue 存在；Mutation reference 与 `from` / `to` 的 Event state 引用也由 Event Builder 检查。
 
 Builder 不因为 Dialogue 之间形成合法循环而失败。
 
@@ -344,4 +367,5 @@ Builder 不因为 Dialogue 之间形成合法循环而失败。
 Dialogue = 线性 lines + 可选的末尾 choices
 Choice = 下一段 Dialogue 的引用
 Completion = terminalDialogueId
+Event state change = 独立 EventStateMutation Content
 ```
