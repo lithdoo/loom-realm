@@ -14,10 +14,11 @@
 4. **Battle Runtime 独立。** Battle 当前运行状态只由 `@loomrealm-game/battle` Simulation authority 拥有。
 5. **PokeMan 不重复定义 BattleActor / BattleSkill。** 战斗静态数据直接复用 `@loomrealm-game/battle` 当前 Content contract。
 6. **Event 保持为剧情状态与场景 / 交互定义。** 不扩成通用 Trigger / Action / Command / Flow engine。
-7. **Event state 的声明式变化独立为 EventStateMutation Content。** `from` 是 AND 前置集合，`to` 是原子赋值集合；OR 用多条 Mutation 表达。
-8. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以在完成时引用一个 EventStateMutation。
-9. **`choices` 与 `mutation` 互斥。** 需要状态变化的 Choice 必须先跳到新的无 Choice Dialogue，再由新 Dialogue 触发 Mutation。
-10. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
+7. **Event current state 是稀疏 `stateId | null`。** 没有当前状态 / `null` 表示 Event 当前未启动或已清空，不参与 Event State 投影。
+8. **Event state 的声明式变化独立为 EventStateMutation Content。** `from` 是 AND 前置集合，`to` 是原子赋值集合；OR 用多条 Mutation 表达。
+9. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以在完成时引用一个 EventStateMutation。
+10. **`choices` 与 `mutation` 互斥。** 需要状态变化的 Choice 必须先跳到新的无 Choice Dialogue，再由新 Dialogue 触发 Mutation。
+11. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
 
 ## 总体关系
 
@@ -35,7 +36,10 @@ Character Content
       └────────────→ current carried Card
                         holder / servant / slot / integrity
 
-Event current state
+Sparse Event current states
+→ eventId → stateId | null
+→ null Event 跳过
+→ active Event State
 → mapId / npcId / placement
 → interaction.dialogue
 → Dialogue Frame
@@ -43,7 +47,7 @@ Event current state
 → terminal Dialogue
 → mutation?
 → EventStateMutation
-→ validate all from
+→ validate all from（包括 null）
 → atomically commit all to
 → Story Resolver re-resolve
 
@@ -169,7 +173,28 @@ terminalDialogueId
 
 ## Event / Story
 
-Event 是 immutable Content；Realm State 只保存各 Event 当前 `stateId`。
+Event 是 immutable Content。Realm State 只保存当前真正有业务意义的 Event state，逻辑模型是稀疏表：
+
+```text
+CurrentEventStates
+= Partial<eventId, stateId>
+
+等价读取语义：
+eventId → stateId | null
+```
+
+其中：
+
+```text
+stateId != null
+→ Event 当前已启动，读取对应 Event State Content
+
+stateId == null
+→ Event 当前为空状态 / 未启动
+→ 不参与 Event State 场景投影
+```
+
+安装初始化 Realm State baseline 只需要声明开局已启动的 Event；不需要把 Content 中所有 Event 都写入 State，也不要求人为增加 `inactive` state。
 
 ```text
 EventDefinition
@@ -189,8 +214,11 @@ EventDefinition
 职责：
 
 ```text
+Event current state
+= stateId | null
+
 Event State
-= 当前剧情阶段
+= 非空 current state 对应的剧情阶段 Content
 
 Event State NPC
 = 当前阶段这个 NPC 在哪、入口 Dialogue 是什么
@@ -199,7 +227,21 @@ Dialogue
 = 台词、Choice 跳转，以及无 Choice 完成时可选的 Mutation ref
 ```
 
-Event State NPC 不再维护 `terminalDialogueId → Mutation` 映射。
+Event State NPC 不维护 `terminalDialogueId → Mutation` 映射。
+
+### 空状态不是 Realm State Record membership
+
+`null` 是 Event 的业务值，不是“底层 Record 一定不存在”。Realm State v1 的 `put(null)` 不会 dematerialize Record，所以：
+
+```text
+从未启动过
+和
+曾经启动过，后来 current state 写回 null
+```
+
+在 Event 业务层都表示当前空状态。
+
+Story Resolver 不依赖 `list()` / Record membership 判断 Event 是否启动。稀疏 Event state 最终使用一个总表 Record 还是多个 Record 仍未冻结。
 
 ## EventStateMutation
 
@@ -208,14 +250,20 @@ EventStateMutation 是独立 Content，不嵌在某个 Event 内成为专属 tra
 ```text
 EventStateMutation
 ├─ from
-│  └─ eventId → stateId
+│  └─ eventId → stateId | null
 └─ to
-   └─ eventId → stateId
+   └─ eventId → stateId | null
 ```
 
 ### `from`：AND
 
-一条 Mutation 的所有 `from` 项必须全部满足。
+一条 Mutation 的所有 `from` 项必须全部满足。`null` 可以作为明确的空状态前置条件：
+
+```text
+eventA == stateA
+AND
+eventB == null
+```
 
 Mutation 不拥有 `or / anyOf / condition tree`。需要 OR 时，为每个分支定义独立 Mutation，由对应 Dialogue / 业务分支引用。
 
@@ -226,10 +274,10 @@ Mutation 不拥有 `or / anyOf / condition tree`。需要 OR 时，为每个分�
 = 前置条件
 
 同时在 from / to
-= 检查旧 state 后写入新 state
+= 检查旧 state 后写入新 state / null
 
 只在 to
-= 直接写入目标 state
+= 直接写入目标 state / null
 ```
 
 例如：
@@ -237,7 +285,7 @@ Mutation 不拥有 `or / anyOf / condition tree`。需要 OR 时，为每个分�
 ```yaml
 from:
   professor-intro: waiting
-  rival-story: before-contract
+  rival-story: null
 
 to:
   professor-intro: contracted
@@ -245,9 +293,22 @@ to:
   tutorial-battle: ready
 ```
 
+这同时完成：检查一个 Event 尚未启动、推进已有 Event、启动新的 Event。
+
+清空 Event 也只是普通 Mutation：
+
+```yaml
+from:
+  tutorial-battle: completed
+
+to:
+  tutorial-battle: null
+  town-route: open
+```
+
 ### `to`：原子 commit
 
-Runtime 先验证全部 `from`，成功后把全部 `to` 在一次 Realm State commit 中一起写入。
+Runtime 先验证全部 `from`，成功后把全部 `to` 在一次 Realm State commit 中一起写入。写入 `null` 表示逻辑上清空 Event，不要求物理 Record 被删除。
 
 Mutation 只拥有 Event current state，不扩展到 Relationship / Contract / Card / Battle / player position / arbitrary Realm State path/value。
 
@@ -258,7 +319,7 @@ Mutation 只拥有 Event current state，不扩展到 Relationship / Contract / 
 ```text
 玩家与 NPC 交互
 ↓
-World 找到当前 Event / state / mapId / npcId
+World 找到当前非空 Event state / mapId / npcId
 ↓
 interaction.dialogue
 ↓
@@ -270,11 +331,11 @@ frame.call(Dialogue)
 ├─ 是 → 选择 target Dialogue，继续 Dialogue graph
 └─ 否 → 有 mutation？
          ├─ 否 → complete
-         └─ 是 → validate Mutation.from（全部 AND）
+         └─ 是 → validate Mutation.from（全部 AND，包括 null）
                   ↓
                 atomically commit Mutation.to
                   ↓
-                Story Resolver 重新解析场景
+                Story Resolver 按新稀疏 Event states 重新解析场景
                   ↓
                 complete
 ↓
@@ -296,7 +357,10 @@ Runtime 不硬编码具体 Event state 名称，也不扫描全部 Mutation 自�
 不同 Event
 → 允许重复引用同一个 npcId
 
-Runtime 合并当前所有来源
+currentState == null 的 Event
+→ 不参与投影
+
+Runtime 合并当前所有非空 Event 来源
 → 每张最终 Map 内 npcId 必须唯一
 ```
 
@@ -368,7 +432,8 @@ Card
 ```text
 Realm State
 ├─ player current map / position / direction
-├─ Event current state[]
+├─ sparse Event current states
+│  └─ eventId → stateId | null
 ├─ Relationship[]
 ├─ current carried Card[]
 ├─ Encounter generated results that must persist
@@ -376,7 +441,7 @@ Realm State
 └─ player choices / random facts that cannot be recomputed
 ```
 
-Event、Dialogue 与 EventStateMutation definitions 都是 Content；Save 只保存实际 mutable facts。
+Event、Dialogue 与 EventStateMutation definitions 都是 Content；Save 只保存实际 mutable facts。Event 空状态的逻辑语义是 `null`，不要求 Save / Realm State 枚举所有 Content Event。
 
 # Runtime / Projection
 
@@ -401,11 +466,13 @@ Map Enter：
 ```text
 Story Index
 +
-Event current states
+稀疏 Event current states
 +
 Character / Event Content
 +
 Encounter generated state
+↓
+跳过 currentState == null 的 Event
 ↓
 Story Resolver
 ↓
@@ -458,11 +525,13 @@ Builder 应检查：
 
 - Character / NPC / Visual / Event / EventStateMutation / Map / Dialogue / BattleActor / BattleSkill 等静态引用不存在；
 - Event/state / Dialogue identity 重复；
+- 安装初始化 State 中非空 Event state 引用了不存在的 Event / state；
 - Dialogue Choice target 不存在；
 - 同一个 Dialogue 同时存在 `choices` 与 `mutation`；
 - Dialogue `mutation` 引用了不存在的 EventStateMutation；
 - `interaction.dialogue` 不存在；
-- Mutation `from` / `to` 引用了不存在的 Event / state；
+- Mutation `from` / `to` 中非空 `stateId` 引用了不存在的 Event state；
+- Mutation 中 `null` 是合法 Event 空状态；
 - Mutation 单侧重复 eventId；
 - Character / BattleActor / BattleSkill 引用不合法；
 - 同一个 Event state 内重复 `(mapId, npcId)`；
@@ -472,9 +541,13 @@ Builder 应检查：
 Builder 不应因为以下情况失败：
 
 ```text
+安装初始化 State 不包含全部 Event
+Event current state 为 null
 Mutation.from 有多个 Event
 Mutation.to 有多个 Event
 Mutation.from / to 的 Event key 集合不同
+Mutation 使用 null → stateId 启动 Event
+Mutation 使用 stateId → null 清空 Event
 多个独立 Mutation 表达 OR 分支
 同一个 npcId 被多个不同 Event 引用
 同一个 npcId 在同一 Event state 中出现在多个不同 Map
@@ -485,8 +558,11 @@ Dialogue 之间形成合法 cycle
 
 Runtime：
 
+- Event current state 逻辑上是稀疏的 `stateId | null`；
+- `null` Event 不参与 Event State 投影；
+- 不以 Realm State Record materialization / membership 判断 Event 是否启动；
 - 只应用被明确引用的 Mutation；
-- Mutation 的全部 `from` 必须同时匹配；
+- Mutation 的全部 `from` 必须同时匹配，包括显式 `null`；
 - Mutation 的全部 `to` 必须原子提交；
 - 不扫描 Mutation 自动触发；
 - 合并当前 NPC 来源后，每张最终 Map 内 `npcId` 唯一。
@@ -496,6 +572,7 @@ Runtime：
 - Character / NPC / Visual 的精确 Content schema / namespace；
 - Character 到 BattleActor Content 的最终引用编码；
 - Event / EventStateMutation 的最终 Content namespace / key；
+- 稀疏 Event current state 的最终 Realm State namespace / key / Record shape；
 - 非 Dialogue 业务如何引用 Mutation；
 - Dialogue mutation `from` 校验失败的产品错误表现；
 - `absent` 与跨 Event NPC 冲突 / 显式 override 规则；
