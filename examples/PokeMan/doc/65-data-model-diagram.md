@@ -103,7 +103,8 @@ classDiagram
       <<Content>>
       id
       lines[]
-      choices[]
+      choices[]?
+      mutationRef?
     }
 
     class DialogueChoice {
@@ -140,7 +141,6 @@ classDiagram
     class EventNPCInteraction {
       <<Content>>
       dialogueId
-      terminalMutationRefs
     }
 
     class EventStateMutation {
@@ -192,6 +192,7 @@ classDiagram
     CharacterDefinition --> DialogueDefinition : speaker refs
     DialogueDefinition "1" *-- "0..*" DialogueChoice : choices
     DialogueChoice --> DialogueDefinition : target
+    DialogueDefinition --> EventStateMutation : optional mutation ref
     DialogueDefinition --> DialogueCompletion : returns terminal id
 
     EventDefinition "1" *-- "1..*" EventState : states
@@ -200,8 +201,6 @@ classDiagram
     EventStateNPC --> NPCInstance : defines source projection
     EventStateNPC "1" *-- "0..1" EventNPCInteraction : interaction
     EventNPCInteraction --> DialogueDefinition : entry dialogue
-    DialogueCompletion --> EventNPCInteraction : terminal lookup
-    EventNPCInteraction --> EventStateMutation : mutation ref
     EventStateMutation --> EventCurrentState : validate from / commit to
 
     EncounterDefinition --> NPCInstance : generates
@@ -228,18 +227,24 @@ flowchart LR
     I -->|有| D[entry Dialogue]
 
     D --> DF[Dialogue Frame]
-    DF --> T[terminalDialogueId]
-    T --> LOOKUP{interaction.mutations}
+    DF --> C{当前 Dialogue 有 choices?}
 
-    LOOKUP -->|无 mutation ref| SAME[Event states 不变]
-    LOOKUP -->|有 mutation ref| M[EventStateMutation]
+    C -->|有| CH[选择 target Dialogue]
+    CH --> DF
 
-    M --> F[from<br/>eventId -> stateId]
+    C -->|无| M{当前 Dialogue 有 mutation?}
+    M -->|无| DONE[complete]
+    M -->|有| MUT[EventStateMutation]
+
+    MUT --> F[from<br/>eventId -> stateId]
     F --> CHECK{全部 from 匹配?}
     CHECK -->|否| FAIL[mutation 不成立]
     CHECK -->|是| TO[to<br/>eventId -> stateId]
     TO --> COMMIT[一次 Realm State commit<br/>原子写入全部 to]
     COMMIT --> RESOLVE[Story Resolver 重新解析场景]
+    RESOLVE --> DONE
+
+    DONE --> T[return terminalDialogueId]
 ```
 
 关键边界：
@@ -251,35 +256,38 @@ Event State
 Event State NPC
 = 这个阶段 NPC 在哪、入口 Dialogue 是什么
 
-Dialogue
-= 实际台词与内部 Choice 跳转
+Dialogue Choice
+= 只选择下一段 Dialogue
 
-Dialogue completion
-= terminalDialogueId
+无 Choice Dialogue
+= 可以在完成时引用一个 EventStateMutation
 
 EventStateMutation
 = from: 多个 Event state 前置条件（全部 AND）
 + to: 多个 Event state 原子赋值
 ```
 
-`from` 与 `to` 不要求一一对应：
+`choices` 与 `mutation` 互斥：
 
 ```text
-只在 from
-= 前置条件
+choices 存在
+=> mutation 不允许存在
 
-同时在 from / to
-= 检查旧 state 后写入新 state
-
-只在 to
-= 直接赋值目标 state
+mutation 存在
+=> choices 不允许存在
 ```
 
-需要 OR 时不在 Mutation 内增加 `or / anyOf`，而是为每个分支定义独立 Mutation，并由对应业务分支引用对应 Mutation。
+所以如果某个 Choice 分支需要剧情状态变化：
 
-EventStateMutation 只拥有 Event current state，不修改 Relationship / Contract / Card / Battle / player position 等其他 Realm State。
+```text
+Choice
+→ target Dialogue
+→ target Dialogue 无 choices
+→ target Dialogue.mutation
+→ EventStateMutation
+```
 
-Runtime 也不会扫描全部 Mutation 自动执行。必须由明确的 Dialogue completion 或其他 World 业务结果引用 Mutation。
+Event State NPC interaction 不再保存 `terminalDialogueId → Mutation` 映射，只保存入口 `dialogueId`。
 
 ## Mutation 的多 Event 语义
 
@@ -313,6 +321,12 @@ to
 ```
 
 Mutation 是“一组前置状态 → 一组状态赋值”，不是一组必须一一配对的 `A → B` 边。
+
+需要 OR 时不在 Mutation 内增加 `or / anyOf`，而是为每个分支定义独立 Mutation，并由对应 Dialogue / 业务分支引用对应 Mutation。
+
+EventStateMutation 只拥有 Event current state，不修改 Relationship / Contract / Card / Battle / player position 等其他 Realm State。
+
+Runtime 也不会扫描全部 Mutation 自动执行。必须由明确的 Dialogue completion 或其他业务结果引用 Mutation。
 
 ## NPC / Event / Map 唯一性
 
@@ -393,6 +407,10 @@ Card
 = 当前随身 Card
 = holder / servant / slot / 当前 Card battle-facing state
 
+Dialogue
+= lines + choices? + mutation?
+= choices 与 mutation 互斥
+
 EventStateMutation
 = 只读写 Event current state
 = from 全 AND，to 原子写入
@@ -431,7 +449,7 @@ PokeMan Skill
 - 技能学习 / 成长如何改变某个角色长期可用的 `skills[]`；
 - Event / EventStateMutation 的最终 Content namespace / key；
 - 非 Dialogue 业务如何引用 Mutation；
-- Mutation `from` 校验失败时的产品错误表现；
+- Dialogue mutation `from` 校验失败时的产品错误表现；
 - 跨 Event 的同一 `(mapId, npcId)` 冲突未来是否需要显式 override；
 - `absent` 与其他 Event 出现定义同时命中时的解析；
 - Encounter re-entry 与生成结果持久化细节。
