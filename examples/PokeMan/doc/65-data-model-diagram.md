@@ -74,6 +74,8 @@ classDiagram
       hostile
       dynamicRelationshipText
       contract?
+      integrity?
+      progression?
     }
 
     class Card {
@@ -82,7 +84,6 @@ classDiagram
       holderCharacterId
       servantCharacterId
       slot
-      integrity
     }
 
     class BattleRuntimeActor {
@@ -149,10 +150,11 @@ classDiagram
       to: eventId->stateId|null
     }
 
-    class EventCurrentState {
-      <<RealmState logical fact>>
-      eventId
-      currentStateId|null
+    class EventStateList {
+      <<RealmState one Record>>
+      entries[]
+      entry.eventId
+      entry.stateId
     }
 
     class EncounterDefinition {
@@ -196,12 +198,12 @@ classDiagram
     DialogueDefinition --> DialogueCompletion : returns terminal id
 
     EventDefinition "1" *-- "1..*" EventState : states
-    EventCurrentState --> EventDefinition : eventId
+    EventStateList --> EventDefinition : current non-null entries
     EventState "1" *-- "0..*" EventStateNPC : map/npc entries
     EventStateNPC --> NPCInstance : defines source projection
     EventStateNPC "1" *-- "0..1" EventNPCInteraction : interaction
     EventNPCInteraction --> DialogueDefinition : entry dialogue
-    EventStateMutation --> EventCurrentState : validate from / commit to
+    EventStateMutation --> EventStateList : validate / replace list
 
     EncounterDefinition --> NPCInstance : generates
     EncounterDefinition --> BattleActorContent : temporary opponent actor
@@ -210,87 +212,96 @@ classDiagram
     StoryIndex --> EventDefinition : indexes
     StoryIndex --> CharacterDefinition : indexes
 
-    Card --> BattleRuntimeActor : carried card state
+    Card --> BattleRuntimeActor : selects carried contract
+    Relationship --> BattleRuntimeActor : integrity / progression
     BattleActorContent --> BattleRuntimeActor : static battle definition
     EncounterDefinition --> BattleRuntimeActor : temporary actor source
 ```
 
-`EventCurrentState` 在这里是**逻辑事实**，不表示最终一定采用“一 Event 一 Record”的 Realm State 物理布局。
-
-## 稀疏 Event Current State
+## EventStateList：一个 Realm State Record
 
 ```mermaid
 flowchart LR
-    C[Event Content<br/>A / B / C / D] --> S[Sparse Event current states]
+    I[Game Entry initial Realm State] --> L[EventStateList Record]
 
-    S --> A[A = state-2]
-    S --> C1[C = state-1]
-    S -. omitted / null .-> B[B = null]
-    S -. omitted / null .-> D[D = null]
+    L --> A[event A = state-2]
+    L --> C[event C = state-1]
+
+    B[event B] -. no entry = null .-> L
+    D[event D] -. no entry = null .-> L
 
     A --> R[Story Resolver]
-    C1 --> R
+    C --> R
     B -. skip .-> R
     D -. skip .-> R
 ```
 
-当前语义：
+当前物理模型已经确定：
 
 ```text
-stateId != null
-→ Event 当前已启动
-→ 读取对应 Event State Content
-
-stateId == null / 当前稀疏表没有非空值
-→ Event 当前为空状态
-→ 不参与 Event State 投影
+EventStateList
+[
+  { eventId, stateId },
+  ...
+]
 ```
 
-安装初始化 Realm State baseline 只写开局已经启动的 Event，不需要为所有 Content Event 写一份 `inactive`。
+规则：
+
+```text
+有 entry
+→ current state = entry.stateId
+
+无 entry
+→ current state = null
+→ Event 当前未启动 / 已清空
+```
+
+列表只保存非空 state；不保存 `stateId: null` 项。
 
 ```text
 null → stateId
-= 启动 Event
+= 新增 entry / 启动 Event
 
 stateId → stateId
-= 推进 Event
+= 修改 entry / 推进 Event
 
 stateId → null
-= 清空 / 结束当前 Event state
+= 删除 entry / 清空 Event
 ```
 
-`null` 是 Event 业务值，不是 Realm State Record membership。Realm State Record 曾经 materialized 后再 `put(null)`，Event 业务上仍然就是空状态。
+EventStateList 的最终 Realm State namespace / key 名字仍未冻结，但“一张列表 Record”已经冻结。
 
 ## Event State / NPC / Dialogue / Mutation 链路
 
 ```mermaid
 flowchart LR
-    ES[Event current state] --> ACTIVE{state != null?}
-    ACTIVE -->|否| SKIP[不提供 Event State 投影]
-    ACTIVE -->|是| MAP[mapId]
+    L[EventStateList] --> FIND{存在 eventId entry?}
+    FIND -->|否| SKIP[Event current state = null<br/>不提供投影]
+    FIND -->|是| ES[Event State Content]
+    ES --> MAP[mapId]
     MAP --> NPC[npcId + placement]
     NPC --> I{interaction?}
 
     I -->|无| SCENE[只作为场景 NPC]
     I -->|有| D[entry Dialogue]
 
-    D --> DF[Dialogue Frame]
-    DF --> C{当前 Dialogue 有 choices?}
+    D --> DS[PokeMan Dialogue Subsystem]
+    DS --> C{当前 Dialogue 有 choices?}
 
     C -->|有| CH[选择 target Dialogue]
-    CH --> DF
+    CH --> DS
 
     C -->|无| M{当前 Dialogue 有 mutation?}
     M -->|无| DONE[complete]
-    M -->|有| MUT[EventStateMutation]
+    M -->|有| MUT[EventStateMutation Content]
 
-    MUT --> F[from<br/>eventId -> stateId | null]
-    F --> CHECK{全部 from 匹配?}
+    MUT --> READ[scope.state.read<br/>EventStateList + version]
+    READ --> CHECK{全部 from 匹配?}
     CHECK -->|否| FAIL[mutation 不成立]
-    CHECK -->|是| TO[to<br/>eventId -> stateId | null]
-    TO --> COMMIT[一次 Realm State commit<br/>原子写入全部 to]
-    COMMIT --> RESOLVE[Story Resolver 重新解析场景]
-    RESOLVE --> DONE
+    CHECK -->|是| BUILD[生成新 EventStateList]
+    BUILD --> COMMIT[scope.state.commit<br/>一次 Record replacement]
+    COMMIT --> DONE
 
     DONE --> T[return terminalDialogueId]
 ```
@@ -298,24 +309,19 @@ flowchart LR
 关键边界：
 
 ```text
-Event current state
-= stateId | null
+Dialogue Content
+= 数据
 
-Event State
-= 非空 current state 对应的当前剧情阶段
+EventStateMutation Content
+= 数据
 
-Event State NPC
-= 这个阶段 NPC 在哪、入口 Dialogue 是什么
+PokeMan Dialogue Subsystem
+= executor
+= 解释 Dialogue graph / Mutation
+= 通过 scope.state commit EventStateList
 
-Dialogue Choice
-= 只选择下一段 Dialogue
-
-无 Choice Dialogue
-= 可以在完成时引用一个 EventStateMutation
-
-EventStateMutation
-= from: 多个 Event state/null 前置条件（全部 AND）
-+ to: 多个 Event state/null 原子赋值
+@loomrealm-game/rpg-dialogue
+= Conversation interaction / presentation
 ```
 
 `choices` 与 `mutation` 互斥：
@@ -335,10 +341,10 @@ Choice
 → target Dialogue
 → target Dialogue 无 choices
 → target Dialogue.mutation
-→ EventStateMutation
+→ PokeMan Dialogue Subsystem 执行 EventStateMutation
 ```
 
-Event State NPC interaction 不保存 `terminalDialogueId → Mutation` 映射，只保存入口 `dialogueId`。
+Event State NPC interaction 只保存入口 `dialogueId`。
 
 ## Mutation 的多 Event / 空状态语义
 
@@ -353,9 +359,10 @@ flowchart TB
     OK -->|是| T1[to: eventA = a2]
     OK -->|是| T2[to: eventB = b1]
     OK -->|是| T3[to: eventC = null]
-    T1 --> ATOMIC[同一次 commit]
-    T2 --> ATOMIC
-    T3 --> ATOMIC
+    T1 --> BUILD[修改列表]
+    T2 --> BUILD
+    T3 --> BUILD
+    BUILD --> ATOMIC[一次 EventStateList Record commit]
 ```
 
 例如：
@@ -373,33 +380,31 @@ to
   tutorial-battle = ready
 ```
 
-这里同时完成：
+`from: null` 表示当前列表没有该 Event entry。
+
+`to` 的解释：
 
 ```text
-检查已有 Event 状态
-+
-检查某 Event 尚为空
-+
-推进 Event
-+
-启动 Event
+to = stateId
+→ upsert EventStateList entry
+
+to = null
+→ 删除 EventStateList entry
 ```
 
-Mutation 是“一组 Event state/null 前置条件 → 一组 state/null 赋值”，不是一组必须一一配对的 `A → B` 边。
+Mutation 是“一组 Event state/null 前置条件 → 一组列表变更”，不是一组必须一一配对的 `A → B` 边。
 
-需要 OR 时不在 Mutation 内增加 `or / anyOf`，而是为每个分支定义独立 Mutation，并由对应 Dialogue / 业务分支引用对应 Mutation。
+需要 OR 时不在 Mutation 内增加 `or / anyOf`，而是为每个分支定义独立 Mutation，并由对应业务分支引用对应 Mutation。
 
 EventStateMutation 只拥有 Event current state，不修改 Relationship / Contract / Card / Battle / player position 等其他 Realm State。
 
-Runtime 也不会扫描全部 Mutation 自动执行。必须由明确的 Dialogue completion 或其他业务结果引用 Mutation。
+Runtime 也不会扫描全部 Mutation 自动执行。必须由明确业务路径中的 PokeMan Subsystem 读取并执行 Mutation。
 
 ## NPC / Event / Map 唯一性
 
 ```mermaid
 flowchart LR
-    EA[Event A current state != null] --> R[Story Resolver]
-    EB[Event B current state != null] --> R
-    EZ[Event Z current state = null] -. skip .-> R
+    L[EventStateList] --> R[Story Resolver]
     CC[Character defaults] --> R
     EN[Encounter generated NPCs] --> R
 
@@ -415,8 +420,8 @@ Source Content
 - 不同 Event 可以引用同一个 npcId
 - 同一个 Event state 可以让同一个 npcId 出现在多个不同 Map
 
-Current Event state
-- null Event 不参与投影
+EventStateList
+- 只有有 entry 的 Event 参与投影
 
 Final resolved Map
 - (mapId, npcId) 必须唯一
@@ -438,7 +443,7 @@ flowchart LR
     S1 --> F4[effect]
 ```
 
-PokeMan 不再增加一层 `PokeManSkill`。BattleSkill 的 shape 和战斗语义由 `@loomrealm-game/battle` 维护；Character 只负责稳定关联 BattleActor Content。
+PokeMan 不增加一层 `PokeManSkill`。BattleSkill 的 shape 和战斗语义由 `@loomrealm-game/battle` 维护；Character 只负责稳定关联 BattleActor Content。
 
 ## Relationship / Card / Battle 的关键链路
 
@@ -447,47 +452,69 @@ flowchart LR
     A[Character A] --> R[Relationship A → B]
     B[Character B] --> R
 
-    R -->|contract = false| N[没有正式契约]
-    R -->|contract = true| C{B 当前是否随 A 携带?}
+    R --> RS[contract<br/>affinity / hostile<br/>integrity / progression]
+    RS --> C{B 当前是否随 A 携带?}
 
-    C -->|否| NC[没有当前 Card 对象]
-    C -->|是| CARD[Card<br/>holder=A<br/>servant=B<br/>slot<br/>integrity]
+    C -->|否| NC[没有当前 Card<br/>Relationship 长期状态仍存在]
+    C -->|是| CARD[Card<br/>holder=A<br/>servant=B<br/>slot]
 
     B --> BAC[BattleActor Content<br/>max_hp + skills[]]
     BAC --> SK[BattleSkill Content]
+
     CARD --> BRA[Battle Runtime Actor]
+    R --> BRA
     BAC --> BRA
 
     BRA --> BR[Battle Simulation<br/>hp / tile / direction<br/>action / protection / Decision]
+    BR --> R2[Battle 结束<br/>Integrity 回写 Relationship]
 
     S[Story / Encounter Battle Source] --> TBA[Temporary Battle Runtime Actor]
     BAC --> TBA
     TBA --> BR
 ```
 
-## 当前最重要的边界
+因此：
 
 ```text
 Relationship
-= 长期人与人关系
+= 长期人与人 / 契约状态
 = affinity / hostile / dynamic text / contract
+= integrity / progression / training
 
 Card
-= 当前随身 Card
-= holder / servant / slot / 当前 Card battle-facing state
+= 当前随身状态
+= holder / servant / slot
 
-Event current state
-= 稀疏 stateId | null
-= null 不参与 Event State 投影
+Card absent
+≠ Relationship / Integrity / Progression 消失
+```
 
-Dialogue
-= lines + choices? + mutation?
-= choices 与 mutation 互斥
+同一个 Character 被不同主公契约时，各自 Relationship 的 Integrity / Progression 相互独立。
+
+## 当前最重要的边界
+
+```text
+EventStateList
+= 一个 Realm State Record
+= 只保存非空 Event state
+
+Dialogue / Mutation Content
+= 数据，不执行
+
+PokeMan Dialogue Subsystem
+= Mutation executor
+
+Relationship
+= 长期有向关系 + 契约级长期状态
+
+Card
+= 当前随身与 slot
 
 EventStateMutation
-= 只读写 Event current state
-= from 全 AND，to 原子写入
-= null 可表示空 Event state
+= 只改变 EventStateList
+= from 全 AND
+= null 表示无 entry
+= 全部 to 通过一次列表 Record replacement 原子提交
 
 BattleActor / BattleSkill Content
 = @loomrealm-game/battle 的静态战斗定义
@@ -496,43 +523,21 @@ Battle Runtime Actor
 = @loomrealm-game/battle 本场 Simulation actor
 ```
 
-因此：
-
-```text
-Content Event exists
-≠ Realm State 必须有非空 current state
-
-current Event state = null
-= 当前 Event 未启动 / 已清空
-
-contract exists
-≠ Card 一定存在
-
-Card exists
-=> 对应 contract 已成立，并且当前进入随身编队
-
-Battle Runtime Actor exists
-≠ 必须来自 Card
-
-PokeMan Skill
-= 不单独存在
-= 直接使用 BattleSkill
-```
-
 ## 图中故意没有解决的问题
 
 以下仍然留白：
 
 - Card 是否需要独立 `cardId`；
-- 从者有 contract 但不随身时，Integrity / Progression 长期状态最终由谁拥有；
+- Relationship progression / training 的精确 shape；
 - Character → BattleActor Content 的最终引用编码；
-- 技能学习 / 成长如何改变某个角色长期可用的 `skills[]`；
+- 技能学习 / 成长如何改变某个契约长期可用的 `skills[]`；
 - Event / EventStateMutation 的最终 Content namespace / key；
-- 稀疏 Event current state 的最终 Realm State namespace / key / Record shape；
-- 非 Dialogue 业务如何引用 Mutation；
-- Dialogue mutation `from` 校验失败时的产品错误表现；
-- 跨 Event 的同一 `(mapId, npcId)` 冲突未来是否需要显式 override；
+- EventStateList Realm State Record 的最终 namespace / key 名字；
+- 非 Dialogue Subsystem 如何在各自 Content 中引用 Mutation；
+- Mutation `from` mismatch / OCC conflict 时的产品错误表现；
+- 跨 Event 的同一 `(mapId,npcId)` 冲突未来是否需要显式 override；
 - `absent` 与其他 Event 出现定义同时命中时的解析；
+- transient Encounter NPC 的固定 Dialogue speaker identity；
 - Encounter re-entry 与生成结果持久化细节。
 
 BattleSkill 本身的静态字段和执行语义不再作为 PokeMan 自己的未决 schema；它直接跟随 `@loomrealm-game/battle` 当前规范。
