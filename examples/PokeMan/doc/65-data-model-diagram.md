@@ -47,7 +47,7 @@ classDiagram
     }
 
     class NPCInstance {
-      <<Runtime / Projection>>
+      <<Runtime>>
       instanceId
       npcId
       characterId?
@@ -59,7 +59,7 @@ classDiagram
     }
 
     class Relationship {
-      <<Realm State>>
+      <<RealmState>>
       fromCharacterId
       toCharacterId
       affinity
@@ -69,7 +69,8 @@ classDiagram
     }
 
     class Card {
-      <<Realm State: current carried only>>
+      <<RealmState>>
+      currentCarriedOnly
       holderCharacterId
       servantCharacterId
       slot
@@ -77,7 +78,7 @@ classDiagram
     }
 
     class BattleActor {
-      <<Battle Runtime>>
+      <<Runtime>>
       currentHp
       maxHp
       currentStats
@@ -114,7 +115,7 @@ classDiagram
     }
 
     class EventCurrentState {
-      <<Realm State>>
+      <<RealmState>>
       eventId
       currentStateId
     }
@@ -127,28 +128,29 @@ classDiagram
     }
 
     class EncounterGeneratedState {
-      <<Realm State when persistence is needed>>
+      <<RealmState>>
+      persistenceOnlyWhenNeeded
       generatedInstances
     }
 
     class StoryIndex {
-      <<Generated Content>>
+      <<GeneratedContent>>
       byMap
       byCharacter
       byEvent
     }
 
-    CharacterDefinition --> BattleProfile : has / references
+    CharacterDefinition --> BattleProfile : battle profile
     BattleProfile --> SkillDefinition : uses
 
     NPCDefinition --> VisualDefinition : presentation
     NPCInstance --> NPCDefinition : npcId
-    NPCInstance --> CharacterDefinition : characterId (optional)
+    NPCInstance --> CharacterDefinition : optional characterId
 
     CharacterDefinition "1" <-- "0..*" Relationship : from
     CharacterDefinition "1" <-- "0..*" Relationship : to
 
-    Relationship "contract=true" --> Card : may enter carried loadout
+    Relationship --> Card : contract + carried
     CharacterDefinition "1" <-- "0..*" Card : holder
     CharacterDefinition "1" <-- "0..*" Card : servant
 
@@ -168,9 +170,9 @@ classDiagram
     StoryIndex --> EventDefinition : indexes
     StoryIndex --> CharacterDefinition : indexes
 
-    Card --> BattleActor : contributes carried card state
-    BattleProfile --> BattleActor : contributes static battle data
-    EncounterDefinition --> BattleActor : can construct temporary actor
+    Card --> BattleActor : carried card state
+    BattleProfile --> BattleActor : static battle data
+    EncounterDefinition --> BattleActor : temporary actor source
 ```
 
 ## Relationship / Card / Battle 的关键链路
@@ -184,13 +186,13 @@ flowchart LR
     R -->|contract = true| C{B 当前是否随 A 携带?}
 
     C -->|否| NC[没有当前 Card 对象]
-    C -->|是| CARD[Card\nholder=A\nservant=B\nslot\nintegrity]
+    C -->|是| CARD[Card<br/>holder=A<br/>servant=B<br/>slot<br/>integrity]
 
-    B --> BP[Character B Battle Profile\nbase stats + skills]
+    B --> BP[Character B Battle Profile<br/>base stats + skills]
     CARD --> BA[Battle Actor]
     BP --> BA
 
-    BA --> BR[Battle Runtime\ncurrentHp / cooldown\nbuff / debuff / Decision]
+    BA --> BR[Battle Runtime<br/>currentHp / cooldown<br/>buff / debuff / Decision]
 
     S[Story / Encounter Battle Definition] --> TBA[Temporary Battle Actor]
     BP --> TBA
