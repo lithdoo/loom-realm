@@ -14,6 +14,7 @@
 4. **Battle Runtime 独立。** Battle 当前运行状态只由 `@loomrealm-game/battle` Simulation authority 拥有。
 5. **PokeMan 不重复定义 BattleActor / BattleSkill。** 战斗静态数据直接复用 `@loomrealm-game/battle` 当前 Content contract。
 6. **Content 尽量完整。** Character / Dialogue / Event / Encounter / Battle 静态定义都从安装 Content 取得。
+7. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
 
 ## 总体关系
 
@@ -152,6 +153,14 @@ npcId != characterId
 
 二者可以偶然相同，但系统不能依赖这个假设。
 
+PokeMan 对 NPC 的地图唯一性规则是：
+
+```text
+最终场景中 (mapId, npcId) 唯一
+```
+
+所以同一个 `npcId` 可以同时存在于多个不同 Map，但不能在同一张 Map 的最终结果里出现两次。
+
 ## Dialogue
 
 固定 Dialogue 是 immutable Content：
@@ -189,6 +198,23 @@ EventDefinition
       └─ other story definitions
 ```
 
+Event source Content 不要求跨 Event 的 `npcId` 唯一。不同 Event 可以都声明同一个 NPC；同一个 Event state 也可以让同一个 `npcId` 出现在多个不同 Map。
+
+当前静态与 Runtime 检查边界是：
+
+```text
+同一个 Event state
+→ (mapId, npcId) 不可重复
+
+不同 Event
+→ 允许重复引用同一个 npcId
+
+Runtime 合并当前所有来源
+→ 每张最终 Map 内 npcId 必须唯一
+```
+
+当前不定义隐式 last-wins。如果多个 Event 在当前 Realm State 下最终同时为同一 `(mapId, npcId)` 提供出现定义，Story Resolver 必须确定性处理为冲突。
+
 Story Index 是 Builder 生成的派生 Content：
 
 ```text
@@ -216,6 +242,8 @@ EncounterDefinition
 ```
 
 Encounter 可以生成 transient NPC Instance，也可以提供剧情 / 普通敌人的 Battle 输入；不要求为临时敌人建立 Character Relationship 或 Card。
+
+Encounter 生成结果与 Story/Event 投影最终也要一起满足当前 Map 的 `npcId` 唯一约束。
 
 # Realm State
 
@@ -373,7 +401,15 @@ NPCPlacement
 └─ pattern?
 ```
 
-一个 Character 可以产生 0..N 个 NPC Instance；Transient Encounter NPC 可以没有 `characterId`。
+`instanceId` 满足 `@loomrealm-game/map` 的实例 contract；PokeMan 的最终业务唯一性另外要求：
+
+```text
+对每个 mapId：npcId 唯一
+```
+
+因此同一个 NPC 可以在多个不同 Map 上同时存在，但不能因为给它不同 `instanceId` 就在同一 Map 上保留两份。
+
+一个 Character 可以产生 0..N 个 NPC Instance；如果同一 Character 在同一 Map 需要多个不同表现，它们必须使用不同 `npcId`。Transient Encounter NPC 可以没有 `characterId`。
 
 Map Enter：
 
@@ -387,6 +423,10 @@ Character / Event Content
 Encounter generated state
 ↓
 Story Resolver
+↓
+合并 NPC sources
+↓
+校验当前 Map npcId 唯一
 ↓
 NPC Instance[]
 ↓
@@ -508,7 +548,7 @@ Runtime
 └─ Renderer / animation state
 ```
 
-# Builder 检查边界
+# Builder / Runtime 检查边界
 
 Builder 应检查：
 
@@ -519,7 +559,8 @@ Builder 应检查：
 - Character 引用了不存在的 BattleActor Content；
 - BattleActor `skills[]` 引用了不存在的 BattleSkill；
 - BattleSkill / BattleActor 本身不满足 Battle package 的 validator / contract；
-- 同一实例集合 `instanceId` 重复；
+- 同一个 Event state 内重复 `(mapId, npcId)`；
+- 单个定义中重复 `instanceId`；
 - placement 非法；
 - Story Index 与源 Content 不一致。
 
@@ -528,18 +569,21 @@ Builder 不应因为以下情况失败：
 ```text
 多个 NPC Definition 使用同一个 Visual
 同一个 Character 使用多个 NPC Definition
-同一个 Character 出现多个 NPC Instance
-同一个 Character 在同一 Map 出现多个 NPC Instance
-同一个 npcId 被多个 NPC Instance 使用
+同一个 npcId 被多个不同 Event 引用
+同一个 npcId 在同一 Event state 中出现在多个不同 Map
+同一个 Character 被多个 Event 引用
+同一个 Character 出现在多个不同 Map
 Dialogue 之间形成 cycle
 同一个 Character 被多个不同方向的 Relationship / contract 引用
 ```
+
+Runtime 在合并 Story / Character / Encounter 等当前来源后，必须对每个最终 Map 检查 `npcId` 唯一。不同来源最终产生同一 `(mapId, npcId)` 时，当前规则是确定性冲突，不是隐式覆盖。
 
 # 当前继续设计的问题
 
 - Character / NPC / Visual 的精确 Content schema / namespace；
 - Character 到 BattleActor Content 的最终引用编码；
-- Event 的完整触发 / 顺序 / 冲突规则；
+- Event 的状态推进触发、`absent` 与跨 Event 冲突 / 显式 override 规则；
 - Dialogue 的 outcome/result、condition、本地化与 presentation metadata；
 - Relationship 的最终 Realm State key / shape；
 - Card 的最终 key / 是否需要独立 `cardId`；
