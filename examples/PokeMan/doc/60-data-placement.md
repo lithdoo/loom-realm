@@ -17,7 +17,7 @@
 - 能由 **Content + Realm State 最小事实**重算出的表现，不为了存档方便再复制一份进 State。
 - 只服务当前调用 / 当前 Battle / 当前画面的，留在 Runtime 内存。
 
-Game Entry 的 `state.records` 是 Session bootstrap 时安装的 Realm State baseline。初始 Relationship、初始 contract、初始 Event state、初始随身 Card 等 mutable baseline 可以从这里进入 State；Character、Dialogue、Battle profile、Skill 等 immutable definition 仍属于 Content。
+Game Entry 的 `state.records` 是 Session bootstrap 时安装的 Realm State baseline。初始 Relationship、初始 contract、初始 Event state、初始随身 Card 等 mutable baseline 可以从这里进入 State；Character、Dialogue、BattleActor / BattleSkill 等 immutable definition 仍属于 Content。
 
 ## Content：定义与剧情
 
@@ -28,9 +28,17 @@ Content
 ├─ Character definitions
 │  ├─ identity / description / fixed AI text
 │  ├─ default NPC instances
-│  └─ Battle static profile
-│     ├─ base stats
-│     └─ skills
+│  └─ Battle references
+│     └─ @loomrealm-game/battle BattleActor Content
+│        ├─ id / name / character graphics
+│        ├─ max_hp
+│        └─ skills[] → BattleSkill
+├─ @loomrealm-game/battle BattleSkill Content
+│  ├─ id / name
+│  ├─ range
+│  ├─ damage
+│  ├─ timing.windup_ticks / recovery_ticks
+│  └─ effect
 ├─ NPC definitions
 ├─ Visual definitions/resources
 ├─ Event / Event State
@@ -40,6 +48,8 @@ Content
 ├─ Battle rules / scenarios
 └─ Map content
 ```
+
+PokeMan **不另建平行的 Skill schema**。当前战斗技能直接采用 `@loomrealm-game/battle` 的 `BattleSkill` Content contract；角色能使用哪些技能，由角色关联的 BattleActor Content 中 `skills[]` 引用表达。以后需要新的战斗能力时，应优先扩展 Battle package 的规范，而不是只在 PokeMan 内新增另一套 Skill 语义。
 
 所有持久 Character 都准备好 Card / Battle 所需静态素材与数据。这只是 Content 完备性，不代表当前可以建立契约。
 
@@ -120,43 +130,56 @@ Card 当前承载：
 - 当前随身 slot；
 - 当前随身 Card 的 Battle-facing state，例如 Card Integrity。
 
-Card 不复制 Character 的基础能力、Skill、人格或静态资源。
+Card 不复制 BattleActor / BattleSkill Content、人格或静态资源。
 
 **Card 的独立 `cardId`、非随身时 Integrity / 训练 / 成长等长期状态最终住在哪里，目前尚未冻结。** 不在这里提前增加新的 State authority。
 
-## Battle：三层分离
+## Battle：直接复用 Battle package 的数据模型
+
+PokeMan 不定义第二套 Battle Actor / Skill 数据模型。静态战斗数据以 `@loomrealm-game/battle` 当前规范为准。
 
 ```text
-Character Content
-= Battle 静态定义
-├─ base stats
-├─ skills
-└─ presentation/resources
+BattleActor Content
+├─ id
+├─ name
+├─ character graphics reference
+├─ max_hp
+└─ skills[] → BattleSkill
+
+BattleSkill Content
+├─ id
+├─ name
+├─ range
+├─ damage
+├─ timing
+│  ├─ windup_ticks
+│  └─ recovery_ticks
+└─ effect
 
 Card Realm State
-= 当前随身 Card 的 Battle-facing state
-└─ integrity
+└─ 当前随身 Card 的 battle-facing state
+   └─ integrity
 
 Battle Runtime
-= 本场权威模拟
-├─ currentHp / maxHp
-├─ current stats
-├─ resolved skills
-├─ cooldown / status / buff / debuff
-├─ Decision
-└─ simulation state
+└─ @loomrealm-game/battle Simulation-owned actor state
+   ├─ hp / maxHp
+   ├─ tile / direction
+   ├─ action
+   ├─ protectedUntilTickExclusive
+   ├─ resolved skills
+   └─ Decision / Simulation working state
 ```
 
-Card Integrity 不是 Character 本体生命值。
+这里不把尚未存在于 Battle v0 的 `attack / defense / speed / MP / accuracy / critical / element / universal cooldown / Buff / Debuff` 等概念写成 PokeMan 已定义字段。将来如果产品确实需要，先在 Battle 模块中设计并冻结，再由 PokeMan 使用。
 
 当前随身 Card 参战：
 
 ```text
-Character Battle Content
+Character → BattleActor Content
 +
 Card State
 ↓
-Battle Actor
+@loomrealm-game/battle Runtime Actor
 ```
 
 剧情 / Encounter 临时对手不需要制造 contract 或 Card：
@@ -164,9 +187,9 @@ Battle Actor
 ```text
 Story / Encounter Battle definition
 +
-Character / Battle profile
+BattleActor Content
 ↓
-Battle Actor
+@loomrealm-game/battle Runtime Actor
 ↓
 Battle 结束后 Runtime 丢弃
 ```
@@ -229,13 +252,13 @@ Card 自由对话可以组合以上信息和必要的当前剧情 context。LLM 
 | 系统菜单 | 菜单定义可本地持有 | 世界事实不放这里 | root / 游戏中菜单实例、光标 |
 | 消息 | — | — | 当前模态消息 |
 | 地图与玩家 | 地图、碰撞、传送、Story Index | 当前地图、玩家格与朝向、必要剧情事实 | Resolver、镜头、走步、输入、寻路 |
-| 人物 | 身份、描述、fixed AI text、Battle static profile | — | 当前解析出的 NPC Instance |
+| 人物 | 身份、描述、fixed AI text、BattleActor Content 引用 | — | 当前解析出的 NPC Instance |
 | 关系 / 契约 | — | Relationship：affinity、hostile、动态文本、contract | 尚未提交的关系变化 |
-| Card | Card / Battle 表现所需静态资源来自 Character / Visual Content | **当前随身 Card State**：holder、servant、slot、battle-facing state | Battle 中的 Card Manifestation |
+| Card | Card / Battle 表现所需静态资源来自 Character / Visual / Battle Content | **当前随身 Card State**：holder、servant、slot、battle-facing state | Battle 中的 Card Manifestation |
 | 对话 | 固定 Dialogue | AI 长期关系语境来自 Relationship | dialogue id / line index / pending choice；LLM working context |
 | 剧情 | Event、states、NPC placement、Dialogue ref、Story Index | Event currentState、不可重算剧情事实 | 当前解析 / 执行步骤 |
-| 遭遇 | table、spawn point、template、Battle profile ref | 需要持续存在的生成结果 | 当前接触、视野、临时对手 |
-| 战斗 | rules、skills、Character Battle profile | 当前随身 Card 的已提交 Battle-facing state | Battle Actor、HP、cooldown、Buff/Debuff、Decision、Simulation |
+| 遭遇 | table、spawn point、template、BattleActor ref | 需要持续存在的生成结果 | 当前接触、视野、临时对手 |
+| 战斗 | `@loomrealm-game/battle` 的 BattleActor / BattleSkill / rules / scenarios | 当前随身 Card 的已提交 battle-facing state | Battle Simulation / Decision / Presentation 当前工作状态 |
 | 表现 | tiles、sprites、portrait、UI skin | — | Renderer replica、动画 |
 | 存档 | — | 选中的 Realm State snapshot | Load 临时缓冲 |
 
@@ -270,11 +293,11 @@ System Menu 可以发起 New Game / Load 意图，但不是第二个 State autho
 存档不重复保存：
 
 - Character fixed AI text；
-- Character Battle static profile / Skill definitions；
+- BattleActor / BattleSkill Content；
 - Dialogue definitions；
 - Event state 中的 immutable placement；
 - Story Index；
-- Battle Runtime 的 currentHp、cooldown、Buff/Debuff；
+- Battle Runtime state；
 - Frame 栈、Renderer replica。
 
 需要注意：**从者不随身时仍需跨存档保留的 Integrity / Progression 状态最终 owner 尚未确定。** 在这个问题冻结以前，本文不把它强行塞回 Relationship，也不新增一个未经确认的 Managed Card / Contracted Servant State。
@@ -291,4 +314,4 @@ System Menu 可以发起 New Game / Load 意图，但不是第二个 State autho
 - 第一道路需要持久的 Encounter 结果；
 - 已触发的 Pocket / 剧情事实。
 
-Character、Battle profile、Skill、Dialogue、默认 NPC Instance 与 Story Index 都留在 Content。
+Character、BattleActor / BattleSkill、Dialogue、默认 NPC Instance 与 Story Index 都留在 Content。
