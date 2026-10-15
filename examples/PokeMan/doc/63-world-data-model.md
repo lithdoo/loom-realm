@@ -1,58 +1,64 @@
 # 世界数据模型
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文把已经讨论确认的 Character、NPC、Visual、Story、Encounter、Relationship、Card 与 Battle 的数据职责放在同一张图里。精确 JSON schema、Realm State namespace/key 和持久化格式仍可在实现前继续细化。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文汇总当前已经确认的 Character、NPC、Visual、Story、Dialogue、Encounter、Relationship、Card 与 Battle 数据职责。精确 JSON schema、Realm State namespace/key 和持久化格式仍可继续细化。
 
-归宿总表见 [数据落点](./60-data-placement.md)，人物与场景实例细节见 [人物](./61-character.md)，Event 见 [事件](./62-event.md)，固定 Dialogue 见 [固定对话](./64-dialogue.md)。
+归宿总表见 [数据落点](./60-data-placement.md)，人物细节见 [人物](./61-character.md)，Event 见 [事件](./62-event.md)，固定 Dialogue 见 [固定对话](./64-dialogue.md)，总览图见 [数据模型图](./65-data-model-diagram.md)。
 
 ## 目标
 
-这套数据模型优先满足四个方向：
+当前模型坚持几个边界：
 
-1. **人物身份与地图表现分离。** Character 不是 NPC，NPC 也不要求一定对应持久 Character。
-2. **剧情尽量数据驱动。** 剧情规则、Event State、固定 Dialogue 与场景实例定义优先留在 Content，不硬编码进 World，也不把可重算结果重复写进存档。
-3. **Realm State 只保留真正动态事实。** Event current state、Relationship、玩家位置、需要持续存在的随机结果等进入 State；契约与长期 Card 状态属于有向 Relationship 的一部分，不再建立第二套独立 authority。
-4. **复用与动态生成都是正常能力。** 多个 NPC 可以共用同一套形象；同一 Character 可以有多个 NPC Instance；Visible Encounter 可以在运行时动态生成 NPC Instance；剧情 Battle 也可以直接构造本场临时 Battle Actor。
+1. **Character identity 与 Map 表现分离。** Character 不是 NPC，NPC Instance 也不要求一定对应持久 Character。
+2. **Relationship 保存人与人的长期关系与契约事实。** Contract 不建立独立 authority。
+3. **Card 与 Relationship 分离。** 技术数据模型里的 Card 只表示当前随身、主要服务 Pocket / Battle 的卡片状态。
+4. **Battle Runtime 独立。** currentHp、cooldown、Buff/Debuff、Decision 等只属于本场 Battle。
+5. **Content 尽量完整。** Character / Dialogue / Event / Encounter / Battle 静态定义都从安装 Content 取得。
 
 ## 总体关系
 
 ```text
-Character
-   │
-   ├──────────────→ Relationship A → B
-   │                    ├─ affinity / hostile / relationship text
-   │                    └─ contract?
-   │                         └─ persistent Card state
-   │
-   └──── optional link ──→ NPC Instance
-                              │
-                              └────────→ NPC Definition
-                                            │
-                                            └────────→ Visual
+                         ┌─────────────────────┐
+                         │ Character Content   │
+                         │ identity / AI /     │
+                         │ Battle profile      │
+                         └─────────┬───────────┘
+                                   │
+                    ┌──────────────┼───────────────┐
+                    │              │               │
+                    ▼              ▼               ▼
+              Relationship     NPC Instance      Card
+                 A → B             │          holder=A
+                    │              │          servant=B
+                    │              ▼               │
+                    │        NPC Definition        │
+                    │              │               │
+                    │              ▼               │
+                    │            Visual            │
+                    │                              │
+                    │ contract                     │ battle-facing state
+                    └──────────────┐               │
+                                   ▼               ▼
+                              current carried Card ──────┐
+                                                        │
+Character Battle Content ────────────────────────────────┤
+                                                        ▼
+                                                   Battle Actor
+                                                        │
+                                                        ▼
+                                                     Battle
 
-Event / Story Content
-→ 决定当前场景应投影哪些 NPC Instance
-→ 可以引用固定 Dialogue
-
-Dialogue Content
-→ 线性台词 + 可选末尾 Choice
-→ Choice 只跳到另一个 Dialogue
-
-Encounter Definition
-→ 运行时生成临时 NPC Instance
-
-Character Battle Content
-+
-Relationship persistent Card state（如果有）
-或 Story / Encounter Battle definition
-→ 构造 Battle Actor
-→ Battle Frame
+Story / Encounter Battle definition ────────────────────┘
 ```
 
-这里没有要求这些对象必须物理存成同一个文件或同一种 Record。图只表达职责和引用关系。
+这张图只表达职责和引用关系，不要求所有概念物理存成一种 Record。
+
+# Content
 
 ## Character：这个人是谁
 
-Character 是持久人物身份。它承载不会因为地图实例多少而复制的人物级静态事实，例如：
+Character 是持久人物 identity。
+
+概念上：
 
 ```text
 CharacterDefinition
@@ -66,54 +72,51 @@ CharacterDefinition
 ├─ tags
 ├─ default scene instances
 ├─ battle profile reference
-└─ card presentation reference
+└─ presentation references
 ```
 
-精确字段名还没有冻结，但以下语义已经确定：
+确认边界：
 
-- `id` 是人物身份的稳定 key；
-- 性格、职业、经历等作者定义的静态资料属于 Content；
-- Character 可以提供一段固定 AI 人物描述文本，用自然语言表达性格、说话习惯、背景、价值观等不需要拆成规则字段的信息；
-- 固定 AI 人物描述属于 immutable Content，游戏规则不依赖解析这段文本；
-- 所有持久角色都准备好形成角色卡和进入 Battle 所需的静态素材与数据；
-- Character Battle Content 提供基础能力、技能及相关静态资源；具体技能结构后续单独设计；
-- 这只是 **Content 完备性规则**，不表示游戏规则当前允许与这个人物建立契约；
-- Character 不保存当前 affinity、hostile、动态关系描述、Card Integrity 等运行中事实。
+- `id` 是人物稳定 identity；
+- 作者定义的职业、性格、经历属于 Content；
+- fixed AI character text 是 immutable natural-language persona；
+- Battle profile 提供基础能力、技能和 Battle 静态资源；
+- 所有持久 Character 都准备好 Card / Battle 所需静态素材，但这不等于 `canContract`；
+- Character 不保存当前 affinity、hostile、contract、Card Integrity 或 Battle currentHp。
 
-Character 可以没有默认 Map 实例，也可以有多个默认 Map 实例。
+## Battle Profile / Skill
 
-## Visual：长什么样
+当前只冻结归属，不冻结 Skill schema：
 
-Visual 是可复用的视觉素材定义。它与 Character identity、NPC Definition 都分开。
+```text
+Character Battle Content
+├─ base stats
+├─ skills
+└─ battle presentation/resources
+```
 
-概念上可以包含：
+具体 Skill Content shape、参数、动作执行、成长 / 学习方式下一步单独设计。
+
+## Visual
+
+Visual 是可复用的视觉定义：
 
 ```text
 VisualDefinition
 ├─ id
 ├─ map sprite
 ├─ portrait
-├─ battle sprite / presentation
+├─ battle presentation
 └─ card art
 ```
 
-不是每个 Visual 都必须同时提供所有表现面；实际字段由对应消费者需要决定。
+多个 NPC Definition 可以引用同一个 Visual；同一 Character 也可以在不同场景使用不同 Visual。
 
-允许：
+## NPC Definition
 
-```text
-thug-a ─┐
-thug-b ─┼→ visual: male-thug-01
-thug-c ─┘
-```
+NPC Definition 表示地图表现模板，不是 Character identity。
 
-同一个 Character 也可以在不同剧情场景使用不同 Visual，例如普通服装、节庆服装、伪装等。改变 Visual 不改变 Character identity。
-
-## NPC Definition：地图表现模板
-
-NPC Definition 表示“以什么地图角色模板出现”。它不是人物身份。
-
-当前 `@loomrealm-game/map` 的窄 Content contract 仍然是：
+当前 `@loomrealm-game/map` 的窄 Content contract 仍是：
 
 ```text
 [struct]NPC/<npcId>
@@ -121,145 +124,17 @@ NPC Definition 表示“以什么地图角色模板出现”。它不是人物�
 └─ sprite
 ```
 
-PokeMan 可以在 Builder/source Content 层使用更方便的 `visualId` 等引用，然后投影成 Map 当前需要的 `struct.NPC`；具体构建格式后续确定。
-
-重要的是：
+PokeMan source Content 可以使用 `visualId` 等更方便的引用，再由 Builder 投影成 Map 所需的 `struct.NPC`。
 
 ```text
 npcId != characterId
 ```
 
-二者可以恰好相同，但系统不能依赖这个假设。
+二者可以偶然相同，但系统不能依赖这个假设。
 
-同一个 Character 可以对应多个 NPC Definition：
+## Dialogue
 
-```text
-Character rival
-├─ NPC Definition rival-normal
-├─ NPC Definition rival-festival
-└─ NPC Definition rival-disguise
-```
-
-多个不同 NPC Definition 也可以引用同一个 Visual。
-
-## NPC Instance：这次具体出现的地图实例
-
-NPC Instance 是 World / Story Resolver 最终要投影到 Map 的场景实例。
-
-概念结构：
-
-```text
-NPC Instance
-├─ instanceId
-├─ npcId
-├─ characterId?   // optional
-├─ mapId
-├─ x
-├─ y
-├─ direction
-└─ pattern?
-```
-
-真正传给当前 Map API 的仍然只有：
-
-```text
-NPCPlacement
-├─ instanceId
-├─ npcId
-├─ x
-├─ y
-├─ direction
-└─ pattern?
-```
-
-`characterId` 是 PokeMan World 侧的业务关联，不要求加入 `@loomrealm-game/map` public API。
-
-### Persistent Character NPC
-
-当 NPC Instance 有 `characterId` 时，它关联一个持久 Character：
-
-```text
-instanceId: rival-lab
-npcId: rival-normal
-characterId: rival
-```
-
-与这个实例交互时，World 可以回到 `characterId = rival`，继续读取对应 Relationship 与人物剧情事实。
-
-### Transient NPC
-
-运行时普通 Encounter、路人、普通挑战者等不要求建立持久 Character，可以没有 `characterId`：
-
-```text
-instanceId: encounter:route1:17
-npcId: thug-male-01
-characterId: none
-```
-
-这类实例可以有本次 Dialogue / Battle identity，但不会因此自动进入长期 Relationship / 契约 / Card 模型。
-
-## Character 与 NPC Instance 的多重性
-
-Character identity 是唯一的，但 Map 表现实例不要求唯一：
-
-```text
-Character rival
-├─ rival-lab-a
-├─ rival-lab-b
-└─ rival-town
-```
-
-允许同一个 Character：
-
-- 出现在多个地图；
-- 在同一地图拥有多个 NPC Instance；
-- 不同 Instance 使用不同 `npcId` / Visual；
-- 多个 Instance 继续共享同一个 Character identity、Relationship 与人物剧情事实。
-
-因此 Builder **不能**因为同一个 `characterId` 或 `npcId` 重复出现就构建失败。
-
-真正需要稳定唯一的是候选 NPC Instance 的 `instanceId`。如果当前剧情解析后出现两个互相冲突的相同 `instanceId`，Story Resolver 应确定性报错/处理，而不能随机保留一个；多个 Event 的顺序与冲突规则仍在 Event 设计中继续讨论。
-
-## Event / Story：定义场景应该是什么样
-
-Event 是 Content。Realm State 只保存这一局当前处于哪个 Event State，以及其他不能从 Content 重建的玩家选择或业务事实。
-
-概念上：
-
-```text
-EventDefinition
-├─ id
-└─ states
-   └─ [stateId]
-      ├─ dialogue references
-      ├─ character / NPC instance definitions
-      └─ other story definitions
-```
-
-Event State 可以声明一个 Character 当前产生 0..N 个 NPC Instance，也可以引用独立的固定 Dialogue Content。Dialogue 自己只负责固定台词与对话内部的选择跳转，不承担 Event State mutation。
-
-Realm State 只需要类似：
-
-```text
-event/professor-intro = "after-contract"
-```
-
-World / Story Resolver 再用这个 `stateId` 去读取对应 Content，并算出当前 Map 的场景投影。
-
-当前仍保留已有的三层解析方向：
-
-```text
-必要的 Realm State 临时剧情覆盖
-→ Event current state 对应的场景定义
-→ Character Content 默认场景实例
-→ 没有实例
-```
-
-“多个 Event 如何排序、最后一条如何确定、冲突如何处理”继续留在 Event 设计中，不在本文提前锁死。
-
-## Dialogue：线性的固定对话片段
-
-固定 Dialogue 是独立的 immutable Content。人物日常对话和剧情对话使用同一种结构：
+固定 Dialogue 是 immutable Content：
 
 ```text
 Dialogue
@@ -272,34 +147,29 @@ Dialogue
    └─ target Dialogue
 ```
 
-一个 Dialogue 内没有通用 Node / Flow。`lines[]` 从头到尾线性播放；`choices` 如果存在，只能出现在最后。Choice 只决定下一段 Dialogue，不直接改变 Relationship、Event State、Battle 或其他世界事实。
+约束：
 
-多个 Dialogue 可以通过 Choice 组成分支：
+- 一个 Dialogue 内只有线性 `lines[]`；
+- Choice 只能在末尾；
+- Choice 只跳到另一个 Dialogue；
+- Dialogue 图允许 cycle；
+- Dialogue 自己不直接修改 Relationship / Event / Battle State。
+
+## Event / Story
+
+Event 是 Content。Realm State 只保存当前 Event state id 和其他真正不能重算的 mutable facts。
 
 ```text
-A
-→ Choice
-   ├─ B
-   └─ C
+EventDefinition
+├─ id
+└─ states
+   └─ [stateId]
+      ├─ dialogue references
+      ├─ NPC instance / placement definitions
+      └─ other story definitions
 ```
 
-也允许组成循环：
-
-```text
-question
-→ explanation
-→ question
-```
-
-所以 Dialogue 引用图有 cycle 是合法情况，Builder 不应把 cycle 本身当错误。
-
-运行中的 `current dialogue id`、`current line index`、待选择状态都是 Dialogue Frame 的临时工作集，不进入 Realm State，也不进入 Save。
-
-详细结构见 [固定对话](./64-dialogue.md)。
-
-## Story Index：Builder 生成的派生 Content
-
-Runtime 不应扫描全部 Event。Builder 根据作者维护的 Character / Event / Map 等源 Content 生成查询索引：
+Story Index 是 Builder 生成的派生 Content：
 
 ```text
 Story Index
@@ -308,33 +178,14 @@ Story Index
 └─ by Event
 ```
 
-它只是 Content projection：
+它可以重建，不进入 Save。
 
-- 可以重新构建；
-- 不是真相的第二份 authority；
-- 不进入 Realm State；
-- 不进入 Save；
-- 作者不需要手工维护多份索引。
+## Encounter
 
-Map Enter 的概念流程：
+Visible Encounter Content 至少表达：
 
 ```text
-Map Enter
-→ 读取 by-Map Story Index
-→ 找到相关 Event / Character 定义
-→ 读取 Event currentStateId
-→ Story Resolver 读取对应 Content
-→ 得到当前 Map 的 story NPC Instance[]
-```
-
-## Encounter：动态生成 NPC Instance
-
-Visible Encounter 是另一条 NPC Instance 来源。
-
-Content 至少需要表达：
-
-```text
-Encounter Content
+EncounterDefinition
 ├─ map encounter table
 ├─ spawn points
 └─ encounter templates
@@ -344,235 +195,306 @@ Encounter Content
    └─ optional battle profile reference
 ```
 
-Map Enter 时：
+Encounter 可以生成 transient NPC Instance，也可以提供剧情 / 普通敌人的 Battle 输入；不要求为临时敌人建立 Character Relationship 或 Card。
 
-```text
-Encounter Content
-→ roll / choose templates
-→ choose legal spawn points
-→ generate transient NPC Instance[]
-```
+# Realm State
 
-通常动态新增的是 **NPC Instance**，不是新的 Character，也不是运行时修改 Content。
+## Relationship：A → B 的长期关系
 
-如果某次随机生成结果需要在离开 / 读档后继续存在，则保存“本次已经生成的 Encounter 实例/结果”这一动态事实；如果产品规则以后决定重新进图直接重 roll，则可以不把对应结果做长期持久化。具体 re-entry 规则仍未冻结。
-
-最终 Map NPC 集合可以由不同来源合成：
-
-```text
-Story Resolver NPC Instance[]
-+
-Encounter generated NPC Instance[]
-+
-必要的 runtime override NPC Instance[]
-↓
-validate instanceId / placement
-↓
-NPCPlacement[]
-↓
-@loomrealm-game/map
-```
-
-## Relationship：A → B 的长期关系状态
-
-Relationship 是 Realm State 中两个人之间、带方向的长期业务状态。
+Relationship 是有方向的：
 
 ```text
 A → B
 = A 与 B 当前持续存在的关系状态
 ```
 
-`A → B` 与 `B → A` 是两份不同的 Relationship，不要求对称。
-
-当前概念结构：
+当前概念字段：
 
 ```text
 Relationship
-├─ directed participant identities
+├─ fromCharacterId
+├─ toCharacterId
 ├─ affinity
 ├─ hostile
 ├─ dynamic relationship text
-└─ contract?              // A 是主公，B 是从者
-   └─ card
-      ├─ integrity
-      └─ carried / managed state
+└─ contract?
 ```
 
-`affinity` 与 `hostile` 独立，不使用 `affinity < 0` 推导 hostile。
+`A → B` 与 `B → A` 是两份独立 Relationship，不要求对称。
 
-动态关系描述文本是一段自然语言，用于表达这一局里 A 对 B 当前形成的关系语境。游戏规则仍读取结构化的 affinity / hostile 等事实，不依赖解析这段文本；这段文本主要供 AI 自由对话理解当前关系。
+`affinity` 与 `hostile` 独立；动态关系文本主要给 AI 理解当前关系，不代替结构化规则字段。
 
-`contract` 表示 A 已经以主公身份与 B 这个从者建立正式契约。Relationship 很好不代表契约一定存在，契约成立以后 affinity / hostile 也仍然继续变化。
+### Contract
 
-双向契约就是两个方向分别成立：
+Contract 不再是独立对象。
+
+```text
+Relationship(A → B).contract
+= A 是主公
+= B 是从者
+= 正式契约已经成立
+```
+
+所以双向契约就是：
 
 ```text
 player → rival   contract
 rival → player   contract
 ```
 
-同一个 Character 也允许与多个主公分别有独立契约：
+同一个 Character 也可以被不同主公分别契约：
 
 ```text
 player → rival   contract
 lord-b → rival   contract
 ```
 
-当前产品规则是一份契约对应一张长期 Card，所以不额外引入独立 `Contract` Record、`contractId` 或 `cardId`。这张 Card 的 identity 直接由有向 Relationship 确定。
+契约存在不意味着当前一定随身。
 
-长期 Card State 当前只承载真正需要跨 Battle / 存档存在的运行状态，例如 Card Integrity 和 carried / managed。人物技能、基础能力和静态素材继续从 Character Content 取得，不复制进 Card State。
+## Card：当前随身的战斗卡片
 
-初始 Relationship，包括初始契约 / Card 状态，可以由 Game Entry `state.records` baseline 安装。最终 Realm State Record 的精确 key / shape 后续再冻结。
+Card 是独立 Realm State 对象，但语义被限定为：
 
-## Card 自由对话：组合已有上下文
+> **当前被某个 holder 带在身上的 Card；它主要用于 Pocket / Battle。**
 
-Card 模式的 AI 自由对话不新增一套独立的人格或关系 authority。
-
-概念上：
+当前概念字段：
 
 ```text
-Relationship A → B
-└─ contract/card
-   → represented Character = B
-   → 读取 B 的 Character 固定人物资料
+Card
+├─ holderCharacterId
+├─ servantCharacterId
+├─ slot
+└─ battleState
+   └─ integrity
+```
 
+语义：
+
+- holder 指当前主公；
+- servant 指 Card 代表的从者；
+- `slot` 是当前随身编队位置；
+- `integrity` 是 Card Battle Manifestation 的完整度 / 稳定度，不是 Character 本体 HP。
+
+Card 只有在对应 contract 已成立且该从者当前被加入随身编队时才存在：
+
+```text
+Relationship(player → rival).contract = true
 +
+Card(holder=player, servant=rival, slot=0)
+```
 
-Relationship B → A
-= B 当前怎么看 A
+如果 contract 继续存在但从者当前不随身：
 
+```text
+Relationship(player → rival).contract = true
+Card(player, rival) = absent
+```
+
+Card 的独立 `cardId` 尚未冻结。
+
+### 当前未决：非随身时的长期 Battle / Progression 状态
+
+Card 被限定为 current carried state 后，下面这件事不能再假装已经解决：
+
+```text
+contract exists
 +
+servant not carried
++
+integrity / training / progression 仍需跨存档存在？
+```
 
-必要的当前剧情 / Card context
+这些事实最终由 Relationship、Center-managed state、Progression state 或其他对象拥有，**目前尚未决定**。
 
+因此当前明确禁止重新把 Integrity 偷塞进 Relationship，只为暂时解决持久化方便。
+
+## 其他 Realm State
+
+还包括：
+
+```text
+Realm State
+├─ player current map / position / direction
+├─ Event current state
+├─ Relationship[]
+├─ current carried Card[]
+├─ Encounter generated results that must persist
+├─ Pocket / story committed facts
+└─ player choices / random facts that cannot be recomputed
+```
+
+# Runtime / Projection
+
+## NPC Instance
+
+NPC Instance 是当前 World / Story Resolver 投影出的地图实例：
+
+```text
+NPCInstance
+├─ instanceId
+├─ npcId
+├─ characterId?      // PokeMan business link
+├─ mapId
+├─ x
+├─ y
+├─ direction
+└─ pattern?
+```
+
+传给 Map 的仍然是：
+
+```text
+NPCPlacement
+├─ instanceId
+├─ npcId
+├─ x
+├─ y
+├─ direction
+└─ pattern?
+```
+
+一个 Character 可以产生 0..N 个 NPC Instance；Transient Encounter NPC 可以没有 `characterId`。
+
+Map Enter：
+
+```text
+Story Index
++
+Event current state
++
+Character / Event Content
++
+Encounter generated state
 ↓
-
-LLM 自由对话
+Story Resolver
+↓
+NPC Instance[]
+↓
+NPCPlacement[]
+↓
+@loomrealm-game/map
 ```
 
-例如 `player → rival` 的契约 Card 与玩家自由对话时，AI 读取宿敌 Character 的固定人物信息，并读取 `rival → player` 的 Relationship，而不是把人格和关系复制进 Card。
+## Battle Actor
 
-LLM 当次生成内容默认只是一次对话输出，不会因为说出某句话就自动成为 Character Content、Relationship State 或其他 Realm State。是否根据一次对话更新动态关系描述或其他业务事实，由游戏逻辑明确提交。
-
-当前不单独定义 Conversation Memory 数据对象；只有实际玩法证明 Relationship 的动态文本不足时，再增加新的长期数据模型。
-
-## Battle：静态定义、长期 Card 状态和本场 Runtime 分离
-
-NPC 是地图表现；Battle Actor 是 Battle Frame 的战斗输入。二者不能直接等同。
-
-Battle 数据分三层：
+Battle Actor 是本场 Battle Runtime 的 actor，不等于 Character、Card 或 NPC Instance。
 
 ```text
-Character Content
-├─ base battle stats
-├─ skills
-└─ battle presentation/resources
-
-Relationship State
-└─ contract/card
-   └─ persistent Card Integrity / carried-managed
-
-Battle Runtime
-└─ Battle Actor
-   ├─ currentHp / maxHp
-   ├─ current stats
-   ├─ resolved skills
-   ├─ cooldown / status / buff / debuff
-   └─ simulation state
+BattleActor
+├─ currentHp
+├─ maxHp
+├─ current stats
+├─ resolved skills
+├─ cooldown / status
+├─ buff / debuff
+├─ Decision state
+└─ simulation state
 ```
 
-技能和基础能力是 Character 的静态 Battle 定义；具体技能 Content shape 和执行模型后续单独设计。
-
-Card Integrity 是 Card Battle Manifestation 的持久运行状态，不是 Character 本体生命值。长期 Card 进入 Battle 时，由 Character Battle Content + Relationship 中的 Card State 构造 Battle Actor；本场 `currentHp`、冷却、Buff 等只由 Battle Simulation 拥有。Battle 完成后，World 再把需要持久化的卡片损耗解释并提交回 Card Integrity。
-
-剧情敌方临时卡不需要先创造一个假的 Relationship / Contract / 持久 Card：
+### 当前随身 Card 来源
 
 ```text
-Persistent Card
-Relationship contract/card
-+ Character Battle Content
-→ Battle Actor
+Character Battle Content
++
+Card battleState
+↓
+Battle Actor
+```
 
-Story temporary opponent
+### 剧情 / Encounter 临时来源
+
+```text
 Story / Encounter Battle definition
-+ Character / Battle profile
-→ Battle Actor
++
+Character / Battle profile
+↓
+Battle Actor
 ```
 
-两种来源进入 Battle 后都只是本场 Battle Actor。剧情临时对手的 Battle Runtime 在结束后直接丢弃；只有产品明确要求它跨战斗持续时，才需要对应的长期 Realm State。
+临时敌人不需要 contract / Card。Battle 结束以后，Runtime actor 直接丢弃；World 只提交明确需要长期存在的业务后果。
 
 因此：
 
 ```text
-NPC Instance != Character != persistent Card state != Battle Actor
+NPC Instance != Character != Relationship != Card != Battle Actor
 ```
 
-Battle Simulation 仍然只拥有本场模拟权威；World 在 Battle 完成后解释结果，并把 Card Integrity、剧情或关系等已确认业务后果提交回 Realm State。
+## Dialogue Runtime
 
-## 数据归宿汇总
+固定 Dialogue 的 Runtime 只需要：
+
+```text
+current dialogue id
+current line index
+pending choice
+```
+
+这些不进入 Save。
+
+AI 自由对话则组合：
+
+```text
+Character fixed AI text
++
+Relationship speaker → counterpart
++
+current story / Card context
+↓
+LLM
+```
+
+当前不建立独立 Conversation Memory。
+
+# 数据关系摘要
 
 ```text
 Content
-├─ Character definitions
-│  ├─ fixed AI character text
-│  └─ Battle static profile
-│     ├─ base stats
-│     └─ skills
-├─ Card / Battle presentation resources
-├─ Visual definitions/resources
-├─ NPC definitions
+├─ Character
+│  └─ Battle Profile
+│     └─ Skill
+├─ NPC Definition → Visual
+├─ Dialogue
 ├─ Event / Event State
-├─ Dialogue definitions
-│  ├─ linear lines
-│  └─ optional terminal choices → target Dialogue
-├─ Story Index (generated)
-├─ Encounter tables/templates/spawn points
-├─ Battle rules / scenarios
-└─ Map content
+├─ Encounter
+├─ Story Index
+├─ Battle rules/scenarios
+└─ Map
 
 Realm State
-├─ current map / player position
-├─ Event current state
-├─ player choices / story facts that cannot be recomputed
-├─ directed Relationship
+├─ Relationship A → B
 │  ├─ affinity
 │  ├─ hostile
-│  ├─ dynamic relationship text
-│  └─ contract?
-│     └─ persistent Card state
-│        ├─ integrity
-│        └─ carried / managed
-├─ Encounter generated results that must persist
-└─ other committed mutable business facts
+│  ├─ dynamic text
+│  └─ contract
+├─ Card (current carried only)
+│  ├─ holder
+│  ├─ servant
+│  ├─ slot
+│  └─ integrity
+├─ Event current state
+├─ player world state
+└─ persistent Encounter / story facts
 
-Frame / Runtime local
-├─ current fixed Dialogue id / line index / pending choice
-├─ current AI free-dialogue working context
-├─ current Battle Actor / simulation
-│  ├─ currentHp / maxHp
-│  ├─ current stats
-│  ├─ cooldown / status / buff / debuff
-│  └─ other simulation state
-├─ current Message/System Menu interaction
+Runtime
+├─ NPC Instance
+├─ Battle Actor
+├─ Dialogue working state
 ├─ Story Resolver working set
-├─ movement / animation working state
-└─ non-persistent generated/intermediate data
+└─ Renderer / animation state
 ```
 
-## Builder 检查边界
+# Builder 检查边界
 
-Builder 应当检查可以静态确定的内容错误，例如：
+Builder 应检查：
 
-- Character / NPC / Visual / Event / Map / Dialogue 等引用不存在；
-- Event/state identity 重复；
-- Dialogue identity 重复；
-- Dialogue Choice `target` 引用了不存在的 Dialogue；
-- 持久 Character speaker 引用了不存在的 Character；
-- Character Battle Content 引用了不存在的技能或资源；
-- 同一候选实例集合中的 `instanceId` 重复；
-- placement 坐标、方向或字段非法；
-- Story Index 与源 Content 不一致；
-- 生成 Map `struct.NPC` 所需资源缺失。
+- Character / NPC / Visual / Event / Map / Dialogue / Skill 等静态引用不存在；
+- Event/state / Dialogue identity 重复；
+- Dialogue Choice target 不存在；
+- 持久 Character speaker 不存在；
+- Character Battle profile 引用了不存在的 Skill / resource；
+- 同一实例集合 `instanceId` 重复；
+- placement 非法；
+- Story Index 与源 Content 不一致。
 
 Builder 不应因为以下情况失败：
 
@@ -582,22 +504,19 @@ Builder 不应因为以下情况失败：
 同一个 Character 出现多个 NPC Instance
 同一个 Character 在同一 Map 出现多个 NPC Instance
 同一个 npcId 被多个 NPC Instance 使用
-Dialogue 之间形成合法循环
+Dialogue 之间形成 cycle
 同一个 Character 被多个不同方向的 Relationship / contract 引用
 ```
 
-这些都是正常的 Content / 场景表达能力。
+# 当前继续设计的问题
 
-## 当前不在本文冻结的内容
-
-以下问题继续留给后续设计：
-
-- Character / NPC / Visual 的精确 JSON schema 与 Content namespace/key；
-- Event 的精确剧情顺序表示和多个 Event 冲突规则；
-- Dialogue Content 的最终 namespace/key、显式 outcome/result、条件 Choice、本地化与 presentation metadata；
-- Relationship 的最终 Realm State Record key / shape，以及动态关系文本如何更新；
-- contract / persistent Card 在 Relationship 内的最终字段形状；
-- **Skill 的 Content shape、参数、执行规则、成长 / 学习方式；**
-- Encounter re-entry 是否重 roll、哪些生成实例必须持久化；
-- 训练、成长、Guidance 的精确数据模型；
-- NPC 独立移动 / patrol / chase 等 Map 能力。
+- Character / NPC / Visual 的精确 Content schema / namespace；
+- Event 的完整触发 / 顺序 / 冲突规则；
+- Dialogue 的 outcome/result、condition、本地化与 presentation metadata；
+- Relationship 的最终 Realm State key / shape；
+- Card 的最终 key / 是否需要独立 `cardId`；
+- **非随身契约从者的 Integrity / Progression 长期 owner；**
+- **Skill Content shape、参数、执行规则、学习 / 成长；**
+- Encounter re-entry / persistence；
+- Guidance、训练和多卡编队；
+- NPC patrol / chase / 独立移动。
