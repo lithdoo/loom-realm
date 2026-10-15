@@ -2,14 +2,14 @@
 
 > 独立技术设计记录。不改写 `../DESIGN.md`。本文把已经讨论确认的 Character、NPC、Visual、Story、Encounter、Relationship、Contract、Card 与 Battle 的数据职责放在同一张图里。精确 JSON schema、Realm State namespace/key 和持久化格式仍可在实现前继续细化。
 
-归宿总表见 [数据落点](./60-data-placement.md)，人物与场景实例细节见 [人物](./61-character.md)，Event 见 [事件](./62-event.md)。
+归宿总表见 [数据落点](./60-data-placement.md)，人物与场景实例细节见 [人物](./61-character.md)，Event 见 [事件](./62-event.md)，固定 Dialogue 见 [固定对话](./64-dialogue.md)。
 
 ## 目标
 
 这套数据模型优先满足四个方向：
 
 1. **人物身份与地图表现分离。** Character 不是 NPC，NPC 也不要求一定对应持久 Character。
-2. **剧情尽量数据驱动。** 剧情规则、Event State、静态 Dialogue 与场景实例定义优先留在 Content，不硬编码进 World，也不把可重算结果重复写进存档。
+2. **剧情尽量数据驱动。** 剧情规则、Event State、固定 Dialogue 与场景实例定义优先留在 Content，不硬编码进 World，也不把可重算结果重复写进存档。
 3. **Realm State 只保留真正动态事实。** Event current state、Relationship、Contract、Card、玩家位置、需要持续存在的随机结果等进入 State；由 Content + State 可重算的场景投影不重复保存。
 4. **复用与动态生成都是正常能力。** 多个 NPC 可以共用同一套形象；同一 Character 可以有多个 NPC Instance；Visible Encounter 可以在运行时动态生成 NPC Instance。
 
@@ -32,6 +32,11 @@ Character
 
 Event / Story Content
 → 决定当前场景应投影哪些 NPC Instance
+→ 可以引用固定 Dialogue
+
+Dialogue Content
+→ 线性台词 + 可选末尾 Choice
+→ Choice 只跳到另一个 Dialogue
 
 Encounter Definition
 → 运行时生成临时 NPC Instance
@@ -223,12 +228,12 @@ EventDefinition
 ├─ id
 └─ states
    └─ [stateId]
-      ├─ static dialogue
+      ├─ dialogue references
       ├─ character / NPC instance definitions
       └─ other story definitions
 ```
 
-Event State 可以声明一个 Character 当前产生 0..N 个 NPC Instance。
+Event State 可以声明一个 Character 当前产生 0..N 个 NPC Instance，也可以引用独立的固定 Dialogue Content。Dialogue 自己只负责固定台词与对话内部的选择跳转，不承担 Event State mutation。
 
 Realm State 只需要类似：
 
@@ -248,6 +253,46 @@ World / Story Resolver 再用这个 `stateId` 去读取对应 Content，并算�
 ```
 
 “多个 Event 如何排序、最后一条如何确定、冲突如何处理”继续留在 Event 设计中，不在本文提前锁死。
+
+## Dialogue：线性的固定对话片段
+
+固定 Dialogue 是独立的 immutable Content。人物日常对话和剧情对话使用同一种结构：
+
+```text
+Dialogue
+├─ id
+├─ lines[]
+│  ├─ speaker?
+│  └─ text
+└─ choices?[]
+   ├─ text
+   └─ target Dialogue
+```
+
+一个 Dialogue 内没有通用 Node / Flow。`lines[]` 从头到尾线性播放；`choices` 如果存在，只能出现在最后。Choice 只决定下一段 Dialogue，不直接改变 Relationship、Contract、Event State、Battle 或其他世界事实。
+
+多个 Dialogue 可以通过 Choice 组成分支：
+
+```text
+A
+→ Choice
+   ├─ B
+   └─ C
+```
+
+也允许组成循环：
+
+```text
+question
+→ explanation
+→ question
+```
+
+所以 Dialogue 引用图有 cycle 是合法情况，Builder 不应把 cycle 本身当错误。
+
+运行中的 `current dialogue id`、`current line index`、待选择状态都是 Dialogue Frame 的临时工作集，不进入 Realm State，也不进入 Save。
+
+详细结构见 [固定对话](./64-dialogue.md)。
 
 ## Story Index：Builder 生成的派生 Content
 
@@ -462,6 +507,8 @@ Content
 ├─ NPC definitions
 ├─ Event / Event State
 ├─ Dialogue definitions
+│  ├─ linear lines
+│  └─ optional terminal choices → target Dialogue
 ├─ Story Index (generated)
 ├─ Encounter tables/templates/spawn points
 ├─ Battle rules / skills / scenarios
@@ -481,7 +528,7 @@ Realm State
 └─ other committed mutable business facts
 
 Frame / Runtime local
-├─ current Dialogue node
+├─ current fixed Dialogue id / line index / pending choice
 ├─ current AI free-dialogue working context
 ├─ current Battle simulation
 ├─ current Message/System Menu interaction
@@ -494,8 +541,11 @@ Frame / Runtime local
 
 Builder 应当检查可以静态确定的内容错误，例如：
 
-- Character / NPC / Visual / Event / Map 等引用不存在；
+- Character / NPC / Visual / Event / Map / Dialogue 等引用不存在；
 - Event/state identity 重复；
+- Dialogue identity 重复；
+- Dialogue Choice `target` 引用了不存在的 Dialogue；
+- 持久 Character speaker 引用了不存在的 Character；
 - 同一候选实例集合中的 `instanceId` 重复；
 - placement 坐标、方向或字段非法；
 - Story Index 与源 Content 不一致；
@@ -509,6 +559,7 @@ Builder 不应因为以下情况失败：
 同一个 Character 出现多个 NPC Instance
 同一个 Character 在同一 Map 出现多个 NPC Instance
 同一个 npcId 被多个 NPC Instance 使用
+Dialogue 之间形成合法循环
 ```
 
 这些都是正常的 Content / 场景表达能力。
@@ -519,6 +570,7 @@ Builder 不应因为以下情况失败：
 
 - Character / NPC / Visual 的精确 JSON schema 与 Content namespace/key；
 - Event 的精确剧情顺序表示和多个 Event 冲突规则；
+- Dialogue Content 的最终 namespace/key、显式 outcome/result、条件 Choice、本地化与 presentation metadata；
 - Relationship 的最终 Realm State Record key / shape，以及动态关系文本具体如何由业务更新；
 - Contract / Card 的最终 Realm State Record shape；
 - Encounter re-entry 是否重 roll、哪些生成实例必须持久化；
