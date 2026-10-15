@@ -15,19 +15,27 @@ classDiagram
       description
       fixedAICharacterText
       tags
-      battleProfileRef
+      battleActorRef
     }
 
-    class BattleProfile {
-      <<Content>>
-      baseStats
+    class BattleActorContent {
+      <<@loomrealm-game/battle Content>>
+      id
+      name
+      characterGraphicsRef
+      max_hp
       skills[]
-      presentationResources
     }
 
-    class SkillDefinition {
-      <<Content>>
-      shape_not_frozen
+    class BattleSkill {
+      <<@loomrealm-game/battle Content>>
+      id
+      name
+      range
+      damage
+      windup_ticks
+      recovery_ticks
+      effect
     }
 
     class VisualDefinition {
@@ -77,14 +85,17 @@ classDiagram
       integrity
     }
 
-    class BattleActor {
-      <<Runtime>>
-      currentHp
+    class BattleRuntimeActor {
+      <<@loomrealm-game/battle Runtime>>
+      actorId
+      team
+      hp
       maxHp
-      currentStats
+      tile
+      direction
+      action
+      protectedUntilTickExclusive
       resolvedSkills
-      cooldownStatus
-      buffDebuff
       decisionState
     }
 
@@ -124,7 +135,7 @@ classDiagram
       <<Content>>
       spawnPoints
       templates
-      battleProfileRefs
+      battleActorRefs
     }
 
     class EncounterGeneratedState {
@@ -140,8 +151,8 @@ classDiagram
       byEvent
     }
 
-    CharacterDefinition --> BattleProfile : battle profile
-    BattleProfile --> SkillDefinition : uses
+    CharacterDefinition --> BattleActorContent : battle actor ref
+    BattleActorContent --> BattleSkill : skills[]
 
     NPCDefinition --> VisualDefinition : presentation
     NPCInstance --> NPCDefinition : npcId
@@ -150,7 +161,7 @@ classDiagram
     CharacterDefinition "1" <-- "0..*" Relationship : from
     CharacterDefinition "1" <-- "0..*" Relationship : to
 
-    Relationship --> Card : contract + carried
+    Relationship --> Card : contract + currently carried
     CharacterDefinition "1" <-- "0..*" Card : holder
     CharacterDefinition "1" <-- "0..*" Card : servant
 
@@ -164,16 +175,32 @@ classDiagram
     EventState --> NPCInstance : defines projection
 
     EncounterDefinition --> NPCInstance : generates
-    EncounterDefinition --> BattleProfile : temporary opponent profile
+    EncounterDefinition --> BattleActorContent : temporary opponent actor
     EncounterGeneratedState --> NPCInstance : persists generated result
 
     StoryIndex --> EventDefinition : indexes
     StoryIndex --> CharacterDefinition : indexes
 
-    Card --> BattleActor : carried card state
-    BattleProfile --> BattleActor : static battle data
-    EncounterDefinition --> BattleActor : temporary actor source
+    Card --> BattleRuntimeActor : carried card state
+    BattleActorContent --> BattleRuntimeActor : static battle definition
+    EncounterDefinition --> BattleRuntimeActor : temporary actor source
 ```
+
+## Character / BattleSkill 链路
+
+```mermaid
+flowchart LR
+    C[Character Content] --> BA[BattleActor Content<br/>@loomrealm-game/battle]
+    BA --> S1[BattleSkill firebolt]
+    BA --> S2[BattleSkill grab]
+
+    S1 --> F1[id / name]
+    S1 --> F2[range / damage]
+    S1 --> F3[windup_ticks / recovery_ticks]
+    S1 --> F4[effect]
+```
+
+PokeMan 不再增加一层 `PokeManSkill`。BattleSkill 的 shape 和战斗语义由 `@loomrealm-game/battle` 维护；Character 只负责稳定关联 BattleActor Content。
 
 ## Relationship / Card / Battle 的关键链路
 
@@ -188,14 +215,15 @@ flowchart LR
     C -->|否| NC[没有当前 Card 对象]
     C -->|是| CARD[Card<br/>holder=A<br/>servant=B<br/>slot<br/>integrity]
 
-    B --> BP[Character B Battle Profile<br/>base stats + skills]
-    CARD --> BA[Battle Actor]
-    BP --> BA
+    B --> BAC[BattleActor Content<br/>max_hp + skills[]]
+    BAC --> SK[BattleSkill Content]
+    CARD --> BRA[Battle Runtime Actor]
+    BAC --> BRA
 
-    BA --> BR[Battle Runtime<br/>currentHp / cooldown<br/>buff / debuff / Decision]
+    BRA --> BR[Battle Simulation<br/>hp / tile / direction<br/>action / protection / Decision]
 
-    S[Story / Encounter Battle Definition] --> TBA[Temporary Battle Actor]
-    BP --> TBA
+    S[Story / Encounter Battle Source] --> TBA[Temporary Battle Runtime Actor]
+    BAC --> TBA
     TBA --> BR
 ```
 
@@ -210,9 +238,11 @@ Card
 = 当前随身 Card
 = holder / servant / slot / 当前 Card battle-facing state
 
-Battle Actor
-= 本场临时战斗实体
-= HP / cooldown / Buff / Debuff / Decision
+BattleActor / BattleSkill Content
+= @loomrealm-game/battle 的静态战斗定义
+
+Battle Runtime Actor
+= @loomrealm-game/battle 本场 Simulation actor
 ```
 
 因此：
@@ -224,11 +254,15 @@ contract exists
 Card exists
 => 对应 contract 已成立，并且当前进入随身编队
 
-Battle Actor exists
+Battle Runtime Actor exists
 ≠ 必须来自 Card
+
+PokeMan Skill
+= 不单独存在
+= 直接使用 BattleSkill
 ```
 
-剧情 / Encounter 可以直接构造临时 Battle Actor，不需要伪造 Relationship 或 Card。
+剧情 / Encounter 可以直接构造临时 Battle Runtime Actor，不需要伪造 Relationship 或 Card。
 
 ## 图中故意没有解决的问题
 
@@ -236,8 +270,9 @@ Battle Actor exists
 
 - Card 是否需要独立 `cardId`；
 - 从者有 contract 但不随身时，Integrity / Progression 长期状态最终由谁拥有；
-- Skill 的最终字段、执行模型、学习 / 成长方式；
+- Character → BattleActor Content 的最终引用编码；
+- 技能学习 / 成长如何改变某个角色长期可用的 `skills[]`；
 - Event 的完整 flow / trigger；
 - Encounter re-entry 与生成结果持久化细节。
 
-这些问题继续设计后再补图。
+BattleSkill 本身的静态字段和执行语义不再作为 PokeMan 自己的未决 schema；它直接跟随 `@loomrealm-game/battle` 当前规范。
