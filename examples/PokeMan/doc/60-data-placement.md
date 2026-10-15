@@ -198,16 +198,35 @@ Battle 结束后，World 决定哪些结果需要提交回 Realm State。
 
 ## Character 与 NPC Instance
 
-Character 表示“这个人是谁”，NPC Instance 表示“当前场景具体出现的实例”。
+Character 表示“这个人是谁”，NPC Instance 表示“当前场景具体出现的地图实例”。
+
+PokeMan 对最终地图结果采用更窄的唯一性规则：
+
+> **同一个 `npcId` 可以同时出现在多个不同 Map，但同一张 Map 的最终解析结果中，一个 `npcId` 最多出现一次。**
+
+也就是：
 
 ```text
-Character rival
-├─ NPC Instance rival-lab-a
-├─ NPC Instance rival-lab-b
-└─ NPC Instance rival-town
+(mapId, npcId) 唯一
 ```
 
-同一个 Character 可以在不同地图或同一地图出现多个实例。真正区分场景实例的是 `instanceId`。
+允许：
+
+```text
+map 1 → rival
+map 2 → rival
+```
+
+不允许最终得到：
+
+```text
+map 1 → rival
+map 1 → rival
+```
+
+不同 Event 可以重复声明同一个 NPC；同一个 Event state 也可以让同一 `npcId` 出现在多个不同 Map。只有最终解析后的 Map 场景必须满足 `(mapId, npcId)` 唯一。
+
+`instanceId` 仍然作为 `@loomrealm-game/map` 的实例 identity 使用，但 PokeMan 不再用不同 `instanceId` 来允许同一 Map 出现多个相同 `npcId`。
 
 Map Enter：
 
@@ -215,13 +234,14 @@ Map Enter：
 读取 Story Index
 → 找到相关 Event / Character Content
 → 读取 Event currentStateId
-→ Story Resolver
+→ Story Resolver 合并当前来源
+→ 校验最终 (mapId, npcId) 唯一
 → NPC Instance[]
 → NPCPlacement[]
 → @loomrealm-game/map
 ```
 
-Builder 应检查缺失引用、重复 `instanceId`、非法 placement 和派生索引一致性；不因为同一个 Character / npcId 多次出现而失败。
+Builder 应检查缺失引用、非法 placement、派生索引一致性，以及单个 Event state 内可静态判断的重复 `(mapId, npcId)`。不同 Event 之间重复引用同一个 `npcId` 本身不报错；Runtime 合并当前来源后，如果最终同一 Map 出现重复 `npcId`，Story Resolver 必须确定性报冲突。
 
 ## AI 自由对话的数据边界
 
