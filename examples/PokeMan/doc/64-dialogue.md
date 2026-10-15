@@ -2,7 +2,7 @@
 
 > 独立技术设计记录。不改写 `../DESIGN.md`。本文只设计作者写好的固定 Dialogue Content；Card 模式的 AI 自由对话是另一套独立系统，不在这里讨论。
 
-归宿总表见 [数据落点](./60-data-placement.md)，人物身份见 [人物](./61-character.md)，整体模型见 [世界数据模型](./63-world-data-model.md)。
+归宿总表见 [数据落点](./60-data-placement.md)，人物身份见 [人物](./61-character.md)，Event 见 [事件](./62-event.md)，整体模型见 [世界数据模型](./63-world-data-model.md)。
 
 ## 目标
 
@@ -165,6 +165,7 @@ Dialogue 不直接通过 Choice 修改世界业务事实，因此不在 Choice �
 修改 affinity
 修改 hostile
 建立 Contract
+创建 Card
 开始 Battle
 改变 Event State
 移动 NPC
@@ -204,6 +205,65 @@ question
 
 当前 Dialogue 之间只有玩家 Choice 才产生跳转，不存在无交互的自动连续 jump，所以允许 cycle 不等于 Runtime 会自动死循环。
 
+## Terminal Dialogue 与完成结果
+
+当一条固定 Dialogue 链最终进入一个没有 `choices` 的 Dialogue，并播放完它的全部 `lines` 时，这个 Dialogue 是本次调用的 **terminal Dialogue**。
+
+Dialogue Frame 正常完成时返回：
+
+```text
+terminalDialogueId
+```
+
+例如：
+
+```text
+rival-challenge
+→ Choice
+   ├─ rival-challenge-accept
+   └─ rival-challenge-refuse
+```
+
+如果玩家选择“来吧”，并播放完 `rival-challenge-accept`：
+
+```text
+terminalDialogueId = rival-challenge-accept
+```
+
+如果玩家选择“现在不了”：
+
+```text
+terminalDialogueId = rival-challenge-refuse
+```
+
+因此当前不为了业务分支额外增加一层通用 `outcome` / `result` 字段。调用方可以使用已有的 terminal Dialogue identity 解释本次固定对话最终走到了哪个分支。
+
+这不会改变 Dialogue 自己的职责：`terminalDialogueId` 只是完成结果，不自动产生任何 Realm State mutation。
+
+## Event 如何使用 terminalDialogueId
+
+Event State NPC 可以把当前入口 Dialogue 和少量 Event state transition 绑定在一起：
+
+```text
+Event current state
+→ mapId / npcId
+→ interaction.dialogue
+→ frame.call(Dialogue)
+→ terminalDialogueId
+→ interaction.transitions[terminalDialogueId]
+→ nextStateId?
+```
+
+这里只允许：
+
+```text
+terminalDialogueId → nextStateId
+```
+
+Event 不因此获得任意 action list。Relationship、Contract、Card、Battle 等业务后果仍由 World 明确解释和提交。
+
+详细边界见 [事件](./62-event.md)。
+
 ## Runtime
 
 概念执行过程：
@@ -216,7 +276,9 @@ question
 按顺序播放 lines
 ↓
 是否有 choices？
-├─ 否 → 本次固定对话完成
+├─ 否 → 当前 Dialogue 成为 terminal Dialogue
+│       ↓
+│     返回 terminalDialogueId
 └─ 是 → 玩家选择
          ↓
        读取 target Dialogue
@@ -234,6 +296,8 @@ pending choice interaction
 
 这些都属于当前 Dialogue Frame 的临时状态，不进入 Realm State，也不作为存档事实。
 
+`terminalDialogueId` 是本次调用完成时返回给 caller 的结果，也不是长期 State。
+
 ## Content 与 State 边界
 
 Dialogue definitions 是 immutable Content：
@@ -248,7 +312,7 @@ Content
 
 Realm State 不保存 Dialogue 的展开副本，也不保存当前播放到第几句。
 
-如果玩家的某次选择最终造成长期世界变化，例如 Relationship、Event progress、Contract 或其他业务事实，由调用方把真正需要持久化的结果提交到 Realm State。
+如果玩家的某次选择最终造成长期世界变化，例如 Relationship、Event progress、Contract、Card 或其他业务事实，由调用方使用 `terminalDialogueId` 等上下文解释，并把真正需要持久化的结果提交到 Realm State。
 
 ## Builder 检查
 
@@ -260,6 +324,8 @@ Builder 应检查能够静态确定的固定 Dialogue 内容错误：
 - Line 缺少需要的文本；
 - Choice 缺少显示文本或 target。
 
+Event 如果把某个 Dialogue id 用作 `interaction.dialogue` 或 transition key，也由 Event / Builder 的跨引用检查保证该 Dialogue 存在。
+
 Builder 不因为 Dialogue 之间形成合法循环而失败。
 
 ## 当前不冻结
@@ -267,7 +333,6 @@ Builder 不因为 Dialogue 之间形成合法循环而失败。
 以下内容等实际需求出现后再决定：
 
 - Dialogue Content 的最终 namespace / key 格式；
-- 是否需要给最终 Dialogue 增加显式 outcome / result；
 - 本地化文本的最终组织方式；
 - 临时 Encounter NPC 的 speaker identity 表达；
 - 对话中的头像切换、表情、音效等 presentation metadata；
@@ -278,4 +343,5 @@ Builder 不因为 Dialogue 之间形成合法循环而失败。
 ```text
 Dialogue = 线性 lines + 可选的末尾 choices
 Choice = 下一段 Dialogue 的引用
+Completion = terminalDialogueId
 ```
