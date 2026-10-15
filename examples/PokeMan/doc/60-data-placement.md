@@ -54,17 +54,34 @@ PokeMan **不另建平行的 Skill schema**。当前战斗技能直接采用 `@l
 
 所有持久 Character 都准备好 Card / Battle 所需静态素材与数据。这只是 Content 完备性，不代表当前可以建立契约。
 
+### 固定 Dialogue
+
 固定 Dialogue 也是 Content：
 
 ```text
 Dialogue
 ├─ id
 ├─ lines[]
-└─ choices?[]
-   └─ target Dialogue
+├─ choices?[]
+│  └─ target Dialogue
+└─ mutation? → EventStateMutation
 ```
 
-一个 Dialogue 线性播放；Choice 只能在末尾，并只跳到另一个 Dialogue。Dialogue 正常完成时返回最终的 `terminalDialogueId`，本身不修改 Realm State。
+一个 Dialogue 线性播放；Choice 只能在末尾，并只跳到另一个 Dialogue。
+
+当前固定互斥约束：
+
+```text
+choices 存在
+=> mutation 不允许存在
+
+mutation 存在
+=> choices 不允许存在
+```
+
+因此如果某个 Choice 分支需要改变 Event state，Choice 必须先跳到新的无 Choice Dialogue，再由目标 Dialogue 在完成时触发 `EventStateMutation`。
+
+Dialogue 正常完成时仍返回最终的 `terminalDialogueId`，但 Event state mutation 不再依赖 caller 用这个 id 再查映射。
 
 ### EventStateMutation
 
@@ -226,28 +243,12 @@ Battle 结束后，World 决定哪些结果需要提交回 Realm State。
 
 Character 表示“这个人是谁”，NPC Instance 表示“当前场景具体出现的地图实例”。
 
-PokeMan 对最终地图结果采用更窄的唯一性规则：
+PokeMan 对最终地图结果采用明确唯一性规则：
 
 > **同一个 `npcId` 可以同时出现在多个不同 Map，但同一张 Map 的最终解析结果中，一个 `npcId` 最多出现一次。**
 
-也就是：
-
 ```text
 (mapId, npcId) 唯一
-```
-
-允许：
-
-```text
-map 1 → rival
-map 2 → rival
-```
-
-不允许最终得到：
-
-```text
-map 1 → rival
-map 1 → rival
 ```
 
 不同 Event 可以重复声明同一个 NPC；同一个 Event state 也可以让同一 `npcId` 出现在多个不同 Map。只有最终解析后的 Map 场景必须满足 `(mapId, npcId)` 唯一。
@@ -301,7 +302,7 @@ Card 自由对话可以组合以上信息和必要的当前剧情 context。LLM 
 | 人物 | 身份、描述、fixed AI text、BattleActor Content 引用 | — | 当前解析出的 NPC Instance |
 | 关系 / 契约 | — | Relationship：affinity、hostile、动态文本、contract | 尚未提交的关系变化 |
 | Card | Card / Battle 表现所需静态资源来自 Character / Visual / Battle Content | **当前随身 Card State**：holder、servant、slot、battle-facing state | Battle 中的 Card Manifestation |
-| 对话 | 固定 Dialogue | AI 长期关系语境来自 Relationship | dialogue id / line index / pending choice；LLM working context |
+| 对话 | 固定 Dialogue，包括可选 EventStateMutation ref | AI 长期关系语境来自 Relationship | dialogue id / line index / pending choice；LLM working context |
 | 剧情 | Event、states、EventStateMutation、NPC placement、Dialogue ref、Story Index | Event currentState、不可重算剧情事实 | 当前解析 / mutation validation / 执行步骤 |
 | 遭遇 | table、spawn point、template、BattleActor ref | 需要持续存在的生成结果 | 当前接触、视野、临时对手 |
 | 战斗 | `@loomrealm-game/battle` 的 BattleActor / BattleSkill / rules / scenarios | 当前随身 Card 的已提交 battle-facing state | Battle Simulation / Decision / Presentation 当前工作状态 |
@@ -314,17 +315,23 @@ Card 自由对话可以组合以上信息和必要的当前剧情 context。LLM 
 Main
   只持有控制面 / Frame 栈
 
-Dialogue / Battle
-  Frame 内拥有当前工作集
+Dialogue
+  Frame 内拥有当前固定对话工作集
+  无 Choice Dialogue 完成时，可读取并请求应用自己引用的 EventStateMutation
+  正常完成后返回 terminalDialogueId
+
+Battle
+  Frame 内拥有当前战斗工作集
   完成后把结果交回调用方
 
-World
-  解释 Content + Realm State
-  验证并应用被明确引用的 EventStateMutation
-  提交地图、Relationship、当前随身 Card、剧情、Encounter 等 mutable facts
+World / Event state owner
+  提供 Realm State authority 上下文
+  验证 Mutation.from
+  原子提交 Mutation.to
+  提交地图、Relationship、当前随身 Card、剧情、Encounter 等其他 mutable facts
 ```
 
-Runtime 不扫描全部 EventStateMutation 自动执行；必须由明确的 Dialogue completion 或其他 World 业务结果选择一个 Mutation。
+Runtime 不扫描全部 EventStateMutation 自动执行；Mutation 必须被明确 Dialogue 或其他业务结果引用。
 
 System Menu 可以发起 New Game / Load 意图，但不是第二个 State authority。
 
