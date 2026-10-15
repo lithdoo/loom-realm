@@ -13,8 +13,9 @@
 3. **Card 与 Relationship 分离。** 技术数据模型里的 Card 只表示当前随身、主要服务 Pocket / Battle 的卡片状态。
 4. **Battle Runtime 独立。** Battle 当前运行状态只由 `@loomrealm-game/battle` Simulation authority 拥有。
 5. **PokeMan 不重复定义 BattleActor / BattleSkill。** 战斗静态数据直接复用 `@loomrealm-game/battle` 当前 Content contract。
-6. **Content 尽量完整。** Character / Dialogue / Event / Encounter / Battle 静态定义都从安装 Content 取得。
-7. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
+6. **Event 保持为剧情状态与场景 / 交互定义。** 不扩成通用 Trigger / Action / Command / Flow engine。
+7. **Dialogue 保持为固定台词与内部 Choice 跳转。** 正常完成时只返回 `terminalDialogueId`，不自己改 Realm State。
+8. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
 
 ## 总体关系
 
@@ -31,6 +32,14 @@ Character Content
       │
       └────────────→ current carried Card
                         holder / servant / slot / integrity
+
+Event current state
+→ mapId / npcId / placement
+→ interaction.dialogue
+→ Dialogue Frame
+→ terminalDialogueId
+→ interaction.transitions[terminalDialogueId]
+→ nextStateId?
 
 BattleActor Content
 +
@@ -184,23 +193,95 @@ Dialogue
 - Dialogue 图允许 cycle；
 - Dialogue 自己不直接修改 Relationship / Event / Battle State。
 
+当 Dialogue 链最终播放完一个没有 `choices` 的 Dialogue 时，该 Dialogue 是 terminal Dialogue。本次 Dialogue Frame 正常完成只返回：
+
+```text
+terminalDialogueId
+```
+
+因此现阶段不额外设计通用 Dialogue `outcome` / `result` 字段。调用方可以直接用 terminal Dialogue identity 解释本次固定对话最后走到哪个分支。
+
 ## Event / Story
 
 Event 是 Content。Realm State 只保存当前 Event state id 和其他真正不能重算的 mutable facts。
+
+当前概念结构：
 
 ```text
 EventDefinition
 ├─ id
 └─ states
    └─ [stateId]
-      ├─ dialogue references
-      ├─ NPC instance / placement definitions
-      └─ other story definitions
+      └─ maps
+         └─ [mapId]
+            └─ npcs
+               └─ [npcId]
+                  ├─ characterId?
+                  ├─ placement
+                  └─ interaction?
+                     ├─ dialogue
+                     └─ transitions?
+                        └─ terminalDialogueId → nextStateId
 ```
+
+这表达四层职责：
+
+```text
+Event State
+= 当前剧情阶段
+
+Event State NPC
+= 当前阶段这个 NPC 在哪、怎么交互
+
+Dialogue
+= 实际台词与 Choice 内部跳转
+
+interaction.transitions
+= 固定 Dialogue 最终分支对应哪个 Event nextState
+```
+
+Dialogue 和 Event 的运行链路：
+
+```text
+玩家与 NPC 交互
+↓
+World 找到当前 Event / state / mapId / npcId
+↓
+读取 interaction.dialogue
+↓
+frame.call(Dialogue)
+↓
+返回 terminalDialogueId
+↓
+查 interaction.transitions[terminalDialogueId]
+↓
+有 nextStateId？
+├─ 否 → Event state 不变
+└─ 是 → World 提交 Event currentStateId
+         ↓
+       Story Resolver 重新解析场景
+```
+
+`interaction.transitions` 只切 Event State，不是 action list。它不直接：
+
+```text
+修改 affinity / hostile
+建立 Contract
+创建 Card
+开始 Battle
+移动玩家
+执行任意 Realm State mutation
+```
+
+这些业务后果继续由 World 明确解释并提交。
+
+非 Dialogue 原因的 Event state 推进，例如 Battle 完成或其他 World 业务结果，第一版也不强行编码成统一 trigger；由 World 明确提交 `eventId → nextStateId`。
+
+### Event NPC source 与最终 Map 唯一性
 
 Event source Content 不要求跨 Event 的 `npcId` 唯一。不同 Event 可以都声明同一个 NPC；同一个 Event state 也可以让同一个 `npcId` 出现在多个不同 Map。
 
-当前静态与 Runtime 检查边界是：
+静态与 Runtime 检查边界：
 
 ```text
 同一个 Event state
@@ -435,6 +516,8 @@ NPCPlacement[]
 @loomrealm-game/map
 ```
 
+Event state 一旦成功切换，World 重新运行相关 Story Resolver，即可自然得到 NPC 出现、位置和入口 Dialogue 的新投影。
+
 ## Battle Runtime Actor
 
 PokeMan 不再定义自己的泛化 BattleActor schema；本场 actor state 直接以 `@loomrealm-game/battle` Simulation contract 为准。
@@ -492,7 +575,15 @@ current line index
 pending choice
 ```
 
-这些不进入 Save。
+正常完成时再把：
+
+```text
+terminalDialogueId
+```
+
+作为本次 Frame result 返回 caller。它不是 Realm State，也不进入 Save。
+
+Event State NPC 可以读取这个结果，通过自己的 `interaction.transitions` 查找 `nextStateId`；真正的 state commit 仍由 World 完成。
 
 AI 自由对话则组合：
 
@@ -520,6 +611,8 @@ Content
 ├─ NPC Definition → Visual
 ├─ Dialogue
 ├─ Event / Event State
+│  └─ maps / npcs / interaction
+│     └─ dialogue + terminalDialogueId → nextStateId
 ├─ Encounter
 ├─ Story Index
 ├─ Battle rules/scenarios
@@ -544,6 +637,7 @@ Runtime
 ├─ NPC Instance
 ├─ @loomrealm-game/battle Runtime Actor / Simulation
 ├─ Dialogue working state
+│  └─ completion result: terminalDialogueId
 ├─ Story Resolver working set
 └─ Renderer / animation state
 ```
@@ -556,6 +650,9 @@ Builder 应检查：
 - Event/state / Dialogue identity 重复；
 - Dialogue Choice target 不存在；
 - 持久 Character speaker 不存在；
+- Event State NPC 的 `interaction.dialogue` 不存在；
+- Event transition key 对应的 Dialogue 不存在；
+- Event transition 的 `nextStateId` 不属于当前 Event；
 - Character 引用了不存在的 BattleActor Content；
 - BattleActor `skills[]` 引用了不存在的 BattleSkill；
 - BattleSkill / BattleActor 本身不满足 Battle package 的 validator / contract；
@@ -583,8 +680,10 @@ Runtime 在合并 Story / Character / Encounter 等当前来源后，必须对�
 
 - Character / NPC / Visual 的精确 Content schema / namespace；
 - Character 到 BattleActor Content 的最终引用编码；
-- Event 的状态推进触发、`absent` 与跨 Event 冲突 / 显式 override 规则；
-- Dialogue 的 outcome/result、condition、本地化与 presentation metadata；
+- Event 最终 JSON namespace / key、placement / instanceId 的精确编码；
+- 非 Dialogue 的重复 Event transition 模式是否未来值得抽取窄的 Content 能力；
+- `absent` 与跨 Event 冲突 / 显式 override 规则；
+- Dialogue 的 condition、本地化与 presentation metadata；
 - Relationship 的最终 Realm State key / shape；
 - Card 的最终 key / 是否需要独立 `cardId`；
 - **非随身契约从者的 Integrity / Progression 长期 owner；**
