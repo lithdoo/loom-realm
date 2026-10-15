@@ -15,8 +15,9 @@
 5. **PokeMan 不重复定义 BattleActor / BattleSkill。** 战斗静态数据直接复用 `@loomrealm-game/battle` 当前 Content contract。
 6. **Event 保持为剧情状态与场景 / 交互定义。** 不扩成通用 Trigger / Action / Command / Flow engine。
 7. **Event state 的声明式变化独立为 EventStateMutation Content。** `from` 是 AND 前置集合，`to` 是原子赋值集合；OR 用多条 Mutation 表达。
-8. **Dialogue 保持为固定台词与内部 Choice 跳转。** 正常完成时只返回 `terminalDialogueId`，不自己改 Realm State。
-9. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
+8. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以在完成时引用一个 EventStateMutation。
+9. **`choices` 与 `mutation` 互斥。** 需要状态变化的 Choice 必须先跳到新的无 Choice Dialogue，再由新 Dialogue 触发 Mutation。
+10. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
 
 ## 总体关系
 
@@ -38,8 +39,10 @@ Event current state
 → mapId / npcId / placement
 → interaction.dialogue
 → Dialogue Frame
-→ terminalDialogueId
-→ EventStateMutation ref
+→ choices? → target Dialogue
+→ terminal Dialogue
+→ mutation?
+→ EventStateMutation
 → validate all from
 → atomically commit all to
 → Story Resolver re-resolve
@@ -56,7 +59,7 @@ Battle Simulation
 
 # Content
 
-## Character：这个人是谁
+## Character
 
 Character 是持久人物 identity。
 
@@ -72,18 +75,11 @@ CharacterDefinition
 └─ presentation references
 ```
 
-确认边界：
+Character 不保存当前 affinity、hostile、contract、Card Integrity 或 Battle Runtime hp。所有持久 Character 都准备好 Card / Battle 所需静态素材，但这不等于 `canContract`。
 
-- `id` 是人物稳定 identity；
-- 作者定义的职业、性格、经历属于 Content；
-- fixed AI character text 是 immutable natural-language persona；
-- Character 稳定关联到 `@loomrealm-game/battle` BattleActor Content；
-- 所有持久 Character 都准备好 Card / Battle 所需静态素材，但这不等于 `canContract`；
-- Character 不保存当前 affinity、hostile、contract、Card Integrity 或 Battle Runtime hp。
+## BattleActor / BattleSkill
 
-## BattleActor / BattleSkill：直接使用 Battle package
-
-PokeMan 当前不定义自己的 Battle Profile / Skill schema。静态战斗数据以 `@loomrealm-game/battle` 当前规范为 canonical source。
+PokeMan 不定义平行的 Battle Profile / Skill schema。静态战斗数据直接使用 `@loomrealm-game/battle`：
 
 ```text
 BattleActor Content
@@ -98,19 +94,18 @@ BattleSkill
 ├─ name
 ├─ range
 ├─ damage
-├─ timing
-│  ├─ windup_ticks
-│  └─ recovery_ticks
+├─ timing.windup_ticks
+├─ timing.recovery_ticks
 └─ effect
 ```
 
-当前 Battle v0 没有定义的 `attack / defense / speed / MP / accuracy / critical / element / armor penetration / universal cooldown / ammo / Buff / Debuff` 等概念，不在 PokeMan 文档中提前宣称为已有字段。将来确实需要新的战斗机制时，优先扩展 `@loomrealm-game/battle`。
+Battle v0 没有定义的 `attack / defense / speed / MP / accuracy / critical / element / universal cooldown / Buff / Debuff` 等概念，不在 PokeMan 文档中提前声明。
 
 ## Visual / NPC Definition
 
-Visual 是可复用的视觉定义；NPC Definition 是地图表现模板，不是 Character identity。
+Visual 是可复用视觉定义；NPC Definition 是地图表现模板，不是 Character identity。
 
-当前 `@loomrealm-game/map` 的窄 NPC Content contract 仍是：
+当前 Map NPC Content contract：
 
 ```text
 [struct]NPC/<npcId>
@@ -118,19 +113,15 @@ Visual 是可复用的视觉定义；NPC Definition 是地图表现模板，不�
 └─ sprite
 ```
 
-PokeMan source Content 可以引用更丰富的 Visual，再由 Builder 投影成 Map 所需定义。
-
 ```text
 npcId != characterId
 ```
 
-PokeMan 对最终 NPC 地图结果要求：
+最终地图结果要求：
 
 ```text
 (mapId, npcId) 唯一
 ```
-
-同一个 `npcId` 可以同时存在于多个不同 Map，但不能在同一张最终 Map 中出现两次。
 
 ## Dialogue
 
@@ -142,26 +133,39 @@ Dialogue
 ├─ lines[]
 │  ├─ speaker?
 │  └─ text
-└─ choices?[]
-   ├─ text
-   └─ target Dialogue
+├─ choices?[]
+│  ├─ text
+│  └─ target Dialogue
+└─ mutation? → EventStateMutation
 ```
 
 约束：
 
-- 一个 Dialogue 内只有线性 `lines[]`；
-- Choice 只能在末尾；
-- Choice 只跳到另一个 Dialogue；
-- Dialogue 图允许 cycle；
-- Dialogue 自己不直接修改 Relationship / Event / Battle State。
+```text
+choices 存在 => mutation 不允许存在
+mutation 存在 => choices 不允许存在
+```
 
-当 Dialogue 链最终播放完一个没有 `choices` 的 Dialogue 时，该 Dialogue 是 terminal Dialogue。本次 Dialogue Frame 正常完成只返回：
+Choice 只负责跳到另一个 Dialogue。
+
+如果某个分支需要改变 Event state：
+
+```text
+Dialogue A
+→ Choice
+   ├─ target Dialogue B
+   │    └─ mutation → Mutation B
+   └─ target Dialogue C
+        └─ no mutation
+```
+
+没有 `choices` 的 Dialogue 播放完成，并在需要时成功应用 `mutation` 后，是 terminal Dialogue。Dialogue Frame 正常完成仍可返回：
 
 ```text
 terminalDialogueId
 ```
 
-不额外增加通用 Dialogue `outcome` / `result` 字段。
+但 Event state mutation 不再由 caller 根据 `terminalDialogueId` 查映射；Mutation 由 terminal Dialogue 自己引用。
 
 ## Event / Story
 
@@ -179,9 +183,7 @@ EventDefinition
                   ├─ characterId?
                   ├─ placement
                   └─ interaction?
-                     ├─ dialogue
-                     └─ mutations?
-                        └─ terminalDialogueId → EventStateMutation ref
+                     └─ dialogue
 ```
 
 职责：
@@ -191,20 +193,17 @@ Event State
 = 当前剧情阶段
 
 Event State NPC
-= 当前阶段这个 NPC 在哪、怎么交互
+= 当前阶段这个 NPC 在哪、入口 Dialogue 是什么
 
 Dialogue
-= 实际台词与 Choice 内部跳转
-
-interaction.mutations
-= 固定 Dialogue 的 terminal 分支引用哪个 EventStateMutation
+= 台词、Choice 跳转，以及无 Choice 完成时可选的 Mutation ref
 ```
+
+Event State NPC 不再维护 `terminalDialogueId → Mutation` 映射。
 
 ## EventStateMutation
 
 EventStateMutation 是独立 Content，不嵌在某个 Event 内成为专属 transition。
-
-概念 shape：
 
 ```text
 EventStateMutation
@@ -214,34 +213,13 @@ EventStateMutation
    └─ eventId → stateId
 ```
 
-Mutation identity 由 Content key / reference 提供，因此逻辑数据本体只需要 `from` / `to`。
-
 ### `from`：AND
 
-一条 Mutation 的所有 `from` 项必须全部满足：
+一条 Mutation 的所有 `from` 项必须全部满足。
 
-```text
-eventA == stateA
-AND
-eventB == stateB
-AND
-...
-```
-
-Mutation 不拥有 `or / anyOf / condition tree`。
-
-需要 OR 时：
-
-```text
-branch A → Mutation A
-branch B → Mutation B
-```
-
-每个分支单独定义一条 Mutation。
+Mutation 不拥有 `or / anyOf / condition tree`。需要 OR 时，为每个分支定义独立 Mutation，由对应 Dialogue / 业务分支引用。
 
 ### `from` / `to` 不一一对应
-
-两边的 Event key 集合、数量都可以不同：
 
 ```text
 只在 from
@@ -251,7 +229,7 @@ branch B → Mutation B
 = 检查旧 state 后写入新 state
 
 只在 to
-= 直接写入目标 state，不要求有同名 from
+= 直接写入目标 state
 ```
 
 例如：
@@ -271,18 +249,7 @@ to:
 
 Runtime 先验证全部 `from`，成功后把全部 `to` 在一次 Realm State commit 中一起写入。
 
-Mutation 只拥有 Event current state，不扩展到：
-
-```text
-Relationship
-Contract
-Card
-Battle
-player position
-arbitrary Realm State path/value
-```
-
-因此 EventStateMutation 是声明式 Event state mutation，不是通用 mutation DSL。
+Mutation 只拥有 Event current state，不扩展到 Relationship / Contract / Card / Battle / player position / arbitrary Realm State path/value。
 
 ## Dialogue → EventStateMutation
 
@@ -297,22 +264,24 @@ interaction.dialogue
 ↓
 frame.call(Dialogue)
 ↓
-terminalDialogueId
+播放 lines
 ↓
-interaction.mutations[terminalDialogueId]
+有 choices？
+├─ 是 → 选择 target Dialogue，继续 Dialogue graph
+└─ 否 → 有 mutation？
+         ├─ 否 → complete
+         └─ 是 → validate Mutation.from（全部 AND）
+                  ↓
+                atomically commit Mutation.to
+                  ↓
+                Story Resolver 重新解析场景
+                  ↓
+                complete
 ↓
-有 Mutation ref？
-├─ 否 → Event states 不自动变化
-└─ 是 → validate Mutation.from（全部 AND）
-         ↓
-       atomically commit Mutation.to
-         ↓
-       Story Resolver 重新解析场景
+返回 terminalDialogueId
 ```
 
-Runtime 不需要硬编码任何具体 Event state 名称。
-
-Runtime 也不扫描全部 Mutation 自动执行。Mutation 必须被明确业务结果引用，避免形成隐式触发链、顺序依赖或自动循环。
+Runtime 不硬编码具体 Event state 名称，也不扫描全部 Mutation 自动执行。Mutation 必须被明确 Dialogue 或其他业务结果引用。
 
 未来 Battle 完成、到达地点等业务也可以显式引用同一种 Mutation，但 Mutation 本身不拥有 trigger。
 
@@ -331,7 +300,7 @@ Runtime 合并当前所有来源
 → 每张最终 Map 内 npcId 必须唯一
 ```
 
-当前不定义隐式 last-wins。多个来源最终同时产生同一 `(mapId, npcId)` 时，Story Resolver 必须确定性处理为冲突。
+多个来源最终同时产生同一 `(mapId, npcId)` 时，Story Resolver 确定性报冲突，不做隐式 last-wins。
 
 Story Index 是 Builder 生成的派生 Content：
 
@@ -359,15 +328,11 @@ EncounterDefinition
    └─ optional BattleActor reference
 ```
 
-Encounter 可以生成 transient NPC Instance，也可以提供剧情 / 普通敌人的 Battle 输入；不要求为临时敌人建立 Character Relationship 或 Card。
-
-Encounter 生成结果与 Story/Event 投影最终也要满足当前 Map 的 `npcId` 唯一约束。
+Encounter 可以生成 transient NPC Instance，也可以提供临时 Battle 输入；不要求为临时敌人建立 Character Relationship 或 Card。
 
 # Realm State
 
 ## Relationship
-
-Relationship 是有方向的人际长期状态：
 
 ```text
 Relationship
@@ -379,22 +344,11 @@ Relationship
 └─ contract?
 ```
 
-`A → B` 与 `B → A` 是两份独立 Relationship。`affinity` 与 `hostile` 独立。
-
-`contract` 表示：
-
-```text
-Relationship(A → B).contract
-= A 是主公
-= B 是从者
-= 正式契约已经成立
-```
-
-Contract 不建立独立 Realm State object。
+`A → B` 与 `B → A` 是独立 Relationship。Contract 不建立独立 Realm State object。
 
 ## Card
 
-Card 是独立 Realm State 对象，只表示当前随身的角色卡：
+Card 是独立 Realm State 对象，只表示当前随身角色卡：
 
 ```text
 Card
@@ -407,7 +361,7 @@ Card
 
 契约存在不意味着当前一定存在 Card。Card 的独立 `cardId` 尚未冻结。
 
-从者有 contract 但当前不随身时，Integrity / training / progression 的长期 owner 仍待设计；不把它们为了方便偷塞回 Relationship。
+从者有 contract 但当前不随身时，Integrity / training / progression 的长期 owner 仍待设计。
 
 ## 其他 Realm State
 
@@ -422,13 +376,11 @@ Realm State
 └─ player choices / random facts that cannot be recomputed
 ```
 
-Event definitions 与 EventStateMutation 都是 Content；Save 只保存 Event current states，不复制 Mutation。
+Event、Dialogue 与 EventStateMutation definitions 都是 Content；Save 只保存实际 mutable facts。
 
 # Runtime / Projection
 
 ## NPC Instance
-
-NPC Instance 是当前 World / Story Resolver 投影出的地图实例：
 
 ```text
 NPCInstance
@@ -442,7 +394,7 @@ NPCInstance
 └─ pattern?
 ```
 
-传给 Map 的仍然是 `NPCPlacement`。`instanceId` 满足 Map 的实例 contract，但 PokeMan 还额外要求每个最终 `mapId` 内 `npcId` 唯一。
+`instanceId` 满足 Map 实例 contract；PokeMan 额外要求每个最终 `mapId` 内 `npcId` 唯一。
 
 Map Enter：
 
@@ -468,7 +420,7 @@ NPCPlacement[]
 
 ## Battle Runtime Actor
 
-PokeMan 不定义平行的 Runtime BattleActor schema；本场 actor state 直接以 `@loomrealm-game/battle` Simulation contract 为准。
+PokeMan 不定义平行 Runtime BattleActor schema；本场 actor state 直接以 `@loomrealm-game/battle` Simulation contract 为准。
 
 ```text
 Character
@@ -498,9 +450,7 @@ current line index
 pending choice
 ```
 
-正常完成结果是 `terminalDialogueId`。这些都不进入 Save。
-
-AI 自由对话继续组合 Character fixed AI text、Relationship 和当前剧情 / Card context；当前不建立独立 Conversation Memory。
+正常完成结果是 `terminalDialogueId`。Mutation definition 与 Dialogue working state 都不进入 Save。
 
 # Builder / Runtime 检查边界
 
@@ -509,13 +459,12 @@ Builder 应检查：
 - Character / NPC / Visual / Event / EventStateMutation / Map / Dialogue / BattleActor / BattleSkill 等静态引用不存在；
 - Event/state / Dialogue identity 重复；
 - Dialogue Choice target 不存在；
-- `interaction.dialogue` / terminal Dialogue key 不存在；
-- `interaction.mutations` 引用了不存在的 EventStateMutation；
+- 同一个 Dialogue 同时存在 `choices` 与 `mutation`；
+- Dialogue `mutation` 引用了不存在的 EventStateMutation；
+- `interaction.dialogue` 不存在；
 - Mutation `from` / `to` 引用了不存在的 Event / state；
 - Mutation 单侧重复 eventId；
-- Character 引用了不存在的 BattleActor Content；
-- BattleActor `skills[]` 引用了不存在的 BattleSkill；
-- BattleSkill / BattleActor 不满足 Battle package validator / contract；
+- Character / BattleActor / BattleSkill 引用不合法；
 - 同一个 Event state 内重复 `(mapId, npcId)`；
 - placement 非法；
 - Story Index 与源 Content 不一致。
@@ -530,7 +479,7 @@ Mutation.from / to 的 Event key 集合不同
 同一个 npcId 被多个不同 Event 引用
 同一个 npcId 在同一 Event state 中出现在多个不同 Map
 同一个 Character 被多个 Event 引用
-Dialogue 之间形成 cycle
+Dialogue 之间形成合法 cycle
 同一个 Character 被多个 Relationship / contract 引用
 ```
 
@@ -548,7 +497,7 @@ Runtime：
 - Character 到 BattleActor Content 的最终引用编码；
 - Event / EventStateMutation 的最终 Content namespace / key；
 - 非 Dialogue 业务如何引用 Mutation；
-- Mutation `from` 校验失败的产品错误表现；
+- Dialogue mutation `from` 校验失败的产品错误表现；
 - `absent` 与跨 Event NPC 冲突 / 显式 override 规则；
 - Dialogue condition、本地化与 presentation metadata；
 - Relationship 的最终 Realm State key / shape；
