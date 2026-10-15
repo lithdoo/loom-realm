@@ -1,12 +1,12 @@
 # Session Events v1 exact-subject qualification
 
-> Evidence date: 2026-10-14
+> Evidence date: 2026-10-15
 >
-> Executable / qualification-input subject: `5722ce56c7d9722e695ebd2e211340442acb15da`
+> Executable / qualification-input subject: `da2ce5cbe963bb63c27604d6be15ff726812638b`
 >
-> Result: **Historical / superseded by executable repair; current requalification pending**
+> Result: **Qualified**
 
-This ledger records historical evidence for the exact implementation commit above. Executable lifecycle/currentness repairs on PR #89 supersede that subject, so this result does not qualify the current branch. The ledger will name a new exact executable subject only after every required gate passes against that commit.
+This ledger records evidence for the exact implementation commit above. The later documentation-only qualification-signature commit does not change executable behavior or qualification inputs and does not transfer this result to future behavior or qualification-input changes. The previously qualified `5722ce56c7d9722e695ebd2e211340442acb15da` subject is historical only.
 
 ## Environment
 
@@ -24,12 +24,12 @@ All commands below completed with exit code 0 against the exact subject commit.
 ```text
 npm run test:session-events:qualification
   build:session-events-stack: PASS
-  Node logical/integration/Hostra qualification: 111 pass, 1 platform skip, 0 fail
+  Node logical/integration/Hostra qualification: 118 pass, 1 platform skip, 0 fail
   real Chromium PWA qualification: 15 pass, 0 skip, 0 fail
 
 npm run test:session-events:packages
   Session Events, Subsystem, Main, Hostra package suites: PASS
-  PWA qualification build and unit suite: 26 pass, 0 fail
+  PWA qualification build and unit suite: 27 pass, 0 fail
 
 npm run test:regression
   all 17 affected workspaces: PASS
@@ -49,8 +49,8 @@ git diff --check
 
 ## Covered subject
 
-Evidence includes the author surface and required `SubsystemScope.events`, validation and detachment, exact-channel routing, source derivation, publish dispatch evidence and `OUTCOME_UNKNOWN`, serial/bounded subscription delivery, close and terminal reasons, logical-client binding replacement/currentness fencing, Runtime and Hub lifetimes, latched Main fatal ownership, dedicated Hostra WebSocket realization, dedicated PWA MessagePort provisioning/replacement, real child-process and Dedicated Worker boundaries, and Desktop/PWA product equivalence.
+Evidence includes the author surface and required `SubsystemScope.events`, validation and detachment, exact-channel routing, source derivation, publish dispatch evidence and `OUTCOME_UNKNOWN`, serial/bounded subscription delivery, close and terminal reasons, explicit remote subscription retirement, request/response correlation, logical-client binding replacement/currentness fencing, Runtime and Hub lifetimes, registration-lifetime Main fatal latching, dedicated Hostra WebSocket realization, bounded generation-based PWA MessagePort provisioning/replacement across 1000+ cycles, real child-process and Dedicated Worker boundaries, and Desktop/PWA product equivalence.
 
 Architecture review found no business truth in the Hub, no duplicated Main authority, no physical identity exposed as logical identity, no Events multiplexing into Control/Data/State, no hidden retry/replay or silent healthy drop, no unbounded queue/Promise accumulation, no stale-binding currentness bypass, no unintended business-facing implementation ABI, and no known contract/implementation divergence.
 
-Known Session Events v1 implementation/qualification gaps: lifecycle/currentness repair and exact-subject requalification are pending.
+Known Session Events v1 implementation/qualification gaps: none.

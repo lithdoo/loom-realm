@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving；Realm State bootstrap semantics synchronized / not implemented / not qualified；Session Events v1 bootstrap/lifetime + current runtime integration profile implemented / requalification pending
+> 稳定程度：Evolving；Realm State bootstrap semantics synchronized / not implemented / not qualified；Session Events v1 bootstrap/lifetime + current runtime integration profile implemented / qualified
 > 主要定义：Launcher-owned Game/Platform PREPARE、Main/Realm State prepared projection、Realm State + SessionEventHub READY barrier、Runtime Runner / Renderer 的逻辑启动顺序、Control/Data/State/Events 建立关系与 Platform provisioning  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Realm State](./realm-state-system.md)、[Session Events](./session-events-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)  
 > 被以下文档实现：[程序主系统模块](../20-modules/main-system/README.md)、[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
