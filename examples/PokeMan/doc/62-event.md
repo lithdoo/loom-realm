@@ -27,26 +27,98 @@ Event
 
 `states` 的 key 是状态 id。value 可以包含这个状态下的静态剧情内容，例如：
 
-- 静态 Dialogue / 文本；
-- 某些 Character 在当前场景下应产生的 NPC Instance / placement；
+- 固定 Dialogue 引用；
+- 某些 NPC / Character 在当前状态下应出现在哪些 Map、什么位置；
 - 后续确认的其他纯 Content 剧情定义。
 
 当前处于哪个状态 id，记在 Realm State 里。World / Story Resolver 只读取当前 state 对应的 Content，不把 state value 本身复制进 Realm State。
 
-## Character 场景实例
+## NPC 出现规则
 
-Event state 可以为某个 Character 提供当前场景实例定义。一个 Character 在同一个 Event state 下可以对应 **0..N 个 NPC Instance**，包括同一张地图上的多个实例。
+PokeMan 对剧情 NPC 的最终地图结果增加一个明确约束：
+
+> **同一个 `npcId` 可以同时出现在多张不同 Map；但同一张 Map 的最终解析结果中，一个 `npcId` 最多出现一次。**
+
+也就是最终场景要求：
 
 ```text
-Character rival
-→ Event state
-   ├─ rival-lab-a
-   └─ rival-lab-b
+(mapId, npcId) 唯一
 ```
 
-这只表示当前场景里有两个关联到同一 Character 的 Map 表现实例，不表示存在两个 Character 本体。
+允许：
 
-每个静态实例最终需要足够的信息生成 Map `NPCPlacement`，例如：
+```text
+map 1 → npcId: rival
+map 2 → npcId: rival
+map 3 → npcId: rival
+```
+
+不允许最终解析成：
+
+```text
+map 1 → npcId: rival
+map 1 → npcId: rival
+```
+
+这里的唯一性约束针对 **最终 Map 场景**，不是针对 Event source Content。
+
+### 同一个 Event state
+
+同一个 Event state 可以多次声明同一个 `npcId`，只要这些出现位于不同 Map：
+
+```text
+Event A
+state: active
+├─ map 1 → rival
+├─ map 2 → rival
+└─ map 3 → rival
+```
+
+这是合法的。
+
+如果同一个 state 自己就声明：
+
+```text
+map 1 → rival
+map 1 → rival
+```
+
+那么 `(mapId, npcId)` 冲突可以在构建期确定，Builder 应直接报错。
+
+### 不同 Event 之间
+
+不同 Event 可以都声明同一个 NPC，当前不对 source Content 做跨 Event 唯一性限制：
+
+```text
+Event A current state → map 1 / rival
+Event B current state → map 1 / rival
+```
+
+这两条定义本身都合法。它们可能处于互斥剧情阶段，也可能因为当前 Realm State 恰好同时生效。
+
+只有当 Runtime 根据当前所有 Event state 合并场景后，最终同一 Map 真的得到两个相同 `npcId` 时，Story Resolver 才把它作为确定性冲突处理。
+
+因此规则是：
+
+```text
+Source Content 可以跨 Event 重复
+↓
+Story Resolver 合并当前所有来源
+↓
+Final resolved Map 必须满足 (mapId, npcId) 唯一
+```
+
+## Character 与 NPC
+
+Character 表示“这个人是谁”，NPC Definition / `npcId` 表示地图角色表现模板，两者不是同一个 identity。
+
+因此“同一个 Character 能否在同一 Map 出现两次”不能只看 `characterId`；真正限制的是最终 `npcId`：
+
+- 同一个 Character 可以同时出现在多个不同 Map；
+- 同一个 Character 如果使用不同 `npcId`，是否允许同图多表现不在这里额外禁止；
+- 当前明确禁止的是同一最终 Map 出现两个相同 `npcId`。
+
+Event state 中的静态出现定义最终至少需要足够的信息生成 Map `NPCPlacement`，例如：
 
 ```text
 instanceId
@@ -59,29 +131,33 @@ direction
 pattern?
 ```
 
-Event 也可以明确声明当前 Character 不使用更低层默认场景实例。现有 `absent` 语义继续保留；精确 JSON shape 与多实例表示形式后续统一确定。
+`instanceId` 继续满足 `@loomrealm-game/map` 的实例 contract，但 PokeMan 业务层不再用它来允许“同一 Map 出现多个相同 `npcId`”。最终场景唯一性看 `(mapId, npcId)`。
 
-某个 state 没有写某个 Character 的场景定义，和明确写 `absent` 不是一回事：
+Event 也可以明确声明某个 NPC / Character 当前不使用更低层默认场景定义。现有 `absent` 语义继续保留；精确 JSON shape 后续统一确定。
+
+某个 state 没有写某个 NPC 的场景定义，和明确写 `absent` 不是一回事：
 
 ```text
 没有定义
-→ 本 Event 不为该 Character 提供这一层结果
+→ 本 Event 不为该 NPC 提供这一层结果
 
 absent
-→ 本 Event 已明确决定该 Character 当前不从更低层默认实例出现
+→ 本 Event 已明确决定该 NPC 当前不从更低层默认定义出现
 ```
 
 ## 多个 Event 的解析
 
-人物场景解析继续采用当前设计方向：按剧情顺序查看提到该 Character 的 Event，取最后一条当前 state 中提供人物场景定义的 Event。
+当前不再把“不同 Event 是否引用同一 NPC”本身视为冲突。
 
-这条规则目前保留，不在本文提前改成 Runtime mutation 模型。以下问题后续继续讨论：
+Story Resolver 根据当前 Realm State 读取所有相关 Event 的 current state，收集这些 state 对当前 Map 提供的场景定义，再对最终结果做约束检查。
 
-- 剧情顺序的精确表示；
-- 多个 Event 同时命中时的冲突规则；
-- Runtime 当前状态下出现相同 `instanceId` 时如何报告确定性错误。
+仍待继续设计的是：
 
-同一个 `characterId` 或 `npcId` 多次出现本身不是冲突；Map 实例冲突以 `instanceId` 为核心判断。
+- 剧情顺序是否还需要成为显式数据；
+- 如果多个 Event 同时为同一 `(mapId, npcId)` 提供定义，是直接冲突还是未来允许显式 override；
+- `absent` 与其他 Event 的出现定义同时命中时如何解析。
+
+当前先保持最保守规则：**如果最终合并后同一 Map 出现重复 `npcId`，Runtime 必须确定性报冲突，不能随机保留一个。**
 
 ## Story Index
 
@@ -102,7 +178,9 @@ Map Enter
 → 得到可能影响本 Map 的 Event / Character 定义
 → 读取这些 Event 的 currentStateId
 → Story Resolver 读取对应 state Content
-→ 得到当前 Map 的 NPC Instance 集合
+→ 合并当前 Map 的 NPC 定义
+→ 校验最终 npcId 唯一
+→ 得到 NPC Instance / NPCPlacement 集合
 ```
 
 Story Index：
@@ -115,23 +193,30 @@ Story Index：
 
 作者主要维护可读的 Event / Character 源数据，不要求手工同步多个索引文件。
 
-## Builder 检查
+## Builder 与 Runtime 检查
 
 Builder 应检查能够静态确定的问题，例如：
 
 - Event / state identity 重复；
-- 单个实例集合中重复 `instanceId`；
+- 同一个 Event state 内重复 `(mapId, npcId)`；
+- 单个定义中的重复 `instanceId`；
 - 引用不存在的 Character / NPC / Map；
 - 非法 placement；
 - 派生 Story Index 与源定义不一致。
 
-Builder 不因为以下情况失败：
+Builder **不因为以下情况失败**：
 
 ```text
-一个 Character 被多个 Event 引用
-一个 Character 在多个 Map 出现
-一个 Character 在同一 Map 有多个 NPC Instance
-同一个 npcId 被多个 instance 使用
+同一个 npcId 被多个不同 Event 引用
+同一个 npcId 在同一个 Event state 中出现在多个不同 Map
+同一个 Character 被多个 Event 引用
+同一个 Character 出现在多个 Map
 ```
 
-这些都是合法的剧情 / 地图表现能力。真正的 Character identity、Relationship、Contract 和 Card 仍然只关联到对应 Character，不因为 NPC Instance 数量增加而复制。
+Runtime 在合并当前所有来源后必须检查：
+
+```text
+对每个 mapId：npcId 唯一
+```
+
+不同 Event 最终同时产生同一 `(mapId, npcId)` 时，Story Resolver 必须确定性处理为冲突；当前不定义隐式 last-wins。
