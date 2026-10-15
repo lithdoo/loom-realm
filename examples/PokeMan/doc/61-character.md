@@ -114,7 +114,7 @@ NPCPlacement
 
 `@loomrealm-game/map` 根据 `npcId` 读取 `[struct]NPC/<npcId>` 的窄 `name + sprite` 定义。Character Content 负责“这个人是谁以及人物 / Card / Battle 所需的静态数据引用”，Map NPC definition 负责地图表现，World / Story Resolver 负责“当前 Map 应该出现哪些实例”。
 
-## Relationship：A → B 的长期关系状态
+## Relationship：A → B 的长期关系与契约状态
 
 Relationship 是 Realm State 中两个人之间、带方向的长期业务状态。
 
@@ -132,7 +132,9 @@ Relationship
 ├─ affinity
 ├─ hostile
 ├─ dynamic relationship text
-└─ contract?              // A 是主公，B 是从者
+├─ contract?              // A 是主公，B 是从者
+├─ integrity?             // 这份契约的 Battle Manifestation 长期完整度
+└─ progression?           // 这份契约的训练 / 成长长期状态；精确 shape 后续设计
 ```
 
 这里先表达语义，最终 Realm State key / JSON shape 后续再冻结。
@@ -161,10 +163,10 @@ hostile = false
 
 结构化状态和关系文本职责不同：
 
-- `affinity`、`hostile` 等结构化状态给游戏规则使用；
+- `affinity`、`hostile`、`integrity`、未来 progression 等结构化状态给游戏规则使用；
 - 动态关系描述文本主要给 AI 自由对话理解关系，不替代规则字段。
 
-### Contract 是 Relationship 上的正式关系事实
+### Contract 与长期 Battle / 成长状态都属于 Relationship
 
 当前不建立独立 Contract Realm State 对象。
 
@@ -174,22 +176,36 @@ hostile = false
 
 Relationship 很好不代表一定有契约；契约成立以后 affinity / hostile 仍然继续变化。把 B 从随身 Card 编队移出，也不会解除这个 contract。
 
+同一份契约长期存在的 Card Integrity、训练 / 成长等状态也归这条有向 Relationship 所有，而不是归当前随身 Card 所有：
+
+```text
+Relationship(A → B)
+├─ contract = true
+├─ integrity = 48
+└─ progression = ...
+
+Card(A, B)
+= 可以存在，也可以当前不存在
+```
+
+因此从者不随身时，这些长期状态仍然自然保留。
+
 同一个 Character 可以与多个主公分别建立契约：
 
 ```text
-player → rival     contract
-lord-b → rival     contract
+player → rival     contract / integrity / progression
+lord-b → rival     contract / integrity / progression
 ```
 
-它们共享同一个 `rival` Character Content，但各自拥有独立的有向 Relationship。
+它们共享同一个 `rival` Character Content，但各自拥有独立的有向 Relationship 和长期契约状态。
 
-初始 affinity、hostile、关系文本与初始 contract 都可以来自 Game Entry `state.records` baseline。
+初始 affinity、hostile、关系文本、contract、integrity 与已定义的 progression baseline 都可以来自 Game Entry `state.records`。
 
-## Card：当前随身的战斗卡片状态
+## Card：当前随身状态
 
-**Card 不嵌在 Relationship 里。** Card 是独立的 Realm State 业务对象，但它的定义被收窄：
+**Card 不嵌在 Relationship 里。** Card 是独立的 Realm State 业务对象，但职责非常窄：
 
-> **技术数据模型里的 Card，只表示当前被主公带在身上、主要用于 Pocket / Battle 的角色卡。**
+> **Card 只表示一份已成立契约当前是否被主公带在身上，以及它位于哪个随身 slot。**
 
 因此：
 
@@ -197,62 +213,53 @@ lord-b → rival     contract
 Relationship contract
 = 长期正式契约是否成立
 
+Relationship integrity / progression
+= 这份契约长期存在的 Battle / 成长状态
+
 Card
-= 这份已成立契约当前是否进入随身编队，以及这张随身卡当前的 Battle-facing 状态
+= 这份已成立契约当前是否进入随身编队
 ```
 
 有 contract 不代表当前一定有 Card：
 
 ```text
-player → rival
+Relationship(player → rival)
 contract = true
+integrity = 48
+progression = ...
+
 Card(player, rival) exists      // 当前随身
 ```
 
 或者：
 
 ```text
-player → rival
+Relationship(player → rival)
 contract = true
+integrity = 48
+progression = ...
+
 Card(player, rival) absent      // 当前不随身
 ```
 
-当前 Card 概念至少需要表达：
+当前 Card 概念只需要表达：
 
 ```text
 Card
 ├─ holderCharacterId
 ├─ servantCharacterId
-├─ carried slot
-└─ battle state
-   └─ integrity
+└─ carried slot
 ```
 
 其中：
 
 - `holderCharacterId`：当前主公；
 - `servantCharacterId`：Card 代表的从者；
-- `carried slot`：当前随身编队位置；序章只有 1 个随身位；
-- `integrity`：Card Battle Manifestation 的完整度 / 稳定度，不是 Character 本体生命值。
+- `carried slot`：当前随身编队位置；序章只有 1 个随身位。
+
+Card 不保存 Integrity、训练 / 成长，不复制 BattleActor / BattleSkill、人物姓名、人格或固定 AI 描述。长期契约状态从对应 Relationship 读取；静态人物 / Battle 数据从 `servantCharacterId` 所对应的 Character / Battle Content 读取。
 
 Card 的独立 `cardId` **尚未冻结**。是否直接使用 `(holderCharacterId, servantCharacterId)` 作为当前随身 Card identity，等 Card Record shape 最终设计时再决定。
-
-Card 不复制 BattleActor / BattleSkill、人物姓名、人格或固定 AI 描述。这些继续从 `servantCharacterId` 所对应的 Character / Battle Content 读取。
-
-### 当前仍未冻结：非随身时的长期 Battle / 成长状态
-
-Card 被限定为“当前随身卡”以后，会留下一个需要后续单独解决的问题：
-
-> **从者有 contract、但当前不随身时，Card Integrity、训练 / 成长等需要跨编队切换保存的事实最终放在哪里？**
-
-现在不擅自增加 `ContractedServantState`、`ManagedCard` 等新 authority。等 Progression / Center 管理继续设计后再冻结。
-
-因此当前只确认：
-
-- Relationship 保存契约事实，不保存 Card Integrity；
-- Card 独立于 Relationship，表示当前随身 Card；
-- Battle Runtime 不直接成为长期状态；
-- 非随身时需要继续存在的 Battle / 成长事实的最终 owner 仍待设计。
 
 ## Battle 数据边界
 
@@ -264,9 +271,14 @@ Character
    ├─ max_hp
    └─ skills[] → BattleSkill
 
-Card State
-= 当前随身 Card 的 Battle-facing 状态
-└─ integrity
+Relationship(holder → servant)
+├─ integrity
+└─ progression / training
+
+Card
+├─ holderCharacterId
+├─ servantCharacterId
+└─ slot
 
 Battle Runtime
 = @loomrealm-game/battle Simulation authority
@@ -278,19 +290,21 @@ Battle Runtime
 └─ Decision / Simulation working state
 ```
 
-随身 Card 进入 Battle 时：
+当前随身 Card 进入 Battle 时：
 
 ```text
-Character → BattleActor Content
+Card(holder=A, servant=B)
 +
-Card battle state
+Relationship(A → B).integrity / progression
++
+Character B → BattleActor Content
 ↓
 @loomrealm-game/battle Runtime Actor
 ```
 
-Battle Simulation 拥有本场权威运行状态。战斗结束后，World 再解释哪些结果需要提交为长期业务事实。
+Battle Simulation 拥有本场权威运行状态。对于 Card Battle Manifestation，Battle 初始 HP 来自 Relationship.integrity；战斗结束后需要持久的 Integrity 结果写回同一 Relationship。
 
-普通剧情战斗或临时敌方 Card 不需要为了 Battle 制造 Relationship / contract / 持久 Card：
+普通剧情战斗或临时敌方本体不需要为了 Battle 制造 Relationship / contract / 持久 Card：
 
 ```text
 Story / Encounter Battle definition
@@ -324,6 +338,9 @@ Card
 Relationship B → A
 → 读取 B 当前怎么看 A
 
+Relationship A → B
+→ 读取 A 持有 B 这份契约的长期状态（需要时）
+
 +
 必要的当前剧情 / Card context
 ↓
@@ -339,7 +356,7 @@ LLM 当次生成的话默认只是对话输出，不自动修改 Character Conte
 人物 / NPC 在当前剧情下如何出现在 Map，继续采用 Content 驱动的解析思路：
 
 1. **Realm State 中必要的临时剧情覆盖。** 只保存真正不能由 Event current state 重算的临时事实。
-2. **Event 场景定义。** Realm State 记录 Event 当前 state id，对应 Content 可以声明 NPC / Character 的 placement。
+2. **Event 场景定义。** Realm State 记录 Event 当前 state，对应 Content 可以声明 NPC / Character 的 placement。
 3. **Character 的 Content 默认场景实例。** 没有更高层覆盖时使用。
 4. **没有实例。** 三层都没有提供实例时，当前不投影到 Map。
 
@@ -399,7 +416,7 @@ Map Enter 概念流程：
 ```text
 Map Enter
 → 读取该 Map 对应的 Story Index
-→ 读取相关 Event current state
+→ 读取 Event current state
 → Story Resolver 解析 Character / Event Content
 → 合并当前 Map 的 NPC 来源
 → 校验 npcId 唯一
@@ -408,4 +425,4 @@ Map Enter
 → context.setNPC(...)
 ```
 
-读档恢复的是 Event current state、Relationship、当前随身 Card 以及其他已确认 mutable facts。Character 固定 AI 人物描述、BattleActor / BattleSkill Content、默认实例、Event state 中声明的场景实例和 Story Index 都继续从安装 Content 读取。
+读档恢复的是 Event current state、Relationship（包括 contract / integrity / progression）、当前随身 Card 以及其他已确认 mutable facts。Character 固定 AI 人物描述、BattleActor / BattleSkill Content、默认实例、Event state 中声明的场景实例和 Story Index 都继续从安装 Content 读取。
