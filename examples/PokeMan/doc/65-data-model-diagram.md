@@ -172,7 +172,7 @@ classDiagram
     EventDefinition "1" *-- "1..*" EventState : states
     EventCurrentState --> EventDefinition : eventId
     EventState --> DialogueDefinition : references
-    EventState --> NPCInstance : defines projection
+    EventState --> NPCInstance : defines source projection
 
     EncounterDefinition --> NPCInstance : generates
     EncounterDefinition --> BattleActorContent : temporary opponent actor
@@ -185,6 +185,33 @@ classDiagram
     BattleActorContent --> BattleRuntimeActor : static battle definition
     EncounterDefinition --> BattleRuntimeActor : temporary actor source
 ```
+
+## NPC / Event / Map 唯一性
+
+```mermaid
+flowchart LR
+    EA[Event A current state] --> R[Story Resolver]
+    EB[Event B current state] --> R
+    CC[Character defaults] --> R
+    EN[Encounter generated NPCs] --> R
+
+    R --> V{validate final Map}
+    V -->|每个 mapId 内 npcId 唯一| OK[NPCPlacement[]]
+    V -->|同一 mapId 重复 npcId| ERR[deterministic conflict]
+```
+
+当前规则：
+
+```text
+Source Content
+- 不同 Event 可以引用同一个 npcId
+- 同一个 Event state 可以让同一个 npcId 出现在多个不同 Map
+
+Final resolved Map
+- (mapId, npcId) 必须唯一
+```
+
+`instanceId` 继续满足 `@loomrealm-game/map` 的实例 contract，但不能用不同 `instanceId` 绕过 PokeMan 的同图 `npcId` 唯一约束。
 
 ## Character / BattleSkill 链路
 
@@ -272,7 +299,9 @@ PokeMan Skill
 - 从者有 contract 但不随身时，Integrity / Progression 长期状态最终由谁拥有；
 - Character → BattleActor Content 的最终引用编码；
 - 技能学习 / 成长如何改变某个角色长期可用的 `skills[]`；
-- Event 的完整 flow / trigger；
+- Event currentState 的推进触发；
+- 跨 Event 的同一 `(mapId, npcId)` 冲突未来是否需要显式 override；
+- `absent` 与其他 Event 出现定义同时命中时的解析；
 - Encounter re-entry 与生成结果持久化细节。
 
 BattleSkill 本身的静态字段和执行语义不再作为 PokeMan 自己的未决 schema；它直接跟随 `@loomrealm-game/battle` 当前规范。
