@@ -13,7 +13,7 @@
 - **身份**：`id`、名称。`id` 是人物级事实的稳定 identity，也是其他静态定义关联人物的稳定键。
 - **描述**：职业、性格、经历等作者定义的静态资料。
 - **功能标签**：研究者、店主、家人等世界职责。
-- **固定 AI 人物描述**：一段供自由对话 AI 使用的自然语言人物说明，可以表达性格、说话习惯、背景、价值观等不值得拆成规则字段的信息。
+- **固定 AI 人物描述**：一段供自由对话 AI 使用的自然语言人物说明，可以表达性格、说话习惯、背景、价值观等不值得拆成游戏规则字段的信息。
 - **默认场景实例**：没有更高优先级剧情覆盖时，这个人默认如何出现在 Map；一个 Character 可以有 0..N 个默认 NPC Instance。
 - **Battle 静态资料引用**：关联 `@loomrealm-game/battle` 的 BattleActor Content；技能直接使用 BattleActor 的 `skills[]` 所引用的 BattleSkill Content。
 
@@ -54,7 +54,7 @@ BattleSkill
 
 当前也不额外增加 `attack / defense / speed / MP / accuracy / critical / element / cooldown / Buff / Debuff` 等 Battle v0 没有定义的字段。将来 PokeMan 确实需要新的战斗机制时，优先在 `@loomrealm-game/battle` 中设计并冻结，再由 Character Content 引用。
 
-## Character 与 Map NPC Instance
+## Character、NPC 与 Map Instance
 
 Character 与 Map NPC Instance 是两个层次：
 
@@ -62,22 +62,43 @@ Character 与 Map NPC Instance 是两个层次：
 Character
 = “这个人是谁”
 
+NPC Definition / npcId
+= “地图上以哪种 NPC 模板出现”
+
 Map NPC Instance
-= “当前场景里出现的一个人物表现实例”
+= “这个 NPC 当前在某张 Map 上的具体出现”
 ```
 
-Character identity 是唯一的，但它在 Content / 当前剧情投影中可以对应 **0..N 个 NPC Instance**。同一个 Character 可以出现在不同地图，也可以在同一张地图上出现多个 NPC Instance；这些实例仍然共享同一个 Character identity 和人物级 Relationship。
+Character identity 与 `npcId` 不要求相同。一个 Character 可以关联不同 NPC Definition，例如不同服装或地图表现。
 
-例如：
+当前 PokeMan 对最终场景采用一个明确约束：
+
+> **同一个 `npcId` 可以同时出现在多个不同 Map，但同一张 Map 的最终解析结果中，一个 `npcId` 最多出现一次。**
+
+因此允许：
 
 ```text
 Character rival
-├─ instanceId: rival-lab-a
-├─ instanceId: rival-lab-b
-└─ instanceId: rival-town
+├─ map 1 → npcId: rival-normal
+├─ map 2 → npcId: rival-normal
+└─ map 3 → npcId: rival-normal
 ```
 
-真正区分 Map 实例的是 `instanceId`。`characterId` 或 `npcId` 重复出现本身不是错误。
+但不允许最终解析成：
+
+```text
+map 1
+├─ npcId: rival-normal
+└─ npcId: rival-normal
+```
+
+如果同一个 Character 在同一 Map 需要多个不同表现，它们必须至少是不同 `npcId`；是否有这种产品需求以后按具体场景决定。
+
+`instanceId` 仍然是 `@loomrealm-game/map` 的实例 identity，但 PokeMan 不再把不同 `instanceId` 当成“同一 Map 可以出现多个相同 `npcId`”的依据。业务层最终唯一性看：
+
+```text
+(mapId, npcId)
+```
 
 PokeMan World 最终投影给 `@loomrealm-game/map` 的仍是：
 
@@ -315,14 +336,14 @@ LLM 当次生成的话默认只是对话输出，不自动修改 Character Conte
 
 ## 场景实例解析
 
-人物在当前剧情下如何出现在 Map，继续采用 Content 驱动的解析思路：
+人物 / NPC 在当前剧情下如何出现在 Map，继续采用 Content 驱动的解析思路：
 
 1. **Realm State 中必要的临时剧情覆盖。** 只保存真正不能由 Event current state 重算的临时事实。
-2. **Event 场景定义。** Realm State 记录 Event 当前 state id，对应 Content 可以声明 Character 的 NPC Instance / placement。
+2. **Event 场景定义。** Realm State 记录 Event 当前 state id，对应 Content 可以声明 NPC / Character 的 placement。
 3. **Character 的 Content 默认场景实例。** 没有更高层覆盖时使用。
-4. **没有实例。** 三层都没有提供实例时，这个人当前不投影到 Map。
+4. **没有实例。** 三层都没有提供实例时，当前不投影到 Map。
 
-重要的是：每层结果都是 0..N 个 NPC Instance，不强制一个 Character 只能有一个位置。
+同一个 NPC 可以在不同 Map 上各自有出现定义；最终每张 Map 内要求 `npcId` 唯一。
 
 一个静态 NPC Instance 至少需要足够的信息生成 Map placement：
 
@@ -345,23 +366,31 @@ pattern?
 
 Builder 应检查构建期即可确定的错误，例如：
 
-- 同一个实例集合中的重复 `instanceId`；
+- 同一个 Event state 内重复 `(mapId, npcId)`；
+- 单个定义中重复 `instanceId`；
 - 引用了不存在的 Character / NPC / Map；
 - 非法坐标、方向或不完整 placement；
 - Character 引用了不存在的 BattleActor Content；
 - BattleActor 引用了不存在的 BattleSkill / resource；
 - Story Index 与源 Content 不一致。
 
-Builder 不因为以下情况失败：
+Builder **不因为以下情况失败**：
 
 ```text
-同一个 characterId 出现多次
-同一个 npcId 出现多次
-同一个 Character 在同一 Map 上产生多个 NPC Instance
+同一个 npcId 被多个不同 Event 引用
+同一个 npcId 在同一 Event state 中出现在多个不同 Map
+同一个 Character 被多个 Event 引用
+同一个 Character 出现在多个不同 Map
 同一个 Character 被多个不同主公的 Relationship / contract 引用
 ```
 
-如果不同剧情来源在 Runtime 当前状态下最终产生相同 `instanceId`，Story Resolver 必须确定性处理冲突，不能随机保留一个。
+Runtime 合并当前 Character / Event / Encounter 等来源后，对每个 Map 必须保证：
+
+```text
+npcId 唯一
+```
+
+如果不同剧情来源最终在同一 Map 产生重复 `npcId`，Story Resolver 必须确定性处理为冲突，不能因为 `instanceId` 不同而同时保留。
 
 ## 进图与读档
 
@@ -372,7 +401,9 @@ Map Enter
 → 读取该 Map 对应的 Story Index
 → 读取相关 Event current state
 → Story Resolver 解析 Character / Event Content
-→ 得到当前 Map 的 NPC Instance 集合
+→ 合并当前 Map 的 NPC 来源
+→ 校验 npcId 唯一
+→ 得到 NPC Instance 集合
 → 映射为 NPCPlacement[]
 → context.setNPC(...)
 ```
