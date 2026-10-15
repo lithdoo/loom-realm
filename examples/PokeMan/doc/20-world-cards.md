@@ -70,62 +70,69 @@
 
 玩家自己的角色卡在序章之后是否成为可持续主动分发的长期系统，暂不在序章阶段决定。
 
-## 同一人物可以对应多张角色卡
+## 同一人物可以对应多份独立契约
 
-同一个人物可以与不同主公分别建立独立契约，因此可以同时存在多张代表同一人物的角色卡：
+同一个人物可以与不同主公分别建立独立契约，因此可以同时存在多份代表同一人物的角色卡关系：
 
 ```text
-Character
-├─ Contract A → Card A
-├─ Contract B → Card B
-└─ Contract C → Card C
+Character B
+├─ Relationship(A → B) / Contract A
+├─ Relationship(C → B) / Contract C
+└─ Relationship(D → B) / Contract D
 ```
 
-这些卡共享同一个人物的核心事实，例如：
+这些关系共享同一个人物的核心事实，例如：
 
 - identity；
 - personality；
 - 世界中的本体与剧情；
 - 基础人物设定与能力来源。
 
-但每一张卡属于不同契约实例，可以独立拥有：
+但每一份有向 Relationship / Contract 独立拥有这段契约长期存在的业务状态，例如：
 
-- holder；
-- 对应关系 / affinity / trust；
+- holder / servant 关系；
+- affinity / trust；
 - Card Integrity；
-- 卡片侧训练与成长；
-- 当前是否随身携带。
+- 契约侧训练与成长；
+- 其他未来确认的契约级 progression。
+
+是否当前随身则不是 Relationship 的长期属性，而由当前 `Card` State 表示。
 
 因此，同一场 Battle 中允许双方使用代表同一个 Character 的角色卡，不增加“同一人物只能有一个 Battle Manifestation”的唯一性限制。例如：
 
 ```text
-主公 A 的宿敌卡 → 宿敌 Battle Manifestation A
+Relationship(A → rival).integrity / progression
+→ A 当前随身的 rival Card
+→ 宿敌 Battle Manifestation A
                          VS
-主公 B 的宿敌卡 → 宿敌 Battle Manifestation B
+Relationship(B → rival).integrity / progression
+→ B 当前随身的 rival Card
+→ 宿敌 Battle Manifestation B
 ```
 
-这不解释为角色本体被复制成两个真人，而是**不同契约通过各自角色卡，对同一个人物形成各自的战斗显现**。
+这不解释为角色本体被复制成两个真人，而是**不同契约关系分别调用同一个人物的战斗显现**。
 
-不同契约的 Battle Manifestation 可以因为持卡者关系、卡片成长、Card Integrity 和 Guidance 不同而产生不同 Decision。多人持卡时更复杂的远程信息同步、Pocket 感知和剧情表现以后再设计，不影响“同一人物可对应多张卡、同场可同时显现”这一基础规则。
+不同契约的 Battle Manifestation 可以因为各自 Relationship 的关系、训练 / 成长、Integrity 和 Guidance 不同而产生不同 Decision。多人持卡时更复杂的远程信息同步、Pocket 感知和剧情表现以后再设计，不影响“同一人物可对应多份独立契约、同场可同时显现”这一基础规则。
 
 # 角色卡管理与“口袋”
 
-## 契约、已管理卡与随身卡是不同事实
+## 契约关系与随身 Card 是不同事实
 
 ```text
-Contract / 契约关系
+Relationship / Contract
 = 玩家与该角色的正式关系已经成立
+= 保存这份契约长期存在的 affinity / integrity / progression 等状态
 
-Managed Card / 已管理角色卡
-= 该卡已经进入中心管理器中的角色卡集合
-
-Carried Card / 随身角色卡
-= 本次旅行中实际被主公带在身上的角色卡
+Card / 随身角色卡
+= 这份已成立契约当前被编入本次旅行的随身队伍
+= 只保存当前随身关系与 slot
 ```
 
 所以：
 
 > **已收服多少人物，与本次旅行能够携带多少人物，是两个独立概念。**
+
+产品文案仍可以把中心里可查看、可编队的契约称为“已管理角色卡”，但技术上它不是额外的 `ManagedCard` State authority：中心管理器展示的是已成立 Contract / Relationship 及其长期状态；当前真正随身的那一部分再由 `Card` State 表示。
 
 ## 随身角色卡数量有限
 
@@ -148,9 +155,9 @@ Carried Card / 随身角色卡
 → 环境 / NPC / Event 反应
 → 当前 Battle 可调用角色
 
-中心管理器中的其他角色卡
+其他已契约 Relationship
 → 契约继续存在
-→ 关系继续存在
+→ affinity / integrity / progression 继续存在
 → 不作为当前 Pocket Companion
 → 默认不能直接用于当前野外 Battle
 ```
@@ -166,30 +173,30 @@ Battle 编队
 
 ## 中心管理器
 
-未编入随身位的角色卡统一由 **中心管理器** 管理。该名称仍是工作概念，正式世界观名称和设施形态以后再定。
+未编入随身位的已契约关系统一由 **中心管理器** 提供管理视图。该名称仍是工作概念，正式世界观名称和设施形态以后再定。
 
 中心定位为标准化的角色卡服务设施，整体旅行节奏参考传统 Pokémon Center + PC。原则上主要城镇都可以存在这种服务节点，玩家在旅行过程中通过中心完成恢复与队伍整理。
 
 中心承担：
 
-- 查看所有已管理角色卡；
-- 核实角色卡完整属性、能力、技能、训练状态和关系资料；
-- 调整随身角色卡；
-- 修复 / 恢复角色卡的 Battle 状态；
+- 查看所有已成立 Contract / Relationship；
+- 核实对应人物、能力、技能、Relationship、Integrity、训练 / 成长等资料；
+- 调整当前随身 Card；
+- 修复 / 恢复 Relationship 上这份契约的 Battle Integrity；
 - 后续根据需要承担训练管理、契约记录等功能。
 
-PokeMan **不提供类似 Pokédex 的随身全角色完整数据库**。旅途中可以显示当前随身卡必要的即时信息，但要查看全部角色卡和完整属性，需要回到中心管理器核实。
+PokeMan **不提供类似 Pokédex 的随身全角色完整数据库**。旅途中可以显示当前随身卡必要的即时信息，但要查看全部已契约关系和完整属性，需要回到中心管理器核实。
 
 ```text
 旅行 / 探索
 ↓
 到达中心
 ↓
-修复角色卡
+修复契约关系的 Integrity
 ↓
 查看完整资料
 ↓
-调整随身队伍
+调整随身 Card / slot
 ↓
 重新出发
 ```
@@ -243,7 +250,7 @@ PokeMan **不提供类似 Pokédex 的随身全角色完整数据库**。旅途�
 
 3. **战斗化身（Battle Manifestation，工作术语）**
    - 通过随身角色卡在 Battle 中形成的战斗形态；
-   - 承载当前角色卡能够调用的战斗能力。
+   - 承载当前契约关系能够调用的战斗能力。
 
 ```text
                  同一个角色
@@ -262,6 +269,6 @@ PokeMan **不提供类似 Pokédex 的随身全角色完整数据库**。旅途�
 
 但是：
 
-> **角色卡拥有属于这张卡 / 这段持有关系的 Battle 运行状态；这不等于角色本人拥有同一份持久战斗状态。**
+> **这份有向 Relationship / Contract 拥有长期的 Integrity 与训练 / 成长状态；当前 Card 只表示它是否随身以及所在 slot。**
 
 剧情中如果人物本体就在现场，也允许直接以本体参战，不需要建立第二套 Battle 系统。
