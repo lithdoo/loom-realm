@@ -19,6 +19,14 @@
 
 Game Entry 的 `state.records` 是 Session bootstrap 时安装的 Realm State baseline。初始 Relationship、初始 contract、初始 Event state、初始随身 Card 等 mutable baseline 可以从这里进入 State；Character、Dialogue、EventStateMutation、BattleActor / BattleSkill 等 immutable definition 仍属于 Content。
 
+Event 初始化采用稀疏语义：安装 baseline 只需要声明开局已经有非空状态的 Event，不需要为 Content 中所有 Event 预写 `inactive` 状态或空 Record。Event 业务读取统一视为：
+
+```text
+eventId → stateId | null
+```
+
+`null` / 没有当前状态表示 Event 当前为空状态，不参与 Event State 场景投影。
+
 ## Content：定义与剧情
 
 当前主要 Content：
@@ -90,9 +98,9 @@ Event state 的声明式变化单独作为 immutable Content：
 ```text
 EventStateMutation
 ├─ from
-│  └─ eventId → stateId
+│  └─ eventId → stateId | null
 └─ to
-   └─ eventId → stateId
+   └─ eventId → stateId | null
 ```
 
 Mutation 的 identity 由 Content key / reference 提供，所以概念数据本体只需要 `from` 和 `to`。
@@ -100,10 +108,13 @@ Mutation 的 identity 由 Content key / reference 提供，所以概念数据本
 语义：
 
 - `from` 中多个 Event 是 **AND**：全部当前 state 都匹配才允许应用；
+- `null` 是合法 Event 空状态，可以出现在 `from` / `to`；
 - `to` 中多个 Event state 在一次 Realm State commit 中一起写入；
 - `from` 与 `to` 的 Event 集合、数量都不要求相同；
 - 只在 `from` 中出现的 Event 只是前置条件；
 - 只在 `to` 中出现的 Event 不要求与某个 `from` 项一一对应；
+- `null → stateId` 表示启动 Event；
+- `stateId → null` 表示清空当前 Event state；
 - 需要 OR 时不增加 `anyOf` / 条件表达式，而是为每个分支定义独立 Mutation。
 
 EventStateMutation 只读写 **Event current state**，不扩展为 Relationship / Card / Battle 等任意 Realm State mutation DSL。
@@ -115,7 +126,8 @@ EventStateMutation 只读写 **Event current state**，不扩展为 Relationship
 ```text
 Realm State
 ├─ player current map / position / direction
-├─ Event current state
+├─ sparse Event current states
+│  └─ eventId → stateId | null
 ├─ directed Relationship
 │  ├─ affinity
 │  ├─ hostile
@@ -131,6 +143,29 @@ Realm State
 ├─ Pocket / story facts that must persist
 └─ player choices / random results that cannot be recomputed
 ```
+
+### Event current state
+
+Event current state 是 Realm State 中的业务事实，但逻辑上是稀疏集合：
+
+```text
+Content 有 Event A / B / C / D
+
+Realm State 当前只需要：
+A → state-2
+C → state-1
+
+B / D → null
+```
+
+因此：
+
+- 安装初始化 baseline 只声明开局已启动的 Event；
+- Event 没有非空状态时不参与 Story Resolver 投影；
+- Event 曾经启动后也可以通过 Mutation 写回 `null`；
+- 业务上的 `null` 不等于“底层 Realm State Record 一定不存在”。
+
+Realm State v1 的 `put(null)` 不会 dematerialize Record，所以 PokeMan 不能用 Record materialization / `list()` membership 判断 Event 是否启动。最终是一个总表 Record 还是多个 Event Record，目前仍不冻结。
 
 ### Relationship
 
@@ -260,7 +295,8 @@ Map Enter：
 ```text
 读取 Story Index
 → 找到相关 Event / Character Content
-→ 读取 Event currentStateId
+→ 读取稀疏 Event current states
+→ 跳过 currentState == null 的 Event
 → Story Resolver 合并当前来源
 → 校验最终 (mapId, npcId) 唯一
 → NPC Instance[]
@@ -268,7 +304,7 @@ Map Enter：
 → @loomrealm-game/map
 ```
 
-Builder 应检查缺失引用、非法 placement、派生索引一致性，以及单个 Event state 内可静态判断的重复 `(mapId, npcId)`。不同 Event 之间重复引用同一个 `npcId` 本身不报错；Runtime 合并当前来源后，如果最终同一 Map 出现重复 `npcId`，Story Resolver 必须确定性报冲突。
+Builder 应检查缺失引用、非法 placement、派生索引一致性、安装初始化 State 中的非空 Event state 引用，以及单个 Event state 内可静态判断的重复 `(mapId, npcId)`。不同 Event 之间重复引用同一个 `npcId` 本身不报错；Runtime 合并当前来源后，如果最终同一 Map 出现重复 `npcId`，Story Resolver 必须确定性报冲突。
 
 ## AI 自由对话的数据边界
 
@@ -303,7 +339,7 @@ Card 自由对话可以组合以上信息和必要的当前剧情 context。LLM 
 | 关系 / 契约 | — | Relationship：affinity、hostile、动态文本、contract | 尚未提交的关系变化 |
 | Card | Card / Battle 表现所需静态资源来自 Character / Visual / Battle Content | **当前随身 Card State**：holder、servant、slot、battle-facing state | Battle 中的 Card Manifestation |
 | 对话 | 固定 Dialogue，包括可选 EventStateMutation ref | AI 长期关系语境来自 Relationship | dialogue id / line index / pending choice；LLM working context |
-| 剧情 | Event、states、EventStateMutation、NPC placement、Dialogue ref、Story Index | Event currentState、不可重算剧情事实 | 当前解析 / mutation validation / 执行步骤 |
+| 剧情 | Event、states、EventStateMutation、NPC placement、Dialogue ref、Story Index | **稀疏 Event current states**：`eventId → stateId | null`；不可重算剧情事实 | 当前解析 / mutation validation / 执行步骤 |
 | 遭遇 | table、spawn point、template、BattleActor ref | 需要持续存在的生成结果 | 当前接触、视野、临时对手 |
 | 战斗 | `@loomrealm-game/battle` 的 BattleActor / BattleSkill / rules / scenarios | 当前随身 Card 的已提交 battle-facing state | Battle Simulation / Decision / Presentation 当前工作状态 |
 | 表现 | tiles、sprites、portrait、UI skin | — | Renderer replica、动画 |
@@ -326,6 +362,7 @@ Battle
 
 World / Event state owner
   提供 Realm State authority 上下文
+  以 stateId | null 读取 Event current state
   验证 Mutation.from
   原子提交 Mutation.to
   提交地图、Relationship、当前随身 Card、剧情、Encounter 等其他 mutable facts
@@ -339,12 +376,14 @@ System Menu 可以发起 New Game / Load 意图，但不是第二个 State autho
 
 存档带走已确认的 Realm State，例如：
 
-- Event current state；
+- 稀疏 Event current states；
 - Relationship 当前状态，包括 contract；
 - 当前随身 Card State；
 - 当前地图 / 玩家位置；
 - 需要持续存在的 Encounter 生成结果；
 - 其他已经提交的剧情 / Pocket 事实。
+
+存档不要求列出 Content 中全部 Event；空 Event 的业务语义是 `null`。
 
 存档不重复保存：
 
@@ -364,7 +403,8 @@ System Menu 可以发起 New Game / Load 意图，但不是第二个 State autho
 序章至少会用到：
 
 - 当前地图和玩家位置；
-- Event current state / 少量剧情事实；
+- 安装 baseline 中开局已启动的少量 Event current state；
+- 后续通过 `null → stateId` 启动的剧情 Event；
 - `player → rival` 与 `rival → player` 的 Relationship / contract；
 - 玩家当前随身的宿敌 Card；
 - Card 当前 Integrity；
