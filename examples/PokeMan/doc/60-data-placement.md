@@ -28,7 +28,7 @@
 
 ## 剧情优先留在 Content
 
-PokeMan 的剧情定义尽量保持数据驱动：Event、Event State、静态 Dialogue、剧情状态下的 Map NPC Instance 等都优先写在 Content，而不是硬编码进 `world.mjs`，也不把这些定义展开后的结果逐项复制进存档。
+PokeMan 的剧情定义尽量保持数据驱动：Event、Event State、固定 Dialogue、剧情状态下的 Map NPC Instance 等都优先写在 Content，而不是硬编码进 `world.mjs`，也不把这些定义展开后的结果逐项复制进存档。
 
 概念上：
 
@@ -37,7 +37,6 @@ Content
 ├─ Character definitions
 ├─ Event definitions
 │  └─ states
-│     ├─ static dialogue
 │     └─ NPC instance / placement definitions
 ├─ Dialogue definitions
 ├─ Encounter definitions
@@ -55,7 +54,7 @@ Realm State
    └─ 不能只靠 Content 重算的随机或玩家选择结果
 ```
 
-作者维护的是可读的 Character / Event 等源 Content；Builder 可以把这些关系编译成 Runtime 友好的派生索引。派生索引仍然是 Content，不是新的 authority，也不是存档数据。
+作者维护的是可读的 Character / Event / Dialogue 等源 Content；Builder 可以把这些关系编译成 Runtime 友好的派生索引。派生索引仍然是 Content，不是新的 authority，也不是存档数据。
 
 这样 World 进入地图时不需要扫描所有剧情内容：
 
@@ -94,6 +93,36 @@ Builder 应检查能够在构建期确定的数据错误，例如：
 
 Builder **不因为同一个 Character 或 `npcId` 出现多次而失败**。如果多个剧情来源在当前运行状态下最终产生相同 `instanceId`，Story Resolver 必须按确定规则处理为冲突，而不是随机保留一个；具体冲突 / 顺序规则继续随 Event 设计讨论。
 
+## 固定 Dialogue 的数据边界
+
+固定 Dialogue 是 immutable Content，不把播放进度写进 Realm State。
+
+当前采用很小的结构：
+
+```text
+Dialogue
+├─ id
+├─ lines[]
+└─ choices?[]
+   └─ target Dialogue
+```
+
+一个 Dialogue 内部只有线性 `lines[]`。`choices` 如果存在，只能在全部台词播放完以后出现；每个 Choice 只负责跳到另一个 Dialogue。多个 Dialogue 因此可以组成分支，也允许形成循环。
+
+运行时只需要临时维护：
+
+```text
+current dialogue id
+current line index
+pending choice interaction
+```
+
+这些属于 Dialogue Frame 工作状态。没有 `choices` 的 Dialogue 播放完就完成；有 `choices` 时由玩家选择下一个 Dialogue。
+
+Dialogue 自己不直接修改 Relationship、Contract、Event State、Battle 或其他世界事实。真正的长期业务后果由调用方解释并提交 Realm State。
+
+详细结构见 [固定对话](./64-dialogue.md)。
+
 ## AI 自由对话的数据边界
 
 Card 模式的自由对话不新增一套独立的 AI 权威数据模型。AI 主要消费两类已经有明确归宿的数据：
@@ -131,8 +160,8 @@ Relationship State
 | 契约与角色卡 | 所有持久角色都提供形成角色卡 / Battle 表现所需的静态数据与素材；这只是 Content 能力，不代表游戏规则允许当前建立契约 | 契约、持有者、完整度、在中心还是随身；能否建立契约由剧情、关系和系统规则决定 | 中心里尚未提交的编队草稿 |
 | 口袋陪伴 | 同行台词、地点评论 | 已经触发过的口袋事件 | 正在说的一句 |
 | 关系 | — | 有向 Relationship 的 affinity、hostile 与动态关系描述文本 | 尚未提交的关系变化、自由对话当次上下文 |
-| 剧情 | Event、states、静态 Dialogue、剧情状态下的 NPC Instance / placement，以及 Builder 生成的 Story Index | 事件当前状态 id，以及真正不能只靠 Content 重建的玩家选择结果 | 正在解析 / 执行、尚未提交的事件步骤 |
-| 对话 | 固定 Dialogue 定义；Character 的固定 AI 人物描述仍属于 Character Content | 自由对话使用的长期关系语境来自 Relationship，不另存一份对话 authority | 当前节点、未提交的选择、当前一次 LLM 对话工作集 |
+| 剧情 | Event、states、剧情状态下的 NPC Instance / placement，以及 Builder 生成的 Story Index；可引用固定 Dialogue | 事件当前状态 id，以及真正不能只靠 Content 重建的玩家选择结果 | 正在解析 / 执行、尚未提交的事件步骤 |
+| 对话 | 固定 Dialogue：线性 `lines[]` + 可选末尾 `choices[]`；Character 的固定 AI 人物描述仍属于 Character Content | 自由对话使用的长期关系语境来自 Relationship；固定 Dialogue 不另存播放状态 | 固定 Dialogue 的 current dialogue id / line index / pending choice；当前一次 LLM 对话工作集 |
 | 遭遇 | 每张地图的遭遇表、出生点、类型 | 本次进图已经生成且需要持续存在的可见实例 | 视野、拦路、追逐、这一步的接触 |
 | 战斗 | 规则、技能、教学战、角色 Battle 静态资料 | 结束后写回的卡片完整度与已提交后果 | 战场、Decision、模拟、本场本体 HP、动画 |
 | 表现 | 图块、角色图、界面皮肤 | — | Renderer 当前副本与动画 |
@@ -178,13 +207,13 @@ System Menu 可以发起 New Game / Load 意图，但 Realm State 中世界事�
 - 当前地图已经生成且需要持续存在的可见 Encounter；
 - 其他已经提交、需要跨读档恢复的剧情和 Pocket 事实。
 
-存档不重复保存 Character 固定 AI 人物描述、默认实例、Event state 中声明的 NPC placement、Story Index 等 immutable Content definition。
+存档不重复保存 Character 固定 AI 人物描述、固定 Dialogue 定义、默认实例、Event state 中声明的 NPC placement、Story Index 等 immutable Content definition。
 
 存档不带走：
 
 - Frame 栈；
 - 打开中的系统菜单和消息；
-- 进行中的对话光标；
+- 固定 Dialogue 当前的 dialogue id、line index 与 pending choice；
 - 当前一次尚未形成业务提交的 LLM 对话工作集；
 - 进行中的战斗模拟；
 - Story Resolver 的派生结果；
@@ -206,4 +235,4 @@ System Menu 可以发起 New Game / Load 意图，但 Realm State 中世界事�
 - 少量玩家选择 / 剧情标记；
 - 已经播过的口袋触发。
 
-Character 固定 AI 人物描述、默认场景实例、Event state 下声明的 NPC Instance / placement 与 Story Index 留在 Content，不作为存档事实重复保存。人物这条见 [人物](./61-character.md)，事件见 [事件](./62-event.md)。其余模块的字段形状留到逐模块讨论时再定。
+Character 固定 AI 人物描述、固定 Dialogue 定义、默认场景实例、Event state 下声明的 NPC Instance / placement 与 Story Index 留在 Content，不作为存档事实重复保存。人物这条见 [人物](./61-character.md)，事件见 [事件](./62-event.md)，固定对话见 [固定对话](./64-dialogue.md)。其余模块的字段形状留到逐模块讨论时再定。
