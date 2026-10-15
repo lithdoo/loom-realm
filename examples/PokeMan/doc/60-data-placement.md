@@ -17,7 +17,7 @@
 - 能由 **Content + Realm State 最小事实**重算出的表现，不为了存档方便再复制一份进 State。
 - 只服务当前调用 / 当前 Battle / 当前画面的，留在 Runtime 内存。
 
-Game Entry 的 `state.records` 是 Session bootstrap 时安装的 Realm State baseline。初始 Relationship、初始 contract、初始 Event state、初始随身 Card 等 mutable baseline 可以从这里进入 State；Character、Dialogue、BattleActor / BattleSkill 等 immutable definition 仍属于 Content。
+Game Entry 的 `state.records` 是 Session bootstrap 时安装的 Realm State baseline。初始 Relationship、初始 contract、初始 Event state、初始随身 Card 等 mutable baseline 可以从这里进入 State；Character、Dialogue、EventStateMutation、BattleActor / BattleSkill 等 immutable definition 仍属于 Content。
 
 ## Content：定义与剧情
 
@@ -42,6 +42,7 @@ Content
 ├─ NPC definitions
 ├─ Visual definitions/resources
 ├─ Event / Event State
+├─ EventStateMutation
 ├─ Dialogue definitions
 ├─ Encounter definitions
 ├─ Story Index (generated)
@@ -63,7 +64,32 @@ Dialogue
    └─ target Dialogue
 ```
 
-一个 Dialogue 线性播放；Choice 只能在末尾，并只跳到另一个 Dialogue。
+一个 Dialogue 线性播放；Choice 只能在末尾，并只跳到另一个 Dialogue。Dialogue 正常完成时返回最终的 `terminalDialogueId`，本身不修改 Realm State。
+
+### EventStateMutation
+
+Event state 的声明式变化单独作为 immutable Content：
+
+```text
+EventStateMutation
+├─ from
+│  └─ eventId → stateId
+└─ to
+   └─ eventId → stateId
+```
+
+Mutation 的 identity 由 Content key / reference 提供，所以概念数据本体只需要 `from` 和 `to`。
+
+语义：
+
+- `from` 中多个 Event 是 **AND**：全部当前 state 都匹配才允许应用；
+- `to` 中多个 Event state 在一次 Realm State commit 中一起写入；
+- `from` 与 `to` 的 Event 集合、数量都不要求相同；
+- 只在 `from` 中出现的 Event 只是前置条件；
+- 只在 `to` 中出现的 Event 不要求与某个 `from` 项一一对应；
+- 需要 OR 时不增加 `anyOf` / 条件表达式，而是为每个分支定义独立 Mutation。
+
+EventStateMutation 只读写 **Event current state**，不扩展为 Relationship / Card / Battle 等任意 Realm State mutation DSL。
 
 ## Realm State：长期业务事实
 
@@ -276,7 +302,7 @@ Card 自由对话可以组合以上信息和必要的当前剧情 context。LLM 
 | 关系 / 契约 | — | Relationship：affinity、hostile、动态文本、contract | 尚未提交的关系变化 |
 | Card | Card / Battle 表现所需静态资源来自 Character / Visual / Battle Content | **当前随身 Card State**：holder、servant、slot、battle-facing state | Battle 中的 Card Manifestation |
 | 对话 | 固定 Dialogue | AI 长期关系语境来自 Relationship | dialogue id / line index / pending choice；LLM working context |
-| 剧情 | Event、states、NPC placement、Dialogue ref、Story Index | Event currentState、不可重算剧情事实 | 当前解析 / 执行步骤 |
+| 剧情 | Event、states、EventStateMutation、NPC placement、Dialogue ref、Story Index | Event currentState、不可重算剧情事实 | 当前解析 / mutation validation / 执行步骤 |
 | 遭遇 | table、spawn point、template、BattleActor ref | 需要持续存在的生成结果 | 当前接触、视野、临时对手 |
 | 战斗 | `@loomrealm-game/battle` 的 BattleActor / BattleSkill / rules / scenarios | 当前随身 Card 的已提交 battle-facing state | Battle Simulation / Decision / Presentation 当前工作状态 |
 | 表现 | tiles、sprites、portrait、UI skin | — | Renderer replica、动画 |
@@ -294,8 +320,11 @@ Dialogue / Battle
 
 World
   解释 Content + Realm State
+  验证并应用被明确引用的 EventStateMutation
   提交地图、Relationship、当前随身 Card、剧情、Encounter 等 mutable facts
 ```
+
+Runtime 不扫描全部 EventStateMutation 自动执行；必须由明确的 Dialogue completion 或其他 World 业务结果选择一个 Mutation。
 
 System Menu 可以发起 New Game / Load 意图，但不是第二个 State authority。
 
@@ -315,6 +344,7 @@ System Menu 可以发起 New Game / Load 意图，但不是第二个 State autho
 - Character fixed AI text；
 - BattleActor / BattleSkill Content；
 - Dialogue definitions；
+- Event definitions / EventStateMutation；
 - Event state 中的 immutable placement；
 - Story Index；
 - Battle Runtime state；
@@ -334,4 +364,4 @@ System Menu 可以发起 New Game / Load 意图，但不是第二个 State autho
 - 第一道路需要持久的 Encounter 结果；
 - 已触发的 Pocket / 剧情事实。
 
-Character、BattleActor / BattleSkill、Dialogue、默认 NPC Instance 与 Story Index 都留在 Content。
+Character、BattleActor / BattleSkill、Dialogue、EventStateMutation、默认 NPC Instance 与 Story Index 都留在 Content。
