@@ -24,17 +24,23 @@ import { SessionEventDelivery } from "./subscription.js";
 
 const PROTOCOL = "loomrealm.session-events/1";
 const MAX_PENDING_REQUESTS = 256;
+const MAX_SUBSCRIPTION_CORRELATIONS = 320;
 const MAX_OUTBOUND_MESSAGES = 256;
 const MAX_OUTBOUND_BYTES = 32 * 1024 * 1024;
 const MAX_MESSAGE_BYTES = 1024 * 1024;
 
+type RequestKind = "publish" | "subscribe" | "unsubscribe";
+
 interface PendingRequest<T = unknown> {
+  readonly kind: RequestKind;
+  readonly state: "pending" | "establishing";
   readonly decode: (value: unknown) => T;
   resolve(value: T): void;
   reject(error: unknown): void;
 }
 
 interface RequestOperation<T> {
+  readonly id: number | null;
   readonly dispatched: Promise<void>;
   readonly result: Promise<T>;
 }
@@ -144,27 +150,44 @@ class RemoteSubscription extends SessionEventDelivery {
   constructor(
     readonly id: number,
     listener: SessionEventListener,
-    private readonly onClose: (subscription: RemoteSubscription) => void,
+    private readonly onClose: (
+      subscription: RemoteSubscription,
+      reason: SessionEventSubscriptionCloseReason,
+    ) => void,
   ) {
-    super(listener, () => onClose(this));
+    super(listener, (reason) => onClose(this, reason));
   }
 }
+
+type RemoteSubscriptionCorrelation =
+  | {
+      readonly state: "live";
+      readonly handle: RemoteSubscription;
+    }
+  | {
+      readonly state: "retiring";
+      readonly handle: RemoteSubscription;
+      readonly unsubscribeRequestId: number;
+    };
 
 export function createSessionEventCarrierBinding(
   carrier: MessageCarrier,
 ): SessionEventPhysicalBinding {
   let nextId = 1;
-  let closed = false;
+  let lifecycle: "live" | "binding-terminal" = "live";
+  let highestSubscriptionId = 0;
   const pending = new Map<number, PendingRequest>();
-  const subscriptions = new Map<number, {
-    readonly handle: RemoteSubscription;
-  }>();
+  // Subscription lifecycle is deliberately split across bounded structures:
+  // ESTABLISHING is a pending subscribe request; LIVE/RETIRING live here;
+  // RETIRED is absence with id <= highestSubscriptionId; BINDING_TERMINAL is
+  // the binding lifecycle above. No per-subscription tombstone is retained.
+  const subscriptions = new Map<number, RemoteSubscriptionCorrelation>();
   let settleTerminal!: (reason: SessionEventBindingTerminalReason) => void;
   const terminal = new Promise<SessionEventBindingTerminalReason>((resolve) => { settleTerminal = resolve; });
 
   const failClosed = (cause: unknown, reason: SessionEventBindingTerminalReason = "binding-terminal") => {
-    if (closed) return;
-    closed = true;
+    if (lifecycle === "binding-terminal") return;
+    lifecycle = "binding-terminal";
     for (const request of pending.values()) request.reject(cause);
     pending.clear();
     for (const subscription of subscriptions.values()) subscription.handle.terminate(reason);
@@ -172,15 +195,15 @@ export function createSessionEventCarrierBinding(
     settleTerminal(reason);
   };
 
-  const request = <T>(method: string, params: unknown, decode: (value: unknown) => T): RequestOperation<T> => {
+  const request = <T>(method: RequestKind, params: unknown, decode: (value: unknown) => T): RequestOperation<T> => {
     const rejected = (error: unknown): RequestOperation<T> => {
       const dispatched = Promise.reject(error);
       const result = Promise.reject<T>(error);
       void dispatched.catch(() => undefined);
       void result.catch(() => undefined);
-      return Object.freeze({ dispatched, result });
+      return Object.freeze({ id: null, dispatched, result });
     };
-    if (closed || pending.size >= MAX_PENDING_REQUESTS || nextId === Number.MAX_SAFE_INTEGER) {
+    if (lifecycle === "binding-terminal" || pending.size >= MAX_PENDING_REQUESTS || nextId === Number.MAX_SAFE_INTEGER) {
       return rejected(sessionEventError("BINDING_UNAVAILABLE", "Session Event carrier is unavailable"));
     }
     const id = nextId++;
@@ -188,7 +211,13 @@ export function createSessionEventCarrierBinding(
     let reject!: (error: unknown) => void;
     const result = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
     void result.catch(() => undefined);
-    pending.set(id, { decode, resolve, reject });
+    pending.set(id, {
+      kind: method,
+      state: method === "subscribe" ? "establishing" : "pending",
+      decode,
+      resolve,
+      reject,
+    });
     const dispatched = send(carrier, { protocol: PROTOCOL, type: "request", id, method, params })
       .catch((error) => {
         pending.delete(id);
@@ -197,17 +226,40 @@ export function createSessionEventCarrierBinding(
         void carrier.close().catch(() => undefined);
         throw error;
       });
-    return Object.freeze({ dispatched, result });
+    return Object.freeze({ id, dispatched, result });
   };
 
-  const localClose = (subscription: RemoteSubscription) => {
-    subscriptions.delete(subscription.id);
-    if (closed) return;
+  const localClose = (
+    subscription: RemoteSubscription,
+    _reason: SessionEventSubscriptionCloseReason,
+  ) => {
+    const correlation = subscriptions.get(subscription.id);
+    if (correlation === undefined || correlation.state !== "live") return;
+    if (lifecycle === "binding-terminal") return;
     const operation = request("unsubscribe", { subscriptionId: subscription.id }, (value) => {
       exact(value, []);
     });
+    if (operation.id === null) {
+      void operation.dispatched.catch((error) => failClosed(error));
+      void operation.result.catch((error) => failClosed(error));
+      return;
+    }
+    subscriptions.set(subscription.id, Object.freeze({
+      state: "retiring" as const,
+      handle: subscription,
+      unsubscribeRequestId: operation.id,
+    }));
     void operation.dispatched.catch((error) => failClosed(error));
-    void operation.result.catch((error) => failClosed(error));
+    void operation.result.then(
+      () => {
+        const current = subscriptions.get(subscription.id);
+        if (
+          current?.state === "retiring" &&
+          current.unsubscribeRequestId === operation.id
+        ) subscriptions.delete(subscription.id);
+      },
+      (error) => failClosed(error),
+    );
   };
 
   void (async () => {
@@ -230,24 +282,34 @@ export function createSessionEventCarrierBinding(
         }
         if (message.type === "event") {
           const shaped = exact(message, ["protocol", "type", "subscriptionId", "event"]);
-          const subscription = subscriptions.get(positiveInteger(shaped.subscriptionId));
+          const subscriptionId = positiveInteger(shaped.subscriptionId);
+          const event = decodeEvent(shaped.event);
+          const subscription = subscriptions.get(subscriptionId);
           if (subscription === undefined) {
+            if (subscriptionId <= highestSubscriptionId) continue;
             throw new TypeError("Impossible Session Event subscription correlation");
           }
-          const event = decodeEvent(shaped.event);
-          subscription.handle.enqueue(event);
+          if (subscription.state === "live") subscription.handle.enqueue(event);
           continue;
         }
         if (message.type === "terminal") {
           const shaped = exact(message, ["protocol", "type", "subscriptionId", "reason"]);
-          const subscription = subscriptions.get(positiveInteger(shaped.subscriptionId));
-          if (subscription === undefined) throw new TypeError("Impossible Session Event terminal correlation");
+          const subscriptionId = positiveInteger(shaped.subscriptionId);
           if (
             shaped.reason !== "overflow" && shaped.reason !== "binding-terminal" &&
             shaped.reason !== "client-terminal" && shaped.reason !== "hub-terminal" &&
             shaped.reason !== "closed"
           ) throw new TypeError("Invalid Session Event terminal reason");
-          subscription.handle.terminate(shaped.reason);
+          const subscription = subscriptions.get(subscriptionId);
+          if (subscription === undefined) {
+            if (subscriptionId <= highestSubscriptionId) continue;
+            throw new TypeError("Impossible Session Event terminal correlation");
+          }
+          // A terminal is the peer's definitive retirement evidence. Remove the
+          // physical correlation before settling the author handle so its local
+          // terminal callback cannot emit a redundant unsubscribe.
+          subscriptions.delete(subscriptionId);
+          if (subscription.state === "live") subscription.handle.terminate(shaped.reason);
           continue;
         }
         throw new TypeError("Invalid Session Event carrier message type");
@@ -280,9 +342,13 @@ export function createSessionEventCarrierBinding(
       const operation = request("subscribe", { channels: validated }, (value) => {
         const result = exact(value, ["subscriptionId"]);
         const id = positiveInteger(result.subscriptionId);
-        if (subscriptions.has(id)) throw new TypeError("Duplicate Session Event subscription identity");
+        if (
+          id <= highestSubscriptionId || subscriptions.has(id) ||
+          subscriptions.size >= MAX_SUBSCRIPTION_CORRELATIONS
+        ) throw new TypeError("Duplicate or excessive Session Event subscription identity");
+        highestSubscriptionId = id;
         const handle = new RemoteSubscription(id, listener, localClose);
-        subscriptions.set(id, { handle });
+        subscriptions.set(id, Object.freeze({ state: "live" as const, handle }));
         handle.reveal();
         return handle;
       });
@@ -334,6 +400,7 @@ export function serveSessionEventCarrier(
   carrier: MessageCarrier,
 ): SessionEventCarrierServer {
   let nextSubscriptionId = 1;
+  let lastRequestId = 0;
   let closed = false;
   const subscriptions = new Map<number, SessionEventSubscription>();
   let settle!: () => void;
@@ -362,6 +429,8 @@ export function serveSessionEventCarrier(
           throw new TypeError("Invalid Session Event request envelope");
         }
         const id = positiveInteger(message.id);
+        if (id <= lastRequestId) throw new TypeError("Stale Session Event request correlation");
+        lastRequestId = id;
         let request: ServerRequest;
         try { request = decodeServerRequest(message.method, message.params); }
         catch (error) { await response(id, false, failureObject(error)); continue; }
@@ -391,6 +460,9 @@ export function serveSessionEventCarrier(
             });
             await response(id, true, Object.freeze({ subscriptionId }));
           } else {
+            if (request.subscriptionId >= nextSubscriptionId) {
+              throw new TypeError("Impossible Session Event unsubscribe correlation");
+            }
             subscriptions.get(request.subscriptionId)?.close();
             subscriptions.delete(request.subscriptionId);
             await response(id, true, Object.freeze({}));

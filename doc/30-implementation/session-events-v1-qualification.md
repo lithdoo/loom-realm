@@ -4,9 +4,9 @@
 >
 > Executable / qualification-input subject: `5722ce56c7d9722e695ebd2e211340442acb15da`
 >
-> Result: **Qualified**
+> Result: **Historical / superseded by executable repair; current requalification pending**
 
-This ledger records evidence for the exact implementation commit above. The later documentation-only status commit does not change the executable or qualification-input subject and does not transfer this result to future behavior changes.
+This ledger records historical evidence for the exact implementation commit above. Executable lifecycle/currentness repairs on PR #89 supersede that subject, so this result does not qualify the current branch. The ledger will name a new exact executable subject only after every required gate passes against that commit.
 
 ## Environment
 
@@ -53,4 +53,4 @@ Evidence includes the author surface and required `SubsystemScope.events`, valid
 
 Architecture review found no business truth in the Hub, no duplicated Main authority, no physical identity exposed as logical identity, no Events multiplexing into Control/Data/State, no hidden retry/replay or silent healthy drop, no unbounded queue/Promise accumulation, no stale-binding currentness bypass, no unintended business-facing implementation ABI, and no known contract/implementation divergence.
 
-Known Session Events v1 implementation/qualification gaps: none.
+Known Session Events v1 implementation/qualification gaps: lifecycle/currentness repair and exact-subject requalification are pending.

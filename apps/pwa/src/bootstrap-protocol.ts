@@ -228,6 +228,42 @@ export function parseRunnerDataResult(value: unknown, subsystemKey: string, requ
   return Object.freeze({ formatVersion: 1, type: item.type, requestId, subsystemKey, connectionId: text(item.connectionId, "connectionId"), ok: item.ok });
 }
 
+const SESSION_EVENT_IDENTITY_PREFIX = "se1";
+
+export function sessionEventProvisioningIdentity(
+  generation: number,
+  nonce: string,
+): string {
+  if (!Number.isSafeInteger(generation) || generation <= 0) {
+    throw new TypeError("Invalid Session Events provisioning generation");
+  }
+  const validNonce = text(nonce, "Session Events provisioning nonce");
+  if (validNonce.includes(":")) {
+    throw new TypeError("Invalid Session Events provisioning nonce");
+  }
+  return `${SESSION_EVENT_IDENTITY_PREFIX}:${generation}:${validNonce}`;
+}
+
+export function sessionEventProvisioningGeneration(
+  requestId: string,
+  bindingId: string,
+): number {
+  const parse = (value: string, label: string): number => {
+    const identity = text(value, label);
+    const match = /^se1:([1-9][0-9]*):([^:]+)$/.exec(identity);
+    if (match === null) throw new TypeError(`Invalid ${label}`);
+    const generation = Number(match[1]);
+    if (!Number.isSafeInteger(generation)) throw new TypeError(`Invalid ${label}`);
+    return generation;
+  };
+  const requestGeneration = parse(requestId, "Session Events requestId");
+  const bindingGeneration = parse(bindingId, "Session Events bindingId");
+  if (requestGeneration !== bindingGeneration) {
+    throw new TypeError("Mismatched Session Events provisioning generation");
+  }
+  return requestGeneration;
+}
+
 export function parseInstallSessionEvents(
   value: unknown,
   subsystemKey: string,

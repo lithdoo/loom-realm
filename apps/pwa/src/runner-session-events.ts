@@ -8,10 +8,12 @@ import {
 } from "@loomrealm/session-events";
 import {
   parseInstallSessionEvents,
+  sessionEventProvisioningGeneration,
   type PwaSessionEventsResultV1,
 } from "./bootstrap-protocol.js";
 
 interface CurrentEventBinding {
+  readonly generation: number;
   readonly bindingId: string;
   readonly binding: SessionEventPhysicalBinding;
   readonly carrier: MessageCarrier;
@@ -22,8 +24,7 @@ export class RunnerSessionEventsBinding {
   readonly initial: Promise<void>;
   private resolveInitial!: () => void;
   private current: CurrentEventBinding | null = null;
-  private readonly seenRequests = new Set<string>();
-  private readonly seenBindings = new Set<string>();
+  private acceptedGeneration = 0;
   private closed = false;
 
   constructor(private readonly port: MessagePort, private readonly subsystemKey: string) {
@@ -44,21 +45,26 @@ export class RunnerSessionEventsBinding {
       this.reply(item.requestId, item.bindingId, false);
       return;
     }
-    if (
-      this.closed || this.current !== null ||
-      this.seenRequests.has(request.requestId) ||
-      this.seenBindings.has(request.bindingId)
-    ) {
+    let generation: number;
+    try {
+      generation = sessionEventProvisioningGeneration(request.requestId, request.bindingId);
+    } catch {
       request.port.close();
       this.reply(request.requestId, request.bindingId, false);
       return;
     }
-    this.seenRequests.add(request.requestId);
-    this.seenBindings.add(request.bindingId);
+    if (this.closed || this.current !== null || generation <= this.acceptedGeneration) {
+      request.port.close();
+      this.reply(request.requestId, request.bindingId, false);
+      return;
+    }
+    // Consume the monotonic generation before construction. A failed or
+    // detached install can never be replayed into currentness later.
+    this.acceptedGeneration = generation;
     try {
       const carrier = createSessionEventMessagePortCarrier(request.port);
       const binding = createSessionEventCarrierBinding(carrier);
-      const current = Object.freeze({ bindingId: request.bindingId, binding, carrier });
+      const current = Object.freeze({ generation, bindingId: request.bindingId, binding, carrier });
       this.current = current;
       this.client.attach(binding);
       void binding.terminal.then(() => {

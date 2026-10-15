@@ -1,7 +1,7 @@
 # LoomRealm Session Events v1 Contract
 
 > 层级：正式契约  
-> 状态：**Active / Normative / Implemented / Qualified**
+> 状态：**Active / Normative / Implemented / Requalification Pending**
 > 契约版本：1  
 > 逻辑协议：`loomrealm.session-events/1`  
 > 稳定程度：**Architecture + Logical Semantics + Deterministic Surface Frozen**  

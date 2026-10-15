@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving；Realm State v1 logical plane + Hostra WS / Worker MessagePort physical realizations implemented and qualified；Session Events v1 logical semantics and dedicated Hostra/PWA physical realizations implemented / qualified
+> 稳定程度：Evolving；Realm State v1 logical plane + Hostra WS / Worker MessagePort physical realizations implemented and qualified；Session Events v1 logical semantics and dedicated Hostra/PWA physical realizations implemented / requalification pending
 > 主要定义：Control Plane、Renderer Data Plane、Realm State Plane、Session Events Plane、Content Plane、carrier/application mapping、authority/recovery 与 communication-facing Platform responsibilities  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Realm State](./realm-state-system.md)、[Session Events](./session-events-system.md)  
 > 被以下文档细化：[渲染系统](./rendering-system.md)、[Subsystem 模型](./subsystem-model.md)、[运行时启动系统](./runtime-bootstrap-system.md)  

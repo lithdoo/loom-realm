@@ -326,6 +326,15 @@ test("fatal latch is asynchronous, one-shot, unsubscribe-safe, and excludes pre-
   await Promise.resolve();
   assert.deepEqual(calls, ["current", "late"]);
 
+  const reused = () => calls.push("reused");
+  latch.source.subscribe(reused)();
+  await Promise.resolve();
+  assert.deepEqual(calls, ["current", "late"]);
+  const detachReused = latch.source.subscribe(reused);
+  await Promise.resolve();
+  assert.deepEqual(calls, ["current", "late", "reused"]);
+  detachReused();
+
   const constructionLatch = createSessionEventFatalLatch();
   assert.throws(() => createSessionEventHub({ onFatal: null }), TypeError);
   let constructionReported = false;

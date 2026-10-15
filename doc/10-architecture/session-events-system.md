@@ -1,7 +1,7 @@
 # Session Events：Session 级跨 Subsystem 事件系统
 
 > 层级：系统架构  
-> 状态：Active Design / implemented / qualified
+> 状态：Active Design / implemented / requalification pending
 > 稳定程度：**Core Semantics + Current Runtime Integration Frozen**  
 > 主要定义：Session-scoped cross-Subsystem transient event distribution、Channel routing、SessionEventHub、Runtime-scoped SessionEventClient、subscription lifetime、serial delivery、failure/backpressure、与 Shared State / Render Event / Control / Diagnostics 的边界  
 > 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)、[Subsystem 模型](./subsystem-model.md)、[渲染系统](./rendering-system.md)  

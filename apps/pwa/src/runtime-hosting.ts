@@ -14,7 +14,12 @@ import {
   type SessionEventHub,
 } from "@loomrealm/session-events";
 import { createMessagePortCarrier } from "./message-port-carrier.js";
-import { parseRunnerDataResult, parseSessionEventsResult } from "./bootstrap-protocol.js";
+import {
+  parseRunnerDataResult,
+  parseSessionEventsResult,
+  sessionEventProvisioningGeneration,
+  sessionEventProvisioningIdentity,
+} from "./bootstrap-protocol.js";
 import type {
   PwaInstallSessionEventsV1,
   PwaInstallSubsystemDataV1,
@@ -138,16 +143,17 @@ export interface PwaRuntimeSessionEventProvisioner {
 }
 
 export class RunnerSessionEventProvisioner {
-  private readonly pending = new Map<string, {
+  private pending: {
+    readonly requestId: string;
     readonly bindingId: string;
+    readonly generation: number;
     readonly timer: ReturnType<typeof setTimeout>;
     resolve(): void;
     reject(cause: unknown): void;
     cleanup(): void;
-  }>();
-  private readonly seenRequests = new Set<string>();
-  private readonly seenBindings = new Set<string>();
-  private currentBindingId: string | null = null;
+  } | null = null;
+  private current: { readonly bindingId: string; readonly generation: number } | null = null;
+  private acceptedGeneration = 0;
   private closed = false;
 
   constructor(
@@ -165,25 +171,31 @@ export class RunnerSessionEventProvisioner {
     port: MessagePort,
     signal?: AbortSignal,
   ): Promise<void> {
+    let generation: number;
+    try {
+      generation = sessionEventProvisioningGeneration(request.requestId, request.bindingId);
+    } catch (cause) {
+      port.close();
+      return Promise.reject(cause);
+    }
     if (
       this.closed || signal?.aborted || request.subsystemKey !== this.subsystemKey ||
-      this.pending.has(request.requestId) || this.seenRequests.has(request.requestId) ||
-      this.seenBindings.has(request.bindingId) || this.currentBindingId !== null
+      this.pending !== null || this.current !== null || generation <= this.acceptedGeneration
     ) {
       port.close();
       return Promise.reject(signal?.reason ?? new Error("Invalid Session Events provisioning request"));
     }
-    this.seenRequests.add(request.requestId);
-    this.seenBindings.add(request.bindingId);
-    this.currentBindingId = request.bindingId;
+    this.acceptedGeneration = generation;
+    this.current = Object.freeze({ bindingId: request.bindingId, generation });
     return new Promise((resolve, reject) => {
       const cleanup = () => {
         clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
       };
       const fail = (cause: unknown) => {
-        if (!this.pending.delete(request.requestId)) return;
-        if (this.currentBindingId === request.bindingId) this.currentBindingId = null;
+        if (this.pending?.requestId !== request.requestId) return;
+        this.pending = null;
+        if (this.current?.bindingId === request.bindingId) this.current = null;
         cleanup();
         reject(cause);
       };
@@ -192,13 +204,15 @@ export class RunnerSessionEventProvisioner {
         () => fail(new Error("Session Events provisioning timed out")),
         this.requestTimeoutMs,
       );
-      this.pending.set(request.requestId, {
+      this.pending = {
+        requestId: request.requestId,
         bindingId: request.bindingId,
+        generation,
         timer,
         resolve,
         reject,
         cleanup,
-      });
+      };
       signal?.addEventListener("abort", onAbort, { once: true });
       try { this.port.postMessage(Object.freeze({ ...request, port }), [port]); }
       catch (cause) { fail(cause); }
@@ -206,7 +220,7 @@ export class RunnerSessionEventProvisioner {
   }
 
   retire(bindingId: string): void {
-    if (this.currentBindingId === bindingId) this.currentBindingId = null;
+    if (this.current?.bindingId === bindingId) this.current = null;
   }
 
   close(): void {
@@ -214,19 +228,20 @@ export class RunnerSessionEventProvisioner {
     this.closed = true;
     this.port.removeEventListener("message", this.onMessage);
     this.port.removeEventListener("messageerror", this.onMessageError);
-    for (const [requestId, pending] of this.pending) {
-      this.pending.delete(requestId);
+    const pending = this.pending;
+    this.pending = null;
+    if (pending !== null) {
       pending.cleanup();
       pending.reject(new Error("Session Events provisioning closed"));
     }
-    this.currentBindingId = null;
+    this.current = null;
   }
 
   private readonly onMessage = (event: MessageEvent<unknown>) => {
     const candidate = event.data as { requestId?: unknown } | null;
     if (candidate === null || typeof candidate !== "object" || typeof candidate.requestId !== "string") return;
-    const pending = this.pending.get(candidate.requestId);
-    if (pending === undefined) return;
+    const pending = this.pending;
+    if (pending === null || pending.requestId !== candidate.requestId) return;
     try {
       const result = parseSessionEventsResult(
         event.data,
@@ -235,12 +250,12 @@ export class RunnerSessionEventProvisioner {
         pending.bindingId,
       );
       if (!result.ok) throw new Error("Runner rejected Session Events provisioning");
-      this.pending.delete(candidate.requestId);
+      this.pending = null;
       pending.cleanup();
       pending.resolve();
     } catch (cause) {
-      this.pending.delete(candidate.requestId);
-      if (this.currentBindingId === pending.bindingId) this.currentBindingId = null;
+      this.pending = null;
+      if (this.current?.bindingId === pending.bindingId) this.current = null;
       pending.cleanup();
       pending.reject(cause);
     }
@@ -295,6 +310,7 @@ export function createPwaRuntimeHosting(options: {
       let terminal = false;
       let controlAcquired = false;
       let eventBindingId: string | null = null;
+      let nextEventBindingGeneration = 1;
       const close = () => {
         if (terminal) return;
         terminal = true;
@@ -366,7 +382,11 @@ export function createPwaRuntimeHosting(options: {
           throw new Error("Session Events binding is already current or Runtime is terminal");
         }
         const events = new MessageChannel();
-        const bindingId = crypto.randomUUID();
+        if (nextEventBindingGeneration === Number.MAX_SAFE_INTEGER) {
+          throw new Error("Session Events binding generation exhausted");
+        }
+        const generation = nextEventBindingGeneration++;
+        const bindingId = sessionEventProvisioningIdentity(generation, crypto.randomUUID());
         const eventBinding = options.sessionEventHub.createBinding(request.subsystemKey);
         const served = serveSessionEventCarrier(
           eventBinding,
@@ -383,7 +403,7 @@ export function createPwaRuntimeHosting(options: {
           await eventProvisioner.install(Object.freeze({
             formatVersion: 1,
             type: "session-events/install",
-            requestId: crypto.randomUUID(),
+            requestId: sessionEventProvisioningIdentity(generation, crypto.randomUUID()),
             subsystemKey: request.subsystemKey,
             bindingId,
           }), events.port2, installSignal);

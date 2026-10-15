@@ -7,17 +7,22 @@ export interface SessionEventFatalLatch {
   report(): void;
 }
 
+interface FatalRegistration {
+  readonly listener: () => void;
+  active: boolean;
+  notified: boolean;
+}
+
 export function createSessionEventFatalLatch(): SessionEventFatalLatch {
-  const listeners = new Set<() => void>();
-  const notified = new WeakSet<() => void>();
+  const registrations = new Set<FatalRegistration>();
   let latched = false;
 
-  const notify = (listener: () => void): void => {
-    if (notified.has(listener)) return;
-    notified.add(listener);
+  const notify = (registration: FatalRegistration): void => {
+    if (!registration.active || registration.notified) return;
+    registration.notified = true;
     queueMicrotask(() => {
-      if (!listeners.has(listener)) return;
-      try { listener(); } catch {}
+      if (!registration.active || !registrations.has(registration)) return;
+      try { registration.listener(); } catch {}
     });
   };
 
@@ -25,20 +30,24 @@ export function createSessionEventFatalLatch(): SessionEventFatalLatch {
     source: Object.freeze({
       subscribe(listener: () => void): () => void {
         if (typeof listener !== "function") throw new TypeError("Invalid fatal listener");
-        listeners.add(listener);
-        if (latched) notify(listener);
-        let active = true;
+        const registration: FatalRegistration = {
+          listener,
+          active: true,
+          notified: false,
+        };
+        registrations.add(registration);
+        if (latched) notify(registration);
         return () => {
-          if (!active) return;
-          active = false;
-          listeners.delete(listener);
+          if (!registration.active) return;
+          registration.active = false;
+          registrations.delete(registration);
         };
       },
     }),
     report(): void {
       if (latched) return;
       latched = true;
-      for (const listener of listeners) notify(listener);
+      for (const registration of registrations) notify(registration);
     },
   });
 }

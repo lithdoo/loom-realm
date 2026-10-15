@@ -83,6 +83,11 @@ test("PWA keeps the closed bootstrap and provisions a dedicated Event MessagePor
   assert.match(hosting, /eventProvisioner\.install\([\s\S]*?events\.port2/);
   assert.ok(runner.indexOf("await events.initial") < runner.indexOf("await import(moduleUrl)"));
   assert.match(eventBinding, /createSessionEventMessagePortCarrier\(request\.port\)/);
+  assert.match(protocol, /sessionEventProvisioningGeneration/);
+  assert.match(hosting, /acceptedGeneration/);
+  assert.match(eventBinding, /acceptedGeneration/);
+  assert.doesNotMatch(hosting, /seenRequests|seenBindings/);
+  assert.doesNotMatch(eventBinding, /seenRequests|seenBindings/);
 });
 
 test("root and CI expose build, integration, qualification-only, and full gates", async () => {

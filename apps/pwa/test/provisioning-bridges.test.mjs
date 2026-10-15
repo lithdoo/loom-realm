@@ -96,13 +96,13 @@ test("Runner provisioner cancellation fences a late ack and permits rollback", a
   channel.port2.close();
 });
 
-function eventInstall(requestId, bindingId, subsystemKey = "demo") {
+function eventInstall(generation, suffix = String(generation), subsystemKey = "demo") {
   return Object.freeze({
     formatVersion: 1,
     type: "session-events/install",
-    requestId,
+    requestId: `se1:${generation}:request-${suffix}`,
     subsystemKey,
-    bindingId,
+    bindingId: `se1:${generation}:binding-${suffix}`,
   });
 }
 
@@ -131,7 +131,7 @@ test("Session Events provisioner requires an exact ack and permits a fresh retir
   channel.port2.start();
 
   const firstPort = new MessageChannel();
-  const first = eventInstall("event-request-1", "event-binding-1");
+  const first = eventInstall(1);
   const installed = provisioner.install(first, firstPort.port1);
   const receivedFirst = await nextMessage(messages, 1);
   channel.port2.postMessage(eventResult(receivedFirst));
@@ -139,13 +139,13 @@ test("Session Events provisioner requires an exact ack and permits a fresh retir
 
   const blockedPort = new MessageChannel();
   await assert.rejects(
-    provisioner.install(eventInstall("event-request-2", "event-binding-2"), blockedPort.port1),
+    provisioner.install(eventInstall(2), blockedPort.port1),
     /Invalid Session Events provisioning request/,
   );
 
   provisioner.retire(first.bindingId);
   const replacementPort = new MessageChannel();
-  const replacement = eventInstall("event-request-3", "event-binding-3");
+  const replacement = eventInstall(3);
   const replaced = provisioner.install(replacement, replacementPort.port1);
   const receivedReplacement = await nextMessage(messages, 2);
   channel.port2.postMessage(eventResult(receivedReplacement));
@@ -166,7 +166,7 @@ test("Session Events provisioner fences wrong and late results plus reused ident
   channel.port2.start();
 
   const firstPort = new MessageChannel();
-  const first = eventInstall("event-request-stale", "event-binding-stale");
+  const first = eventInstall(1, "stale");
   const pending = provisioner.install(first, firstPort.port1);
   const received = await nextMessage(messages, 1);
   channel.port2.postMessage(eventResult(received, { bindingId: "wrong-binding" }));
@@ -175,17 +175,17 @@ test("Session Events provisioner fences wrong and late results plus reused ident
   channel.port2.postMessage(eventResult(received));
   const reusedRequestPort = new MessageChannel();
   await assert.rejects(
-    provisioner.install(eventInstall(first.requestId, "event-binding-fresh"), reusedRequestPort.port1),
+    provisioner.install(Object.freeze({ ...eventInstall(1, "fresh-binding"), requestId: first.requestId }), reusedRequestPort.port1),
     /Invalid Session Events provisioning request/,
   );
   const reusedBindingPort = new MessageChannel();
   await assert.rejects(
-    provisioner.install(eventInstall("event-request-fresh", first.bindingId), reusedBindingPort.port1),
+    provisioner.install(Object.freeze({ ...eventInstall(1, "fresh-request"), bindingId: first.bindingId }), reusedBindingPort.port1),
     /Invalid Session Events provisioning request/,
   );
   const wrongSubsystemPort = new MessageChannel();
   await assert.rejects(
-    provisioner.install(eventInstall("event-request-wrong", "event-binding-wrong", "other"), wrongSubsystemPort.port1),
+    provisioner.install(eventInstall(2, "wrong", "other"), wrongSubsystemPort.port1),
     /Invalid Session Events provisioning request/,
   );
 
@@ -206,7 +206,7 @@ test("Session Events provisioner abort and close settle pending installs without
 
   const controller = new AbortController();
   const abortedPort = new MessageChannel();
-  const request = eventInstall("event-request-abort", "event-binding-abort");
+  const request = eventInstall(1, "abort");
   const pending = provisioner.install(request, abortedPort.port1, controller.signal);
   const received = await nextMessage(messages, 1);
   controller.abort(new Error("superseded"));
@@ -214,7 +214,7 @@ test("Session Events provisioner abort and close settle pending installs without
   channel.port2.postMessage(eventResult(received));
 
   const closePort = new MessageChannel();
-  const closing = provisioner.install(eventInstall("event-request-close", "event-binding-close"), closePort.port1);
+  const closing = provisioner.install(eventInstall(2, "close"), closePort.port1);
   await nextMessage(messages, 2);
   provisioner.close();
   await assert.rejects(closing, /provisioning closed/);
@@ -230,32 +230,33 @@ test("production PWA Runner controller replaces a dedicated Event port on the sa
   const runner = new RunnerSessionEventsBinding(provisioning.port2, "demo");
   const hub = createSessionEventHub();
 
-  const install = async (requestId, bindingId) => {
+  const install = async (generation, suffix) => {
     const events = new MessageChannel();
     const served = serveSessionEventCarrier(
       hub.createBinding("demo"),
       createSessionEventMessagePortCarrier(events.port1),
     );
-    await host.install(eventInstall(requestId, bindingId), events.port2);
-    return served;
+    const request = eventInstall(generation, suffix);
+    await host.install(request, events.port2);
+    return { served, request };
   };
 
-  const firstServer = await install("event-request-a", "event-binding-a");
+  const first = await install(1, "a");
   await runner.initial;
   const seen = [];
   const old = await runner.client.subscribe(["replacement"], (event) => seen.push(event.type));
   await runner.client.publish("replacement", "before-loss", null);
   await nextMessage(seen, 1);
 
-  await firstServer.close();
+  await first.served.close();
   assert.deepEqual(await old.closed, { reason: "binding-terminal" });
   await assert.rejects(
     runner.client.publish("replacement", "known-not-accepted", null),
     { code: "BINDING_UNAVAILABLE" },
   );
-  host.retire("event-binding-a");
+  host.retire(first.request.bindingId);
 
-  const secondServer = await install("event-request-b", "event-binding-b");
+  const second = await install(2, "b");
   await runner.client.publish("replacement", "no-replay-without-fresh-subscription", null);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.deepEqual(seen, ["before-loss"]);
@@ -267,6 +268,52 @@ test("production PWA Runner controller replaces a dedicated Event port on the sa
   fresh.close();
   await runner.close();
   host.close();
-  await secondServer.close();
+  await second.served.close();
+  hub.terminate();
+});
+
+test("Session Events PWA currentness remains bounded across 1000+ replacements and fences generation one", async () => {
+  const provisioning = new MessageChannel();
+  const host = new RunnerSessionEventProvisioner(provisioning.port1, "demo", 1_000);
+  const runner = new RunnerSessionEventsBinding(provisioning.port2, "demo");
+  const hub = createSessionEventHub();
+  let current = null;
+  let firstRequest = null;
+
+  for (let generation = 1; generation <= 1001; generation += 1) {
+    const events = new MessageChannel();
+    const served = serveSessionEventCarrier(
+      hub.createBinding("demo"),
+      createSessionEventMessagePortCarrier(events.port1),
+    );
+    const request = eventInstall(generation, `cycle-${generation}`);
+    await host.install(request, events.port2);
+    firstRequest ??= request;
+    if (generation < 1001) {
+      await served.close();
+      host.retire(request.bindingId);
+      while (runner.client.isBound) await new Promise((resolve) => setTimeout(resolve, 0));
+    } else {
+      current = { served, request };
+    }
+  }
+
+  const stalePort = new MessageChannel();
+  const staleResult = new Promise((resolve) => {
+    const listener = (event) => {
+      if (event.data?.requestId !== firstRequest.requestId) return;
+      provisioning.port1.removeEventListener("message", listener);
+      resolve(event.data);
+    };
+    provisioning.port1.addEventListener("message", listener);
+  });
+  provisioning.port1.postMessage(Object.freeze({ ...firstRequest, port: stalePort.port1 }), [stalePort.port1]);
+  assert.equal((await staleResult).ok, false);
+  await runner.client.publish("x", "fresh-still-current", null);
+
+  await runner.close();
+  host.close();
+  await current.served.close();
+  stalePort.port2.close();
   hub.terminate();
 });

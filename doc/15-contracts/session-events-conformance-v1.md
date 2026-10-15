@@ -1,7 +1,7 @@
 # LoomRealm Session Events v1 Conformance
 
 > 层级：正式契约 / Conformance  
-> 状态：**Active / Normative / Implemented / Qualified**
+> 状态：**Active / Normative / Implemented / Requalification Pending**
 > 对应契约：[Session Events v1](./session-events-v1.md)  
 > Physical profile：[Session Events Runtime Integration Profile v1](./session-events-runtime-profile-v1.md)  
 > 最近复核：2026-10-14
