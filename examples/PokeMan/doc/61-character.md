@@ -13,7 +13,10 @@
 - **身份**：`id`、名称。`id` 是人物级事实的稳定 identity，也是关联人物资源和其他静态定义的稳定键。
 - **描述**：职业、性格、经历。这是作者写好的静态内容；这一局里实际发生的事记在剧情 State。
 - **功能标签**：研究者、店主、家人这类标签，说明这个人在世界上的职责。
+- **固定 AI 人物描述**：一段供自由对话 AI 使用的自然语言人物说明，可以表达性格、说话习惯、背景、价值观等不值得拆成游戏规则字段的信息。
 - **默认场景实例**：在没有临时覆盖、也没有当前 Event State 覆盖时，这个人默认可以怎样出现在 Map 场景中。一个 Character 可以没有默认实例，也可以有多个默认 NPC Instance。
+
+固定 AI 人物描述属于 immutable Content。它回答的是“这个人本来是什么样的人”，不会因为这一局与玩家关系变化而改写。游戏规则也不依赖解析这段自然语言；需要被规则读取的事实仍然使用结构化数据。
 
 人物相关的图像、角色卡表现、Battle 表现等资源不要求全部塞进这一条 Character 记录。所有持久角色都应当提供形成角色卡和进入 Battle 所需要的静态素材与数据，并通过人物 `id` 或由它稳定关联的 Content key 取得。
 
@@ -62,11 +65,42 @@ NPCPlacement
 
 `@loomrealm-game/map` 根据 `npcId` 读取 `[struct]NPC/<npcId>` 的窄 `name + sprite` 定义。Character Content 负责“这个人是谁以及他有哪些人物 / 角色卡 / Battle 静态数据”，Map NPC definition 负责地图表现需要的资源，World / Story Resolver 负责“当前 Map 应该出现哪些实例”。
 
-## 关系基础事实
+## Relationship：变化的“我怎么看你”
 
-初始好感等 mutable relationship baseline 可以写在 Game Entry 的 `state.records` 里，并在 Session bootstrap 时成为 Realm State initial baseline；它不是玩家点击 New Game 时才安装。
+Relationship 是 Realm State 中的长期关系事实，不属于 Character，也不属于 Card。
 
-好感是一个整数。**hostile 与好感是独立事实，不由 `affinity < 0` 推导。**
+Relationship 采用有方向的语义：
+
+```text
+A → B
+= A 当前怎么看待 / 对待 B
+```
+
+所以：
+
+```text
+player → rival
+```
+
+和：
+
+```text
+rival → player
+```
+
+是两份不同的关系状态，不要求对称。这样自由对话时，由谁扮演说话者，就可以读取“说话者 → 对方”的 Relationship。
+
+当前确认的 Relationship 最小内容分成两类：
+
+```text
+Relationship
+├─ 结构化状态
+│  ├─ affinity
+│  └─ hostile
+└─ 一段动态关系描述文本
+```
+
+`affinity` 是整数。**hostile 与 affinity 是独立事实，不由 `affinity < 0` 推导。**
 
 例如：
 
@@ -75,9 +109,41 @@ affinity = -20
 hostile = false
 ```
 
-可以表示双方关系很差，但当前没有进入敌对冲突；反过来，也允许因为剧情或行为让当前关系进入 hostile，而不要求先把 affinity 改成负数。
+可以表示 A 很不喜欢 B，但当前没有进入敌对冲突；反过来，也允许因为剧情或行为让当前关系进入 hostile，而不要求先把 affinity 改成负数。
 
-好感和 hostile 最终属于 Relationship，而不是 Character 本体属性。Relationship 的 identity、方向性和完整 Record shape 留到后续关系 / 契约设计单独确定。
+动态关系描述文本用自然语言表达这一局里 A 对 B 当前形成的关系语境，例如共同经历、认可、不满、习惯性的态度等。它会随着游戏过程变化，因此属于 Realm State，并随存档恢复。
+
+结构化状态和关系文本职责不同：
+
+- `affinity`、`hostile` 等结构化状态给游戏规则使用；
+- 动态关系描述文本主要给 AI 自由对话理解关系，不替代规则字段。
+
+初始 affinity、hostile 与初始关系描述文本可以写在 Game Entry 的 `state.records` baseline 中，并在 Session bootstrap 时成为 Realm State initial value；它们不是玩家点击 New Game 时才安装。
+
+## Card 自由对话如何使用 Character 与 Relationship
+
+Card 自由对话不需要在 Card 上复制一套人格或关系资料。
+
+概念上：
+
+```text
+Card
+→ represented Character
+→ 读取 Character 固定 AI 人物描述
+
+Card / Contract
+→ 确定对话双方
+→ 读取“说话者 → 对方”的 Relationship State
+
+再加必要的当前剧情 / Card context
+→ 交给 LLM
+```
+
+例如宿敌的 Card 与玩家自由对话时，固定人物性格来自宿敌 Character Content，当前对玩家的态度主要来自 `rival → player` Relationship State。
+
+LLM 当次生成的话默认只是对话输出。它不会因为说出某句话就自动修改 Character 固定设定、Relationship 动态文本或其他 Realm State。是否把一次对话形成的长期变化写回 Relationship，由游戏业务明确决定并提交。
+
+当前不单独建立 Conversation Memory 数据对象；如果以后实际玩法证明 Relationship 的动态文本不足以承载所需的长期对话语境，再单独设计。
 
 ## 场景实例解析
 
@@ -102,7 +168,7 @@ mapId
 x
 y
 direction
-pattern? 
+pattern?
 ```
 
 `mapId` 使用地图引擎的地图编号。`x`、`y` 是格子坐标。`direction` 使用地图引擎的朝向：`2` 下、`4` 左、`6` 右、`8` 上。
@@ -142,4 +208,4 @@ Map Enter
 → context.setNPC(...)
 ```
 
-读档恢复的是 Event current state、Relationship、Card 等 mutable facts。Character 默认实例、Event state 中声明的场景实例和 Builder 生成的 Story Index 都继续从当前安装 Content 读取，不在存档里重复保存一份。
+读档恢复的是 Event current state、Relationship、Card 等 mutable facts。Character 固定 AI 人物描述、默认实例、Event state 中声明的场景实例和 Builder 生成的 Story Index 都继续从当前安装 Content 读取，不在存档里重复保存一份。
