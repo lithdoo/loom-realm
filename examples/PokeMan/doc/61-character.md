@@ -1,6 +1,6 @@
 # 人物
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文决定持久人物的 Content、长期 Relationship、当前随身 Card，以及人物如何投影成 Map NPC Instance。固定 Dialogue、Encounter 和具体 Skill 规则分别在对应模块继续设计。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文决定持久人物的 Content、长期 Relationship、当前随身 Card，以及人物如何投影成 Map NPC Instance。固定 Dialogue、Encounter 和 Battle 规则分别由对应模块定义。
 
 归宿总表见 [数据落点](./60-data-placement.md)。
 
@@ -15,11 +15,44 @@
 - **功能标签**：研究者、店主、家人等世界职责。
 - **固定 AI 人物描述**：一段供自由对话 AI 使用的自然语言人物说明，可以表达性格、说话习惯、背景、价值观等不值得拆成规则字段的信息。
 - **默认场景实例**：没有更高优先级剧情覆盖时，这个人默认如何出现在 Map；一个 Character 可以有 0..N 个默认 NPC Instance。
-- **Battle 静态资料**：形成 Battle Actor 所需的基础能力、可用技能与相关表现资源。具体 Skill 结构后续单独设计。
+- **Battle 静态资料引用**：关联 `@loomrealm-game/battle` 的 BattleActor Content；技能直接使用 BattleActor 的 `skills[]` 所引用的 BattleSkill Content。
 
 固定 AI 人物描述属于 immutable Content。它回答“这个人本来是什么样的人”，不会因为这一局与玩家关系变化而改写。需要被规则读取的事实仍然使用结构化数据。
 
 所有持久 Character 都应准备好形成 Card / Battle 表现所需的静态素材与数据。这只是 **Content 完备性规则**，不表示当前游戏规则允许与这个人物建立契约，也不推导 `canContract = true`。
+
+### Battle 数据直接复用 `@loomrealm-game/battle`
+
+PokeMan 不在 Character 模块里再定义一套平行的 Skill / Battle stat schema。
+
+当前 BattleActor Content 的逻辑数据包括：
+
+```text
+BattleActor Content
+├─ id
+├─ name
+├─ character graphics reference
+├─ max_hp
+└─ skills[] → BattleSkill
+```
+
+BattleSkill 直接采用 Battle package 当前定义：
+
+```text
+BattleSkill
+├─ id
+├─ name
+├─ range
+├─ damage
+├─ timing
+│  ├─ windup_ticks
+│  └─ recovery_ticks
+└─ effect
+```
+
+因此 Character 只需要稳定关联到相应 BattleActor Content；“这个角色有哪些技能”由 BattleActor 的 `skills[]` 表达，不在 Character 上再复制另一份 Skill definition。
+
+当前也不额外增加 `attack / defense / speed / MP / accuracy / critical / element / cooldown / Buff / Debuff` 等 Battle v0 没有定义的字段。将来 PokeMan 确实需要新的战斗机制时，优先在 `@loomrealm-game/battle` 中设计并冻结，再由 Character Content 引用。
 
 ## Character 与 Map NPC Instance
 
@@ -58,7 +91,7 @@ NPCPlacement
 └─ pattern?
 ```
 
-`@loomrealm-game/map` 根据 `npcId` 读取 `[struct]NPC/<npcId>` 的窄 `name + sprite` 定义。Character Content 负责“这个人是谁以及人物 / Card / Battle 所需的静态数据”，Map NPC definition 负责地图表现，World / Story Resolver 负责“当前 Map 应该出现哪些实例”。
+`@loomrealm-game/map` 根据 `npcId` 读取 `[struct]NPC/<npcId>` 的窄 `name + sprite` 定义。Character Content 负责“这个人是谁以及人物 / Card / Battle 所需的静态数据引用”，Map NPC definition 负责地图表现，World / Story Resolver 负责“当前 Map 应该出现哪些实例”。
 
 ## Relationship：A → B 的长期关系状态
 
@@ -133,7 +166,7 @@ lord-b → rival     contract
 
 ## Card：当前随身的战斗卡片状态
 
-**Card 不再嵌在 Relationship 里。** Card 是独立的 Realm State 业务对象，但它的定义被进一步收窄：
+**Card 不嵌在 Relationship 里。** Card 是独立的 Realm State 业务对象，但它的定义被收窄：
 
 > **技术数据模型里的 Card，只表示当前被主公带在身上、主要用于 Pocket / Battle 的角色卡。**
 
@@ -183,7 +216,7 @@ Card
 
 Card 的独立 `cardId` **尚未冻结**。是否直接使用 `(holderCharacterId, servantCharacterId)` 作为当前随身 Card identity，等 Card Record shape 最终设计时再决定。
 
-Card 不复制人物姓名、人格、基础能力、技能或固定 AI 描述。这些继续从 `servantCharacterId` 指向的 Character Content 读取。
+Card 不复制 BattleActor / BattleSkill、人物姓名、人格或固定 AI 描述。这些继续从 `servantCharacterId` 所对应的 Character / Battle Content 读取。
 
 ### 当前仍未冻结：非随身时的长期 Battle / 成长状态
 
@@ -191,7 +224,7 @@ Card 被限定为“当前随身卡”以后，会留下一个需要后续单独
 
 > **从者有 contract、但当前不随身时，Card Integrity、训练 / 成长等需要跨编队切换保存的事实最终放在哪里？**
 
-现在不擅自增加 `ContractedServantState`、`ManagedCard` 等新 authority。等 Skill / Progression / Center 管理一起设计后再冻结。
+现在不擅自增加 `ContractedServantState`、`ManagedCard` 等新 authority。等 Progression / Center 管理继续设计后再冻结。
 
 因此当前只确认：
 
@@ -202,48 +235,48 @@ Card 被限定为“当前随身卡”以后，会留下一个需要后续单独
 
 ## Battle 数据边界
 
-目前 Battle 相关数据分三层：
+PokeMan 的 Battle 数据直接接入 `@loomrealm-game/battle`：
 
 ```text
-Character Content
-= 固定 Battle 定义
-├─ base battle stats
-├─ skills
-└─ Battle presentation/resources
+Character
+→ BattleActor Content
+   ├─ max_hp
+   └─ skills[] → BattleSkill
 
 Card State
 = 当前随身 Card 的 Battle-facing 状态
 └─ integrity
 
 Battle Runtime
-= 这一场战斗的临时模拟状态
-├─ currentHp / maxHp
-├─ current stats
+= @loomrealm-game/battle Simulation authority
+├─ hp / maxHp
+├─ tile / direction
+├─ action
+├─ protectedUntilTickExclusive
 ├─ resolved skills
-├─ cooldown / status / buff / debuff
-└─ simulation state
+└─ Decision / Simulation working state
 ```
 
 随身 Card 进入 Battle 时：
 
 ```text
-Character Battle Content
+Character → BattleActor Content
 +
 Card battle state
 ↓
-Battle Actor
+@loomrealm-game/battle Runtime Actor
 ```
 
-Battle Simulation 拥有本场 `currentHp`、技能冷却、Buff / Debuff、Decision 等权威。战斗结束后，World 再解释哪些结果需要提交为长期业务事实。
+Battle Simulation 拥有本场权威运行状态。战斗结束后，World 再解释哪些结果需要提交为长期业务事实。
 
 普通剧情战斗或临时敌方 Card 不需要为了 Battle 制造 Relationship / contract / 持久 Card：
 
 ```text
 Story / Encounter Battle definition
 +
-Character / Battle profile
+BattleActor Content
 ↓
-Battle Actor
+Battle Runtime Actor
 ↓
 Battle
 ↓
@@ -253,10 +286,8 @@ Runtime 丢弃
 所以：
 
 ```text
-Character != Relationship != Card != Battle Actor
+Character != Relationship != Card != Battle Runtime Actor
 ```
-
-技能的具体 Content shape、参数和执行模型下一步单独设计。
 
 ## Card 自由对话如何使用 Character 与 Relationship
 
@@ -317,7 +348,8 @@ Builder 应检查构建期即可确定的错误，例如：
 - 同一个实例集合中的重复 `instanceId`；
 - 引用了不存在的 Character / NPC / Map；
 - 非法坐标、方向或不完整 placement；
-- Character Battle Content 引用了不存在的技能或资源；
+- Character 引用了不存在的 BattleActor Content；
+- BattleActor 引用了不存在的 BattleSkill / resource；
 - Story Index 与源 Content 不一致。
 
 Builder 不因为以下情况失败：
@@ -345,4 +377,4 @@ Map Enter
 → context.setNPC(...)
 ```
 
-读档恢复的是 Event current state、Relationship、当前随身 Card 以及其他已确认 mutable facts。Character 固定 AI 人物描述、Battle 静态资料、技能定义、默认实例、Event state 中声明的场景实例和 Story Index 都继续从安装 Content 读取。
+读档恢复的是 Event current state、Relationship、当前随身 Card 以及其他已确认 mutable facts。Character 固定 AI 人物描述、BattleActor / BattleSkill Content、默认实例、Event state 中声明的场景实例和 Story Index 都继续从安装 Content 读取。
