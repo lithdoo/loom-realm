@@ -8,11 +8,13 @@
 
 固定 Dialogue 保持一个很小的模型：
 
-> **一个 Dialogue 是一段线性台词列表；列表末尾可以结束，或者出现 Choice。Choice 只跳到另一个 Dialogue。没有 Choice 的 Dialogue 可以在正常完成时触发一个 EventStateMutation。**
+> **一个 Dialogue 是一段线性台词列表；列表末尾可以结束，或者出现 Choice。Choice 只跳到另一个 Dialogue。没有 Choice 的 Dialogue 可以在正常完成时引用一个 EventStateMutation。**
 
 因此不在 Dialogue 内设计通用 Node、Flow、脚本命令或任意业务 action。
 
 人物日常对话、主线剧情对话、支线剧情对话使用同一种 Dialogue Content。区别只在于谁从哪里启动它，以及无 Choice Dialogue 完成后是否引用一个 EventStateMutation。
+
+Content 永远只是定义数据。**真正解释 Dialogue graph 并执行 Mutation 的是 PokeMan Dialogue Subsystem。**
 
 ## 基本结构
 
@@ -54,8 +56,8 @@ mutation 存在
 
 3. 状态变更 Dialogue
    lines
-   → mutation
-   → apply EventStateMutation
+   → mutation ref
+   → Dialogue Subsystem 执行 EventStateMutation
    → complete
 ```
 
@@ -126,7 +128,7 @@ startBattle
 
 ## Choice 分支需要状态变化时
 
-如果某个 Choice 分支最终需要改变 Event state，Choice 仍然只跳到新的 Dialogue；由新的无 Choice Dialogue 在完成时触发 Mutation。
+如果某个 Choice 分支最终需要改变 Event state，Choice 仍然只跳到新的 Dialogue；由新的无 Choice Dialogue 在完成时引用 Mutation。
 
 例如：
 
@@ -177,7 +179,7 @@ Choice
 = 只选择下一段 Dialogue
 
 无 Choice Dialogue
-= 可以在完成时产生 Event state mutation
+= 可以在完成时声明一个 EventStateMutation ref
 ```
 
 ## 分支与循环
@@ -203,31 +205,70 @@ Builder **不能因为 Dialogue 引用图存在 cycle 就报错**。
 
 它只允许出现在 **没有 `choices` 的 Dialogue** 上。
 
-语义：
+这里的职责边界是：
 
 ```text
-播放完当前 Dialogue.lines
-↓
-当前 Dialogue 没有 choices
-↓
-有 mutation？
-├─ 否 → 正常完成
-└─ 是 → 读取 EventStateMutation
-         ↓
-       校验全部 from（AND）
-         ↓
-       原子写入全部 to
-         ↓
-       正常完成
+Dialogue Content
+= 保存 mutation ref
+
+EventStateMutation Content
+= 保存 from / to
+
+PokeMan Dialogue Subsystem
+= Runtime executor
+
+Realm State
+= EventStateList authority
 ```
 
-Dialogue 只引用 Mutation，不内嵌 `from` / `to`，也不获得通用业务 action 能力。
+Dialogue Content 本身不会“执行”任何东西。
 
-`EventStateMutation` 仍然只读写 Event current state，不修改 Relationship / Contract / Card / Battle / player position 等其他业务事实。
+## PokeMan Dialogue Subsystem 如何执行 Mutation
+
+PokeMan Dialogue Subsystem 组合两层能力：
+
+```text
+@loomrealm-game/rpg-dialogue
+→ 当前 Conversation interaction / presentation
+
+PokeMan Dialogue business runtime
+→ Dialogue graph
+→ Choice target 跳转
+→ EventStateMutation 解释
+→ Realm State commit
+```
+
+当一个无 Choice Dialogue 播放完成并带有 `mutation` 时：
+
+```text
+读取 EventStateMutation Content
+↓
+scope.state.read(EventStateList)
+↓
+根据 EventStateList 解释每个 from：
+  有 eventId entry → current = entry.stateId
+  无 eventId entry → current = null
+↓
+全部 from AND 匹配
+↓
+生成新 EventStateList：
+  to = stateId → upsert entry
+  to = null    → 删除 entry
+↓
+scope.state.commit()
+  condition = EventStateList Record version
+  write     = 新 EventStateList
+↓
+commit 成功后 Dialogue 正常完成
+```
+
+因此多个 Event 的 `to` 变化通过**一次 EventStateList Record replacement**原子完成。
+
+`EventStateMutation` 仍然只改变 Event current state，不修改 Relationship / Contract / Card / Battle / player position 等其他业务事实。
 
 ## Terminal Dialogue 与完成结果
 
-没有 `choices` 的 Dialogue 播放完全部 `lines`，并在需要时成功应用 `mutation` 后，是本次调用的 terminal Dialogue。
+没有 `choices` 的 Dialogue 播放完全部 `lines`，并在需要时由 Dialogue Subsystem 成功应用 `mutation` 后，是本次调用的 terminal Dialogue。
 
 Dialogue Frame 正常完成时仍返回：
 
@@ -246,27 +287,35 @@ rival-challenge
 
 最终分别返回对应的 terminal Dialogue id。
 
-`terminalDialogueId` 仍然只是完成结果，不是 Realm State。现在 Event state mutation 不再依赖 caller 根据 `terminalDialogueId` 再查一张映射；如果 terminal Dialogue 自己声明了 `mutation`，Dialogue 执行过程直接应用它。
+`terminalDialogueId` 仍然只是完成结果，不是 Realm State。Event state mutation 不再依赖 caller 根据 `terminalDialogueId` 再查一张映射；terminal Dialogue 自己声明 Mutation ref，PokeMan Dialogue Subsystem 在完成路径中执行它。
 
 ## Runtime
 
 概念执行过程：
 
 ```text
-调用入口 Dialogue
+PokeMan Dialogue Subsystem 收到入口 Dialogue
 ↓
 读取 Dialogue Content
 ↓
-播放 lines
+调用 @loomrealm-game/rpg-dialogue 展示当前 lines / choices
 ↓
 是否有 choices？
 ├─ 是 → 玩家选择 target Dialogue
+│       ↓
+│     PokeMan Dialogue Subsystem 读取 target Dialogue
 │       ↓
 │     从 target Dialogue 第一行继续
 │
 └─ 否 → 是否有 mutation？
          ├─ 否 → complete
-         └─ 是 → apply EventStateMutation
+         └─ 是 → 读取 Mutation + EventStateList
+                  ↓
+                校验 from
+                  ↓
+                生成新 EventStateList
+                  ↓
+                scope.state.commit()
                   ↓
                 complete
 ↓
@@ -298,9 +347,9 @@ Content
 
 EventStateMutation 也是 immutable Content。
 
-Realm State 不保存 Dialogue 展开副本、当前 line index 或 Mutation definition，只保存实际 Event current states 等业务事实。
+Realm State 不保存 Dialogue 展开副本、当前 line index 或 Mutation definition，只保存实际 EventStateList 等业务事实。
 
-如果某次对话还需要造成 Relationship、Contract、Card、Battle 等非 Event-state 后果，这些不进入 Dialogue `mutation`；继续由对应 World / 业务 owner 明确处理。
+如果某次对话还需要造成 Relationship、Contract、Card、Battle 等非 Event-state 后果，这些不进入 EventStateMutation；由相应 PokeMan 业务逻辑 / Subsystem 明确处理。这里不把 EventStateMutation 扩成通用 action DSL。
 
 ## Builder 检查
 
@@ -313,7 +362,7 @@ Builder 应检查：
 - Choice 缺少显示文本或 target；
 - 同一个 Dialogue 同时存在 `choices` 与 `mutation`；
 - `mutation` 引用了不存在的 EventStateMutation；
-- EventStateMutation 的 `from` / `to` 引用了不存在的 Event / state。
+- EventStateMutation 的非空 `from` / `to` state 引用了不存在的 Event / state。
 
 Builder 不因为合法的 Dialogue cycle 失败。
 
@@ -326,7 +375,7 @@ Builder 不因为合法的 Dialogue cycle 失败。
 - 临时 Encounter NPC 的 speaker identity 表达；
 - 对话中的头像切换、表情、音效等 presentation metadata；
 - 根据 Realm State 动态隐藏 / 显示 Choice 的条件系统；
-- Dialogue mutation 失败时的具体 UI / Message 表现。
+- Dialogue Mutation 的 `from` mismatch / OCC conflict 时具体 UI / Message 表现。
 
 当前优先保持：
 
@@ -334,6 +383,8 @@ Builder 不因为合法的 Dialogue cycle 失败。
 Dialogue = 线性 lines + choices? + mutation?
 choices 与 mutation 互斥
 Choice = 下一段 Dialogue 的引用
-无 Choice Dialogue = 可以在完成时引用 EventStateMutation
+无 Choice Dialogue = 可以声明 EventStateMutation ref
+PokeMan Dialogue Subsystem = Mutation executor
+EventStateList = Event current state authority
 Completion = terminalDialogueId
 ```
