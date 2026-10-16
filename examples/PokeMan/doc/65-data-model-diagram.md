@@ -1,487 +1,284 @@
 # 数据模型图
 
-> 当前技术数据模型的可视化总览。只画已经确认到当前阶段的职责边界；带“未冻结”的部分不在图里假装成最终 schema。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文只提供当前数据 authority / FSDB identity 的总览图；字段细节以 [Content FSDB 物理模型](./66-content-fsdb.md)、[人物](./61-character.md)、[事件](./62-event.md)、[固定对话](./64-dialogue.md) 为准。
 
-## UML 总览
+# Content / State / Runtime
 
 ```mermaid
-classDiagram
-    direction LR
+flowchart TB
+  subgraph Content[Content / FSDB]
+    Character["struct.Character / <characterId>"]
+    NPC["struct.NPC / <npcId>"]
+    Dialogue["struct.Dialogue / <dialogueId>"]
+    Event["struct.Event / <eventId>"]
+    Mutation["struct.EventStateMutation / <mutationId>"]
+    Encounter["struct.Encounter / <mapId>"]
+    StoryIndex["struct.StoryIndex / current"]
+    Graphics["resource.Graphics / ..."]
+    BattleActor["BattleActor Content"]
+    BattleSkill["BattleSkill Content"]
+  end
 
-    class CharacterDefinition {
-      <<Content>>
-      id
-      name
-      description
-      fixedAICharacterText
-      tags
-      defaultSceneInstances[]
-      battleActorRef
-    }
+  subgraph State[Realm State]
+    EventStateList["EventStateList"]
+    Relationship["Relationship A → B"]
+    Contract["contract? { integrity, skills[] }"]
+    Card["Card { holder, servant, slot }"]
+    Resume["resume/checkpoint location? "]
+  end
 
-    class BattleActorContent {
-      <<@loomrealm-game/battle Content>>
-      id
-      name
-      characterGraphicsRef
-      max_hp
-      skills[]
-    }
+  subgraph Runtime[Runtime Memory]
+    StoryResolver["Story Resolver"]
+    NPCInstance["World-side NPC Instance"]
+    MapRuntime["Map Runtime\nmap / player pose / motion / scene"]
+    DialogueRuntime["Dialogue Runtime\ncurrent dialogue / line / choice"]
+    BattleRuntime["Battle Runtime Actor"]
+    EncounterRuntime["generated Encounter set"]
+  end
 
-    class BattleSkill {
-      <<@loomrealm-game/battle Content>>
-      id
-      name
-      range
-      damage
-      windup_ticks
-      recovery_ticks
-      effect
-    }
+  NPC --> Graphics
+  Character --> BattleActor
+  BattleActor --> BattleSkill
+  Character --> NPC
+  Character --> Dialogue
 
-    class Relationship {
-      <<RealmState>>
-      fromCharacterId
-      toCharacterId
-      affinity
-      hostile
-      dynamicRelationshipText
-      contract?
-    }
+  Dialogue --> Mutation
+  Event --> Character
+  Event --> NPC
+  Event --> Dialogue
+  Event -. transient .-> BattleActor
+  Encounter --> NPC
+  Encounter --> Dialogue
+  Encounter --> BattleActor
 
-    class Contract {
-      <<Relationship nested state>>
-      integrity
-      skills[]
-    }
+  EventStateList --> StoryResolver
+  StoryIndex --> StoryResolver
+  Character --> StoryResolver
+  Event --> StoryResolver
+  Encounter --> StoryResolver
+  StoryResolver --> NPCInstance
+  NPCInstance --> MapRuntime
 
-    class Card {
-      <<RealmState current-carried fact>>
-      holderCharacterId
-      servantCharacterId
-      slot
-    }
+  Relationship --> Contract
+  Card --> Relationship
+  Character --> Relationship
+  Contract --> BattleRuntime
+  Character --> BattleRuntime
+  BattleActor --> BattleRuntime
 
-    class NPCDefinition {
-      <<Content>>
-      npcId
-      name
-      sprite
-    }
+  Dialogue --> DialogueRuntime
+  Mutation --> DialogueRuntime
+  DialogueRuntime --> EventStateList
 
-    class NPCInstance {
-      <<Runtime>>
-      instanceId
-      npcId
-      characterId?
-      mapId
-      x
-      y
-      direction
-      pattern?
-    }
-
-    class DialogueDefinition {
-      <<Content>>
-      id
-      speakerName?
-      lines[]
-      choices[]?
-      mutationRef?
-    }
-
-    class EventDefinition {
-      <<Content>>
-      id
-      states[]
-    }
-
-    class EventStateMutation {
-      <<Content>>
-      from: eventId->stateId|null
-      to: eventId->stateId|null
-    }
-
-    class EventStateList {
-      <<RealmState one Record>>
-      entries[]
-      entry.eventId
-      entry.stateId
-    }
-
-    class EncounterDefinition {
-      <<Content>>
-      spawnPoints
-      templates
-      battleActorRefs
-    }
-
-    class BattleRuntimeActor {
-      <<@loomrealm-game/battle Runtime>>
-      hp
-      maxHp
-      tile
-      direction
-      resolvedSkills
-      decisionState
-    }
-
-    CharacterDefinition --> BattleActorContent : stable battleActorRef
-    BattleActorContent --> BattleSkill : skills[] definitions
-
-    CharacterDefinition "1" <-- "0..*" Relationship : from/to
-    Relationship *-- Contract : optional
-
-    Contract --> BattleSkill : current contract skills[]
-    Relationship --> Card : established contract may be carried
-    CharacterDefinition "1" <-- "0..*" Card : holder/servant refs
-
-    NPCInstance --> NPCDefinition : npcId
-    NPCInstance --> CharacterDefinition : optional characterId
-    CharacterDefinition --> BattleActorContent : persistent NPC base actor
-
-    CharacterDefinition --> DialogueDefinition : optional Line.speaker refs
-    DialogueDefinition --> EventStateMutation : optional mutation ref
-
-    EventStateList --> EventDefinition : current non-null entries
-    EventStateMutation --> EventStateList : validate / replace list
-
-    EncounterDefinition --> NPCInstance : generates transient instances
-    EncounterDefinition --> BattleActorContent : transient base actor source
-
-    BattleActorContent --> Contract : initializes max_hp / skills[]
-    Card --> BattleRuntimeActor : selects carried contract
-    Contract --> BattleRuntimeActor : integrity / skills[]
-    BattleActorContent --> BattleRuntimeActor : stable/base actor definition
+  MapRuntime -. explicit checkpoint only .-> Resume
+  Encounter --> EncounterRuntime
 ```
 
-Card、Relationship / Contract、Character Content 都是平级数据来源。Card 引用 Character / Contract，但不是 Character Content 的子对象。
-
-## NPC Instance → BattleActor → Contract / Battle 链路
+# FSDB identity
 
 ```mermaid
 flowchart LR
-    PC[Persistent NPC Instance] --> CH[Character]
-    CH --> BA[stable BattleActor Content]
-
-    TE[Transient Encounter / Story NPC Instance] --> SRC[Encounter / Story static source]
-    SRC --> BA2[base BattleActor Content]
-
-    BA --> DIRECT[本体 Battle Runtime Actor]
-    BA2 --> DIRECT2[transient Battle Runtime Actor]
-
-    BA --> INIT[建立新 Contract]
-    INIT --> CT[Relationship.contract<br/>integrity = max_hp<br/>skills[] = copy skills[]]
-
-    CT --> CARD[Current Card<br/>holder / servant / slot]
-    CARD --> BR[Battle Runtime Actor]
-    CT --> BR
-    BA --> BR
-
-    BR --> OUT[Battle 结束]
-    OUT --> CT2[Integrity 写回 contract.integrity]
+  CFile["[struct]Character/rival.json"] --> CId["struct.Character / rival"]
+  DFile["[struct]Dialogue/lab-rival-intro.json"] --> DId["struct.Dialogue / lab-rival-intro"]
+  EFile["[struct]Event/prologue.json"] --> EId["struct.Event / prologue"]
+  MFile["[struct]EventStateMutation/prologue-to-route.json"] --> MId["struct.EventStateMutation / prologue-to-route"]
+  XFile["[struct]Encounter/2.json"] --> XId["struct.Encounter / 2\nmapId = 2"]
+  GFile["[resource]Graphics/Characters/Rival.png"] --> GId["resource.Graphics / Characters/Rival"]
 ```
 
-当前规则：
+规则：
+
+```text
+PokeMan struct record key
+= definition identity
+
+source value
+!= 再保存一份 id
+```
+
+固定目标 table 的引用只保存 key；BattleActor 等外部 package serialization namespace 尚未冻结的对象使用 `{namespace,key}` ContentRef。
+
+# Character / NPC / Battle
+
+```mermaid
+flowchart LR
+  Character["struct.Character / rival"] -->|battleActor ContentRef| BaseActor["base BattleActor"]
+  Character -->|defaultScenes mapId + npcId| NPCDef["struct.NPC / rival-casual"]
+  NPCDef --> Sprite["resource.Graphics / Characters/RivalCasual"]
+
+  PersistentInstance["persistent NPC Instance"] --> Character
+  TransientSource["Encounter / Event transient source"] --> BaseActor
+  TransientInstance["transient NPC Instance"] --> TransientSource
+
+  BaseActor --> Skills["BattleSkill definitions"]
+```
+
+固定：
 
 ```text
 Persistent NPC Instance
-→ Character.battleActorRef
-→ stable BattleActor
+→ Character
+→ same base BattleActor
 
 Transient NPC Instance
-→ Encounter / Story battleActorRef
+→ Encounter / Story source
 → base BattleActor
-
-NPC Instance
-≠ BattleActor variant owner
 ```
 
-MVP 不允许同一个持久 Character 因为不同 NPC Instance 而切换成不同 BattleActor identity。
+不建立 NPC Instance BattleActor variant / resolved Battle profile authority。
 
-建立 Contract：
+# Character default scene / Event takeover
 
-```text
-contract.integrity = BattleActor.max_hp
-contract.skills[] = copy(BattleActor.skills[])
-Contract Integrity max = BattleActor.max_hp
+```mermaid
+flowchart TD
+  Check{"Any active Event directive\ncharacter = X ?"}
+  Default["Use Character X.defaultScenes"]
+  EventOnly["Exclude all defaults\nUse Event sources only"]
+  Result["Merge scene sources"]
+
+  Check -->|No| Default
+  Check -->|Yes| EventOnly
+  Default --> Result
+  EventOnly --> Result
 ```
 
-Contract 不保存额外 `maxIntegrity`；基础 BattleActor 继续是稳定 max / actor definition 来源。
+`absent:true` 只表示该 Event 明确提到 Character 但不贡献 placement；它不压制其他 Event placement，也不建立 priority。
 
-Relationship / Contract：
-
-```text
-Relationship
-= 有向长期关系
-= 可以存在而 contract 为空
-
-Relationship.contract
-= 正式契约成立
-= MVP: integrity + skills[]
-```
-
-Card：
-
-```text
-Card
-= 当前是否随身 + slot
-= MVP 没有独立 cardId / Card identity
-```
-
-MVP 不设计：
-
-```text
-NPC Instance resolvedBattleData
-BattleActor variant per NPC Instance
-progression
-training state
-learnedSkillIds
-baseSkills + learnedSkills merge
-experience / skill points / skill tree
-```
-
-未来真的加入技能学习时，再扩展 Contract 的业务规则。
-
-## EventStateList：一个 Realm State Record
+# Event FSDB shape
 
 ```mermaid
 flowchart LR
-    I[Game Entry initial Realm State] --> L[EventStateList Record]
-    L --> A[event A = state-2]
-    L --> C[event C = state-1]
-    B[event B] -. no entry = null .-> L
-    D[event D] -. no entry = null .-> L
+  EventRecord["struct.Event / prologue"] --> States["states.<stateId>"]
+  States --> Maps["maps.<decimal-mapId>"]
+  Maps --> Npcs["npcs.<npcId>"]
+  Npcs --> CharacterRef["character? → Character key"]
+  Npcs --> Placement["placement XOR absent:true"]
+  Npcs --> DialogueRef["interaction.dialogue? → Dialogue key"]
+  Npcs -. transient only .-> BattleRef["battleActor? → ContentRef"]
 ```
 
-```text
-有 entry
-→ current state = entry.stateId
+`eventId / stateId / mapId / npcId` 都由 FSDB / object key 表达，不在 value 里重复保存。
 
-无 entry
-→ current state = null
-
-null → stateId
-→ 新增 entry
-
-stateId → stateId
-→ 修改 entry
-
-stateId → null
-→ 删除 entry
-```
-
-EventStateList 的最终 Realm State namespace / key 名字仍未冻结，但“一张列表 Record”已经冻结。
-
-## Event State / Dialogue / Mutation
+# Dialogue
 
 ```mermaid
 flowchart LR
-    ES[Active Event State] --> NPC[scene directive]
-    NPC --> D[entry Dialogue]
-    D --> DS[PokeMan Dialogue Subsystem]
-    DS --> CH{choices?}
-    CH -->|有| NEXT[target Dialogue]
-    NEXT --> DS
-    CH -->|无| M{mutation?}
-    M -->|无| DONE[complete]
-    M -->|有| MUT[EventStateMutation]
-    MUT --> READ[read EventStateList + version]
-    READ --> CHECK[validate all from]
-    CHECK --> BUILD[build new list]
-    BUILD --> COMMIT[one record replacement]
-    COMMIT --> DONE
+  Dialogue["struct.Dialogue / <dialogueId>"] --> Lines["lines[]"]
+  Lines --> Speaker["speaker? → Character key"]
+  Dialogue --> SpeakerName["speakerName?\npresentation only"]
+  Dialogue --> Choice["choices?[]"]
+  Choice --> Target["target → Dialogue key"]
+  Dialogue --> Mutation["mutation? → EventStateMutation key"]
 ```
 
-`choices` 与 `mutation` 互斥。EventStateMutation 只改变 Event current state，不修改 Relationship / Contract / Card / Battle 等其他 State。
+固定：
 
-如果同一次 Dialogue 业务还建立 Contract：
+```text
+choices XOR mutation
+```
+
+# Event state
 
 ```mermaid
 flowchart LR
-    D[terminal Dialogue] --> M[Dialogue.mutation]
-    M --> ES[update EventStateList only]
-    D --> B[PokeMan business Runtime]
-    B --> C[create Relationship.contract]
-    C --> BA[resolve target NPC base BattleActor]
-```
-
-这两条路径属于同一个业务流程，但不是同一个数据 mutation DSL。
-
-## Dialogue speaker 解析
-
-```mermaid
-flowchart TB
-    L[Dialogue Line] --> S{Line.speaker?}
-    S -->|有| C[按 Character identity 解析]
-    S -->|无| D{Dialogue.speakerName?}
-    D -->|有| N[使用默认显示名]
-    D -->|无| R[旁白]
+  EventContent["struct.Event / <eventId>"] --> LegalStates["legal stateIds"]
+  EventStateList["Realm State EventStateList"] --> Current["eventId → current non-null stateId"]
+  Mutation["struct.EventStateMutation / <mutationId>"] --> From["from: eventId → stateId | null"]
+  Mutation --> To["to: eventId → stateId | null"]
+  From --> Commit["Runtime validates all from"]
+  Current --> Commit
+  To --> Commit
+  Commit --> EventStateList
 ```
 
 ```text
-Line.speaker
-= 持久 Character identity
-
-Dialogue.speakerName
-= transient / non-Character speaker 的默认显示名
-= presentation fallback
-= 不是 Character identity
+no EventStateList entry
+= logical current state null
 ```
 
-## 非 Dialogue 业务的 Mutation 路径
+Mutation 只改变 Event current state，不创建 Contract / Card / Battle。
+
+# Relationship / Contract / Card
 
 ```mermaid
 flowchart LR
-    B[Battle / World / Encounter Runtime] --> SE[session-event<br/>发生了什么]
-    SE --> G[PokeMan session-level<br/>业务运行时]
-    G --> Q{是否推进剧情?}
-    Q -->|否| END[不执行 Mutation]
-    Q -->|是| M[选择 EventStateMutation]
-    M --> C[更新 EventStateList]
-```
-
-Battle / Map / Encounter Content 不保存剧情 `mutationRef`；`session-event` 也不需要携带 Mutation identity。
-
-## Character default fallback / Event takeover
-
-```mermaid
-flowchart TB
-    E[所有 active Event State] --> Q{是否有 scene directive<br/>characterId = X?}
-    Q -->|否| DEF[使用 Character X defaults]
-    Q -->|是| TAKE[default 全部退出]
-    TAKE --> P[合并 Event placements]
-    TAKE --> A[absent 不贡献 placement]
-    P --> FINAL[最终 scene]
-    A --> FINAL
+  A["Character A"] --> Rel["Relationship A → B"]
+  B["Character B"] --> Rel
+  Rel --> Affinity["affinity / hostile / dynamic text"]
+  Rel --> Contract["contract?\nintegrity / skills[]"]
+  Contract --> Card["Card?\nholder=A servant=B slot"]
+  B --> BaseActor["base BattleActor"]
+  BaseActor --> ContractInit["new Contract init"]
+  ContractInit --> Contract
 ```
 
 ```text
-没有 active Event 提到 Character X
-→ 才使用 Character default
+Relationship exists
+!= Contract exists
 
-任一 active Event 提到 Character X
-→ default 完全不参与
-→ 只看 Event scene directives
-
-absent
-= 本 Event 提到 Character，但本 Event 不提供 placement
-= 不压制 peer Event placement
+Contract exists
+!= Card currently carried
 ```
 
-## NPC / Event / Map 唯一性
+Contract initialization：
+
+```text
+integrity = BattleActor.max_hp
+skills[]  = copy(BattleActor.skills[])
+```
+
+MVP 不保存 `maxIntegrity`，也不建立 `cardId`。
+
+# Card Battle
+
+```mermaid
+flowchart TD
+  Card["Card holder=A servant=B"] --> Select["Select servant B"]
+  Contract["Relationship A→B.contract\nintegrity / skills[]"] --> Build["Build Battle Runtime Actor"]
+  Character["Character B"] --> ActorRef["base BattleActor ContentRef"]
+  ActorRef --> BaseActor["base BattleActor\nmax_hp / definitions"]
+  BaseActor --> Build
+  Select --> Build
+  Build --> Battle["Battle Simulation"]
+  Battle --> Persist["Persist long-lived integrity result"]
+  Persist --> Contract
+```
+
+Battle live HP / tile / action / plan 等只属于 Battle Runtime。
+
+# Map live state / durable resume
 
 ```mermaid
 flowchart LR
-    L[EventStateList] --> R[Story Resolver]
-    CC[Character defaults<br/>unmentioned only] --> R
-    EN[Encounter Runtime sources] --> R
-    R --> V{validate final Map}
-    V -->|mapId 内 npcId 唯一| OK[NPCPlacement[]]
-    V -->|重复| ERR[deterministic conflict]
+  MapRuntime["Map Runtime\nlive mapId / x / y / direction / motion"] -->|explicit save/checkpoint| Resume["Realm State resume location?"]
+  Resume -->|Load / start new Map Runtime| MapRuntime2["new Map Runtime"]
 ```
 
-不同 Event 可以引用同一个 NPC / Character；最终每张 Map 内要求 `(mapId,npcId)` 唯一。
+不允许 Map Runtime 与 Realm State 同时成为“当前 live player pose”的 authority。
 
-## Encounter persistence 边界
+# Encounter
+
+```mermaid
+flowchart LR
+  Encounter["struct.Encounter / <mapId>"] --> Spawn["spawnPoints[]"]
+  Encounter --> Templates["templates.<templateId>"]
+  Templates --> NPC["npc → struct.NPC"]
+  Templates --> Dialogue["dialogue? → struct.Dialogue"]
+  Templates --> Actor["battleActor → ContentRef"]
+  Encounter --> Runtime["generated Encounter Runtime set"]
+```
+
+re-entry reroll、defeated persistence、清理时机属于 Runtime/gameplay policy，不在图中建立额外 Realm State authority。
+
+# 一句话总览
 
 ```text
-重新进图是否重新 roll
-已击败对象是否继续消失
-生成结果何时清理
-是否跨 Session 保留
+Content
+= 安装后只读定义；FSDB key 是 PokeMan struct identity
+
+Realm State
+= 这一局跨 Subsystem 共享的长期 mutable facts
+
+Runtime Memory
+= 当前 Subsystem 正在执行的 live authority / working set
 ```
-
-这些属于 Runtime / gameplay behavior policy，不属于当前数据物理结构缺口。
-
-当前不预设：
-
-```text
-EncounterGeneratedState
-generatedInstances[]
-defeatedIds[]
-spawn snapshot
-seed Record
-```
-
-只有未来 Runtime policy 确实要求某些事实跨边界持续时，才根据最小需求增加 Realm State。
-
-## 当前最重要的边界
-
-```text
-Character
-= 持久 identity
-= stable BattleActor source
-
-NPC Instance
-= 这次世界中的具体出现
-= 不拥有 BattleActor variant
-
-Relationship
-= 有向长期关系
-
-Relationship.contract
-= 可选长期契约状态
-= MVP: integrity + skills[]
-
-BattleActor.max_hp / skills[]
-= 新 Contract 初始化来源
-
-Card
-= 当前随身与 slot
-= 无独立 cardId / identity
-
-EventStateList
-= 一个 Realm State Record
-= 只保存非空 Event state
-
-Dialogue.speakerName
-= 默认显示名
-= 不是 Character identity
-
-固定 Dialogue Mutation
-= Dialogue Content.mutation
-→ Dialogue Subsystem 执行
-→ 只修改 EventStateList
-
-非 Event-state 业务效果
-= 对应 PokeMan business Runtime 处理
-
-非 Dialogue 剧情推进
-= session-event
-→ session-level 业务运行时选择 Mutation
-
-Encounter re-entry / persistence
-= Runtime/gameplay policy
-= 当前不预设 State shape
-```
-
-## 图中故意没有解决的数据问题
-
-以下仍然留白：
-
-- Relationship / Contract 的最终 Realm State key / JSON shape；
-- Card 的最终 Realm State 物理布局与必要唯一约束；不设计独立 `cardId`；
-- Character → BattleActor Content 的最终引用编码；
-- Encounter / Story transient source → BattleActor Content 的最终引用编码；
-- Event / EventStateMutation 的最终 Content namespace / key；
-- EventStateList Realm State Record 的最终 namespace / key；
-- Event placement / `instanceId` / `absent` 的最终 JSON shape。
-
-以下不再作为 MVP 数据模型缺口：
-
-```text
-NPC Instance resolved battle data / BattleActor variant
-Contract 默认值来源
-Contract Integrity 初始值 / 最大值来源
-Card identity / cardId
-Encounter re-entry / persistence
-progression / training shape
-技能成长 / base+learned merge
-transient Encounter speaker identity
-非 Dialogue Content mutationRef
-```
-
-Encounter re-entry / persistence 属于 Runtime/gameplay policy，不应在当前阶段反推一个猜测性的 Encounter State shape。
-
-BattleSkill 本身的静态字段和执行语义直接跟随 `@loomrealm-game/battle` 当前规范。
