@@ -10,10 +10,10 @@
 
 1. **Character identity 与 Map 表现分离。** Character 不是 NPC，NPC Instance 也不要求一定对应持久 Character。
 2. **Relationship 保存有向长期关系；Contract 是 Relationship 内的可选长期契约状态。** MVP Contract 只保存 `integrity + skills[]`。
-3. **Card 与 Relationship / Contract 分离。** Card 只表示当前随身，以及 holder / servant / slot；不保存 Integrity 或技能集。
+3. **Card 与 Relationship / Contract 分离。** Card 只表示当前随身，以及 holder / servant / slot；不保存 Integrity 或技能集；MVP 不建立独立 `cardId`。
 4. **Battle Runtime 独立。** Battle 当前运行状态只由 `@loomrealm-game/battle` Simulation authority 拥有。
 5. **PokeMan 不重复定义 BattleActor / BattleSkill。** 静态战斗定义直接复用 `@loomrealm-game/battle` 当前 Content contract。
-6. **BattleActor.skills[] 是本体 / transient actor 的技能集，也是新 Contract 的技能 baseline。** Contract 建立后，该契约当前实际可用技能以 `Relationship.contract.skills[]` 为准。
+6. **Contract 默认值来自目标 NPC Instance 的 resolved battle data。** Character / BattleActor / Encounter / Story 等是解析来源；Contract 创建时 snapshot `integrity / skills[]`，创建后不随 NPC Instance 自动同步。
 7. **MVP 不定义 progression / training schema。** 技能学习、等级、训练树等以后有真实玩法再扩展 Contract。
 8. **Event 保持为剧情状态与场景 / 交互定义。** 不扩成通用 Trigger / Action / Command / Flow engine。
 9. **Event current state 使用一个 EventStateList Realm State Record。** 列表只保存非空 state；没有 entry 等价于 `null`。
@@ -23,27 +23,35 @@
 13. **Transient Dialogue speaker 不创建 Character。** Dialogue 可以提供默认 `speakerName`；它只是 presentation fallback，不是 identity。
 14. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以引用一个 EventStateMutation。
 15. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
+16. **Encounter re-entry / persistence 属于 Runtime/gameplay policy。** 当前数据模型不预设 Encounter persistence Realm State shape。
 
 ## 总体关系
 
 ```text
-Character Content
+Character / Encounter / Story Content
       │
       ├────────────→ BattleActor Content
       │                 ├─ max_hp
       │                 └─ skills[] → BattleSkill Content
       │
-      ├────────────→ Relationship A → B
-      │                 ├─ affinity / hostile / dynamic text
-      │                 └─ contract?
-      │                    ├─ integrity
-      │                    └─ skills[]
-      │
-      ├────────────→ default scene instances
-      │                 └─ only when no active Event mentions Character
-      │
-      └────────────→ current carried Card
-                        holder / servant / slot
+      └────────────→ PokeMan NPC Instance
+                        └─ resolved battle data
+                           ├─ resolved actor / max values
+                           └─ resolved skills[]
+                                  │
+                                  └─ contract creation snapshot
+                                     ↓
+Relationship A → B
+├─ affinity / hostile / dynamic text
+└─ contract?
+   ├─ integrity
+   └─ skills[]
+
+Character Content
+├─ default scene instances
+│  └─ only when no active Event mentions Character
+└─ current carried Card projection
+   └─ holder / servant / slot
 
 Dialogue Content
 → Line.speaker? = persistent Character identity
@@ -118,18 +126,18 @@ BattleSkill
 └─ effect
 ```
 
-MVP 的技能 ownership：
+BattleActor 是 NPC Instance battle data 的静态来源之一。MVP 的直接 ownership 是：
 
 ```text
 本体 / transient Battle actor
-→ 直接使用 BattleActor.skills[]
+→ 使用 NPC Instance 当前 resolved battle data
 
 新 Contract 建立
-→ copy BattleActor.skills[]
-→ Relationship.contract.skills[]
+→ snapshot 目标 NPC Instance resolved battle data
+→ Relationship.contract.integrity / skills[]
 
 Contract 已建立后的 Card Battle
-→ 使用 Relationship.contract.skills[]
+→ 使用 Relationship.contract.integrity / skills[]
 ```
 
 因此 MVP 不存在另一层 `learnedSkillIds`、base/learned merge、技能树或 progression State。
@@ -261,7 +269,11 @@ MVP Contract 只保存：
 - `integrity`：这份契约的 Battle Manifestation 长期完整度；
 - `skills[]`：这份契约当前实际拥有的 BattleSkill ids。
 
-建立 Contract 时，以对应 `BattleActor.skills[]` 初始化 `contract.skills[]`。同一个 Character 被不同主公契约时，各自 Contract 的 Integrity 与技能集相互独立。
+建立 Contract 时，从**交互目标 NPC Instance 当前 resolved battle data**初始化 `contract.integrity / skills[]`。这里的 resolved battle data 可以由 Character/BattleActor、Encounter、Story 等来源共同解析，但 Contract 不直接绑定这些静态 source。
+
+Contract 创建是 snapshot：创建以后 NPC Instance 的变化不会自动同步到已有 Contract。NPC 本体某场 Battle 的当前 HP 也不直接等于 Contract Integrity。
+
+同一个 Character 被不同主公契约时，各自 Contract 的 Integrity 与技能集相互独立。
 
 MVP 不定义 `progression / training` 字段；未来成长玩法再扩展 Contract。
 
@@ -290,7 +302,7 @@ Card(A, B) absent
 
 Card 不保存 Integrity、技能集或 BattleActor / BattleSkill 数据。
 
-Card 的独立 `cardId` 是否需要存在尚未冻结。
+**MVP 不建立独立 Card identity / `cardId`。** Card 只是 holder / servant / slot 组成的当前随身事实。最终采用列表 Record 还是其他物理布局、以及必要唯一约束，仍可在 Realm State schema 收口时决定。
 
 ## 其他 Realm State
 
@@ -301,10 +313,11 @@ Realm State
 ├─ Relationship[]
 │  └─ optional Contract integrity / skills[]
 ├─ current carried Card[]
-├─ Encounter generated results that must persist
 ├─ Pocket / story committed facts
 └─ player choices / random facts that cannot be recomputed
 ```
+
+当前不预设 Encounter generated state。Encounter re-entry / persistence 行为没有冻结以前，不为它提前设计 Realm State 物理结构。
 
 # EventStateMutation
 
@@ -380,9 +393,13 @@ Encounter 可以生成 transient NPC Instance，也可以提供临时 Battle 输
 
 Transient Encounter NPC 使用固定 Dialogue 时，如果只需要一个通用说话者显示名，直接由该 Dialogue 的 `speakerName` 提供。
 
+Encounter re-entry / persistence（重新 roll、击败结果是否保留、生成结果何时清理、是否跨 Session）属于 Runtime / gameplay behavior policy。当前数据模型不假定存在 `EncounterGeneratedState`、seed record、generated instance snapshot 或 defeated-id list。
+
 # Runtime / Projection
 
 ## NPC Instance
+
+PokeMan World-side NPC Instance 是业务运行时实例，可以比 Map `NPCPlacement` 丰富：
 
 ```text
 NPCInstance
@@ -393,8 +410,13 @@ NPCInstance
 ├─ x
 ├─ y
 ├─ direction
-└─ pattern?
+├─ pattern?
+└─ resolved battle data
+   ├─ resolved actor / max values
+   └─ resolved skills[]
 ```
+
+这里 `resolved battle data` 表示职责，不冻结最终 JSON 必须采用嵌套字段。它可以由 Character/BattleActor、Encounter、Story 等来源解析。
 
 `instanceId` 满足 Map 实例 contract；PokeMan 额外要求每个最终 `mapId` 内 `npcId` 唯一。
 
@@ -407,7 +429,7 @@ EventStateList
 +
 Character / Event Content
 +
-Encounter generated state
+Encounter Runtime sources
 ↓
 读取相关 active Event State
 ↓
@@ -420,10 +442,14 @@ Encounter generated state
 ↓
 校验当前 Map npcId 唯一
 ↓
+PokeMan NPC Instance[]
+↓
 NPCPlacement[]
 ```
 
 ## Battle Runtime Actor
+
+Card Battle：
 
 ```text
 Card(holder=A, servant=B)
@@ -437,7 +463,13 @@ Battle Runtime Actor
 
 Card Battle Manifestation 的初始 HP 来自 `contract.integrity`，当前可用技能来自 `contract.skills[]`；Battle 结束后长期 Integrity 写回同一 Contract。
 
-没有 Contract 的本体 / transient actor 直接使用 `BattleActor.skills[]`。
+没有 Contract 的本体 / transient actor：
+
+```text
+NPC Instance resolved battle data
+↓
+Battle Runtime Actor
+```
 
 因此：
 
@@ -455,7 +487,9 @@ Builder 应检查：
 - Dialogue Choice target / Character speaker / Mutation ref 不存在；
 - 同一个 Dialogue 同时存在 `choices` 与 `mutation`；
 - Mutation 非空 state 引用不存在；
-- Character / BattleActor / BattleSkill 引用不合法；
+- Character / Encounter / Story battle source 引用不合法；
+- BattleActor / BattleSkill 引用不合法；
+- 可静态判断的 NPC Instance battle source / resolved skill 引用不合法；
 - 初始化 Contract 的 `skills[]` 引用了不存在的 BattleSkill；
 - 同一个 Event state 内重复 `(mapId,npcId)`；
 - placement 非法；
@@ -470,8 +504,10 @@ Runtime 保证：
 - `Dialogue.speakerName` 只是显示 fallback；
 - Content 不执行 Mutation；
 - 固定 Dialogue 和 session-event 两条 Mutation 触发路径保持分离；
+- Contract 创建时从目标 NPC Instance resolved battle data 生成 snapshot；
+- 已有 Contract 不随 NPC Instance 后续变化自动同步；
 - Card Battle 使用 `Relationship.contract.integrity / skills[]`；
-- 没有 Contract 的本体 / transient actor 使用 `BattleActor.skills[]`；
+- 没有 Contract 的本体 / transient actor 使用 NPC Instance resolved battle data；
 - 合并当前 NPC 来源后，每张最终 Map 内 `npcId` 唯一。
 
 # 当前继续设计的数据问题
@@ -479,14 +515,13 @@ Runtime 保证：
 当前真正还需要继续冻结的数据问题：
 
 - Character / NPC / Visual 的精确 Content schema / namespace；
+- **NPC Instance battle source / resolved battle data 的最终引用与 schema**，包括 Character / Encounter / Story 如何解析到 BattleActor，以及 Contract 初始化所需默认字段如何表达；
 - Character 到 BattleActor Content 的最终引用编码；
 - Event / EventStateMutation 的最终 Content namespace / key；
 - EventStateList Realm State Record 的最终 namespace / key 名字；
 - Event placement / `instanceId` / `absent` 的最终 JSON shape；
 - Relationship / Contract 的最终 Realm State key / JSON shape；
-- Card 的最终 key / 是否需要独立 `cardId` / 唯一约束；
-- Contract Integrity 的初始值 / 最大值来源；
-- Encounter re-entry / persistence 及对应 Realm State shape。
+- Card 的最终 Realm State 物理布局与必要唯一约束；**不再设计独立 Card identity / `cardId`**。
 
 以下不再作为 MVP 数据模型缺口：
 
@@ -495,7 +530,10 @@ Relationship progression / training shape
 技能学习 / base+learned merge
 transient Encounter speaker identity
 非 Dialogue Content mutationRef
+Card identity / cardId
+Contract 默认值来自哪里
+Encounter re-entry / persistence
 Mutation failure UI / retry policy
 ```
 
-它们要么已经收口，要么属于未来玩法 / Runtime 设计。
+其中 Encounter re-entry / persistence 与 Mutation failure policy 属于 Runtime / gameplay execution 设计；不是当前数据物理结构问题。
