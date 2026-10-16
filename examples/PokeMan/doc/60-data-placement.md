@@ -29,7 +29,7 @@ Content
 ├─ Character definitions
 │  ├─ identity / description / fixed AI text
 │  ├─ default NPC instances
-│  └─ Battle references
+│  └─ stable BattleActor reference
 │     └─ @loomrealm-game/battle BattleActor Content
 │        ├─ id / name / character graphics
 │        ├─ max_hp
@@ -46,6 +46,7 @@ Content
 ├─ EventStateMutation
 ├─ Dialogue definitions
 ├─ Encounter definitions
+│  └─ transient NPC BattleActor references when needed
 ├─ Story Index (generated)
 ├─ Battle rules / scenarios
 └─ Map content
@@ -53,23 +54,48 @@ Content
 
 PokeMan **不另建平行的 Skill schema**。当前战斗技能直接采用 `@loomrealm-game/battle` 的 `BattleSkill` Content contract。
 
-BattleActor 仍是重要静态 battle source，但 MVP 的 Contract 默认值不直接从 Character / BattleActor 创建，而从**当前目标 NPC Instance 已解析好的 battle data**做 snapshot：
+### 基础 BattleActor
+
+MVP 只使用基础 BattleActor，不设计 NPC Instance 专属 BattleActor variant：
 
 ```text
-Character / Encounter / Story battle sources
-↓
-NPC Instance resolved battle data
-├─ resolved actor / max values
-└─ resolved skills[]
-↓ contract creation snapshot
-Relationship.contract
-├─ integrity
-└─ skills[]
+持久 Character
+→ stable Character.battleActorRef
+→ BattleActor Content
+
+transient Encounter / Story NPC
+→ Encounter / Story static battleActorRef
+→ BattleActor Content
 ```
 
-没有 Contract 的本体 / transient actor 使用其 NPC Instance 当前 resolved battle data；没有额外覆盖时，它通常直接来自 BattleActor Content。
+同一个持久 Character 的不同 NPC Instance 可以使用不同 `npcId`、位置、服装或剧情表现，但不会改变其 BattleActor identity。
 
-Contract 建立以后，这份契约当前可用技能以 `Relationship.contract.skills[]` 为准。MVP 不设计 `baseSkills + learnedSkills` 合并层，也不设计 progression / training schema。
+NPC Instance 在 Runtime 中只需要**解析到一个基础 BattleActor**；不再引入 `resolved battle data`、`resolved actor variant` 或覆盖后的 Battle profile 概念。
+
+建立新 Contract 时：
+
+```text
+目标 NPC Instance
+↓ resolve base BattleActor
+BattleActor Content
+├─ max_hp
+└─ skills[]
+↓ create Contract
+Relationship.contract
+├─ integrity = BattleActor.max_hp
+└─ skills[] = copy(BattleActor.skills[])
+```
+
+MVP 同时固定：
+
+```text
+Contract 初始 Integrity = BattleActor.max_hp
+Contract Integrity 上限 = BattleActor.max_hp
+```
+
+Contract 不额外保存 `maxIntegrity`。Contract 建立以后，该契约当前可用技能以 `Relationship.contract.skills[]` 为准；MVP 不设计 `baseSkills + learnedSkills` 合并层，也不设计 progression / training schema。
+
+没有 Contract 的本体 / transient actor 直接使用其基础 BattleActor 构造本场 Battle Runtime Actor。
 
 所有持久 Character 都准备好 Card / Battle 所需静态素材与数据。这只是 Content 完备性，不代表当前可以建立契约。
 
@@ -119,6 +145,8 @@ mutation 存在
 如果某个 Choice 分支需要改变 Event state，Choice 必须先跳到新的无 Choice Dialogue，再由目标 Dialogue 在完成时触发 `EventStateMutation`。
 
 Content 只声明数据，不参与执行。真正解释 Dialogue graph、读取 Mutation、校验当前 Event state 并调用 `scope.state.commit()` 的是 **PokeMan Dialogue Subsystem**。底层 `@loomrealm-game/rpg-dialogue` 仍只负责当前 Conversation interaction / presentation。
+
+需要注意：Dialogue 的 `mutation` 只表示 Event state 变化。若同一次业务交互还要建立 Relationship Contract、创建 / 调整 Card 等，这些由对应 PokeMan 业务 Runtime 另外执行，不进入 EventStateMutation。
 
 ### EventStateMutation
 
@@ -252,11 +280,20 @@ Relationship(A → B)
    └─ skills[]
 ```
 
-存在 `contract` 对象表示 A 已经作为主公与 B 建立正式契约；不存在表示没有契约。Contract 不建立独立 Realm State authority，而是 Relationship 内的一段长期状态。
+**Relationship 存在不等于 Contract 已成立。** Relationship 可以先记录 affinity / hostile / dynamic text，而 `contract` 仍为空。
+
+存在 `contract` 对象才表示 A 已经作为主公与 B 建立正式契约；不存在表示没有契约。Contract 不建立独立 Realm State authority，而是 Relationship 内的一段长期状态。
 
 `contract.integrity` 和 `contract.skills[]` 即使 B 当前不随身也继续存在。不同主公与同一个 Character 建立的 Contract 各自拥有独立 Integrity 与技能集。
 
-创建新 Contract 时，从目标 NPC Instance 当前 resolved battle data 初始化 `integrity / skills[]`，并将它们作为 Contract snapshot 保存。NPC Instance 后续变化不会自动同步已有 Contract；目标 NPC 某场本体 Battle 的当前 HP 也不直接等同于 Contract Integrity。
+创建新 Contract 时，从目标 NPC Instance 解析到基础 BattleActor，并初始化：
+
+```text
+contract.integrity = BattleActor.max_hp
+contract.skills[] = copy(BattleActor.skills[])
+```
+
+Contract Integrity 上限同样来自这份稳定基础 BattleActor 的 `max_hp`。目标 NPC 某场本体 Battle 的当前 HP 不直接等同于 Contract Integrity。
 
 MVP **不定义 `progression / training` 字段**。未来真正加入训练、等级、学习技能等玩法时，再扩展 Contract；这些未来方向不阻塞当前数据模型。
 
@@ -294,6 +331,8 @@ Card 不保存 Integrity、技能集、BattleActor / BattleSkill Content、人�
 
 **MVP 不建立独立 Card identity / `cardId`。** 当前 Card 只是一条随身编队事实，由 holder / servant / slot 表达。Card 的最终 Record/list 物理 shape 和必要唯一约束仍可在 schema 收口时决定，但不再额外设计 Card 自身 identity。
 
+中心里的“已管理角色卡”只是已成立 Relationship / Contract 的产品管理视图，不建立额外 `ManagedCard` Realm State authority。
+
 # Battle：直接复用 Battle package 的数据模型
 
 PokeMan 不定义第二套 Battle Actor / Skill 数据模型。静态战斗数据以 `@loomrealm-game/battle` 当前规范为准。
@@ -315,11 +354,6 @@ BattleSkill Content
 │  ├─ windup_ticks
 │  └─ recovery_ticks
 └─ effect
-
-PokeMan NPC Instance
-└─ resolved battle data
-   ├─ resolved actor / max values
-   └─ resolved skills[]
 
 Relationship(holder → servant)
 └─ contract
@@ -348,7 +382,7 @@ Card(holder=A, servant=B)
 +
 Relationship(A → B).contract.integrity / skills[]
 +
-Character B → BattleActor Content
+Character B → stable BattleActor Content
 ↓
 @loomrealm-game/battle Runtime Actor
 ```
@@ -357,15 +391,21 @@ Character B → BattleActor Content
 
 - 初始 Battle HP 来自 `Relationship.contract.integrity`；
 - 当前可用技能来自 `Relationship.contract.skills[]`；
+- max HP / Integrity 上限来自 servant Character 的稳定基础 `BattleActor.max_hp`；
 - BattleActor 继续提供静态表现 / actor definition 和 BattleSkill definitions；
 - Battle 结束后需要长期保留的 Integrity 写回同一 `Relationship.contract.integrity`。
 
 剧情 / Encounter 临时对手不需要制造 contract 或 Card：
 
 ```text
-Character / Story / Encounter battle sources
-↓
-NPC Instance resolved battle data
+持久 NPC Instance
+→ Character.battleActorRef
+→ base BattleActor
+
+transient NPC Instance
+→ Encounter / Story battleActorRef
+→ base BattleActor
+
 ↓
 @loomrealm-game/battle Runtime Actor
 ↓
@@ -388,15 +428,19 @@ PokeMan 对最终地图结果采用明确唯一性规则：
 
 `instanceId` 仍然作为 `@loomrealm-game/map` 的实例 identity 使用，但 PokeMan 不再用不同 `instanceId` 来允许同一 Map 出现多个相同 `npcId`。
 
-PokeMan 的 World-side NPC Instance 可以比 Map 的 `NPCPlacement` 丰富，并在 Runtime 中解析 battle data。最终投给 Map 的仍只有 Map 所需 placement：
+PokeMan 的 World-side NPC Instance 可以比 Map 的 `NPCPlacement` 丰富，但 MVP 不在 NPC Instance 上建立独立 Battle profile。Runtime 需要 Battle 数据时，只解析到基础 BattleActor：
 
 ```text
-PokeMan NPC Instance
+持久 NPC Instance
 ├─ instanceId
 ├─ npcId
-├─ characterId?
-├─ map / placement
-└─ resolved battle data
+├─ characterId
+└─ Character → stable BattleActor
+
+transient NPC Instance
+├─ instanceId
+├─ npcId
+└─ Encounter / Story source → BattleActor
 
 ↓ projection
 
@@ -420,7 +464,6 @@ Map Enter：
 → Story Resolver 合并当前来源
 → 校验最终 (mapId,npcId) 唯一
 → NPC Instance[]
-→ 需要时解析 battle data
 → NPCPlacement[]
 → @loomrealm-game/map
 ```
@@ -459,8 +502,8 @@ Card 自由对话可以组合以上信息和必要的当前剧情 context。LLM 
 | 系统菜单 | 菜单定义可本地持有 | 世界事实不放这里 | root / 游戏中菜单实例、光标 |
 | 消息 | — | — | 当前模态消息 |
 | 地图与玩家 | 地图、碰撞、传送、Story Index | 当前地图、玩家格与朝向、必要剧情事实 | Resolver、镜头、走步、输入、寻路 |
-| 人物 | 身份、描述、fixed AI text、BattleActor Content 等静态来源 | — | 当前解析出的 NPC Instance，包括需要时的 resolved battle data |
-| 关系 / 契约 | Contract 默认值的静态来源来自 Character / Encounter / Story 等 Content | Relationship：affinity、hostile、动态文本、`contract?.integrity / skills[]` | Contract 创建时从目标 NPC Instance resolved battle data 生成 snapshot |
+| 人物 | 身份、描述、fixed AI text、stable BattleActor ref | — | 当前解析出的 NPC Instance |
+| 关系 / 契约 | BattleActor.max_hp / skills[] 提供新 Contract 默认值 | Relationship：affinity、hostile、动态文本、`contract?.integrity / skills[]` | Contract 创建时从目标 NPC Instance 找到基础 BattleActor 并初始化 |
 | Card | Card / Battle 表现所需静态资源来自 Character / Visual / Battle Content | **当前随身 Card**：holder、servant、slot；无独立 cardId | Battle 中的 Card Manifestation |
 | 对话 | 固定 Dialogue：`speakerName?`、lines、Choice、可选 EventStateMutation ref | Mutation 执行时由 PokeMan Dialogue Subsystem 使用 Realm State | dialogue id / line index / pending choice；LLM working context |
 | 剧情 | Event、states、EventStateMutation、NPC placement、Dialogue ref、Story Index | **一个 EventStateList Record** | 当前解析 / mutation validation / 新列表计算 |
@@ -504,13 +547,14 @@ PokeMan session-level 业务运行时
 Battle Subsystem
   Frame 内拥有当前战斗工作集
   Card Battle 从 Relationship.contract 读取 integrity / skills[]
-  没有 Contract 的本体 / transient actor 使用 NPC Instance resolved battle data
+  本体 / transient actor 使用各自基础 BattleActor
   Battle 结束后由对应游戏业务把长期 Integrity 写回 Relationship.contract
 
 World
   解释 Map / Event / Relationship / Card / Encounter 等世界业务
-  构造 PokeMan NPC Instance 并解析业务所需 battle data
-  Contract 创建时从交互目标 NPC Instance resolved battle data 生成长期 snapshot
+  构造 PokeMan NPC Instance
+  需要 Battle 数据时解析当前 NPC Instance 对应的基础 BattleActor
+  Contract 创建时用该 BattleActor.max_hp / skills[] 初始化长期 Contract
 ```
 
 Content 永远只是定义数据，不执行 Mutation，也不是 State authority。
@@ -529,6 +573,8 @@ Mutation 的两条触发路径保持分离：
 ```
 
 `session-event` 表达“发生了什么”，不需要携带 EventStateMutation identity；EventStateMutation 表达“Event state 怎么改”，不拥有 trigger。Runtime 也不扫描全部 EventStateMutation 自动执行。
+
+如果某个业务事实同时意味着“剧情推进”和“建立 Contract”，EventStateMutation 仍然只负责 EventStateList；Contract 创建由对应业务 Runtime 单独提交。两者的 commit ordering / failure handling 属于 Runtime 设计，不在当前数据模型阶段冻结。
 
 # Encounter persistence 边界
 
