@@ -188,7 +188,7 @@ entry absent → current state = null
 ## Relationship / Contract
 
 ```text
-pokeman.Relationship / <from>/<to>
+pokeman.Relationship / <from>:<to>
 → {
     affinity,
     hostile,
@@ -199,6 +199,8 @@ pokeman.Relationship / <from>/<to>
     }
   }
 ```
+
+进入 Relationship / CarriedCards key 的 Character business id 使用 `[a-z0-9][a-z0-9._-]{0,119}`；Relationship 以 `:` 组合两个 Character id，最大 241 bytes，满足 Realm State v1 key 限制。
 
 `A → B` 与 `B → A` 独立。
 
