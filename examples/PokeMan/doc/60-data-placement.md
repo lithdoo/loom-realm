@@ -110,6 +110,8 @@ Mutation identity 由 Content key / reference 提供。
 
 EventStateMutation 只读写 **Event current state**，不扩展为 Relationship / Card / Battle 等任意 Realm State mutation DSL。
 
+Mutation **不声明自己的 trigger**。固定 Dialogue 可以直接保存 `mutation` reference；非 Dialogue 业务不要求在 Battle / Map / Encounter 等 Content 中增加 `mutationRef`。这些业务先在 Runtime 表达“发生了什么”，再由 PokeMan 的 session-level 业务运行时决定是否执行某个 EventStateMutation。
+
 # Realm State：长期业务事实
 
 当前确认的 Realm State 主要包括：
@@ -343,13 +345,13 @@ Map Enter：
 → 对当前 Map 相关 Event 查询 stateId
 → 缺 entry / null 的 Event 跳过
 → Story Resolver 合并当前来源
-→ 校验最终 (mapId, npcId) 唯一
+→ 校验最终 (mapId,npcId) 唯一
 → NPC Instance[]
 → NPCPlacement[]
 → @loomrealm-game/map
 ```
 
-Builder 应检查缺失引用、非法 placement、派生索引一致性、安装初始化 EventStateList，以及单个 Event state 内可静态判断的重复 `(mapId, npcId)`。不同 Event 之间重复引用同一个 `npcId` 本身不报错；Runtime 合并当前来源后，如果最终同一 Map 出现重复 `npcId`，Story Resolver 必须确定性报冲突。
+Builder 应检查缺失引用、非法 placement、派生索引一致性、安装初始化 EventStateList，以及单个 Event state 内可静态判断的重复 `(mapId,npcId)`。不同 Event 之间重复引用同一个 `npcId` 本身不报错；Runtime 合并当前来源后，如果最终同一 Map 出现重复 `npcId`，Story Resolver 必须确定性报冲突。
 
 # AI 自由对话的数据边界
 
@@ -413,6 +415,17 @@ PokeMan Dialogue Subsystem
   只负责当前 Conversation interaction / presentation
   不理解 Event / Mutation / Realm State 业务语义
 
+Battle / World / Encounter 等业务 Subsystem
+  负责自己的业务执行
+  发生对剧情有意义的事实时，通过 session-event 表达“发生了什么”
+  不需要因为剧情推进在各自 Content 中增加 EventStateMutation ref
+
+PokeMan session-level 业务运行时
+  捕获相关 session-event
+  根据事件 payload、当前业务上下文和 Event state 判断是否需要推进剧情
+  如需要，选择对应 EventStateMutation
+  读取 / 校验 / commit EventStateList
+
 Battle Subsystem
   Frame 内拥有当前战斗工作集
   Battle 结束后由对应游戏业务把需要持久的结果写回 Relationship 等 Realm State
@@ -423,7 +436,20 @@ World
 
 Content 永远只是定义数据，不执行 Mutation，也不是 State authority。
 
-Runtime 不扫描全部 EventStateMutation 自动执行；Mutation 必须被明确 Dialogue 或其他业务结果引用。
+Mutation 的两条触发路径保持分离：
+
+```text
+固定 Dialogue
+→ Dialogue Content.mutation
+→ PokeMan Dialogue Subsystem 执行
+
+其他业务事实
+→ session-event
+→ PokeMan session-level 业务运行时判断
+→ 选择并执行 EventStateMutation
+```
+
+`session-event` 表达“发生了什么”，不需要携带 EventStateMutation identity；EventStateMutation 表达“Event state 怎么改”，不拥有 trigger。Runtime 也不扫描全部 EventStateMutation 自动执行。
 
 # 存档边界
 
