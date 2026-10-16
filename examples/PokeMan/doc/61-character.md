@@ -235,16 +235,24 @@ Relationship 是 Realm State 中两个 Character 之间的有向长期关系。
 
 ```text
 namespace = pokeman.Relationship
-key       = <fromCharacterId>/<toCharacterId>
+key       = <fromCharacterId>:<toCharacterId>
 ```
 
 例如：
 
 ```text
-pokeman.Relationship / player/rival
+pokeman.Relationship / player:rival
 ```
 
 表示 `player → rival`。
+
+会进入 Relationship / CarriedCards Record key 的 Character business id 固定为：
+
+```text
+[a-z0-9][a-z0-9._-]{0,119}
+```
+
+`:` 不属于 Character id，因此 `A:B` 可无歧义拆回两个 Character identity；最大复合 key 为 241 bytes，满足 Realm State v1 的 256-byte key 上限。
 
 value 不重复保存 from / to：
 
@@ -271,7 +279,7 @@ RelationshipValue
 存在：
 
 ```text
-pokeman.Relationship / A/B
+pokeman.Relationship / A:B
 value.contract
 ```
 
@@ -388,7 +396,7 @@ AI character text
 pokeman.CarriedCards / A
 → servant B
 +
-pokeman.Relationship / A/B
+pokeman.Relationship / A:B
 → contract.integrity / skills[]
 +
 struct.Character / B
@@ -470,7 +478,7 @@ Builder 应检查：
 - `defaultScenes` npcId 指向存在的 `struct.NPC`；
 - `interaction.dialogue` 指向存在的 `struct.Dialogue`；
 - placement 坐标 / direction / pattern 合法；
-- Realm State Character ids 满足稳定 token 规则并对应 Character identity；
+- 进入 Relationship / CarriedCards key 的 Character identity 满足 `[a-z0-9][a-z0-9._-]{0,119}`；
 - CarriedCards 的 slot / servant 唯一并满足对应 Contract invariant；
 - StoryIndex 与 Character / Event 源 Content 一致。
 
