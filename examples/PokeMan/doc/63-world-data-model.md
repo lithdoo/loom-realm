@@ -1,6 +1,6 @@
 # 世界数据模型
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文汇总当前已经确认的 Character、NPC、Story、Dialogue、EventStateMutation、Encounter、Relationship、Contract、Card 与 Battle 数据职责。Content 的 FSDB 物理编码以 [Content FSDB 物理模型](./66-content-fsdb.md) 为准。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文汇总当前 Character、NPC、Story、Dialogue、Encounter、Relationship、Contract、Card 与 Battle 数据职责。Realm State 物理结构以 [67-realm-state-records.md](./67-realm-state-records.md) 为准；Content FSDB 物理结构以 [68-content-fsdb.md](./68-content-fsdb.md) 为准。
 
 相关文档：
 
@@ -9,15 +9,17 @@
 - [事件](./62-event.md)
 - [固定对话](./64-dialogue.md)
 - [数据模型图](./65-data-model-diagram.md)
-- [Content FSDB 物理模型](./66-content-fsdb.md)
+- [数据 Authority 清单](./66-data-authority.md)
+- [Realm State Record 设计](./67-realm-state-records.md)
+- [Content FSDB 物理模型](./68-content-fsdb.md)
 
 # 当前边界
 
 1. **Character identity 与 Map 表现分离。** Character 不是 NPC；NPC Instance 也不要求对应持久 Character。
-2. **PokeMan 自有 struct record identity 直接使用 FSDB key。** Character / Dialogue / Event / EventStateMutation 不再在 source value 中重复保存 `id`。
+2. **PokeMan 自有 struct record identity 直接使用 FSDB key。** Character / Dialogue / Event / EventStateMutation 不在 source value 中重复保存 `id`。
 3. **Relationship 保存有向长期关系；Contract 是 Relationship 内可选长期契约状态。** Relationship 可以存在而 Contract 不存在。
-4. **Card 与 Relationship / Contract 分离。** Card 只表示当前随身，不保存 Integrity / skills；MVP 不建立 `cardId`。
-5. **Battle Runtime 独立。** 当前 Battle live state 只由 `@loomrealm-game/battle` Simulation authority 拥有。
+4. **Card 与 Relationship / Contract 分离。** Card 只表示当前随身；MVP 不建立 `cardId`。
+5. **Battle Runtime 独立。** Battle live state 只由 `@loomrealm-game/battle` Simulation authority 拥有。
 6. **PokeMan 不重复定义 BattleActor / BattleSkill。** Character / Encounter / Story 只保存基础 BattleActor ContentRef。
 7. **持久 Character 稳定引用一个基础 BattleActor。** 不因不同 NPC Definition / Map / Event 产生 BattleActor variant。
 8. **Contract 从基础 BattleActor 初始化。** `integrity = max_hp`，`skills[] = copy(BattleActor.skills[])`，Integrity 上限也来自 `max_hp`。
@@ -30,7 +32,7 @@
 15. **Transient Dialogue speaker 不创建 Character。** `speakerName` 只是 presentation fallback。
 16. **最终 Map scene 每张图 `npcId` 唯一。** 不同 Map 可复用相同 npcId。
 17. **Encounter re-entry / defeated persistence 是 Runtime policy。** 当前不预设 Encounter persistence State。
-18. **live player position 属于 Map Runtime。** Realm State 只有产品明确需要时才保存 durable resume/checkpoint location。
+18. **live player position 属于 Map Runtime。** `pokeman.PlayerWorld/current` 只保存 durable resume/checkpoint location。
 
 # FSDB Content 总体结构
 
@@ -46,7 +48,7 @@
 └─ [resource]Graphics/
 ```
 
-其中：
+核心 identities：
 
 ```text
 struct.Character/<characterId>
@@ -60,14 +62,7 @@ struct.StoryIndex/current
 
 PokeMan 自有 `struct.*` source value 不重复保存 record identity。
 
-固定目标 table 的引用只保存 key；BattleActor 这类 package namespace 尚未最终冻结的引用保存：
-
-```json
-{
-  "namespace": "...",
-  "key": "..."
-}
-```
+固定目标 table 的引用只保存 key；BattleActor 等外部 package serialization namespace 尚未冻结的对象使用 `{namespace,key}` ContentRef。
 
 # Content
 
@@ -89,11 +84,9 @@ struct.Character/<characterId>
 
 Character 不保存 affinity、hostile、Contract、Card、Battle HP 或 Runtime instanceId。
 
-`defaultScenes` 只在当前 active Event 没有提到这个 Character 时作为 fallback。
+`defaultScenes` 只在当前 active Event 没有提到该 Character 时作为 fallback。
 
 ## NPC
-
-Map package 已有窄 contract：
 
 ```text
 struct.NPC/<npcId>
@@ -174,7 +167,7 @@ struct.Event/<eventId>
                └─ <npcId>
                   ├─ character?
                   ├─ placement XOR absent:true
-                  ├─ battleActor?        # only transient Story NPC
+                  ├─ battleActor?        # transient Story NPC only
                   └─ interaction?
                      └─ dialogue
 ```
@@ -217,13 +210,6 @@ to exists, must be non-empty
 
 多个 `from` 是 AND；OR 用多条 Mutation。
 
-`null` 是 Event 空状态语义：
-
-```text
-from null → require no EventStateList entry
-to null   → remove EventStateList entry
-```
-
 Mutation 不保存 trigger / action / command。
 
 ## Encounter
@@ -256,14 +242,22 @@ StoryIndex 是 Builder-generated read model，不是业务 authority，可由 Ch
 
 # Realm State
 
+## durable PlayerWorld checkpoint
+
+```text
+pokeman.PlayerWorld / current
+→ { mapId, x, y, direction }
+```
+
+`mapId` 是正 safe integer。
+
+这条 Record 只表示 durable resume/checkpoint location；当前 live map / position / direction / motion 由 Map Runtime authority 拥有。
+
 ## EventStateList
 
 ```text
-EventStateList
-[
-  { eventId, stateId },
-  ...
-]
+pokeman.EventStateList / current
+→ [{ eventId, stateId }]
 ```
 
 ```text
@@ -271,53 +265,40 @@ entry exists → current = stateId
 entry absent → current = null
 ```
 
-只存非空 state。
+列表只保存非空 state。
 
 ## Relationship / Contract
 
 ```text
-Relationship
-├─ fromCharacterId
-├─ toCharacterId
-├─ affinity
-├─ hostile
-├─ dynamic relationship text
-└─ contract?
-   ├─ integrity
-   └─ skills[]
+pokeman.Relationship / <from>/<to>
+→ {
+    affinity,
+    hostile,
+    relationshipText,
+    contract?: {
+      integrity,
+      skills[]
+    }
+  }
 ```
 
 `A → B` 与 `B → A` 独立。
 
-Relationship 可以存在而 Contract 不存在；存在 `contract` 对象才表示正式契约成立。
+Relationship Record 可以存在而 `contract` 缺失。存在 `contract` 才表示正式契约成立。
 
-Contract 不建立独立 Realm State authority。
-
-## Card
+## CarriedCards
 
 ```text
-Card
-├─ holderCharacterId
-├─ servantCharacterId
-└─ slot
+pokeman.CarriedCards / <holder>
+→ [{ slot, servantCharacterId }]
 ```
 
-Card 只表示当前随身。
+固定：同一 holder 内 slot 唯一、servant 唯一、按 slot 升序；Card 不保存 Integrity / skills / static Battle data。
 
 ```text
-Contract exists + Card absent
-→ 契约仍存在，只是当前不随身
+CarriedCards(A) contains B
+→ Relationship(A → B).contract exists
 ```
-
-Card 不保存 Integrity、skills 或静态 Battle / Character 数据。
-
-MVP 无 `cardId`。
-
-## Resume location
-
-live map / position / direction 的 authority 是 Map Runtime。
-
-如果 Save / Load 需要恢复位置，Realm State 可以保存一个 durable resume/checkpoint value；它不是第二份 live pose authority。
 
 # Runtime Memory
 
@@ -339,6 +320,16 @@ Map NPCPlacement[]
 ```
 
 最终每张 Map 要求 `npcId` 唯一。
+
+Map Runtime live authority：
+
+```text
+current mapId
+player x / y
+direction
+motion
+scene
+```
 
 ## Dialogue
 
@@ -406,7 +397,7 @@ PokeMan Dialogue Subsystem
 ├─ Choice target traversal
 └─ terminal mutation?
    → struct.EventStateMutation
-   → EventStateList commit
+   → pokeman.EventStateList/current commit
 ```
 
 如果同一业务交互还建立 Contract，由独立 business Runtime 创建 `Relationship.contract`。
@@ -414,11 +405,14 @@ PokeMan Dialogue Subsystem
 ## Card Battle
 
 ```text
-Card(holder=A, servant=B)
+pokeman.CarriedCards / A
+→ servant B
 +
-Relationship(A→B).contract.integrity / skills[]
+pokeman.Relationship / A/B
+→ contract.integrity / skills[]
 +
-Character B.battleActor
+struct.Character / B
+→ base BattleActor
 ↓
 Battle Runtime Actor
 ↓
@@ -430,16 +424,22 @@ long-lived integrity result
 
 # 当前真正未决的数据问题
 
-1. Relationship / Contract Realm State 最终 physical encoding。
-2. Card Realm State 最终 list/record layout 与唯一约束。
-3. EventStateList Realm State 最终 namespace / key。
-4. Battle package 正式 BattleActor / BattleSkill serialization namespace / key/reference encoding。
-5. Encounter generation 的概率、数量、seed 等 Content 参数。
-6. StoryIndex 最终为了 Resolver 查询保留哪些派生字段。
+Realm State 核心物理结构已由 `67` 冻结；PokeMan Content 主体 FSDB schema 已由 `68` 收口。
 
-以下不再是 Content physical-schema gap：
+当前主要开放项：
+
+1. Battle package 正式 BattleActor / BattleSkill serialization namespace / key/reference encoding。
+2. Encounter generation 的概率、数量、权重、spawn selection、seed 等参数。
+3. StoryIndex 最终为 Resolver 查询保留哪些派生字段。
+4. 本地化与 richer presentation metadata。
+
+以下不再是 data physical-schema gap：
 
 ```text
+Relationship / Contract Record encoding
+CarriedCards layout / uniqueness
+EventStateList namespace / key
+PlayerWorld mapId type
 Character / Dialogue / Event / Mutation / Encounter table identity
 PokeMan struct record 是否重复保存 id
 Event state/map/npc identity 是否重复写 value
