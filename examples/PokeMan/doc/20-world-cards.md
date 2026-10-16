@@ -104,12 +104,13 @@ Relationship(A → B)
 
 - `integrity` 是这份契约的 Battle Manifestation 长期完整度；
 - `skills[]` 是这份契约当前实际拥有的 BattleSkill ids；
-- Contract 建立时，从**目标 NPC Instance 当前 resolved battle data** 初始化 `integrity / skills[]`；
-- NPC Instance 的 resolved battle data 可以来自 Character / BattleActor / Encounter 等静态来源的组合与解析，但 Contract 创建面对的是这次世界中具体目标实例，而不是直接重新读取一个固定 Character baseline；
-- Contract 创建完成后，这些值成为该 Contract 的长期 snapshot；NPC Instance 后续变化不会自动改写已有 Contract；
-- 后续真的加入技能学习时，可以改变这份 Contract 的 `skills[]`。
+- 每个持久 Character 稳定引用一个基础 BattleActor Content；同一 Character 的不同 NPC Instance 不改变这个 BattleActor identity；
+- transient Encounter / Story NPC 则由自身静态来源指定基础 BattleActor；
+- 建立 Contract 时，Runtime 先从当前目标 NPC Instance 找到它的基础 BattleActor，然后初始化：`contract.integrity = BattleActor.max_hp`、`contract.skills[] = copy(BattleActor.skills[])`；
+- MVP 的 Contract Integrity 上限同样来自这份基础 BattleActor 的 `max_hp`，不额外保存第二份 max；
+- Contract 创建完成后，`integrity / skills[]` 成为这份 Contract 的长期状态；后续真的加入技能学习时，可以改变 `skills[]`。
 
-Contract Integrity 的初始化来源是 NPC Instance 的 resolved battle defaults，而不是“这名 NPC 刚打完一场 Battle 后剩余多少本体 HP”。本体 Battle HP 与 Contract Integrity 仍是不同产品语义。
+Contract Integrity 的初始化不是“这名 NPC 刚打完一场本体 Battle 后剩余多少 HP”。本体 Battle HP 与 Contract Integrity 是不同产品语义。
 
 **MVP 不定义独立 `progression / training` State。** 训练、等级、技能成长等仍是长期产品方向，但等真实玩法出现以后再扩展 Contract，不提前冻结成长 schema。
 
@@ -135,13 +136,17 @@ Relationship(B → rival).contract
 
 # 角色卡管理与“口袋”
 
-## 契约关系与随身 Card 是不同事实
+## Relationship、Contract 与随身 Card 是不同事实
 
 ```text
-Relationship / Contract
-= 玩家与该角色的正式关系已经成立
-= Relationship 保存 affinity / hostile / dynamic text
-= Contract 保存这份契约长期的 integrity / skills[]
+Relationship
+= A → B 当前持续存在的有向关系
+= 可以存在而 contract 为空
+= 保存 affinity / hostile / dynamic text
+
+Relationship.contract exists
+= A 已经以主公身份与 B 建立正式契约
+= 保存这份契约长期的 integrity / skills[]
 
 Card / 随身角色卡
 = 这份已成立契约当前被编入本次旅行的随身队伍
@@ -212,7 +217,7 @@ Battle 编队
 - 查看所有已成立 Relationship / Contract；
 - 核实对应人物、能力、技能、Relationship、Integrity 等资料；
 - 调整当前随身 Card；
-- 修复 / 恢复 Contract 的 Battle Integrity；
+- 修复 / 恢复 Contract 的 Battle Integrity，MVP 修满目标来自对应基础 BattleActor 的 `max_hp`；
 - 后续根据需要承担训练管理、成长记录等未来功能。
 
 PokeMan **不提供类似 Pokédex 的随身全角色完整数据库**。旅途中可以显示当前随身卡必要的即时信息，但要查看全部已契约关系和完整属性，需要回到中心管理器核实。
