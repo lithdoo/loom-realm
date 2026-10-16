@@ -229,9 +229,11 @@ Mutation 不保存 trigger / action / command。`to` 非空就是当前结构约
 
 ```text
 struct.Encounter/<decimal-mapId>
+├─ count
 ├─ spawnPoints[]
 └─ templates
    └─ <templateId>
+      ├─ weight
       ├─ npc → NPC key
       ├─ engagement
       ├─ dialogue? → Dialogue key
@@ -240,7 +242,21 @@ struct.Encounter/<decimal-mapId>
 
 record key 就是 mapId，不重复保存 mapId 字段。
 
-当前真正尚未冻结的是 author-authored generation distribution：生成数量如何表达，以及多个 template 的相对选择权重/概率采用哪种最小表示。
+固定约束：
+
+```text
+count
+→ positive safe integer
+→ count <= spawnPoints.length
+
+weight
+→ positive safe integer
+
+spawnPoints
+→ (x,y) 在同一 Encounter record 内不重复
+```
+
+`count` 表示每次生成几个 Encounter NPC；`weight` 表示 template 之间的相对选择权重。具体随机抽取与 spawn selection 算法属于 Runtime。
 
 以下不作为当前 Content schema gap：
 
@@ -323,6 +339,26 @@ pokeman.CarriedCards / <holder>
 ```text
 CarriedCards(A) contains B
 → Relationship(A → B).contract exists
+```
+
+## Record-level absence
+
+```text
+PlayerWorld/current absent
+→ invalid PokeMan State
+→ baseline 必须提供
+
+EventStateList/current absent
+→ invalid PokeMan State
+→ baseline 必须提供
+→ 没有 active Event 用 []
+
+Relationship/A:B absent
+→ 没有持久化这段 Relationship
+
+CarriedCards/A absent
+→ 业务值 []
+→ 与 materialized [] 在当前编队业务上等价
 ```
 
 # Runtime Memory
@@ -447,12 +483,9 @@ long-lived integrity result
 → Relationship.contract.integrity
 ```
 
-# 当前真正未决的数据问题
+# 当前数据结构状态
 
-经过一致性复核，目前真正还需要继续设计的核心数据问题只有：
-
-1. **Encounter authored generation 数据**：生成数量与 template 相对选择分布的最小表示。
-2. **Realm State Record-level absence 语义**：`PlayerWorld/current`、`EventStateList/current`、`CarriedCards/<holder>` 从未 materialize 时的 PokeMan 业务解释。
+经过一致性复核与最后两项冻结，当前 MVP Realm State 核心四类 Record 和 Content 核心业务 shape 已经收口；没有剩余的 MVP 核心业务 data physical-schema gap。
 
 其余以下事项不再当作 MVP 核心 data gap：
 
@@ -461,10 +494,12 @@ BattleSkill identity / Contract.skills[] encoding
 Dialogue choices XOR mutation
 Event absent 的第二套结构
 EventStateMutation semantic no-op proof
+Encounter generation count / template weight
+Realm State Record-level absence
 StoryIndex 最终派生字段
 本地化 / richer presentation metadata
 Encounter seed / respawn / persistence
 FSDB .info.meta 文件编写本身
 ```
 
-`.info.meta` / exact schema 文件仍要在实现阶段写出来，但那是把已冻结 shape 落成可执行 schema 的工作，不代表需要再发明一套业务数据模型。
+`.info.meta` / exact schema、Builder validator 和 Runtime 实现仍然要写，但它们是把已冻结模型落地，不代表需要继续发明业务数据结构。
