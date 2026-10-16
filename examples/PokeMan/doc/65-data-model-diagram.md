@@ -347,6 +347,36 @@ Choice
 
 Event State NPC interaction 只保存入口 `dialogueId`。
 
+## 非 Dialogue 业务的 Mutation 路径
+
+```mermaid
+flowchart LR
+    B[Battle / World / Encounter Runtime] --> SE[session-event<br/>发生了什么]
+    SE --> G[PokeMan session-level<br/>业务运行时]
+    G --> Q{这件事是否推进剧情?}
+    Q -->|否| END[不执行 Mutation]
+    Q -->|是| M[选择 EventStateMutation]
+    M --> READ[读取 EventStateList]
+    READ --> CHECK[校验 from]
+    CHECK --> BUILD[生成新 EventStateList]
+    BUILD --> COMMIT[commit EventStateList]
+```
+
+这里不要求 Battle / Map / Encounter Content 保存 `mutationRef`：
+
+```text
+session-event
+= 发生了什么
+
+PokeMan session-level 业务运行时
+= 这件事对剧情意味着什么
+
+EventStateMutation
+= Event state 怎么改
+```
+
+`session-event` 不需要携带 Mutation identity；Mutation 也不拥有 trigger。Runtime 不扫描全部 Mutation 自动触发。
+
 ## Mutation 的多 Event / 空状态语义
 
 ```mermaid
@@ -380,7 +410,7 @@ to = null
 
 Mutation 是“一组 Event state/null 前置条件 → 一组列表变更”，不是一组必须一一配对的 `A → B` 边。
 
-需要 OR 时不在 Mutation 内增加 `or / anyOf`，而是为每个分支定义独立 Mutation，并由对应业务分支引用对应 Mutation。
+需要 OR 时不在 Mutation 内增加 `or / anyOf`，而是为每个分支定义独立 Mutation，并由具体业务路径选择对应 Mutation。
 
 EventStateMutation 只拥有 Event current state，不修改 Relationship / Contract / Card / Battle / player position 等其他 Realm State。
 
@@ -465,7 +495,7 @@ Character defaults
 - 仅对完全未被 active Event 提到的 Character 生效
 
 Final resolved Map
-- (mapId, npcId) 必须唯一
+- (mapId,npcId) 必须唯一
 ```
 
 `instanceId` 继续满足 `@loomrealm-game/map` 的实例 contract，但不能用不同 `instanceId` 绕过 PokeMan 的同图 `npcId` 唯一约束。
@@ -550,8 +580,13 @@ absent
 Dialogue / Mutation Content
 = 数据，不执行
 
-PokeMan Dialogue Subsystem
-= Mutation executor
+固定 Dialogue Mutation
+= Dialogue Content.mutation
+→ PokeMan Dialogue Subsystem 执行
+
+非 Dialogue 剧情推进
+= session-event 表达业务事实
+→ PokeMan session-level 业务运行时选择并执行 Mutation
 
 Relationship
 = 长期有向关系 + 契约级长期状态
@@ -563,6 +598,7 @@ EventStateMutation
 = 只改变 EventStateList
 = from 全 AND
 = null 表示无 entry
+= 不拥有 trigger
 = 全部 to 通过一次列表 Record replacement 原子提交
 
 BattleActor / BattleSkill Content
@@ -583,7 +619,6 @@ Battle Runtime Actor
 - Event / EventStateMutation 的最终 Content namespace / key；
 - EventStateList Realm State Record 的最终 namespace / key 名字；
 - Event placement / `instanceId` / `absent` 的最终 JSON shape；
-- 非 Dialogue Subsystem 如何在各自 Content 中引用 Mutation；
 - transient Encounter NPC 的固定 Dialogue speaker identity；
 - Encounter re-entry 与生成结果持久化细节。
 
