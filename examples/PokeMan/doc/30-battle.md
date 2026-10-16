@@ -133,31 +133,62 @@ Integrity 仍然是 48
 
 二者共用 Battle 机制，但产品语义不同。
 
+## Contract 建立时的 Battle 默认值来源
+
+Contract 不是直接从 Character 的某个固定 BattleActor baseline 机械复制出来，而是在**与当前世界中的目标 NPC Instance 建立契约时**，从这个实例已经解析出来的 battle data 初始化。
+
+概念链路：
+
+```text
+Character / Encounter / Story battle sources
+↓
+当前目标 NPC Instance
+↓
+resolved battle data
+├─ resolved BattleActor / max values
+└─ resolved skills[]
+↓ contract creation snapshot
+Relationship.contract
+├─ integrity
+└─ skills[]
+```
+
+因此一个 Character 在不同剧情阶段、不同 NPC 表现或不同业务来源下，即使解析到不同 battle defaults，Contract 也可以准确反映**建立契约当时那个具体 NPC Instance** 的状态。
+
+这里有两个重要边界：
+
+```text
+NPC Instance resolved battle data
+= Contract 创建时的初始化来源
+
+Relationship.contract
+= Contract 创建后的长期 authority
+```
+
+Contract 创建完成以后，NPC Instance 后续 battle data 的变化不会自动同步到已有 Contract；后续 Contract 技能变化直接修改 `contract.skills[]`。
+
+`contract.integrity` 也来自 NPC Instance 的 resolved battle defaults，而不是目标 NPC 刚结束某场本体 Battle 后剩余的当前 HP。本体 Battle HP 与 Contract Integrity 仍是不同语义。
+
+NPC Instance 最终怎样引用 / 解析 BattleActor，以及 resolved battle data 的精确字段，属于后续 schema 收口；这里先固定**初始化来源是 NPC Instance，而不是直接 Character baseline**。
+
 ## MVP 技能来源
 
 PokeMan 不定义平行 Skill schema，技能定义仍然来自 `@loomrealm-game/battle` 的 BattleSkill Content。
 
-当前 BattleActor 静态 Content 自带：
+对于没有 Contract 的本体 / transient actor，Battle 使用该 NPC Instance 当前 resolved battle data 中的技能；如果没有额外覆盖，这些技能通常来自其 BattleActor Content 的 `skills[]`。
+
+对于 Contract：
 
 ```text
-BattleActor.skills[]
-```
-
-MVP 规则：
-
-```text
-没有 Contract 的本体 / transient actor
-→ 直接使用 BattleActor.skills[]
-
 建立新 Contract
-→ copy BattleActor.skills[]
+→ snapshot 当前目标 NPC Instance resolved skills[]
 → Relationship.contract.skills[]
 
 Contract 对应的 Card Battle
 → 当前可用技能来自 Relationship.contract.skills[]
 ```
 
-也就是说，`BattleActor.skills[]` 是人物的基础 / 默认技能 baseline，而 `Relationship.contract.skills[]` 是**这份具体契约当前实际拥有的技能集**。
+也就是说，`BattleActor.skills[]` 仍然是重要静态定义来源，但 **Contract 的直接初始化来源是目标 NPC Instance 的 resolved battle data**。
 
 MVP 不增加：
 
