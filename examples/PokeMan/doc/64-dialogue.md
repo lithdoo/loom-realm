@@ -168,7 +168,7 @@ professor-intro
 → Choice
    ├─ [接受] → professor-contract-accept
    │              ├─ lines
-   │              └─ mutation: professor-contract-accepted
+   │              └─ mutation: professor-intro-progressed
    │
    └─ [拒绝] → professor-contract-refuse
                   └─ lines
@@ -193,7 +193,7 @@ id: professor-contract-accept
 lines:
   - speaker: professor
     text: "那么，契约成立。"
-mutation: professor-contract-accepted
+mutation: professor-intro-progressed
 ```
 
 ```yaml
@@ -212,6 +212,23 @@ Choice
 无 Choice Dialogue
 = 可以在完成时声明一个 EventStateMutation ref
 ```
+
+这里的 `mutation` **只表示 Event state 的推进**。即使台词内容是“契约成立”，EventStateMutation 也不会创建 `Relationship.contract`：
+
+```text
+terminal Dialogue 完成
+├─ Dialogue.mutation
+│  → PokeMan Dialogue Subsystem
+│  → 只更新 EventStateList
+│
+└─ 同一业务交互需要建立 Contract 时
+   → 对应 PokeMan business Runtime 单独创建 Relationship.contract
+   → 从当前目标 NPC Instance 解析基础 BattleActor
+   → integrity = BattleActor.max_hp
+   → skills[] = copy(BattleActor.skills[])
+```
+
+两条业务写入的具体先后顺序、失败恢复与跨 State 协调属于 Runtime 设计，不通过给 EventStateMutation 增加通用 action 字段来解决。
 
 ## 分支与循环
 
@@ -244,6 +261,7 @@ Dialogue Content
 
 EventStateMutation Content
 = 保存 from / to
+= 只拥有 Event state
 
 PokeMan Dialogue Subsystem
 = Runtime executor
@@ -428,6 +446,7 @@ choices 与 mutation 互斥
 Choice = 下一段 Dialogue 的引用
 无 Choice Dialogue = 可以声明 EventStateMutation ref
 PokeMan Dialogue Subsystem = Mutation executor
+EventStateMutation = 只改变 Event state，不创建 Contract / Card
 EventStateList = Event current state authority
 Completion = terminalDialogueId
 ```
