@@ -118,6 +118,22 @@ Encounter
 StoryIndex
 ```
 
+## Character key 的额外业务约束
+
+FSDB 自身允许更宽的合法文件名，但 `struct.Character` key 还会进入 `pokeman.Relationship` 与 `pokeman.CarriedCards` 的 Realm State Record key。为满足 Realm State v1 的 key grammar 与 256-byte 长度上限，PokeMan Character key 额外固定为：
+
+```text
+[a-z0-9][a-z0-9._-]{0,119}
+```
+
+即 1–120 个 ASCII 字符。`:` 不允许出现在 Character key 中，因此 Relationship 可以稳定编码为：
+
+```text
+<fromCharacterId>:<toCharacterId>
+```
+
+最大长度为 241 bytes。
+
 ## 固定目标 table：只保存 key
 
 如果字段 schema 已唯一确定目标 namespace，则只保存 key：
@@ -239,6 +255,7 @@ Character
 规则：
 
 - Character identity 来自 FSDB key；
+- Character key 必须满足 `[a-z0-9][a-z0-9._-]{0,119}`；
 - `battleActor` 是持久 Character 的稳定基础 BattleActor reference；
 - `defaultScenes` 是 Event 未接管该 Character 时的 fallback source；
 - `<mapId>` 是 Map package 正 safe integer `mapId` 的十进制字符串形式；
@@ -756,6 +773,7 @@ Realm State 的 `pokeman.PlayerWorld/current` 只作为 durable resume/checkpoin
 除业务文档已有语义检查外，Builder 至少应检查：
 
 - PokeMan 自有 struct identity 使用 FSDB key，source 不接受重复 `id` 字段；
+- `struct.Character` key 满足 `[a-z0-9][a-z0-9._-]{0,119}`；
 - 固定-target key 引用存在于目标 table；
 - Character `battleActor` ContentRef 可解析；
 - Character `defaultScenes` map key 是合法正 safe integer；
@@ -783,7 +801,7 @@ pokeman.PlayerWorld / current
 pokeman.EventStateList / current
 → Event current state list
 
-pokeman.Relationship / <from>/<to>
+pokeman.Relationship / <from>:<to>
 → affinity / hostile / relationshipText / contract?
 
 pokeman.CarriedCards / <holder>
