@@ -58,7 +58,7 @@ Persistent Character 和剧情人物不要求通过随机生成产生，它们�
 Visible Encounter Entity
 ├─ ordinary / transient
 │    → 本次或本区域使用
-│    → 有本次 Dialogue / Battle identity
+│    → 有本次 Dialogue / Battle 表现
 │    → 不要求永久 affinity / contract / story
 │
 └─ persistent character
@@ -70,6 +70,14 @@ Visible Encounter Entity
 ```
 
 普通混混、一般帮派成员、普通挑战者可以是 transient；宿敌、重要从者、功能 NPC、剧情人物和重要主公更适合作为 persistent character。
+
+Transient Encounter NPC 不需要为了固定 Dialogue 创建一个“通用 Character”。如果一段固定 Dialogue 只需要显示这类临时 NPC 的说话者名字，可以直接使用 Dialogue Content 的默认 `speakerName`：
+
+```text
+Dialogue.speakerName = "路霸"
+```
+
+这只是说话者显示名，不是 Character identity，也不建立 Relationship / Contract / Event Character 等长期关联。同一段 Dialogue 可以被多个不同 transient NPC Instance 复用，而不会把它们解释成同一个人。
 
 ## Battle 对手不等于从者
 
