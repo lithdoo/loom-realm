@@ -109,8 +109,8 @@ key       = current
 ```text
 PlayerWorldValue
 ├─ mapId: positive safe integer
-├─ x: non-negative integer
-├─ y: non-negative integer
+├─ x: non-negative safe integer
+├─ y: non-negative safe integer
 └─ direction: 2 | 4 | 6 | 8
 ```
 
@@ -354,6 +354,8 @@ max contract.integrity = BattleActor.max_hp
 skills: string[]
 ```
 
+这里的字符串直接使用现有 `@loomrealm-game/battle` 的 BattleSkill identity：BattleActor authored shape 使用 `skills: string[]`，Simulation / Decision contract 使用 `skillId: string`。因此 PokeMan 不再设计额外的 `BattleSkillRef` 或另一套 skill reference encoding。
+
 结构约束：
 
 - 每个元素是 BattleSkill id；
@@ -511,6 +513,8 @@ empty CarriedCards
 
 Realm State 底层 contract 可以允许 record value `null`，但 PokeMan 这四类 canonical value 不使用它。
 
+这里仍需单独区分 **Record 内部 value shape** 与 **Record 本身从未 materialize**。Relationship 的 Record-level absence 已经有明确业务语义；另外三类 Record 的 absence 业务解释见本文末尾“当前仍未解决的数据结构问题”。
+
 # 完整示例
 
 ## durable PlayerWorld checkpoint
@@ -605,8 +609,8 @@ pokeman.CarriedCards / player
 pokeman.PlayerWorld / current
 → durable resume/checkpoint {
     mapId: positive safe integer,
-    x,
-    y,
+    x: non-negative safe integer,
+    y: non-negative safe integer,
     direction
   }
 
@@ -645,6 +649,7 @@ optional Contract = field absence
 business value shape does not use null
 Relationship value does not repeat from/to
 CarriedCards value does not repeat holder
+skills[] = BattleSkill id string[]
 skills[] ordered + unique
 CarriedCards sorted by slot
 slot unique
@@ -656,15 +661,24 @@ PlayerWorld.mapId is positive safe integer
 
 # 当前仍未解决的数据结构问题
 
-Realm State 核心四类 Record 的粒度、namespace/key 与 value shape 已冻结，不再是未决项。
+Realm State 核心四类 Record 的粒度、namespace/key 与 value shape 已冻结。BattleSkill identity / `Contract.skills[]` 不再是未决项。
 
-Content physical schema 由 [68-content-fsdb.md](./68-content-fsdb.md) 收口。当前真正仍开放的主要数据项是：
+当前 Realm State 侧真正还需要确定的是 **Record-level absence 业务语义**：
 
 ```text
-Battle package 正式 BattleActor / BattleSkill serialization namespace / key/reference encoding
-Encounter generation 的概率 / 数量 / seed 等具体参数
-StoryIndex 最终为 Resolver 查询保留哪些派生字段
+pokeman.PlayerWorld / current
+→ 从未 materialize 时代表什么？是否要求 baseline 必有？
+
+pokeman.EventStateList / current
+→ 从未 materialize 时是否业务等价于 []，还是要求 baseline 必有？
+
+pokeman.CarriedCards / <holder>
+→ 从未 materialize 时是否业务等价于 []？
 ```
+
+这不是要增加新字段，而是把 Realm State v1 已经存在的 `never-materialized → value=null` 情况映射成明确的 PokeMan 业务语义。
+
+Content / Encounter / StoryIndex 等问题由 [68-content-fsdb.md](./68-content-fsdb.md) 负责，不在本文重复列成 Realm State 未决项。
 
 当前不建立通用：
 
