@@ -22,7 +22,7 @@ flowchart TB
   subgraph State[Realm State]
     PlayerWorld["pokeman.PlayerWorld / current\ndurable checkpoint"]
     EventStateList["pokeman.EventStateList / current"]
-    Relationship["pokeman.Relationship / <from>/<to>"]
+    Relationship["pokeman.Relationship / <from>:<to>"]
     Contract["contract? { integrity, skills[] }"]
     Carried["pokeman.CarriedCards / <holder>"]
   end
@@ -199,7 +199,7 @@ Mutation 只改变 Event current state，不创建 Contract / Card / Battle。
 
 ```mermaid
 flowchart LR
-  A["Character A"] --> Rel["pokeman.Relationship / A/B"]
+  A["Character A"] --> Rel["pokeman.Relationship / A:B"]
   B["Character B"] --> Rel
   Rel --> Affinity["affinity / hostile / relationshipText"]
   Rel --> Contract["contract?\nintegrity / skills[]"]
@@ -231,7 +231,7 @@ MVP 不保存 `maxIntegrity`，也不建立 `cardId`。
 ```mermaid
 flowchart TD
   Carried["pokeman.CarriedCards / A\nservant B"] --> Select["Select servant B"]
-  Contract["pokeman.Relationship / A/B\ncontract.integrity / skills[]"] --> Build["Build Battle Runtime Actor"]
+  Contract["pokeman.Relationship / A:B\ncontract.integrity / skills[]"] --> Build["Build Battle Runtime Actor"]
   Character["struct.Character / B"] --> ActorRef["base BattleActor ContentRef"]
   ActorRef --> BaseActor["base BattleActor\nmax_hp / definitions"]
   BaseActor --> Build
