@@ -46,7 +46,37 @@ Map Enter
 
 例如同一条道路可以在不同进入实例中出现不同组合：混混、普通挑战者、旅行者、空位等。
 
-具体生成数量、概率、Spawn Point、随机 seed、重新进入地图是否完全重新 roll 等属于后续内容与技术设计；当前只固定“**地图进入时生成，生成后可见**”这一产品规则。
+具体生成数量、概率、Spawn Point、随机 seed 等属于后续内容与技术设计；当前只固定“**地图进入时生成，生成后可见**”这一产品规则。
+
+### Re-entry / persistence 属于 Runtime policy
+
+“离开地图再回来是否重新 roll”“已经击败的 Encounter 是否继续消失”“生成结果何时清理”“是否跨 Session 保留”等，不在当前数据物理结构阶段提前决定。
+
+这些首先属于 **Runtime / gameplay behavior policy**：
+
+```text
+离开 / 重进 Map
+↓
+Runtime policy 决定
+├─ 重新生成
+├─ 复用本次结果
+├─ 保留已击败事实
+└─ 其他业务行为
+```
+
+只有未来这套行为规则真的要求跨 Frame / Map / Session 持续某些事实时，才根据最小需求决定是否需要 Realm State，以及具体保存什么。
+
+因此当前数据设计**不预设**：
+
+```text
+EncounterGeneratedState
+generatedInstances[]
+defeatedIds[]
+spawn snapshot
+random seed record
+```
+
+这些都不是当前数据物理结构的未决阻塞项。
 
 Persistent Character 和剧情人物不要求通过随机生成产生，它们可以由世界状态和剧情决定位置与是否出现。
 
