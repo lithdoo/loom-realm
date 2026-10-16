@@ -14,7 +14,7 @@
 - **描述**：职业、性格、经历等作者定义的静态资料。
 - **功能标签**：研究者、店主、家人等世界职责。
 - **固定 AI 人物描述**：一段供自由对话 AI 使用的自然语言人物说明，可以表达性格、说话习惯、背景、价值观等不值得拆成游戏规则字段的信息。
-- **默认场景实例**：没有更高优先级剧情覆盖时，这个人默认如何出现在 Map；一个 Character 可以有 0..N 个默认 NPC Instance。
+- **默认场景实例**：当当前所有 active Event State 都没有提到这个 Character 时，这个人默认如何出现在 Map；一个 Character 可以有 0..N 个默认 NPC Instance。
 - **Battle 静态资料引用**：关联 `@loomrealm-game/battle` 的 BattleActor Content；技能直接使用 BattleActor 的 `skills[]` 所引用的 BattleSkill Content。
 
 固定 AI 人物描述属于 immutable Content。它回答“这个人本来是什么样的人”，不会因为这一局与玩家关系变化而改写。需要被规则读取的事实仍然使用结构化数据。
@@ -353,14 +353,49 @@ LLM 当次生成的话默认只是对话输出，不自动修改 Character Conte
 
 ## 场景实例解析
 
-人物 / NPC 在当前剧情下如何出现在 Map，继续采用 Content 驱动的解析思路：
+Character 的 Content 默认场景实例是**纯 fallback**，不是与 Event scene source 并列竞争的来源。
 
-1. **Realm State 中必要的临时剧情覆盖。** 只保存真正不能由 Event current state 重算的临时事实。
-2. **Event 场景定义。** Realm State 记录 Event 当前 state，对应 Content 可以声明 NPC / Character 的 placement。
-3. **Character 的 Content 默认场景实例。** 没有更高层覆盖时使用。
-4. **没有实例。** 三层都没有提供实例时，当前不投影到 Map。
+对任意持久 Character `X`，Story Resolver 先检查当前所有 active Event State：
 
-同一个 NPC 可以在不同 Map 上各自有出现定义；最终每张 Map 内要求 `npcId` 唯一。
+```text
+是否存在任意 Event State scene directive
+满足 characterId = X？
+```
+
+这里的 scene directive 包括 placement 和 `absent`。只写 `npcId`、没有 `characterId` 的 transient / 非 Character NPC 不会因此接管某个 Character 的默认场景。
+
+规则：
+
+```text
+没有任何 active Event State 提到 Character X
+→ 使用 Character X 的 default scene instances
+
+至少一个 active Event State 提到 Character X
+→ Character X 的所有 default scene instances 整体退出解析
+→ Character X 当前场景完全由这些 Event sources 决定
+```
+
+因此 Event 不是“比 default 优先一点”，而是一旦提到 Character 就**接管这个 Character 当前的 scene projection**。
+
+Event sources 之间继续正常合并：
+
+```text
+Event A → Character X absent
+Event B → Character X placement at town
+
+→ default 不参与
+→ Event A 不提供 placement
+→ Event B 提供 placement
+→ 最终使用 town placement
+```
+
+`absent` 不压制其他 Event 的明确 placement，也不建立 Event priority。它只表示：
+
+> **这个 Event 当前明确提到了这个 Character，但本 Event 不为它提供出现 placement。**
+
+如果当前 active Event 已经接管 Character，而所有相关 Event 都没有提供 placement，则这个 Character 当前不出现。
+
+同一个 NPC 可以在不同 Map 上各自有出现定义；最终每张 Map 内仍要求 `npcId` 唯一。
 
 一个静态 NPC Instance 至少需要足够的信息生成 Map placement：
 
@@ -376,8 +411,6 @@ pattern?
 ```
 
 `mapId` 使用地图编号；`direction` 使用 Map 当前约定的 `2/4/6/8`。
-
-剧情定义仍可表达 `absent`：表示“这一层明确要求不出现”，而不是“本层没有定义”。精确 JSON shape 随 Event / placement schema 后续统一确定。
 
 ## Builder 与 Runtime 检查
 
@@ -399,9 +432,21 @@ Builder **不因为以下情况失败**：
 同一个 Character 被多个 Event 引用
 同一个 Character 出现在多个不同 Map
 同一个 Character 被多个不同主公的 Relationship / contract 引用
+一个 Event 对 Character 声明 absent、另一个 Event 对同一 Character 提供 placement
 ```
 
-Runtime 合并当前 Character / Event / Encounter 等来源后，对每个 Map 必须保证：
+Runtime 合并当前 Character / Event / Encounter 等来源时：
+
+```text
+active Event 没有提到 Character X
+→ 才加入 Character X default scene instances
+
+active Event 至少一个提到 Character X
+→ 不加入任何 Character X default scene instance
+→ 只合并 Event 对 X 的 scene directives
+```
+
+最终对每个 Map 必须保证：
 
 ```text
 npcId 唯一
@@ -416,13 +461,16 @@ Map Enter 概念流程：
 ```text
 Map Enter
 → 读取该 Map 对应的 Story Index
-→ 读取 Event current state
-→ Story Resolver 解析 Character / Event Content
-→ 合并当前 Map 的 NPC 来源
+→ 读取 EventStateList
+→ 读取相关 active Event State
+→ 收集这些 Event State 提到的 Character 集合
+→ 对未被 Event 提到的 Character 使用 default scene instances
+→ 对被 Event 提到的 Character 只使用 Event scene directives
+→ 合并其他 NPC / Encounter 来源
 → 校验 npcId 唯一
 → 得到 NPC Instance 集合
 → 映射为 NPCPlacement[]
 → context.setNPC(...)
 ```
 
-读档恢复的是 Event current state、Relationship（包括 contract / integrity / progression）、当前随身 Card 以及其他已确认 mutable facts。Character 固定 AI 人物描述、BattleActor / BattleSkill Content、默认实例、Event state 中声明的场景实例和 Story Index 都继续从安装 Content 读取。
+读档恢复的是 EventStateList、Relationship（包括 contract / integrity / progression）、当前随身 Card 以及其他已确认 mutable facts。Character 固定 AI 人物描述、BattleActor / BattleSkill Content、默认实例、Event state 中声明的场景实例和 Story Index 都继续从安装 Content 读取。
