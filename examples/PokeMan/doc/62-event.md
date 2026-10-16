@@ -29,7 +29,7 @@ EventStateList
 → Event 当前为空状态 / 未启动
 ```
 
-Event state 的变化不硬编码成 `if (state === A) state = B`。变化规则单独写成 immutable `EventStateMutation` Content，由明确的 Dialogue completion 或其他业务结果引用；真正执行 Mutation 的是相应 PokeMan Subsystem。
+Event state 的变化不硬编码成 `if (state === A) state = B`。变化规则单独写成 immutable `EventStateMutation` Content。固定 Dialogue 可以直接引用 Mutation；其他业务通过 Runtime 事件与 session-level 业务逻辑决定是否执行 Mutation。真正执行 Mutation 的始终是 PokeMan Runtime，而不是 Content。
 
 当前坚持：
 
@@ -253,7 +253,7 @@ not
 通用表达式
 ```
 
-如果业务需要 OR，则为每个分支分别定义独立 Mutation，并由对应业务分支引用对应 Mutation。
+如果业务需要 OR，则为每个分支分别定义独立 Mutation，并由对应业务分支选择对应 Mutation。
 
 ## `from` 与 `to` 不要求一一对应
 
@@ -468,9 +468,9 @@ PokeMan Dialogue Subsystem
 
 Dialogue Frame 仍然可以返回最终 `terminalDialogueId`。
 
-# Runtime 不扫描 Mutation
+# Mutation 的 Runtime 触发边界
 
-EventStateMutation 是被引用的数据，不是自动监听规则。
+EventStateMutation 是数据，不是监听器，也不声明自己的 trigger。
 
 Runtime **不会**：
 
@@ -480,15 +480,34 @@ Runtime **不会**：
 → 自动执行
 ```
 
-正确模型是：
+固定 Dialogue 是一条直接数据引用路径：
 
 ```text
-明确业务结果
-→ 明确 Mutation ref
-→ 对应 PokeMan Subsystem 执行 Mutation
+Dialogue Content.mutation
+→ PokeMan Dialogue Subsystem
+→ 执行 EventStateMutation
 ```
 
-当前最直接的 executor 是 PokeMan Dialogue Subsystem。未来 Battle 完成、到达地点等业务如果需要使用同一 Mutation 数据结构，也由对应 Subsystem 明确读取并执行它，而不是让 Content 自己拥有 trigger 或执行能力。
+非 Dialogue 业务走另一条路径。Battle、World、Encounter 等业务先通过 `session-event` 表达已经发生的业务事实，例如概念上的：
+
+```text
+BattleCompleted
+MapEntered / DestinationReached
+EncounterCompleted
+```
+
+然后由 PokeMan 的 session-level 业务运行时捕获相关事件，根据事件 payload、当前业务上下文与 Event state，决定是否需要推进剧情，以及应该执行哪一个 EventStateMutation：
+
+```text
+业务 Subsystem
+→ session-event：发生了什么
+→ PokeMan session-level 业务运行时
+→ 判断这件事对剧情意味着什么
+→ 如需要，选择 EventStateMutation
+→ 执行 Mutation
+```
+
+因此 Battle / Map / Encounter 等 Content **不需要为了剧情推进增加 `mutationRef`**。`session-event` 也不需要携带 EventStateMutation identity；它只表达业务事实。EventStateMutation 只表达 Event state 怎么改。
 
 # Character scene 接管规则
 
@@ -576,7 +595,7 @@ PokeMan 对剧情 NPC 的最终地图结果有明确约束：
 (mapId, npcId) 唯一
 ```
 
-同一个 Event state 可以多次声明同一个 `npcId`，只要这些出现位于不同 Map。如果同一个 state 自己声明两次相同 `(mapId, npcId)`，Builder 应直接报错。
+同一个 Event state 可以多次声明同一个 `npcId`，只要这些出现位于不同 Map。如果同一个 state 自己声明两次相同 `(mapId,npcId)`，Builder 应直接报错。
 
 不同 Event 可以重复引用同一个 `npcId` 或 Character。Runtime 根据 EventStateList 中当前所有 active Event 合并 scene sources 后，只对最终结果做约束检查。
 
@@ -641,7 +660,7 @@ Mutation 使用 stateId → null 删除 Event entry
 同一个 npcId 在同一个 Event state 中出现在多个不同 Map
 同一个 Character 被多个 Event 引用
 同一个 Character 出现在多个 Map
-一个 Event 对 Character 声明 absent、另一个 Event 对同一 Character提供 placement
+一个 Event 对 Character 声明 absent、另一个 Event 对同一 Character 提供 placement
 合法的 Dialogue cycle
 ```
 
@@ -650,12 +669,14 @@ Runtime 应保证：
 - EventStateList 中 `eventId` 唯一；
 - 缺 entry 等价于 current state `null`；
 - 缺 entry 的 Event 不参与 Event State 场景投影；
-- 只应用被明确引用的 Mutation；
-- Mutation 的 executor 是对应 PokeMan Subsystem，不是 Content；
-- 被引用 Mutation 的全部 `from` 当前值必须同时匹配，包括显式 `null`；
+- Content 不执行 Mutation；
+- Dialogue 只通过明确 `Dialogue.mutation` 触发 Mutation；
+- 非 Dialogue 业务通过 `session-event` 表达业务事实，由 PokeMan session-level 业务运行时决定是否以及执行哪个 Mutation；
+- Battle / Map / Encounter Content 不需要因为剧情推进保存 EventStateMutation ref；
+- 被执行 Mutation 的全部 `from` 当前值必须同时匹配，包括显式 `null`；
 - Mutation 基于读取到的 EventStateList Record version 做 OCC commit；
 - 成功 Mutation 用一次 Record replacement 原子替换整个 EventStateList；
-- Runtime 不主动扫描未被引用的 Mutation；
+- Runtime 不主动扫描未被引用 / 未被业务选择的 Mutation；
 - active Event State 一旦提到 Character，就完全关闭该 Character default scene fallback；
 - `absent` 不压制其他 Event placement；
 - 合并当前场景来源后，每张最终 Map 内 `npcId` 唯一。
@@ -664,5 +685,4 @@ Runtime 应保证：
 
 - Event / EventStateMutation 的最终 Content namespace / key；
 - EventStateList Realm State Record 的最终 namespace / key 名字；
-- Event placement / `instanceId` / `absent` 的最终 JSON schema；
-- 非 Dialogue Subsystem 如何在各自业务 Content 中引用 Mutation。
+- Event placement / `instanceId` / `absent` 的最终 JSON schema。
