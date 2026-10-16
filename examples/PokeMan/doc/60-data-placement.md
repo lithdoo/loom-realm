@@ -220,7 +220,7 @@ pokeman.PlayerWorld / current
 pokeman.EventStateList / current
 → [{ eventId, stateId }]
 
-pokeman.Relationship / <from>/<to>
+pokeman.Relationship / <from>:<to>
 → { affinity, hostile, relationshipText, contract? }
 
 pokeman.CarriedCards / <holder>
