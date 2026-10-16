@@ -656,10 +656,11 @@ file      = [struct]Encounter/<mapId>.json
 
 record value 不重复保存 `mapId`。
 
-当前骨架：
+MVP 最终 shape：
 
 ```json
 {
+  "count": 2,
   "spawnPoints": [
     {
       "x": 7,
@@ -670,16 +671,31 @@ record value 不重复保存 `mapId`。
       "x": 13,
       "y": 8,
       "direction": 4
+    },
+    {
+      "x": 20,
+      "y": 6,
+      "direction": 8
     }
   ],
   "templates": {
     "road-bandit": {
+      "weight": 3,
       "npc": "road-bandit",
       "engagement": "hostile",
       "dialogue": "route-bandit-threat",
       "battleActor": {
         "namespace": "<battle content namespace>",
         "key": "road-bandit"
+      }
+    },
+    "rogue-trainee": {
+      "weight": 1,
+      "npc": "rogue-trainee",
+      "engagement": "hostile",
+      "battleActor": {
+        "namespace": "<battle content namespace>",
+        "key": "rogue-trainee"
       }
     }
   }
@@ -690,12 +706,14 @@ shape：
 
 ```text
 Encounter
+├─ count: positive safe integer
 ├─ spawnPoints[]
 │  ├─ x
 │  ├─ y
 │  └─ direction
 └─ templates
    └─ <templateId>
+      ├─ weight: positive safe integer
       ├─ npc: NPC key
       ├─ engagement
       ├─ dialogue?: Dialogue key
@@ -704,18 +722,30 @@ Encounter
 
 `templateId` 是该 Encounter record 内部 identity，不建立新的 FSDB record。
 
+`count` 表示这张 Map 每次生成的 Encounter NPC 数量；`weight` 只表示 template 之间的相对选择权重。例如 `3` 与 `1` 表示前者相对后者有三倍权重，不规定具体随机算法。
+
+固定约束：
+
+```text
+count
+→ positive safe integer
+→ count <= spawnPoints.length
+
+weight
+→ positive safe integer
+
+spawnPoints
+→ x / y 是 non-negative safe integer
+→ 同一 record 内 (x,y) 不重复
+```
+
 当前 MVP 已明确需要：
 
 ```text
 engagement = "hostile"
 ```
 
-当前真正仍缺的 authored generation 数据只有：
-
-```text
-每次生成数量的表达
-多个 template 的相对选择分布（例如 weight）
-```
+不增加 `minCount / maxCount`；当前没有“同一张 Map 每次生成数量本身也随机”的产品需求。
 
 以下不作为当前 Content schema gap：
 
@@ -820,7 +850,9 @@ Realm State 的 `pokeman.PlayerWorld/current` 只作为 durable resume/checkpoin
 - EventStateMutation `to` 非空；
 - EventStateMutation 所有非空 stateId 存在；
 - Encounter record key 是合法正 safe integer mapId；
-- Encounter spawn point `x / y` 是非负 safe integer；
+- Encounter `count` 是正 safe integer 且不大于 `spawnPoints.length`；
+- Encounter spawn point `x / y` 是非负 safe integer，且同一 record 内 `(x,y)` 不重复；
+- Encounter template `weight` 是正 safe integer；
 - Encounter template 的 `npc / dialogue / battleActor` 引用存在；
 - StoryIndex 与源 Content 一致。
 
@@ -857,11 +889,9 @@ initial source
 
 Content 不复制这些 mutable values。
 
-# 当前仍未冻结
+# 当前冻结结论
 
-经过一致性复核，当前 Content 侧真正需要继续设计的核心项只剩：
-
-1. **Encounter authored generation 数据**：生成数量的最小表示，以及 template 相对选择分布采用哪种简单编码（例如 `weight`）。
+经过一致性复核并冻结 Encounter `count / weight` 后，当前 MVP Content 核心业务 physical schema 已收口。
 
 以下不再列为 MVP 核心 Content physical-schema gap：
 
@@ -871,6 +901,7 @@ BattleActor gameplay schema
 Dialogue choices / mutation exclusivity
 Event absent 的第二套 takeover 结构
 EventStateMutation semantic no-op proof
+Encounter generation count / template weight
 StoryIndex 最终派生字段
 Encounter seed / spawn selection algorithm / re-entry / respawn / persistence
 本地化、头像 / 表情 / 音效等 future presentation metadata
@@ -890,6 +921,6 @@ Event placement / absent basic JSON shape 与 absent 最小约束
 Event / Character scene source 是否保存 Runtime instanceId
 持久 Character / transient Story NPC 的 base BattleActor 引用位置
 BattleSkill id = string；Contract.skills[] 直接复用
-Encounter 是否重复保存 mapId
+Encounter record identity / count / spawnPoints / template weight
 Relationship / Contract / Card / EventStateList Realm State encoding
 ```
