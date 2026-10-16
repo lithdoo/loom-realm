@@ -270,7 +270,7 @@ entry absent → current = null
 ## Relationship / Contract
 
 ```text
-pokeman.Relationship / <from>/<to>
+pokeman.Relationship / <from>:<to>
 → {
     affinity,
     hostile,
@@ -281,6 +281,8 @@ pokeman.Relationship / <from>/<to>
     }
   }
 ```
+
+会进入 Relationship / CarriedCards key 的 Character business id 使用 `[a-z0-9][a-z0-9._-]{0,119}`；`:` 作为 Relationship 复合 key 分隔符，因此 `A:B` 无歧义且最长 241 bytes。
 
 `A → B` 与 `B → A` 独立。
 
@@ -408,7 +410,7 @@ PokeMan Dialogue Subsystem
 pokeman.CarriedCards / A
 → servant B
 +
-pokeman.Relationship / A/B
+pokeman.Relationship / A:B
 → contract.integrity / skills[]
 +
 struct.Character / B
