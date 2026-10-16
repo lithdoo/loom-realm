@@ -89,12 +89,13 @@ Visible Encounter Entity
 ├─ ordinary / transient
 │    → 本次或本区域使用
 │    → 有本次 Dialogue / Battle 表现
-│    → 不要求永久 affinity / contract / story
+│    → 不要求永久 Relationship / Contract / story
 │
 └─ persistent character
      → stable characterId
-     → affinity / hostile
-     → contract / card relationship
+     → Relationship: affinity / hostile / dynamic text
+     → optional Contract
+     → current Card if carried
      → story progress
      → 可以反复相遇、发展关系甚至收服
 ```
@@ -108,6 +109,8 @@ Dialogue.speakerName = "路霸"
 ```
 
 这只是说话者显示名，不是 Character identity，也不建立 Relationship / Contract / Event Character 等长期关联。同一段 Dialogue 可以被多个不同 transient NPC Instance 复用，而不会把它们解释成同一个人。
+
+Transient Encounter NPC 需要进入 Battle 时，由 Encounter / Story 静态来源指定一个基础 `BattleActor`；NPC Instance 使用这个基础模板，不生成独立 BattleActor variant。
 
 ## Battle 对手不等于从者
 
@@ -153,13 +156,17 @@ Hostile 成立
 
 Battle 对关系的影响由情境决定，不使用统一“胜利 = affinity +N”规则。敌对也是动态关系状态，而不是永久人物类别。
 
-MVP 关系模型先保持最小：
+MVP 的长期人物关系统一使用当前 Relationship 模型：
 
 ```text
-relation / affinity
-+
-hostile
+Relationship(A → B)
+├─ affinity
+├─ hostile
+├─ dynamic relationship text
+└─ contract?
 ```
+
+Transient Encounter Entity 不要求为了本次遭遇创建这套长期 Relationship。
 
 # 核心游戏循环
 
@@ -168,7 +175,7 @@ System Menu #root
       ↓
 进入 / 读取游戏
       ↓
-中心管理角色卡 / 修复卡片 / 选择随身从者
+中心查看已契约 Relationship / Contract、修复 Integrity、选择随身 Card
       ↓
 探索世界（Map）
       ↓
@@ -180,13 +187,13 @@ Dialogue / Interaction
       ↓
 Battle（可选或强制）
       ↓
-卡片 Battle 状态 + Relationship / World State 返回世界
+Contract Integrity / Relationship / World State 返回世界
       ↓
 满足人物自己的收服条件
       ↓
-建立角色卡关系并进入中心管理体系
+建立 Relationship.contract
       ↓
-编入有限随身位
+按需要编入有限随身 Card slot
       ↓
 Pocket Dialogue / Event / Battle
       ↓
