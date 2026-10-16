@@ -42,7 +42,7 @@ Character
   "description": "从小与主公一起长大的竞争对手。",
   "aiCharacterText": "好胜、自信，不愿轻易服输。",
   "battleActor": {
-    "namespace": "<battle package namespace>",
+    "namespace": "<battle content namespace>",
     "key": "rival"
   },
   "defaultScenes": {
@@ -80,7 +80,7 @@ Character
 
 PokeMan 不定义平行 Skill / Battle Profile schema。
 
-BattleActor / BattleSkill 的 gameplay contract 直接复用 `@loomrealm-game/battle`：
+BattleActor / BattleSkill 的 gameplay contract 直接复用已经存在的 `@loomrealm-game/battle`：
 
 ```text
 BattleActor
@@ -88,10 +88,10 @@ BattleActor
 ├─ name
 ├─ character graphics reference
 ├─ max_hp
-└─ skills[] → BattleSkill
+└─ skills[] → BattleSkill id
 
 BattleSkill
-├─ logical definition identity
+├─ id: string
 ├─ name
 ├─ range
 ├─ damage
@@ -100,7 +100,19 @@ BattleSkill
 └─ effect
 ```
 
-Battle package 的正式外部 serialization namespace / key/reference encoding 仍由 battle package 自己冻结。因此 PokeMan `Character.battleActor` 使用 `{namespace,key}` ContentRef，不擅自创建第二套 `struct.BattleActor` 规范。
+Battle v0 的 Simulation-facing contract 本身就使用 `skillId: string`，BattleActor 当前 authored shape 也是 `skills: string[]`。因此 PokeMan 不再把 Contract skill identity 当成另一套待设计引用：
+
+```text
+BattleActor.skills[]
+= BattleSkill id string[]
+
+Relationship.contract.skills[]
+= ordered unique BattleSkill id string[]
+```
+
+新 Contract 直接复制 `BattleActor.skills[]`。这里不增加 `BattleSkillRef`、`ContentRef[]` 或 PokeMan 自己的第二套 Skill identity。
+
+`Character.battleActor` 自身仍使用 `{ namespace, key }` ContentRef，是因为它定位的是一条基础 BattleActor Content definition；这与 `skills[]` 保存 BattleSkill id 是两件不同的事，不构成数据缺口。
 
 MVP 不增加 `attack / defense / speed / MP / accuracy / critical / element / universal cooldown / ammo` 等 Battle v0 没有的字段。
 
@@ -222,6 +234,8 @@ character = X
 表示：
 
 > 这个 Event 当前明确提到 Character `rival`，但本 Event 不贡献 placement。
+
+固定：`absent:true` 必须同时有 `character`，且不得同时出现 `placement / battleActor / interaction`。
 
 `absent` 不压制其他 Event 的 placement，也不建立 Event priority。
 
@@ -499,7 +513,6 @@ Event A 对 X absent + Event B 对 X placement
 
 Character / Relationship / Contract / CarriedCards 的 PokeMan 物理结构已经分别由 `68` / `67` 冻结。
 
-当前相关开放项只包括：
+当前没有 BattleSkill identity / Contract.skills physical gap：`Contract.skills[]` 直接复用 battle 模块既有的 `skillId: string`。
 
-- Battle package 正式 BattleActor / BattleSkill serialization namespace / key/reference encoding；
-- Runtime `instanceId` 具体生成算法（Runtime，不是 Content schema）。
+剩余 `instanceId` 具体生成算法属于 Runtime，不是 Content / Realm State data physical-schema gap。
