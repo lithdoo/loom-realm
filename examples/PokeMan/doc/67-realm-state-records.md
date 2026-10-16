@@ -513,7 +513,29 @@ empty CarriedCards
 
 Realm State 底层 contract 可以允许 record value `null`，但 PokeMan 这四类 canonical value 不使用它。
 
-这里仍需单独区分 **Record 内部 value shape** 与 **Record 本身从未 materialize**。Relationship 的 Record-level absence 已经有明确业务语义；另外三类 Record 的 absence 业务解释见本文末尾“当前仍未解决的数据结构问题”。
+Record 本身从未 materialize 时的 PokeMan 业务语义固定如下：
+
+```text
+pokeman.PlayerWorld / current
+→ baseline MUST materialize
+→ absent / never-materialized = invalid PokeMan State
+
+pokeman.EventStateList / current
+→ baseline MUST materialize
+→ absent / never-materialized = invalid PokeMan State
+→ 没有 active Event 使用 []
+
+pokeman.Relationship / A:B
+→ absent / never-materialized = 没有持久化这段有向 Relationship
+
+pokeman.CarriedCards / A
+→ absent / never-materialized = 业务值 []
+→ materialized [] = 业务值 []
+```
+
+因此 singleton 基础 Record 使用“必须存在”的编码；按 holder / relationship 按需产生的 Record 可以让 absence 具有领域语义。
+
+`CarriedCards/A` 的 absent 与 materialized `[]` 在 Realm State 物理历史上仍然不同，但在 PokeMan 当前编队业务读取上等价，都表示“当前没有随身 Card”。不要求为每个 Character 预先 materialize 一个空 `CarriedCards` Record。
 
 # 完整示例
 
@@ -657,28 +679,17 @@ servantCharacterId unique per holder
 Carried Card requires corresponding Contract
 PlayerWorld is durable checkpoint, not live Map authority
 PlayerWorld.mapId is positive safe integer
+PlayerWorld/current baseline must exist
+EventStateList/current baseline must exist
+Relationship absence = no persisted relationship
+CarriedCards absence = business []
 ```
 
 # 当前仍未解决的数据结构问题
 
-Realm State 核心四类 Record 的粒度、namespace/key 与 value shape 已冻结。BattleSkill identity / `Contract.skills[]` 不再是未决项。
+Realm State 核心四类 Record 的粒度、namespace/key、value shape 与 Record-level absence 业务语义已经冻结。
 
-当前 Realm State 侧真正还需要确定的是 **Record-level absence 业务语义**：
-
-```text
-pokeman.PlayerWorld / current
-→ 从未 materialize 时代表什么？是否要求 baseline 必有？
-
-pokeman.EventStateList / current
-→ 从未 materialize 时是否业务等价于 []，还是要求 baseline 必有？
-
-pokeman.CarriedCards / <holder>
-→ 从未 materialize 时是否业务等价于 []？
-```
-
-这不是要增加新字段，而是把 Realm State v1 已经存在的 `never-materialized → value=null` 情况映射成明确的 PokeMan 业务语义。
-
-Content / Encounter / StoryIndex 等问题由 [68-content-fsdb.md](./68-content-fsdb.md) 负责，不在本文重复列成 Realm State 未决项。
+当前 Realm State 侧没有剩余的 MVP 核心 physical-schema gap。Content / Encounter 的 authored 数据结构见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 当前不建立通用：
 
