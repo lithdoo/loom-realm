@@ -50,7 +50,20 @@ Content
 └─ Map content
 ```
 
-PokeMan **不另建平行的 Skill schema**。当前战斗技能直接采用 `@loomrealm-game/battle` 的 `BattleSkill` Content contract；角色能使用哪些技能，由角色关联的 BattleActor Content 中 `skills[]` 引用表达。以后需要新的战斗能力时，应优先扩展 Battle package 的规范，而不是只在 PokeMan 内新增另一套 Skill 语义。
+PokeMan **不另建平行的 Skill schema**。当前战斗技能直接采用 `@loomrealm-game/battle` 的 `BattleSkill` Content contract。
+
+MVP 中 `BattleActor.skills[]` 的职责明确为：
+
+```text
+没有 Contract 的本体 / transient Battle actor
+→ 直接使用 BattleActor.skills[]
+
+新 Contract 建立
+→ BattleActor.skills[] 作为初始 baseline
+→ copy 到 Relationship.contract.skills[]
+```
+
+Contract 建立以后，这份契约当前可用技能以 `Relationship.contract.skills[]` 为准。MVP 不设计 `baseSkills + learnedSkills` 合并层，也不设计 progression / training schema。
 
 所有持久 Character 都准备好 Card / Battle 所需静态素材与数据。这只是 Content 完备性，不代表当前可以建立契约。
 
@@ -147,9 +160,9 @@ Realm State
 │  ├─ affinity
 │  ├─ hostile
 │  ├─ dynamic relationship text
-│  ├─ contract?
-│  ├─ integrity?
-│  └─ progression?
+│  └─ contract?
+│     ├─ integrity
+│     └─ skills[]                // BattleSkill ids
 ├─ current carried Card[]
 │  ├─ holderCharacterId
 │  ├─ servantCharacterId
@@ -211,7 +224,7 @@ Mutation 执行时：
 
 EventStateList 的最终 namespace / key 名字仍可在实现 schema 冻结时决定，但“一个列表 Record”这一物理模型已确认。
 
-## Relationship：长期关系、契约、Integrity 与成长
+## Relationship / Contract：长期关系与 MVP 契约状态
 
 Relationship 是有方向的：
 
@@ -220,23 +233,23 @@ A → B
 = A 与 B 当前持续存在的关系状态
 ```
 
-当前确认长期属于 Relationship 的事实包括：
+MVP 当前确认：
 
 ```text
 Relationship(A → B)
 ├─ affinity
 ├─ hostile
 ├─ dynamic relationship text
-├─ contract?
-├─ integrity?
-└─ progression / training?
+└─ contract?
+   ├─ integrity
+   └─ skills[]
 ```
 
-`contract` 表示 A 已经作为主公与 B 建立正式契约。Integrity 与训练 / 成长属于**这份有向契约关系的长期状态**，即使 B 当前不随身也继续存在。
+存在 `contract` 对象表示 A 已经作为主公与 B 建立正式契约；不存在表示没有契约。Contract 不建立独立 Realm State authority，而是 Relationship 内的一段长期状态。
 
-同一个 Character 被不同主公契约时，各自 Relationship 的 affinity、Integrity、Progression 相互独立。
+`contract.integrity` 和 `contract.skills[]` 即使 B 当前不随身也继续存在。不同主公与同一个 Character 建立的 Contract 各自拥有独立 Integrity 与技能集。
 
-Contract **不建立独立 Realm State authority**。
+MVP **不定义 `progression / training` 字段**。未来真正加入训练、等级、学习技能等玩法时，再扩展 Contract；这些未来方向不阻塞当前数据模型。
 
 ## Card：只表示当前随身
 
@@ -256,18 +269,19 @@ Card
 所以：
 
 ```text
-Relationship(A → B).contract = true
-Relationship(A → B).integrity = 48
+Relationship(A → B).contract exists
+contract.integrity = 48
+contract.skills = [firebolt, grab]
 
 Card(A, B) exists
 → 当前随身
 
 Card(A, B) absent
 → 当前不随身
-→ Relationship / integrity / progression 仍然存在
+→ Contract / integrity / skills[] 仍然存在
 ```
 
-Card 不保存 Integrity、Progression、BattleActor / BattleSkill Content、人格或静态资源。
+Card 不保存 Integrity、技能集、BattleActor / BattleSkill Content、人格或静态资源。
 
 Card 的独立 `cardId` 是否需要存在仍未冻结。
 
@@ -294,8 +308,9 @@ BattleSkill Content
 └─ effect
 
 Relationship(holder → servant)
-├─ integrity
-└─ progression / training
+└─ contract
+   ├─ integrity
+   └─ skills[]
 
 Current Card
 ├─ holderCharacterId
@@ -317,14 +332,19 @@ Battle Runtime
 ```text
 Card(holder=A, servant=B)
 +
-Relationship(A → B).integrity / progression
+Relationship(A → B).contract.integrity / skills[]
 +
 Character B → BattleActor Content
 ↓
 @loomrealm-game/battle Runtime Actor
 ```
 
-对于 Card Battle Manifestation，初始 Battle HP 来自 Relationship.integrity；战斗结束后需要长期保留的 Integrity 结果写回同一 Relationship。
+对于 Card Battle Manifestation：
+
+- 初始 Battle HP 来自 `Relationship.contract.integrity`；
+- 当前可用技能来自 `Relationship.contract.skills[]`；
+- BattleActor 继续提供 `max_hp`、静态表现 / actor definition 和 BattleSkill definitions；
+- Battle 结束后需要长期保留的 Integrity 写回同一 `Relationship.contract.integrity`。
 
 剧情 / Encounter 临时对手不需要制造 contract 或 Card：
 
@@ -332,6 +352,7 @@ Character B → BattleActor Content
 Story / Encounter Battle definition
 +
 BattleActor Content
+  └─ skills[] 直接作为当前 actor 技能
 ↓
 @loomrealm-game/battle Runtime Actor
 ↓
@@ -385,7 +406,7 @@ Relationship B → A
 = affinity + hostile + dynamic relationship text
 
 Relationship A → B
-= A 持有 B 这份契约的长期 integrity / progression（需要时）
+= A 持有 B 这份 Contract 的 integrity / skills[]（需要时）
 
 Card(holder=A, servant=B)
 = B 当前是否作为 A 的随身 Pocket / Battle Card
@@ -404,12 +425,12 @@ Card 自由对话可以组合以上信息和必要的当前剧情 context。LLM 
 | 消息 | — | — | 当前模态消息 |
 | 地图与玩家 | 地图、碰撞、传送、Story Index | 当前地图、玩家格与朝向、必要剧情事实 | Resolver、镜头、走步、输入、寻路 |
 | 人物 | 身份、描述、fixed AI text、BattleActor Content 引用 | — | 当前解析出的 NPC Instance |
-| 关系 / 契约 | — | Relationship：affinity、hostile、动态文本、contract、integrity、progression | 尚未提交的关系变化 |
+| 关系 / 契约 | BattleActor.skills[] 提供新 Contract 默认技能 baseline | Relationship：affinity、hostile、动态文本、`contract?.integrity / skills[]` | 尚未提交的关系变化 |
 | Card | Card / Battle 表现所需静态资源来自 Character / Visual / Battle Content | **当前随身 Card**：holder、servant、slot | Battle 中的 Card Manifestation |
 | 对话 | 固定 Dialogue：`speakerName?`、lines、Choice、可选 EventStateMutation ref | Mutation 执行时由 PokeMan Dialogue Subsystem 使用 Realm State | dialogue id / line index / pending choice；LLM working context |
 | 剧情 | Event、states、EventStateMutation、NPC placement、Dialogue ref、Story Index | **一个 EventStateList Record** | 当前解析 / mutation validation / 新列表计算 |
 | 遭遇 | table、spawn point、template、BattleActor ref | 需要持续存在的生成结果 | 当前接触、视野、临时对手 |
-| 战斗 | `@loomrealm-game/battle` 的 BattleActor / BattleSkill / rules / scenarios | Relationship.integrity / progression；当前 Card 编队 | Battle Simulation / Decision / Presentation 当前工作状态 |
+| 战斗 | `@loomrealm-game/battle` 的 BattleActor / BattleSkill / rules / scenarios | `Relationship.contract.integrity / skills[]`；当前 Card 编队 | Battle Simulation / Decision / Presentation 当前工作状态 |
 | 表现 | tiles、sprites、portrait、UI skin | — | Renderer replica、动画 |
 | 存档 | — | 选中的 Realm State snapshot | Load 临时缓冲 |
 
@@ -447,7 +468,8 @@ PokeMan session-level 业务运行时
 
 Battle Subsystem
   Frame 内拥有当前战斗工作集
-  Battle 结束后由对应游戏业务把需要持久的结果写回 Relationship 等 Realm State
+  Card Battle 从 Relationship.contract 读取 integrity / skills[]
+  Battle 结束后由对应游戏业务把长期 Integrity 写回 Relationship.contract
 
 World
   解释 Map / Event / Relationship / Card / Encounter 等世界业务
@@ -475,7 +497,7 @@ Mutation 的两条触发路径保持分离：
 存档带走已确认的 Realm State，例如：
 
 - EventStateList；
-- Relationship 当前状态，包括 contract / integrity / progression；
+- Relationship 当前状态，包括可选 Contract 的 `integrity / skills[]`；
 - 当前随身 Card（holder / servant / slot）；
 - 当前地图 / 玩家位置；
 - 需要持续存在的 Encounter 生成结果；
@@ -500,8 +522,8 @@ EventStateList 不要求列出 Content 中全部 Event；列表没有某个 `eve
 
 - 当前地图和玩家位置；
 - 安装 baseline 中的 EventStateList；
-- `player → rival` 与 `rival → player` 的 Relationship / contract；
-- 对应 Relationship 的 Integrity / 后续 progression；
+- `player → rival` 与 `rival → player` 的 Relationship / Contract；
+- 对应 Contract 的 Integrity 与 `skills[]`；
 - 玩家当前随身的宿敌 Card（slot）；
 - 第一道路需要持久的 Encounter 结果；
 - 已触发的 Pocket / 剧情事实。
