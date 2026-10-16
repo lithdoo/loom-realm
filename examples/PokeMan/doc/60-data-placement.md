@@ -61,11 +61,29 @@ PokeMan **不另建平行的 Skill schema**。当前战斗技能直接采用 `@l
 ```text
 Dialogue
 ├─ id
+├─ speakerName?          // 默认显示名，不是 Character identity
 ├─ lines[]
+│  ├─ speaker?           // 持久 Character identity
+│  └─ text
 ├─ choices?[]
 │  └─ target Dialogue
 └─ mutation? → EventStateMutation
 ```
+
+Speaker 解析保持最小：
+
+```text
+Line.speaker 存在
+→ 按持久 Character 解析
+
+Line.speaker 不存在 + Dialogue.speakerName 存在
+→ 使用默认显示名
+
+两者都没有
+→ 旁白
+```
+
+因此 transient Encounter NPC 不需要为了固定 Dialogue 创建通用 Character；它可以复用带 `speakerName` 的 Dialogue。`speakerName` 只是 presentation fallback，不能作为 Relationship、Event、Battle 等业务 identity。
 
 一个 Dialogue 线性播放；Choice 只能在末尾，并只跳到另一个 Dialogue。
 
@@ -388,7 +406,7 @@ Card 自由对话可以组合以上信息和必要的当前剧情 context。LLM 
 | 人物 | 身份、描述、fixed AI text、BattleActor Content 引用 | — | 当前解析出的 NPC Instance |
 | 关系 / 契约 | — | Relationship：affinity、hostile、动态文本、contract、integrity、progression | 尚未提交的关系变化 |
 | Card | Card / Battle 表现所需静态资源来自 Character / Visual / Battle Content | **当前随身 Card**：holder、servant、slot | Battle 中的 Card Manifestation |
-| 对话 | 固定 Dialogue，包括可选 EventStateMutation ref | Mutation 执行时由 PokeMan Dialogue Subsystem 使用 Realm State | dialogue id / line index / pending choice；LLM working context |
+| 对话 | 固定 Dialogue：`speakerName?`、lines、Choice、可选 EventStateMutation ref | Mutation 执行时由 PokeMan Dialogue Subsystem 使用 Realm State | dialogue id / line index / pending choice；LLM working context |
 | 剧情 | Event、states、EventStateMutation、NPC placement、Dialogue ref、Story Index | **一个 EventStateList Record** | 当前解析 / mutation validation / 新列表计算 |
 | 遭遇 | table、spawn point、template、BattleActor ref | 需要持续存在的生成结果 | 当前接触、视野、临时对手 |
 | 战斗 | `@loomrealm-game/battle` 的 BattleActor / BattleSkill / rules / scenarios | Relationship.integrity / progression；当前 Card 编队 | Battle Simulation / Decision / Presentation 当前工作状态 |
@@ -403,6 +421,7 @@ Main
 
 PokeMan Dialogue Subsystem
   读取 Dialogue / EventStateMutation Content
+  解析 Line.speaker / Dialogue.speakerName 的显示
   执行 Dialogue graph
   到达带 mutation 的无 Choice Dialogue 时：
     → scope.state 读取 EventStateList
@@ -468,7 +487,7 @@ EventStateList 不要求列出 Content 中全部 Event；列表没有某个 `eve
 
 - Character fixed AI text；
 - BattleActor / BattleSkill Content；
-- Dialogue definitions；
+- Dialogue definitions，包括 `speakerName`；
 - Event definitions / EventStateMutation；
 - Event state 中的 immutable placement；
 - Story Index；
