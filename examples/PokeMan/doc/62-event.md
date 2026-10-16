@@ -113,8 +113,8 @@ Placement：
 
 ```text
 Placement
-├─ x: non-negative integer
-├─ y: non-negative integer
+├─ x: non-negative safe integer
+├─ y: non-negative safe integer
 ├─ direction: 2 | 4 | 6 | 8
 └─ pattern?: 0 | 1 | 2 | 3
 ```
@@ -123,7 +123,15 @@ Placement
 
 ```text
 placement XOR absent:true
+
+absent:true
+→ character 必须存在
+→ placement 不存在
+→ battleActor 不存在
+→ interaction 不存在
 ```
+
+`absent:true` 仍保留在当前 NPC directive 里，不额外引入 `absentCharacters[]` 或第二套 Character takeover 结构。
 
 `instanceId` 不属于 Event Content。它由 Story Resolver / World Runtime 构造当前 NPC Instance 时生成。
 
@@ -168,7 +176,7 @@ character 存在
     "direction": 2
   },
   "battleActor": {
-    "namespace": "<battle package namespace>",
+    "namespace": "<battle content namespace>",
     "key": "road-bandit"
   },
   "interaction": {
@@ -285,7 +293,7 @@ to
 }
 ```
 
-但完全 no-op Mutation 不合法。
+这里禁止的是 `to: {}` 这种空赋值。数据结构不额外比较 `from / to` 来证明一次执行一定改变值；例如同一个 state 从 `active` 写回 `active` 在结构上仍然合法，是否有意义属于具体内容设计，不再为此增加 schema 复杂度。
 
 ## null 语义
 
@@ -505,7 +513,7 @@ validate final npcId uniqueness
 Runtime NPC Instances
 ```
 
-StoryIndex 是 derived Content，不进入 Realm State / Save。
+StoryIndex 是 derived Content，不进入 Realm State / Save；其精确派生字段可以随 Resolver 查询实现调整，不视为新的业务数据 authority 或 MVP 核心 schema 缺口。
 
 # Builder 检查
 
@@ -519,7 +527,8 @@ Builder 应检查：
 - `character` 指向存在的 `struct.Character`；
 - `interaction.dialogue` 指向存在的 `struct.Dialogue`；
 - directive 满足 `placement XOR absent:true`；
-- placement 合法；
+- `absent:true` 时必须有 `character`，且不得同时出现 `placement / battleActor / interaction`；
+- placement 坐标为非负 safe integer，direction / pattern 合法；
 - directive 有 `character` 时禁止 `battleActor`；
 - transient directive 的 `battleActor` ContentRef 可解析；
 - Dialogue Choice target / mutation 引用存在；
@@ -535,6 +544,7 @@ baseline 没有列出全部 Event
 Mutation.from = {}
 Mutation.from / to key set 不同
 Mutation 使用 null
+Mutation 的 to 与当前/前置 state 可能相同
 多个 Mutation 表达 OR
 同一个 npcId 被多个 Event source 引用
 同一个 npcId 在不同 Map 出现
@@ -547,7 +557,7 @@ Event A 对 X absent + Event B 对 X placement
 
 Event / EventStateMutation Content physical schema 与 EventStateList Realm State physical identity 已分别由 `68` / `67` 冻结。
 
-当前相关开放项只剩：
+当前相关开放项只剩 Runtime 行为：
 
 - Runtime `instanceId` 生成算法；
 - 非 Dialogue business fact → Mutation handler 的 Runtime 实现；
