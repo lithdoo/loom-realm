@@ -79,7 +79,6 @@ classDiagram
       y
       direction
       pattern?
-      resolvedBattleData
     }
 
     class DialogueDefinition {
@@ -127,19 +126,19 @@ classDiagram
       decisionState
     }
 
-    CharacterDefinition --> BattleActorContent : static battle source
+    CharacterDefinition --> BattleActorContent : stable battleActorRef
     BattleActorContent --> BattleSkill : skills[] definitions
 
     CharacterDefinition "1" <-- "0..*" Relationship : from/to
     Relationship *-- Contract : optional
 
     Contract --> BattleSkill : current contract skills[]
-    Relationship --> Card : contract may be carried
-    CharacterDefinition "1" <-- "0..*" Card : holder/servant
+    Relationship --> Card : established contract may be carried
+    CharacterDefinition "1" <-- "0..*" Card : holder/servant refs
 
     NPCInstance --> NPCDefinition : npcId
     NPCInstance --> CharacterDefinition : optional characterId
-    NPCInstance --> BattleActorContent : resolved from battle sources
+    CharacterDefinition --> BattleActorContent : persistent NPC base actor
 
     CharacterDefinition --> DialogueDefinition : optional Line.speaker refs
     DialogueDefinition --> EventStateMutation : optional mutation ref
@@ -147,30 +146,33 @@ classDiagram
     EventStateList --> EventDefinition : current non-null entries
     EventStateMutation --> EventStateList : validate / replace list
 
-    EncounterDefinition --> NPCInstance : generates / contributes battle source
-    EncounterDefinition --> BattleActorContent : temporary battle source
+    EncounterDefinition --> NPCInstance : generates transient instances
+    EncounterDefinition --> BattleActorContent : transient base actor source
 
-    NPCInstance --> Contract : creation snapshot source
+    BattleActorContent --> Contract : initializes max_hp / skills[]
     Card --> BattleRuntimeActor : selects carried contract
     Contract --> BattleRuntimeActor : integrity / skills[]
-    BattleActorContent --> BattleRuntimeActor : static actor definition
-    NPCInstance --> BattleRuntimeActor : direct actor resolved data
+    BattleActorContent --> BattleRuntimeActor : stable/base actor definition
 ```
 
-`NPCInstance.resolvedBattleData` 在图中表示职责，不冻结最终 JSON 必须真的嵌套一个同名字段。
+Card、Relationship / Contract、Character Content 都是平级数据来源。Card 引用 Character / Contract，但不是 Character Content 的子对象。
 
-## NPC Instance → Contract / Battle 链路
+## NPC Instance → BattleActor → Contract / Battle 链路
 
 ```mermaid
 flowchart LR
-    SRC[Character / Encounter / Story sources] --> NPC[NPC Instance]
-    BA[BattleActor Content] --> NPC
-    NPC --> RES[resolved battle data<br/>actor/max values + skills[]]
+    PC[Persistent NPC Instance] --> CH[Character]
+    CH --> BA[stable BattleActor Content]
 
-    RES --> DIRECT[本体 / transient actor<br/>本场 Battle 直接使用]
-    RES --> INIT[建立新 Contract<br/>snapshot defaults]
+    TE[Transient Encounter / Story NPC Instance] --> SRC[Encounter / Story static source]
+    SRC --> BA2[base BattleActor Content]
 
-    INIT --> CT[Relationship.contract<br/>integrity + skills[]]
+    BA --> DIRECT[本体 Battle Runtime Actor]
+    BA2 --> DIRECT2[transient Battle Runtime Actor]
+
+    BA --> INIT[建立新 Contract]
+    INIT --> CT[Relationship.contract<br/>integrity = max_hp<br/>skills[] = copy skills[]]
+
     CT --> CARD[Current Card<br/>holder / servant / slot]
     CARD --> BR[Battle Runtime Actor]
     CT --> BR
@@ -183,31 +185,55 @@ flowchart LR
 当前规则：
 
 ```text
-NPC Instance resolved battle data
-= Contract 创建时的直接初始化来源
-= 本体 / transient actor 的本场 Battle 输入来源
+Persistent NPC Instance
+→ Character.battleActorRef
+→ stable BattleActor
 
-Relationship.contract
-= 创建后的长期 authority
-= integrity + skills[]
+Transient NPC Instance
+→ Encounter / Story battleActorRef
+→ base BattleActor
 
-Card
-= 只表示当前是否随身 + slot
-= MVP 没有独立 cardId / Card identity
+NPC Instance
+≠ BattleActor variant owner
 ```
 
-Contract 创建是 snapshot：
+MVP 不允许同一个持久 Character 因为不同 NPC Instance 而切换成不同 BattleActor identity。
+
+建立 Contract：
 
 ```text
-NPC Instance 后续 battle data 变化
-≠ 自动改写已有 Contract
+contract.integrity = BattleActor.max_hp
+contract.skills[] = copy(BattleActor.skills[])
+Contract Integrity max = BattleActor.max_hp
 ```
 
-`contract.integrity` 的初始化来自 NPC Instance resolved battle defaults，而不是该 NPC 某场本体 Battle 的当前剩余 HP。
+Contract 不保存额外 `maxIntegrity`；基础 BattleActor 继续是稳定 max / actor definition 来源。
+
+Relationship / Contract：
+
+```text
+Relationship
+= 有向长期关系
+= 可以存在而 contract 为空
+
+Relationship.contract
+= 正式契约成立
+= MVP: integrity + skills[]
+```
+
+Card：
+
+```text
+Card
+= 当前是否随身 + slot
+= MVP 没有独立 cardId / Card identity
+```
 
 MVP 不设计：
 
 ```text
+NPC Instance resolvedBattleData
+BattleActor variant per NPC Instance
 progression
 training state
 learnedSkillIds
@@ -268,6 +294,19 @@ flowchart LR
 ```
 
 `choices` 与 `mutation` 互斥。EventStateMutation 只改变 Event current state，不修改 Relationship / Contract / Card / Battle 等其他 State。
+
+如果同一次 Dialogue 业务还建立 Contract：
+
+```mermaid
+flowchart LR
+    D[terminal Dialogue] --> M[Dialogue.mutation]
+    M --> ES[update EventStateList only]
+    D --> B[PokeMan business Runtime]
+    B --> C[create Relationship.contract]
+    C --> BA[resolve target NPC base BattleActor]
+```
+
+这两条路径属于同一个业务流程，但不是同一个数据 mutation DSL。
 
 ## Dialogue speaker 解析
 
@@ -370,6 +409,14 @@ seed Record
 ## 当前最重要的边界
 
 ```text
+Character
+= 持久 identity
+= stable BattleActor source
+
+NPC Instance
+= 这次世界中的具体出现
+= 不拥有 BattleActor variant
+
 Relationship
 = 有向长期关系
 
@@ -377,9 +424,8 @@ Relationship.contract
 = 可选长期契约状态
 = MVP: integrity + skills[]
 
-NPC Instance resolved battle data
-= Contract 创建时的直接默认值来源
-= direct actor 的本场 Battle 输入来源
+BattleActor.max_hp / skills[]
+= 新 Contract 初始化来源
 
 Card
 = 当前随身与 slot
@@ -396,6 +442,10 @@ Dialogue.speakerName
 固定 Dialogue Mutation
 = Dialogue Content.mutation
 → Dialogue Subsystem 执行
+→ 只修改 EventStateList
+
+非 Event-state 业务效果
+= 对应 PokeMan business Runtime 处理
 
 非 Dialogue 剧情推进
 = session-event
@@ -412,8 +462,8 @@ Encounter re-entry / persistence
 
 - Relationship / Contract 的最终 Realm State key / JSON shape；
 - Card 的最终 Realm State 物理布局与必要唯一约束；不设计独立 `cardId`；
-- **NPC Instance battle source / resolved battle data 的最终引用与 schema**，包括 Character / Encounter / Story 如何解析到 BattleActor，以及 Contract 初始化默认字段如何表达；
 - Character → BattleActor Content 的最终引用编码；
+- Encounter / Story transient source → BattleActor Content 的最终引用编码；
 - Event / EventStateMutation 的最终 Content namespace / key；
 - EventStateList Realm State Record 的最终 namespace / key；
 - Event placement / `instanceId` / `absent` 的最终 JSON shape。
@@ -421,8 +471,10 @@ Encounter re-entry / persistence
 以下不再作为 MVP 数据模型缺口：
 
 ```text
-Card identity / cardId
+NPC Instance resolved battle data / BattleActor variant
 Contract 默认值来源
+Contract Integrity 初始值 / 最大值来源
+Card identity / cardId
 Encounter re-entry / persistence
 progression / training shape
 技能成长 / base+learned merge
