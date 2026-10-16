@@ -120,7 +120,7 @@ StoryIndex
 
 ## Character key 的额外业务约束
 
-FSDB 自身允许更宽的合法文件名，但 `struct.Character` key 还会进入 `pokeman.Relationship` 与 `pokeman.CarriedCards` 的 Realm State Record key。为满足 Realm State v1 的 key grammar 与 256-byte 长度上限，PokeMan Character key 额外固定为：
+`struct.Character` key 还会进入 `pokeman.Relationship` 与 `pokeman.CarriedCards` 的 Realm State Record key，因此额外固定为：
 
 ```text
 [a-z0-9][a-z0-9._-]{0,119}
@@ -132,7 +132,7 @@ FSDB 自身允许更宽的合法文件名，但 `struct.Character` key 还会进
 <fromCharacterId>:<toCharacterId>
 ```
 
-最大长度为 241 bytes。
+最大长度为 241 bytes，满足 Realm State v1 的 256-byte key 上限。
 
 ## 固定目标 table：只保存 key
 
@@ -168,9 +168,9 @@ eventId
 → struct.Event key
 ```
 
-## 外部 package / namespace 未冻结：保存 ContentRef
+## 跨 table / package definition：保存 ContentRef
 
-当目标 namespace 不是 PokeMan 自己可以冻结的固定 table 时，使用：
+当字段需要定位一条不属于固定 PokeMan table 的 Content definition 时，使用：
 
 ```ts
 type ContentRef = {
@@ -179,18 +179,30 @@ type ContentRef = {
 }
 ```
 
-当前最重要的是 `battleActor`。
-
-Battle package 已冻结 BattleActor 的逻辑 contract，但正式外部 serialization namespace / key/reference encoding 仍由 battle package 决定。因此 PokeMan 不创建平行 `struct.BattleActor` 规范。
+当前主要用于 `battleActor`：
 
 ```json
 {
   "battleActor": {
-    "namespace": "<battle package namespace>",
+    "namespace": "<battle content namespace>",
     "key": "rival"
   }
 }
 ```
+
+这只表示“定位一条基础 BattleActor definition”，不意味着 PokeMan 重新定义 BattleActor schema。
+
+`@loomrealm-game/battle` 已经拥有 BattleActor / BattleSkill gameplay contract，并且 BattleSkill identity 在现有 Battle contract 中就是 string `id / skillId`。因此：
+
+```text
+BattleActor.skills[]
+= BattleSkill id string[]
+
+Relationship.contract.skills[]
+= ordered unique BattleSkill id string[]
+```
+
+PokeMan 不建立 `BattleSkillRef`、`ContentRef[]` 或第二套 Skill identity。
 
 作者 source 不手写 `contentVersion`；版本由 Content API / resolved reference 处理。
 
@@ -212,7 +224,7 @@ file      = [struct]Character/<characterId>.json
   "description": "从小与主公一起长大的竞争对手。",
   "aiCharacterText": "好胜、自信，不愿轻易服输。",
   "battleActor": {
-    "namespace": "<battle package namespace>",
+    "namespace": "<battle content namespace>",
     "key": "rival"
   },
   "defaultScenes": {
@@ -261,6 +273,7 @@ Character
 - `<mapId>` 是 Map package 正 safe integer `mapId` 的十进制字符串形式；
 - `<npcId>` 是 `struct.NPC` key；
 - `interaction.dialogue` 是 `struct.Dialogue` key；
+- placement `x / y` 使用非负 safe integer；
 - default scene source 不保存 Runtime `instanceId`。
 
 Character 不保存 Relationship、Contract、Card 或 Battle Runtime state。
@@ -371,6 +384,10 @@ choices 存在
 
 mutation 存在
 → choices 不存在
+
+choices 与 mutation
+→ 最多存在一个
+→ 允许两者都不存在
 ```
 
 # EventStateMutation
@@ -441,7 +458,7 @@ to
 }
 ```
 
-禁止完全 no-op Mutation。
+这里只禁止 `to: {}` 这种空赋值。schema 不额外比较 `from / to` 来证明一次执行一定改变当前值；这种“语义 no-op”不是值得增加数据结构复杂度的问题。
 
 Mutation 不保存：
 
@@ -545,8 +562,8 @@ Placement：
 
 ```text
 Placement
-├─ x: non-negative integer
-├─ y: non-negative integer
+├─ x: non-negative safe integer
+├─ y: non-negative safe integer
 ├─ direction: 2 | 4 | 6 | 8
 └─ pattern?: 0 | 1 | 2 | 3
 ```
@@ -555,7 +572,15 @@ Placement
 
 ```text
 placement XOR absent:true
+
+absent:true
+→ character 必须存在
+→ placement 不存在
+→ battleActor 不存在
+→ interaction 不存在
 ```
+
+不额外引入 `absentCharacters[]` 或第二套 Character takeover schema。
 
 `instanceId` 不属于 Event Content。
 
@@ -599,7 +624,7 @@ transient Story NPC 可以直接保存基础 BattleActor：
     "direction": 2
   },
   "battleActor": {
-    "namespace": "<battle package namespace>",
+    "namespace": "<battle content namespace>",
     "key": "road-bandit"
   },
   "interaction": {
@@ -653,7 +678,7 @@ record value 不重复保存 `mapId`。
       "engagement": "hostile",
       "dialogue": "route-bandit-threat",
       "battleActor": {
-        "namespace": "<battle package namespace>",
+        "namespace": "<battle content namespace>",
         "key": "road-bandit"
       }
     }
@@ -685,19 +710,24 @@ Encounter
 engagement = "hostile"
 ```
 
-以下 generation 参数尚未冻结：
+当前真正仍缺的 authored generation 数据只有：
 
 ```text
-weight
-probability
-minCount
-maxCount
-seed
-respawn
-persistent
+每次生成数量的表达
+多个 template 的相对选择分布（例如 weight）
 ```
 
-Encounter re-entry / defeated persistence 等仍属于 Runtime / gameplay policy。
+以下不作为当前 Content schema gap：
+
+```text
+seed
+spawn selection algorithm
+re-entry reroll
+respawn
+defeated persistence
+```
+
+它们默认属于 Runtime / gameplay policy。只有未来产品明确需要作者配置时，才重新进入 Content 数据设计。
 
 # StoryIndex
 
@@ -747,7 +777,7 @@ StoryIndex
 
 派生数组必须 unique，并由 Builder 使用稳定顺序输出。
 
-StoryIndex 的精确字段集合仍可随真实 Resolver 查询需求调整；当前冻结的是 generated Content identity 与非-authority 属性。
+StoryIndex 的精确字段集合可以随真实 Resolver 查询需要调整。因为它是可重建的 generated read model，这不是 MVP 核心业务数据 schema 缺口，也不形成新的 authority。
 
 # Map id
 
@@ -777,16 +807,20 @@ Realm State 的 `pokeman.PlayerWorld/current` 只作为 durable resume/checkpoin
 - 固定-target key 引用存在于目标 table；
 - Character `battleActor` ContentRef 可解析；
 - Character `defaultScenes` map key 是合法正 safe integer；
+- Character `defaultScenes` placement 的 `x / y` 是非负 safe integer；
 - Character `defaultScenes` 的 `npcId` 指向 `struct.NPC`；
 - Event state / map / npc object key 合法；
 - Event map key 是合法正 safe integer；
 - Event directive 满足 `placement XOR absent:true`；
+- `absent:true` 时必须有 `character`，且不得同时出现 `placement / battleActor / interaction`；
+- Event placement 的 `x / y` 是非负 safe integer；
 - Event directive 有 `character` 时禁止 `battleActor`；
 - Dialogue `speaker`、Choice `target`、`mutation` 引用存在；
 - Dialogue `choices` 与 `mutation` 互斥；
 - EventStateMutation `to` 非空；
 - EventStateMutation 所有非空 stateId 存在；
 - Encounter record key 是合法正 safe integer mapId；
+- Encounter spawn point `x / y` 是非负 safe integer；
 - Encounter template 的 `npc / dialogue / battleActor` 引用存在；
 - StoryIndex 与源 Content 一致。
 
@@ -818,28 +852,44 @@ max / initial source
 Relationship.contract.skills[]
 initial source
 → copy(BattleActor.skills[])
+→ BattleSkill id string[]
 ```
 
 Content 不复制这些 mutable values。
 
 # 当前仍未冻结
 
-Content physical schema 收口以后，当前主要开放项是：
+经过一致性复核，当前 Content 侧真正需要继续设计的核心项只剩：
 
-1. Battle package 的 BattleActor / BattleSkill 正式 serialization namespace / key/reference encoding；PokeMan 只使用 ContentRef。
-2. Encounter 随机生成的具体数量、概率、权重、spawn 选择与 seed 规则。
-3. StoryIndex 为实际 Resolver 查询最终保留哪些派生字段。
-4. 本地化、头像 / 表情 / 音效等 richer presentation metadata。
+1. **Encounter authored generation 数据**：生成数量的最小表示，以及 template 相对选择分布采用哪种简单编码（例如 `weight`）。
 
-以下不再是 Content physical-schema gap：
+以下不再列为 MVP 核心 Content physical-schema gap：
+
+```text
+BattleSkill identity / Contract.skills[] encoding
+BattleActor gameplay schema
+Dialogue choices / mutation exclusivity
+Event absent 的第二套 takeover 结构
+EventStateMutation semantic no-op proof
+StoryIndex 最终派生字段
+Encounter seed / spawn selection algorithm / re-entry / respawn / persistence
+本地化、头像 / 表情 / 音效等 future presentation metadata
+```
+
+每个 struct table 仍需要实际 `.info.meta` / exact schema 文件，但这是把本文已经冻结的 shape 落成 FSDB 可执行校验的实现工作，不代表还需要重新设计业务数据模型。
+
+以下已经冻结，不再是 Content physical-schema gap：
 
 ```text
 Character / Dialogue / Event / EventStateMutation / Encounter / StoryIndex table identity
 PokeMan struct record 是否重复保存 id
+Character key 与 Relationship key 的编码约束
 Event stateId / mapId / npcId 是否重复写进 value
-Event placement / absent basic JSON shape
+Dialogue choices 与 mutation 的互斥语义
+Event placement / absent basic JSON shape 与 absent 最小约束
 Event / Character scene source 是否保存 Runtime instanceId
 持久 Character / transient Story NPC 的 base BattleActor 引用位置
+BattleSkill id = string；Contract.skills[] 直接复用
 Encounter 是否重复保存 mapId
 Relationship / Contract / Card / EventStateList Realm State encoding
 ```
