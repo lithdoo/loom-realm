@@ -51,6 +51,10 @@ choices 存在
 
 mutation 存在
 → choices 不存在
+
+choices 与 mutation
+→ 最多存在一个
+→ 允许两者都不存在
 ```
 
 所以 Dialogue 只有三种形态：
@@ -110,7 +114,8 @@ transient/default speaker：
 ```text
 Line.speaker 存在
 → 持久 Character
-→ 显示 Character.name / Character presentation
+→ 显示 Character.name
+→ richer presentation data 如果未来需要再单独定义
 
 Line.speaker 不存在
 + Dialogue.speakerName 存在
@@ -347,7 +352,7 @@ Builder 不因为合法 Dialogue cycle 失败。
 
 # 当前不冻结
 
-以下内容等真实需求出现后再设计：
+以下内容等真实需求出现后再设计，不算当前 physical-schema gap：
 
 - 本地化文本最终组织；
 - 头像 / 表情 / 音效等 richer presentation metadata；
@@ -364,7 +369,7 @@ source 不保存 id
 speaker = Character key
 Choice.target = Dialogue key
 mutation = EventStateMutation key
-choices XOR mutation
+choices 与 mutation 互斥，允许两者都不存在
 speakerName = presentation fallback, not identity
 Completion = terminalDialogueId runtime result
 ```
