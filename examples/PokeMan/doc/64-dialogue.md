@@ -1,6 +1,6 @@
 # 固定对话
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文只设计作者写好的固定 Dialogue Content；Card 模式 AI 自由对话不在这里讨论。FSDB 物理编码见 [Content FSDB 物理模型](./66-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文只设计作者写好的固定 Dialogue Content；Card 模式 AI 自由对话不在这里讨论。FSDB 物理编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 归宿总表见 [数据落点](./60-data-placement.md)，人物见 [人物](./61-character.md)，Event / EventStateMutation 见 [事件](./62-event.md)。
 
@@ -232,18 +232,18 @@ professor-intro
 terminal Dialogue completion
 ├─ Dialogue.mutation
 │  → PokeMan Dialogue Subsystem
-│  → EventStateList only
+│  → pokeman.EventStateList/current only
 │
 └─ same business interaction establishes Contract
    → PokeMan business Runtime
    → current target NPC Instance
    → resolve base BattleActor
-   → create Relationship.contract
+   → create pokeman.Relationship/<holder>/<servant>.contract
       ├─ integrity = BattleActor.max_hp
       └─ skills[] = copy(BattleActor.skills[])
 ```
 
-这两条写入的 ordering / failure coordination 是 Runtime 设计，不通过扩展 EventStateMutation action DSL 解决。
+两条写入的 ordering / failure coordination 是 Runtime 设计，不通过扩展 EventStateMutation action DSL 解决。
 
 # 分支与循环
 
@@ -294,7 +294,7 @@ choices?
 └─ no  → mutation?
          ├─ no  → complete
          └─ yes → load EventStateMutation
-                  → read EventStateList
+                  → read pokeman.EventStateList/current
                   → validate all from
                   → build new EventStateList
                   → state.commit()
@@ -332,7 +332,7 @@ EventStateMutation definition
 Builder 应检查：
 
 - `struct.Dialogue` FSDB key 合法；
-- record 不重复保存 `id`；
+- source record 不重复保存 `id`；
 - `lines` 存在且至少一项；
 - Line `text` 合法；
 - Line `speaker` 指向存在的 `struct.Character`；
