@@ -1,141 +1,166 @@
 # 人物
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文决定持久人物的 Content、长期 Relationship、当前随身 Card，以及人物如何投影成 Map NPC Instance。固定 Dialogue、Encounter 和 Battle 规则分别由对应模块定义。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义持久 Character、NPC / Map Instance、Relationship / Contract、Card 与 Battle 数据边界。Content 的 FSDB 物理编码见 [Content FSDB 物理模型](./66-content-fsdb.md)。
 
 归宿总表见 [数据落点](./60-data-placement.md)。
 
-## Content 里的人物
+# Character Content
 
-一个持久的人一条 Character Content 记录。主角、家人、博士、宿敌、店主，以及以后可以建立契约的修行者，都是 Character。进图时随机生成的普通混混、路霸不要求建立持久 Character，可以走 Encounter template。
-
-人物记录放稳定、不随这一局游玩改变的定义，例如：
-
-- **身份**：`id`、名称。`id` 是人物级事实的稳定 identity，也是其他静态定义关联人物的稳定键。
-- **描述**：职业、性格、经历等作者定义的静态资料。
-- **功能标签**：研究者、店主、家人等世界职责。
-- **固定 AI 人物描述**：一段供自由对话 AI 使用的自然语言人物说明，可以表达性格、说话习惯、背景、价值观等不值得拆成游戏规则字段的信息。
-- **默认场景实例**：当当前所有 active Event State 都没有提到这个 Character 时，这个人默认如何出现在 Map；一个 Character 可以有 0..N 个默认 NPC Instance。
-- **Battle 静态资料引用**：稳定关联一个 `@loomrealm-game/battle` BattleActor Content；技能直接使用 BattleActor 的 `skills[]` 所引用的 BattleSkill Content。
-
-固定 AI 人物描述属于 immutable Content。它回答“这个人本来是什么样的人”，不会因为这一局与玩家关系变化而改写。需要被规则读取的事实仍然使用结构化数据。
-
-所有持久 Character 都应准备好形成 Card / Battle 表现所需的静态素材与数据。这只是 **Content 完备性规则**，不表示当前游戏规则允许与这个人物建立契约，也不推导 `canContract = true`。
-
-### Battle 数据直接复用 `@loomrealm-game/battle`
-
-PokeMan 不在 Character 模块里再定义一套平行的 Skill / Battle stat schema。
-
-当前 BattleActor Content 的逻辑数据包括：
+一个持久人物对应一条 `struct.Character` record。
 
 ```text
-BattleActor Content
-├─ id
+[struct]Character/<characterId>.json
+→ namespace = struct.Character
+→ key = characterId
+```
+
+**Character identity 由 FSDB record key 提供；PokeMan source record 不再重复保存 `id` 字段。**
+
+主角、家人、博士、宿敌、店主，以及以后可以建立契约的修行者，都是 Character。随机生成的普通混混、路霸等 transient Encounter NPC 不要求建立 Character。
+
+当前核心数据：
+
+```text
+Character
+├─ name
+├─ description?
+├─ aiCharacterText?
+├─ battleActor: ContentRef
+└─ defaultScenes?
+   └─ <mapId decimal key>
+      └─ <npcId>
+         ├─ placement
+         └─ interaction?
+            └─ dialogue
+```
+
+例如：
+
+```json
+{
+  "name": "宿敌",
+  "description": "从小与主公一起长大的竞争对手。",
+  "aiCharacterText": "好胜、自信，不愿轻易服输。",
+  "battleActor": {
+    "namespace": "<battle package namespace>",
+    "key": "rival"
+  },
+  "defaultScenes": {
+    "1": {
+      "rival-casual": {
+        "placement": {
+          "x": 10,
+          "y": 6,
+          "direction": 2
+        },
+        "interaction": {
+          "dialogue": "rival-default"
+        }
+      }
+    }
+  }
+}
+```
+
+其中：
+
+- `name / description / aiCharacterText` 是 immutable author data；
+- `battleActor` 稳定引用这个 Character 的基础 BattleActor；
+- `defaultScenes` 是当前 active Event 没有接管该 Character 时的 fallback scene source；
+- `<mapId>` 是 Map package 正 safe integer `mapId` 的十进制字符串形式；
+- `<npcId>` 是 `struct.NPC` key；
+- `interaction.dialogue` 是 `struct.Dialogue` key；
+- default scene source 不保存 Runtime `instanceId`。
+
+固定 AI 人物描述回答“这个人本来是什么样的人”。需要被规则读取的长期变化不回写 Character Content，而进入 Realm State Relationship 等结构化事实。
+
+所有持久 Character 都应准备好形成 Card / Battle 表现所需的静态素材与数据。这是 **Content 完备性规则**，不表示存在 `canContract = true`，也不表示当前一定能建立契约。
+
+# BattleActor / BattleSkill
+
+PokeMan 不定义平行 Skill / Battle Profile schema。
+
+BattleActor / BattleSkill 的 gameplay contract 直接复用 `@loomrealm-game/battle`：
+
+```text
+BattleActor
+├─ id / logical definition identity
 ├─ name
 ├─ character graphics reference
 ├─ max_hp
 └─ skills[] → BattleSkill
-```
 
-BattleSkill 直接采用 Battle package 当前定义：
-
-```text
 BattleSkill
-├─ id
+├─ id / logical definition identity
 ├─ name
 ├─ range
 ├─ damage
-├─ timing
-│  ├─ windup_ticks
-│  └─ recovery_ticks
+├─ timing.windup_ticks
+├─ timing.recovery_ticks
 └─ effect
 ```
 
-Character 只需要稳定关联到相应 BattleActor Content，不再复制另一份 Skill definition。
+Battle package 的正式外部 serialization namespace / key/reference encoding 仍由 battle package 自己冻结。因此 PokeMan `Character.battleActor` 使用 `{namespace,key}` ContentRef，不擅自创建第二套 `struct.BattleActor` 规范。
 
-MVP 对 NPC Instance → BattleActor 的规则保持简单：
+MVP 不增加 `attack / defense / speed / MP / accuracy / critical / element / universal cooldown / ammo` 等 Battle v0 没有的字段。
 
-```text
-持久 NPC Instance
-→ characterId
-→ Character.battleActorRef
-→ 基础 BattleActor
-
-transient Encounter / Story NPC Instance
-→ 对应 Encounter / Story 静态 battleActorRef
-→ 基础 BattleActor
-```
-
-**同一个持久 Character 的不同 NPC Instance 不改变 BattleActor identity。** 不因为不同 Map、不同 Event state、不同服装或不同 `npcId` 产生新的 BattleActor variant。
-
-对于没有 Contract 的本体 / transient Battle actor，本场 Battle 直接从这个基础 BattleActor 构造 Runtime Actor。
-
-建立 Contract 时同样先从当前目标 NPC Instance 找到基础 BattleActor，再初始化长期 Contract：
-
-```text
-目标 NPC Instance
-↓
-基础 BattleActor
-├─ max_hp
-└─ skills[]
-↓ create Contract
-Relationship.contract
-├─ integrity = BattleActor.max_hp
-└─ skills[] = copy(BattleActor.skills[])
-```
-
-MVP 的 Contract Integrity 上限也来自同一个稳定基础 `BattleActor.max_hp`；Contract 不额外保存 `maxIntegrity`。
-
-契约成立以后，这份契约当前实际拥有的技能以 `Relationship.contract.skills[]` 为准；MVP 不设计 `baseSkills + learnedSkills` 合并算法，也不设计经验、技能点、技能树等 progression schema。
-
-当前也不额外增加 `attack / defense / speed / MP / accuracy / critical / element / cooldown / Buff / Debuff` 等 Battle v0 没有定义的字段。将来 PokeMan 确实需要新的战斗机制时，优先在 `@loomrealm-game/battle` 中设计并冻结，再由 Character / Encounter / Story 静态来源引用。
-
-## Character、NPC 与 Map Instance
-
-Character 与 Map NPC Instance 是两个层次：
+# Character、NPC 与 Map Instance
 
 ```text
 Character
 = “这个人是谁”
 
 NPC Definition / npcId
-= “地图上以哪种 NPC 模板出现”
+= “地图上以哪种表现模板出现”
 
 Map NPC Instance
-= “这个 NPC 当前在某张 Map 上的具体出现”
+= “当前场景里这次具体出现”
 ```
 
-Character identity 与 `npcId` 不要求相同。一个 Character 可以关联不同 NPC Definition，例如不同服装或地图表现。
-
-当前 PokeMan 对最终场景采用一个明确约束：
-
-> **同一个 `npcId` 可以同时出现在多个不同 Map，但同一张 Map 的最终解析结果中，一个 `npcId` 最多出现一次。**
-
-因此允许：
+Character identity 与 `npcId` 不要求相同。一个 Character 可以使用多个 NPC Definition，例如不同服装：
 
 ```text
 Character rival
-├─ map 1 → npcId: rival-normal
-├─ map 2 → npcId: rival-normal
-└─ map 3 → npcId: rival-normal
+├─ npcId = rival-casual
+└─ npcId = rival-lab
 ```
 
-但不允许最终解析成：
+PokeMan 不扩展 Map package 已有的 `struct.NPC`：
 
 ```text
-map 1
-├─ npcId: rival-normal
-└─ npcId: rival-normal
+struct.NPC/<npcId>
+├─ name
+└─ sprite → resource.Graphics
 ```
 
-如果同一个 Character 在同一 Map 需要多个不同表现，它们必须至少是不同 `npcId`；是否有这种产品需求以后按具体场景决定。
+Character identity、Dialogue、BattleActor、Relationship 等都不塞进 `struct.NPC`。
 
-`instanceId` 仍然是 `@loomrealm-game/map` 的实例 identity，但 PokeMan 不再把不同 `instanceId` 当成“同一 Map 可以出现多个相同 `npcId`”的依据。业务层最终唯一性看：
+## 基础 BattleActor 解析
+
+持久 Character：
 
 ```text
-(mapId, npcId)
+Persistent NPC Instance
+→ characterId
+→ struct.Character/<characterId>
+→ Character.battleActor
+→ base BattleActor
 ```
 
-PokeMan World 最终投影给 `@loomrealm-game/map` 的仍是：
+transient Encounter / Story NPC：
+
+```text
+Transient NPC Instance
+→ Encounter / Event static source
+→ battleActor ContentRef
+→ base BattleActor
+```
+
+**同一个持久 Character 的不同 NPC Definition / NPC Instance 不改变 BattleActor identity。** 不因为不同 Map、Event state、服装或 `npcId` 产生新的 BattleActor variant。
+
+PokeMan World-side NPC Instance 可以比 Map package 的 `NPCPlacement` 丰富，保存 `characterId?`、source context 等 Runtime 信息；但不拥有独立 Battle profile / resolved battle data authority。
+
+最终传给 Map package：
 
 ```text
 NPCPlacement
@@ -147,33 +172,88 @@ NPCPlacement
 └─ pattern?
 ```
 
-PokeMan 自己在投影之前使用的 World-side NPC Instance 可以比 Map 的 `NPCPlacement` 丰富，例如额外知道 `characterId` 或生成来源；但 MVP 不把一份独立 Battle profile / resolved battle data 嵌进 NPC Instance。
+`instanceId` 是 Runtime instance identity，不写回 Character / Event Content。
 
-需要进入 Battle 或建立 Contract 时，Runtime 只做“从当前 NPC Instance 找到基础 BattleActor”的解析：
+# Map 场景唯一性
+
+当前最终场景固定：
+
+> 同一个 `npcId` 可以同时出现在不同 Map，但同一张 Map 的最终解析结果中，一个 `npcId` 最多出现一次。
 
 ```text
-persistent NPC Instance
-→ characterId → Character.battleActorRef
-
-transient NPC Instance
-→ Encounter / Story source → battleActorRef
+(mapId, npcId)
+= final business uniqueness
 ```
 
-`@loomrealm-game/map` 只看到它需要的 `NPCPlacement`。`@loomrealm-game/map` 根据 `npcId` 读取 `[struct]NPC/<npcId>` 的窄 `name + sprite` 定义。Character Content 负责“这个人是谁以及人物 / Card / Battle 所需的静态数据引用”，Map NPC definition 负责地图表现，World / Story Resolver 负责“当前 Map 应该出现哪些实例”。
-
-## Relationship：A → B 的长期关系与契约状态
-
-Relationship 是 Realm State 中两个人之间、带方向的长期业务状态。
+因此允许：
 
 ```text
-A → B
-= A 与 B 当前持续存在的关系状态
+map 1 → rival-casual
+map 2 → rival-casual
 ```
 
-MVP 当前确认的概念字段：
+但不允许最终同一 Map 中出现两个 `rival-casual`，即使它们的 `instanceId` 不同。
+
+不同 Event source 可以都引用相同 `npcId`；跨 source 不做 author-time 全局唯一。Story Resolver 合并当前 active sources 后，如果同一 Map 得到重复 `npcId`，必须 deterministic conflict，不做 last-wins。
+
+# Character default scene / Event takeover
+
+Character 的 `defaultScenes` 是纯 fallback。
+
+Story Resolver 对持久 Character `X`：
 
 ```text
-Relationship
+当前没有任何 active Event State 提到 X
+→ 使用 Character X.defaultScenes
+
+至少一个 active Event State 提到 X
+→ X 的全部 defaultScenes 退出解析
+→ X 当前 scene 完全由 Event sources 决定
+```
+
+这里 Event “提到 Character”要求 directive 明确保存：
+
+```text
+character = X
+```
+
+只有 `npcId`、没有 `character` 的 transient NPC source 不接管任何 Character default scene。
+
+## absent
+
+Event directive 的：
+
+```json
+{
+  "character": "rival",
+  "absent": true
+}
+```
+
+表示：
+
+> 这个 Event 当前明确提到 Character `rival`，但本 Event 不贡献 placement。
+
+`absent` 不压制其他 Event 的 placement，也不建立 Event priority：
+
+```text
+Event A → X absent
+Event B → X placement at town
+
+→ X 已被 Event 接管
+→ default 不参与
+→ Event A 不贡献 placement
+→ Event B 的 town placement 生效
+```
+
+如果 active Event 已经接管 X，而所有相关 source 都不贡献 placement，则 X 当前不出现。
+
+# Relationship
+
+Relationship 是 Realm State 中两个 Character 之间的有向长期关系：
+
+```text
+Relationship(A → B)
 ├─ fromCharacterId
 ├─ toCharacterId
 ├─ affinity
@@ -181,86 +261,87 @@ Relationship
 ├─ dynamic relationship text
 └─ contract?
    ├─ integrity
-   └─ skills[] → BattleSkill ids
+   └─ skills[]
 ```
 
-**Relationship 存在不表示 Contract 已成立。** A 与 B 可以先产生 affinity / hostile / dynamic relationship text，而 `contract` 仍然不存在。
+`A → B` 与 `B → A` 是独立 Relationship，不要求对称。
 
-`contract` 不再只是一个独立布尔字段。**存在 `contract` 对象才表示正式契约成立；不存在就表示没有契约。** Contract 仍然只是 Relationship 的一部分，不建立独立 Realm State authority。
+**Relationship 存在不表示 Contract 已成立。** A 与 B 可以先有 affinity / hostile / relationship text，而 `contract` 不存在。
 
-这里先表达语义，最终 Realm State key / JSON shape 后续再冻结。
-
-`player → rival` 与 `rival → player` 是两份不同的 Relationship，不要求对称。双向契约就是两个方向分别存在各自的 `contract`：
-
-```text
-Relationship(player → rival).contract
-Relationship(rival → player).contract
-```
-
-### affinity / hostile / 关系文本
-
-`affinity` 是整数。**hostile 与 affinity 是独立事实，不由 `affinity < 0` 推导。**
-
-例如：
+`affinity` 是整数。`hostile` 与 affinity 是独立事实：
 
 ```text
 affinity = -20
 hostile = false
 ```
 
-可以表示 A 很不喜欢 B，但当前没有进入敌对冲突；反过来，也允许剧情直接让关系进入 hostile，而不要求先把 affinity 改成负数。
+是合法状态。
 
-动态关系描述文本用自然语言表达这一局里 A 对 B 当前形成的关系语境，例如共同经历、认可、不满、习惯性的态度等。它属于 Realm State，并随存档恢复。
+动态关系文本用于 AI 自由对话理解这一局形成的关系语境，不替代给规则读取的结构化字段。
 
-结构化状态和关系文本职责不同：
+# Contract
 
-- `affinity`、`hostile`、`contract.integrity`、`contract.skills[]` 等结构化状态给游戏规则使用；
-- 动态关系描述文本主要给 AI 自由对话理解关系，不替代规则字段。
-
-### Contract：MVP 长期 Battle 状态
-
-`A → B` Relationship 上存在 `contract` 表示：
-
-> **A 已经以主公身份与 B 这个从者建立正式契约。**
-
-Relationship 很好不代表一定有契约；契约成立以后 affinity / hostile 仍然继续变化。把 B 从随身 Card 编队移出，也不会解除这个 contract。
-
-MVP 中 Contract 只保存当前实际需要跨 Battle / 随身切换持续存在的 Battle 状态：
+存在：
 
 ```text
-Relationship(A → B)
-└─ contract
-   ├─ integrity = 48
-   └─ skills = [firebolt, grab]
-
-Card(A, B)
-= 可以存在，也可以当前不存在
+Relationship(A → B).contract
 ```
 
-其中：
+表示：
 
-- `integrity`：这份契约的 Battle Manifestation 长期完整度；
-- `skills[]`：这份契约当前实际可用的 BattleSkill ids。
+> A 已作为主公与 B 这个从者建立正式契约。
 
-建立新 Contract 时，MVP 从**目标 NPC Instance 对应的基础 BattleActor**初始化：
+Contract 不建立独立 Realm State authority，而是 Relationship 内的一段长期状态。
+
+MVP Contract 只有：
 
 ```text
-BattleActor.max_hp
-→ contract.integrity
-
-BattleActor.skills[]
-→ copy → contract.skills[]
+contract
+├─ integrity
+└─ skills[]
 ```
 
-Contract Integrity 上限也是 `BattleActor.max_hp`。这不是读取目标 NPC 某场本体 Battle 结束后的当前 HP；本体 Battle HP 与 Contract Integrity 是不同产品语义。
+建立 Contract 时，从当前交互目标 NPC Instance 解析基础 BattleActor：
 
-Contract 创建完成以后，`contract.integrity / skills[]` 成为该 Contract 的长期 authority。基础 BattleActor 的 `skills[]` 不会在之后自动覆盖已有 Contract 的技能集。
+```text
+目标 NPC Instance
+↓
+base BattleActor
+├─ max_hp
+└─ skills[]
+↓
+Relationship.contract
+├─ integrity = BattleActor.max_hp
+└─ skills[] = copy(BattleActor.skills[])
+```
 
-MVP **不定义 `progression` / `training` State shape**。未来真正加入训练、学习技能、等级等玩法时，再扩展 Contract；这些未来方向不作为当前 schema 的未决阻塞项。
+Contract Integrity 上限也来自同一 `BattleActor.max_hp`；不保存 `maxIntegrity`。
 
-因此从者不随身时，`contract.integrity` 和 `contract.skills[]` 仍然自然保留。
+目标 NPC 本体某一场 Battle 的当前 HP 与 Contract Integrity 是不同产品语义。
 
-同一个 Character 可以与多个主公分别建立契约：
+Contract 成立后，当前实际拥有技能以：
+
+```text
+Relationship.contract.skills[]
+```
+
+为长期 authority。基础 BattleActor.skills 不会自动覆盖已有 Contract。
+
+MVP 不定义：
+
+```text
+level
+exp
+training
+skill tree
+skill point
+learnedSkillIds
+baseSkills + learnedSkills merge
+```
+
+这些未来玩法不属于当前 schema gap。
+
+同一个 Character 可以与多个主公分别建立 Contract：
 
 ```text
 player → rival
@@ -270,295 +351,179 @@ lord-b → rival
 └─ contract: integrity / skills[]
 ```
 
-它们共享同一个 `rival` Character / BattleActor Content，但各自拥有独立的有向 Relationship 和 Contract 状态。
+它们共享 Character / base BattleActor Content，但 Contract 状态独立。
 
-初始 affinity、hostile、关系文本和已有 Contract 都可以来自 Game Entry `state.records`。
+# Card
 
-## Card：当前随身状态
-
-**Card 不嵌在 Relationship 里。** Card 是独立的 Realm State 业务对象，但职责非常窄：
-
-> **Card 只表示一份已成立契约当前是否被主公带在身上，以及它位于哪个随身 slot。**
-
-因此：
+Card 是独立 Realm State 当前随身事实：
 
 ```text
-Relationship.contract exists
-= 长期正式契约成立
-= 保存 integrity / skills[]
-
-Card
-= 这份已成立契约当前是否进入随身编队
-```
-
-有 Contract 不代表当前一定有 Card：
-
-```text
-Relationship(player → rival)
-contract:
-  integrity: 48
-  skills: [firebolt, grab]
-
-Card(player, rival) exists      // 当前随身
-```
-
-或者：
-
-```text
-Relationship(player → rival)
-contract:
-  integrity: 48
-  skills: [firebolt, grab]
-
-Card(player, rival) absent      // 当前不随身
-```
-
-当前 Card 概念只需要表达：
-
-```text
-Card
-├─ holderCharacterId
-├─ servantCharacterId
-└─ carried slot
-```
-
-其中：
-
-- `holderCharacterId`：当前主公；
-- `servantCharacterId`：Card 代表的从者；
-- `carried slot`：当前随身编队位置；序章只有 1 个随身位。
-
-Card 不保存 Integrity、技能集、训练 / 成长，不复制 BattleActor / BattleSkill、人物姓名、人格或固定 AI 描述。长期契约状态从对应 Relationship.contract 读取；静态人物 / Battle 数据从 `servantCharacterId` 所对应的 Character / Battle Content 读取。
-
-**MVP 不为 Card 建立独立 identity / `cardId`。** Card 只是当前随身状态记录，使用 `holderCharacterId + servantCharacterId + slot` 表达当前编队事实。是否采用一个列表 Record、以及 holder/slot 等最终唯一约束，在 Realm State schema 收口时决定，但不再引入 Card 自身 identity。
-
-中心里的“已管理角色卡”只是已成立 Relationship / Contract 的 UI / 产品管理视图，不建立额外 ManagedCard State。
-
-## Battle 数据边界
-
-PokeMan 的 Battle 数据直接接入 `@loomrealm-game/battle`：
-
-```text
-Character
-→ stable BattleActor Content
-   ├─ max_hp
-   └─ skills[] → BattleSkill
-
-Relationship(holder → servant)
-└─ contract
-   ├─ integrity
-   └─ skills[]                 // 当前这份契约实际可用技能
-
 Card
 ├─ holderCharacterId
 ├─ servantCharacterId
 └─ slot
-
-Battle Runtime
-= @loomrealm-game/battle Simulation authority
-├─ hp / maxHp
-├─ tile / direction
-├─ action
-├─ protectedUntilTickExclusive
-├─ resolved skills
-└─ Decision / Simulation working state
 ```
 
-当前随身 Card 进入 Battle 时：
+```text
+Relationship(A → B).contract exists
+= 长期契约成立
+
+Card(A,B) exists
+= 当前随身
+
+Card(A,B) absent
+= 当前不随身
+= Contract 继续存在
+```
+
+Card 不保存：
+
+```text
+integrity
+skills
+BattleActor
+BattleSkill
+Character name
+人格
+AI character text
+```
+
+**MVP 不建立 Card identity / `cardId`。** 当前 Card 只表达 holder / servant / slot。
+
+Card 最终使用一个 list Record 还是其他 Realm State 物理布局，以及 holder+slot / holder+servant 唯一约束，仍在 Realm State schema 收口时决定。
+
+中心里的“已管理角色卡”只是对已成立 Relationship / Contract 的管理视图，不建立 `ManagedCard` State authority。
+
+# Card Battle
+
+当前随身 Card 进入 Battle：
 
 ```text
 Card(holder=A, servant=B)
 +
 Relationship(A → B).contract.integrity / skills[]
 +
-Character B → stable BattleActor Content
+Character B → base BattleActor Content
 ↓
 @loomrealm-game/battle Runtime Actor
 ```
 
-Battle Simulation 拥有本场权威运行状态。对于 Card Battle Manifestation：
+Battle Simulation 拥有本场 live authority：
 
-- 初始 HP 来自 `Relationship.contract.integrity`；
-- 当前可用技能来自 `Relationship.contract.skills[]`；
-- max HP / Contract Integrity 上限来自 `BattleActor.max_hp`；
-- BattleActor 继续提供静态 actor 定义、表现资源和 BattleSkill definitions 的来源；
-- 战斗结束后需要持久的 Integrity 结果写回同一 `Relationship.contract.integrity`。
+- 初始 HP 来自 Contract Integrity；
+- 当前可用技能来自 Contract skills；
+- max HP / repair target 来自 base BattleActor.max_hp；
+- BattleActor 继续提供静态 actor definition / graphics / BattleSkill definitions；
+- 战斗结束后需要长期保留的结果写回 Relationship.contract。
 
-普通剧情战斗或临时敌方本体不需要为了 Battle 制造 Relationship / contract / 持久 Card：
+普通剧情本体或 transient 敌方不要求为了 Battle 制造 Relationship / Contract / Card：
 
 ```text
-persistent NPC Instance
-→ Character.battleActorRef
-→ base BattleActor
+persistent body
+→ Character.battleActor
 
-transient NPC Instance
-→ Encounter / Story battleActorRef
-→ base BattleActor
+transient body
+→ Encounter / Event battleActor
 
 ↓
 Battle Runtime Actor
 ↓
-Battle
+Battle 完成
 ↓
-Runtime 丢弃
+Runtime actor 丢弃
 ```
 
 所以：
 
 ```text
-Character != NPC Instance != Relationship != Contract != Card != Battle Runtime Actor
+Character
+!= NPC Definition
+!= NPC Instance
+!= Relationship
+!= Contract
+!= Card
+!= Battle Runtime Actor
 ```
 
-## Card 自由对话如何使用 Character 与 Relationship
+# Card 自由对话
 
-Card 自由对话不在 Card 上复制人格或关系资料。
+Card 自由对话不复制 Character / Relationship 数据。
 
 对于 `Card(holder=A, servant=B)`：
 
 ```text
-Card
-→ servantCharacterId = B
-→ 读取 B 的 Character 固定 AI 人物描述
+Character B
+→ fixed AI character text
 
 Relationship B → A
-→ 读取 B 当前怎么看 A
+→ B 当前怎么看 A
 
 Relationship A → B
-→ 读取 A 持有 B 这份 Contract 的 integrity / skills[]（需要时）
+→ A 与 B 的契约状态（需要时）
 
 +
-必要的当前剧情 / Card context
+当前剧情 / Card context
 ↓
 LLM
 ```
 
-LLM 当次生成的话默认只是对话输出，不自动修改 Character Content、Relationship 或其他 Realm State。是否形成长期关系变化，由游戏业务明确提交。
+LLM 一次生成的台词默认只是输出，不自动修改 Character Content、Relationship 或其他 Realm State。长期关系变化必须由游戏业务明确提交。
 
-当前不建立独立 Conversation Memory；只有实际玩法证明 Relationship 动态文本不足时再讨论。
+当前不建立独立 Conversation Memory。
 
-## 场景实例解析
+# Map Enter
 
-Character 的 Content 默认场景实例是**纯 fallback**，不是与 Event scene source 并列竞争的来源。
-
-对任意持久 Character `X`，Story Resolver 先检查当前所有 active Event State：
-
-```text
-是否存在任意 Event State scene directive
-满足 characterId = X？
-```
-
-这里的 scene directive 包括 placement 和 `absent`。只写 `npcId`、没有 `characterId` 的 transient / 非 Character NPC 不会因此接管某个 Character 的默认场景。
-
-规则：
-
-```text
-没有任何 active Event State 提到 Character X
-→ 使用 Character X 的 default scene instances
-
-至少一个 active Event State 提到 Character X
-→ Character X 的所有 default scene instances 整体退出解析
-→ Character X 当前场景完全由这些 Event sources 决定
-```
-
-因此 Event 不是“比 default 优先一点”，而是一旦提到 Character 就**接管这个 Character 当前的 scene projection**。
-
-Event sources 之间继续正常合并：
-
-```text
-Event A → Character X absent
-Event B → Character X placement at town
-
-→ default 不参与
-→ Event A 不提供 placement
-→ Event B 提供 placement
-→ 最终使用 town placement
-```
-
-`absent` 不压制其他 Event 的明确 placement，也不建立 Event priority。它只表示：
-
-> **这个 Event 当前明确提到了这个 Character，但本 Event 不为它提供出现 placement。**
-
-如果当前 active Event 已经接管 Character，而所有相关 Event 都没有提供 placement，则这个 Character 当前不出现。
-
-同一个 NPC 可以在不同 Map 上各自有出现定义；最终每张 Map 内仍要求 `npcId` 唯一。
-
-一个静态 NPC Instance 至少需要足够的信息生成 Map placement：
-
-```text
-instanceId
-npcId
-type: "static"
-mapId
-x
-y
-direction
-pattern?
-```
-
-`mapId` 使用地图编号；`direction` 使用 Map 当前约定的 `2/4/6/8`。
-
-## Builder 与 Runtime 检查
-
-Builder 应检查构建期即可确定的错误，例如：
-
-- 同一个 Event state 内重复 `(mapId, npcId)`；
-- 单个定义中重复 `instanceId`；
-- 引用了不存在的 Character / NPC / Map；
-- 非法坐标、方向或不完整 placement；
-- Character / Encounter / Story 的基础 BattleActor 引用不存在；
-- BattleActor 引用了不存在的 BattleSkill / resource；
-- 初始化 Contract 的 `skills[]` 引用了不存在的 BattleSkill；
-- Story Index 与源 Content 不一致。
-
-Builder **不因为以下情况失败**：
-
-```text
-同一个 npcId 被多个不同 Event 引用
-同一个 npcId 在同一 Event state 中出现在多个不同 Map
-同一个 Character 被多个 Event 引用
-同一个 Character 出现在多个不同 Map
-同一个 Character 被多个不同主公的 Relationship / contract 引用
-一个 Event 对 Character 声明 absent、另一个 Event 对同一 Character 提供 placement
-```
-
-Runtime 合并当前 Character / Event / Encounter 等来源时：
-
-```text
-active Event 没有提到 Character X
-→ 才加入 Character X default scene instances
-
-active Event 至少一个提到 Character X
-→ 不加入任何 Character X default scene instance
-→ 只合并 Event 对 X 的 scene directives
-```
-
-最终对每个 Map 必须保证：
-
-```text
-npcId 唯一
-```
-
-如果不同剧情来源最终在同一 Map 产生重复 `npcId`，Story Resolver 必须确定性处理为冲突，不能因为 `instanceId` 不同而同时保留。
-
-Contract 创建时，Runtime 从交互目标 NPC Instance 解析到基础 BattleActor，并用 `max_hp / skills[]` 初始化 Contract。
-
-## 进图与读档
-
-Map Enter 概念流程：
+概念流程：
 
 ```text
 Map Enter
-→ 读取该 Map 对应的 Story Index
+→ StoryIndex 查找该 Map 相关 Character / Event
 → 读取 EventStateList
-→ 读取相关 active Event State
-→ 收集这些 Event State 提到的 Character 集合
-→ 对未被 Event 提到的 Character 使用 default scene instances
-→ 对被 Event 提到的 Character 只使用 Event scene directives
-→ 合并其他 NPC / Encounter 来源
-→ 校验 npcId 唯一
-→ 得到 PokeMan NPC Instance 集合
-→ 映射为 NPCPlacement[]
+→ 找到相关 active Event State
+→ 收集 Event 明确提到的 Character
+→ 未被 Event 提到的 Character：使用 defaultScenes
+→ 被 Event 提到的 Character：只使用 Event directives
+→ 合并 transient Story / Encounter sources
+→ 校验 final npcId uniqueness
+→ 生成 World-side NPC Instances
+→ 生成 Runtime instanceId
+→ 映射 NPCPlacement[]
 → context.setNPC(...)
 ```
 
-读档恢复的是 EventStateList、Relationship（包括可选 Contract 的 `integrity / skills[]`）、当前随身 Card 以及其他已确认 mutable facts。Character 固定 AI 人物描述、BattleActor / BattleSkill Content、默认实例、Event state 中声明的场景实例和 Story Index 都继续从安装 Content 读取。
+# Builder 检查
+
+Builder 应检查：
+
+- `struct.Character` record identity 来自 FSDB key，不接受重复 `id` 字段；
+- Character `battleActor` ContentRef 可解析；
+- Character `defaultScenes` map key 是合法正 safe integer；
+- `defaultScenes` 中 `npcId` 指向存在的 `struct.NPC`；
+- `interaction.dialogue` 指向存在的 `struct.Dialogue`；
+- placement 坐标 / direction / pattern 合法；
+- Event 等 source 引用的 Character / NPC / Map / BattleActor 存在；
+- StoryIndex 与 Character / Event 源 Content 一致。
+
+Builder 不因为以下情况失败：
+
+```text
+同一个 npcId 被多个不同 Event 引用
+同一个 npcId 在不同 Map 出现
+同一个 Character 被多个 Event 引用
+同一个 Character 在多个 Map 出现
+同一个 Character 被多个不同主公的 Relationship / Contract 引用
+Event A 对 X absent + Event B 对 X placement
+```
+
+跨 source 合并后的同 Map `npcId` 冲突由 Story Resolver deterministic reject。
+
+# 当前未决
+
+Character Content 的 FSDB table / identity / defaultScenes 基本 shape 已冻结在 [66-content-fsdb.md](./66-content-fsdb.md)。当前仍未冻结的相关问题只包括：
+
+- Battle package 正式 BattleActor serialization namespace / key；
+- Relationship / Contract Realm State 最终 record/key encoding；
+- Card Realm State 最终 layout / uniqueness constraints；
+- Runtime `instanceId` 具体生成算法。
+
+这些不改变本文已经确定的 ownership。
