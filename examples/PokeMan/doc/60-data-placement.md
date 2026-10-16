@@ -53,7 +53,7 @@ PokeMan 自有 Content 直接按 FSDB 组织。详细规则见 [68-content-fsdb.
 
 - `struct` record 的 FSDB key 就是 identity；PokeMan 自有 source 不重复保存 `id`；
 - 固定目标 table 的引用只保存 key；
-- BattleActor 这类正式 namespace 尚由外部 package 决定的引用使用 `{ namespace, key }` ContentRef；
+- `battleActor` 是跨 table / package 的基础 BattleActor ContentRef；BattleSkill identity 直接复用 battle 模块既有的 `id / skillId: string`；
 - `resource` key 可以有 `Characters/Mage` 这样的层级路径，`struct` key 不靠子目录形成层级；
 - `mapId` 业务值统一是正 safe integer；JSON object / FSDB key 中使用其十进制字符串形式。
 
@@ -100,12 +100,14 @@ PokeMan 不建立 NPC Instance 专属 Battle profile / variant / resolved battle
 ↓ resolve base BattleActor
 BattleActor
 ├─ max_hp
-└─ skills[]
+└─ skills[]              # BattleSkill id string[]
 ↓
 Relationship.contract
 ├─ integrity = BattleActor.max_hp
 └─ skills[] = copy(BattleActor.skills[])
 ```
+
+`Relationship.contract.skills[]` 直接复用 battle 模块的 BattleSkill id string，不建立第二套 Skill reference。
 
 Contract Integrity 上限同样来自 `BattleActor.max_hp`，不额外保存 `maxIntegrity`。
 
@@ -138,7 +140,7 @@ Line.speaker 不存在 + speakerName 存在
 → narration
 ```
 
-`choices` 与 `mutation` 互斥。Choice 只跳到另一个 Dialogue；需要改变 Event state 的分支跳到新的 terminal Dialogue，再由那个 Dialogue 引用 EventStateMutation。
+`choices` 与 `mutation` 互斥，允许两者都不存在。Choice 只跳到另一个 Dialogue；需要改变 Event state 的分支跳到新的 terminal Dialogue，再由那个 Dialogue 引用 EventStateMutation。
 
 Dialogue.mutation 只表示 Event state 变化，不创建 Contract / Card / Relationship。
 
@@ -161,6 +163,8 @@ struct.Event/<eventId>
                      └─ dialogue
 ```
 
+`absent:true` 只在明确 `character` 时合法，并且不得同时带 `placement / battleActor / interaction`；不额外建立另一套 absent/takeover 数据结构。
+
 EventStateMutation：
 
 ```text
@@ -177,7 +181,8 @@ struct.EventStateMutation/<mutationId>
 - `to` 至少有一个成员；
 - `null` 表示逻辑 Event 空状态；
 - EventStateMutation 只改变 Event current state；
-- 不增加 trigger / action / command / generic state path mutation。
+- 不增加 trigger / action / command / generic state path mutation；
+- 不要求 schema 证明 `from / to` 在任何执行上下文下一定造成值变化。
 
 ## Encounter
 
@@ -194,7 +199,19 @@ struct.Encounter/<decimal-mapId>
       └─ battleActor → ContentRef
 ```
 
-随机数量、概率、权重、seed、respawn 等尚未冻结，不提前造字段。
+当前真正尚未补齐的是 **author-authored generation distribution**：例如每次生成数量范围，以及多个 template 之间如何表达相对选择权重/概率。
+
+以下不作为当前 Content 数据字段预先设计：
+
+```text
+seed
+spawn selection algorithm
+re-entry reroll
+respawn
+defeated persistence
+```
+
+这些默认属于 Runtime / gameplay policy；只有以后产品明确要求“作者可配置”时才重新进入 Content 设计。
 
 ## StoryIndex
 
@@ -208,6 +225,8 @@ struct.StoryIndex/current
 ```
 
 它用于避免 Runtime 为查询当前 Map 剧情 source 扫描所有 Character / Event。它不是业务 authority，可以从源 Content 重建。
+
+StoryIndex 的精确派生字段可以跟随 Resolver 实现调整；这属于 generated read model 的实现细节，不作为 MVP 核心业务数据缺口。
 
 # Realm State
 
@@ -370,7 +389,7 @@ Character → base BattleActor
 Relationship.contract.integrity / skills[]
 ```
 
-构造 Runtime Actor；结束后只有需要长期持续的 Contract Integrity 等结果写回 Realm State。
+构造 Runtime Actor；结束后只有真正需要长期持续的 Contract Integrity 等结果写回 Realm State。
 
 ## Encounter Runtime
 
@@ -408,23 +427,29 @@ Runtime Memory = 当前系统正在执行什么
 
 # 当前仍开放的数据问题
 
-Realm State 核心物理结构已由 `67` 冻结；PokeMan Content 主体 FSDB physical schema 已由 `68` 收口。
+经过当前一致性复核，不再把 battle serialization、StoryIndex 派生字段、本地化 / richer presentation、Encounter persistence 等列成 MVP 核心数据缺口。
 
-当前真正仍开放的主要数据问题：
+当前真正仍需要继续确定的只有：
 
-1. Battle package 的 BattleActor / BattleSkill 正式 serialization namespace / key/reference encoding。
-2. Encounter generation 的具体概率 / 数量 /权重 / spawn selection / seed 参数。
-3. StoryIndex 最终为 Resolver 查询保留哪些派生字段。
-4. 本地化与 richer presentation metadata。
+1. **Encounter authored generation 数据**：生成数量如何表达，以及 template 之间使用哪种简单的相对选择分布（例如 weight）。
+2. **Realm State Record-level absence 语义**：`PlayerWorld/current`、`EventStateList/current`、`CarriedCards/<holder>` 在 Record 从未 materialize 时，PokeMan 业务上分别如何解释；Relationship absence 已经明确。
+
+把当前冻结 shape 写成各 FSDB table 的 exact `.info.meta` / schema 文件属于实现落地工作，不是新的产品数据模型问题。
 
 以下不是当前 data physical-schema gap：
 
 ```text
+BattleSkill identity / Contract.skills[] encoding
 Relationship / Contract Record layout
 CarriedCards Record layout / uniqueness constraints
 EventStateList namespace / key
 PlayerWorld mapId type
-Encounter re-entry / persistence policy
+Dialogue choices / mutation runtime behavior
+Event absent 的第二套数据结构
+EventStateMutation semantic no-op proof
+StoryIndex 最终派生字段
+本地化 / richer presentation metadata
+Encounter seed / re-entry / respawn / defeated persistence
 Mutation mismatch / OCC / OUTCOME_UNKNOWN handling
 Dialogue / Contract write ordering
 non-Dialogue business fact → Mutation Runtime handler
