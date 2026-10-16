@@ -26,26 +26,42 @@ MVP 核心 Realm State 固定为四类 Record：
 | --- | --- | --- | --- |
 | durable world resume/checkpoint | `pokeman.PlayerWorld` | `current` | `{ mapId, x, y, direction }` |
 | Event current state | `pokeman.EventStateList` | `current` | `[{ eventId, stateId }]` |
-| 有向 Relationship / Contract | `pokeman.Relationship` | `<fromCharacterId>/<toCharacterId>` | `{ affinity, hostile, relationshipText, contract? }` |
+| 有向 Relationship / Contract | `pokeman.Relationship` | `<fromCharacterId>:<toCharacterId>` | `{ affinity, hostile, relationshipText, contract? }` |
 | 当前随身 Card 编队 | `pokeman.CarriedCards` | `<holderCharacterId>` | `[{ slot, servantCharacterId }]` |
 
 不建立一个巨大的全局 `GameState` Record，也不为每张 Card 建立独立 Record。
 
 # ID 与 key 编码
 
-PokeMan 参与 Realm State key 的业务 character/event id 使用稳定 token：
+Realm State v1 的 Record key 禁止包含 `/`，并限制 UTF-8 编码长度不超过 256 bytes。因此 Relationship 不能使用 `<from>/<to>` 编码。
+
+会直接进入 Relationship / CarriedCards Record key 的 Character business id 固定为 ASCII token：
 
 ```text
-[a-z0-9][a-z0-9._-]*
+[a-z0-9][a-z0-9._-]{0,119}
 ```
 
-因此 `/` 不属于合法业务 id 字符，可以安全用于 Relationship 的有向复合 identity。
+也就是 1–120 个 ASCII 字符。`:` 不属于合法 Character id 字符，因此可以作为 Relationship 复合 identity 的无歧义分隔符。
+
+Relationship key 固定编码为：
+
+```text
+<fromCharacterId>:<toCharacterId>
+```
+
+最大长度：
+
+```text
+120 + 1 + 120 = 241 bytes
+```
+
+因此稳定落在 Realm State v1 的 256-byte key 上限内。
 
 例如：
 
 ```text
 namespace = pokeman.Relationship
-key       = player/rival
+key       = player:rival
 ```
 
 表示：
@@ -54,9 +70,11 @@ key       = player/rival
 Relationship(player → rival)
 ```
 
-`player/rival` 与 `rival/player` 是两个不同 key。
+`player:rival` 与 `rival:player` 是两个不同 key。
 
-Content FSDB record key 作为 Character / Event identity 时，应满足 Realm State 需要的稳定 token 约束；Builder 必须在跨 Content / State identity 使用处验证这一点。
+`pokeman.CarriedCards/<holderCharacterId>` 直接使用同一 Character business id，因此也天然满足 Realm State key 长度限制。
+
+Content FSDB record key 作为 Character identity 并进入这些 Realm State key 时，必须满足上述 Character business id 约束。Event id 不参与 Relationship / CarriedCards key 编码，继续按其 Content identity 规则处理。
 
 # PlayerWorld Record
 
@@ -192,15 +210,15 @@ EventStateEntry
 
 ```text
 namespace = pokeman.Relationship
-key       = <fromCharacterId>/<toCharacterId>
+key       = <fromCharacterId>:<toCharacterId>
 ```
 
 例如：
 
 ```text
-pokeman.Relationship / player/rival
-pokeman.Relationship / rival/player
-pokeman.Relationship / lord-b/rival
+pokeman.Relationship / player:rival
+pokeman.Relationship / rival:player
+pokeman.Relationship / lord-b:rival
 ```
 
 因为 from / to 已经属于 Record key，value 不重复保存它们。
@@ -528,7 +546,7 @@ pokeman.EventStateList / current
 ## player → rival
 
 ```text
-pokeman.Relationship / player/rival
+pokeman.Relationship / player:rival
 ```
 
 ```json
@@ -549,7 +567,7 @@ pokeman.Relationship / player/rival
 ## rival → player
 
 ```text
-pokeman.Relationship / rival/player
+pokeman.Relationship / rival:player
 ```
 
 ```json
@@ -598,7 +616,7 @@ pokeman.EventStateList / current
     stateId
   }]
 
-pokeman.Relationship / <from>/<to>
+pokeman.Relationship / <from>:<to>
 → {
     affinity,
     hostile,
@@ -619,8 +637,9 @@ pokeman.CarriedCards / <holder>
 同时冻结：
 
 ```text
-business id token = [a-z0-9][a-z0-9._-]*
-Relationship key = <from>/<to>
+Character business id = [a-z0-9][a-z0-9._-]{0,119}
+Relationship key = <from>:<to>
+Relationship key max length = 241 bytes
 empty list = []
 optional Contract = field absence
 business value shape does not use null
