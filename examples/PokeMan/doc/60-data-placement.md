@@ -1,6 +1,6 @@
 # 数据落点
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文只定义 Content / Realm State / Runtime Memory 的 authority 边界；Content 的 FSDB 物理结构见 [Content FSDB 物理模型](./66-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文只定义 Content / Realm State / Runtime Memory 的 authority 边界；Realm State 物理结构见 [67-realm-state-records.md](./67-realm-state-records.md)，Content FSDB 物理结构见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 ## 三处归宿
 
@@ -22,12 +22,12 @@
 
 ```text
 可存档
-!= 一定属于 Realm State
+!= 一定属于 Realm State live authority
 ```
 
-Realm State 的首要判断是 **session-level shared mutable authority**，而不是“以后会不会写进存档文件”。Save / Load 是产品工作流，可以从 Realm State 读取需要持久化的事实；Subsystem-local live authority 仍应保持单一。
+Realm State 的首要判断是 **session-level shared mutable business fact**，而不是“以后会不会写进存档文件”。Save / Load 可以把某个 Runtime 当前值投影成 durable checkpoint，但不能因此建立两个并行 live authority。
 
-## Content
+# Content
 
 PokeMan 当前主要 Content：
 
@@ -49,15 +49,15 @@ Content
 └─ resource.*
 ```
 
-PokeMan 自有 Content 直接按 FSDB 组织。详细规则见 [66-content-fsdb.md](./66-content-fsdb.md)：
+PokeMan 自有 Content 直接按 FSDB 组织。详细规则见 [68-content-fsdb.md](./68-content-fsdb.md)：
 
-- `struct` record 的 FSDB key 就是 identity；PokeMan 自有 record 不重复保存 `id`；
+- `struct` record 的 FSDB key 就是 identity；PokeMan 自有 source 不重复保存 `id`；
 - 固定目标 table 的引用只保存 key；
 - BattleActor 这类正式 namespace 尚由外部 package 决定的引用使用 `{ namespace, key }` ContentRef；
 - `resource` key 可以有 `Characters/Mage` 这样的层级路径，`struct` key 不靠子目录形成层级；
-- `mapId` 业务值统一是正 safe integer；JSON object / FSDB key 中使用其十进制字符串表示。
+- `mapId` 业务值统一是正 safe integer；JSON object / FSDB key 中使用其十进制字符串形式。
 
-### Character / NPC / BattleActor
+## Character / NPC / BattleActor
 
 ```text
 Character
@@ -109,7 +109,7 @@ Relationship.contract
 
 Contract Integrity 上限同样来自 `BattleActor.max_hp`，不额外保存 `maxIntegrity`。
 
-### Dialogue
+## Dialogue
 
 固定 Dialogue 是 Content：
 
@@ -142,7 +142,7 @@ Line.speaker 不存在 + speakerName 存在
 
 Dialogue.mutation 只表示 Event state 变化，不创建 Contract / Card / Relationship。
 
-### Event / EventStateMutation
+## Event / EventStateMutation
 
 Event 是剧情阶段及其当前场景 / 交互定义：
 
@@ -161,7 +161,7 @@ struct.Event/<eventId>
                      └─ dialogue
 ```
 
-EventStateMutation 是不可变 Content：
+EventStateMutation：
 
 ```text
 struct.EventStateMutation/<mutationId>
@@ -179,11 +179,9 @@ struct.EventStateMutation/<mutationId>
 - EventStateMutation 只改变 Event current state；
 - 不增加 trigger / action / command / generic state path mutation。
 
-### Encounter
+## Encounter
 
 Encounter 是 Content，但 re-entry / defeated persistence 等是 Runtime / gameplay policy。
-
-当前 FSDB 骨架：
 
 ```text
 struct.Encounter/<decimal-mapId>
@@ -198,9 +196,9 @@ struct.Encounter/<decimal-mapId>
 
 随机数量、概率、权重、seed、respawn 等尚未冻结，不提前造字段。
 
-### Story Index
+## StoryIndex
 
-Story Index 是 Builder 生成的派生 Content：
+StoryIndex 是 Builder-generated Content：
 
 ```text
 struct.StoryIndex/current
@@ -213,44 +211,37 @@ struct.StoryIndex/current
 
 # Realm State
 
-当前确认的 Realm State：
+Realm State 的 canonical physical records 已冻结在 [67-realm-state-records.md](./67-realm-state-records.md)：
 
 ```text
-Realm State
-├─ EventStateList
-│  └─ entries[]
-│     ├─ eventId
-│     └─ stateId
-├─ directed Relationship[]
-│  ├─ fromCharacterId
-│  ├─ toCharacterId
-│  ├─ affinity
-│  ├─ hostile
-│  ├─ dynamic relationship text
-│  └─ contract?
-│     ├─ integrity
-│     └─ skills[]
-├─ current carried Card[]
-│  ├─ holderCharacterId
-│  ├─ servantCharacterId
-│  └─ slot
-├─ durable resume/checkpoint location    # 仅产品确实需要 Save/Load 时
-├─ Pocket / story committed facts
-└─ 其他真正需要跨 Subsystem 共享的 mutable facts
+pokeman.PlayerWorld / current
+→ durable resume/checkpoint { mapId, x, y, direction }
+
+pokeman.EventStateList / current
+→ [{ eventId, stateId }]
+
+pokeman.Relationship / <from>/<to>
+→ { affinity, hostile, relationshipText, contract? }
+
+pokeman.CarriedCards / <holder>
+→ [{ slot, servantCharacterId }]
 ```
+
+## durable PlayerWorld checkpoint
+
+`pokeman.PlayerWorld/current` 保存的是 **恢复位置**，不是 live player pose。
+
+```text
+live player map / position / direction / motion
+→ Map Runtime
+
+explicit durable resume/checkpoint
+→ Realm State
+```
+
+`PlayerWorld.mapId` 是正 safe integer。
 
 ## EventStateList
-
-所有 Event current state 使用一个稀疏列表 Record：
-
-```text
-[
-  { eventId: "professor-intro", stateId: "waiting" },
-  { eventId: "home-intro", stateId: "active" }
-]
-```
-
-规则：
 
 ```text
 有 entry
@@ -260,7 +251,7 @@ Realm State
 → current state = null
 ```
 
-Realm State 不保存 `{ stateId: null }` 项。
+Realm State 不保存 `{ stateId:null }` 项。
 
 Mutation 执行时读取 EventStateList + version，校验全部 `from`，在内存生成新列表，再一次 commit 替换整个 Record。
 
@@ -270,36 +261,37 @@ Mutation 执行时读取 EventStateList + version，校验全部 `from`，在内
 Relationship(A → B)
 ├─ affinity
 ├─ hostile
-├─ dynamic relationship text
+├─ relationshipText
 └─ contract?
    ├─ integrity
    └─ skills[]
 ```
 
-Relationship 可以存在而 Contract 不存在。存在 `contract` 对象才表示正式契约成立。
+Relationship 可以存在而 Contract 不存在。存在 `contract` 才表示正式契约成立。
 
-Contract 不建立独立 Realm State authority；它嵌在对应有向 Relationship 中。
+Contract 不建立独立 Realm State authority。
 
-MVP 不定义 progression / training / learnedSkillIds / level 等字段。
-
-## Card
+## CarriedCards
 
 ```text
-Card
-├─ holderCharacterId
-├─ servantCharacterId
-└─ slot
+pokeman.CarriedCards / <holder>
+→ [{ slot, servantCharacterId }]
 ```
 
-Card 只表示已成立契约当前是否进入随身编队。它不保存 Integrity、技能、BattleActor、人格或其他静态数据。
+Card 只表示已成立契约当前是否进入随身编队。它不保存 Integrity、skills、BattleActor、人格或其他静态数据。
 
 MVP 不建立 `cardId`。
+
+固定 invariant：
+
+```text
+CarriedCards(A) contains B
+→ Relationship(A → B).contract exists
+```
 
 # Runtime Memory
 
 ## Map Runtime live authority
-
-当前正在运行的地图位置不是 Realm State 的第二份 live authority：
 
 ```text
 Map Runtime
@@ -313,21 +305,9 @@ Map Runtime
 
 这些 live facts 由 Map Runtime authority 拥有。
 
-如果产品需要 Save / Load 恢复位置，可以在明确的 checkpoint / save workflow 中把**持久恢复位置**写到 Realm State：
-
-```text
-live player pose
-→ Map Runtime
-
-persisted resume/checkpoint location
-→ Realm State（若产品需要）
-```
-
-不能让 Realm State 和 Map Runtime 同时各自作为“当前 live position”的 authority。
+如果产品需要 Save / Load 恢复位置，只在明确 checkpoint / save workflow 中把当前位置投影到 `pokeman.PlayerWorld/current`。
 
 ## NPC Instance / Story Resolver
-
-当前 Map 的 NPC Instance 是 Runtime projection：
 
 ```text
 Content
@@ -392,19 +372,11 @@ Relationship.contract.integrity / skills[]
 
 构造 Runtime Actor；结束后只有需要长期持续的 Contract Integrity 等结果写回 Realm State。
 
-普通本体 / transient Battle 的当场 HP 等默认随 Battle Runtime 结束而丢弃，除非未来具体玩法明确要求持久化。
-
 ## Encounter Runtime
 
-当前生成的 transient Encounter 集合可以是 Runtime Memory：
+当前 generated Encounter set / spawn assignments / transient body state 可以留在 Runtime Memory。
 
-```text
-current generated Encounter NPCs
-current spawn assignments
-current transient battle/body state
-```
-
-是否进出地图重抽、击败后本次 Session 是否保持消失、何时清空生成结果等属于 gameplay Runtime policy，不是当前 Realm State schema 缺口。
+是否重进地图重抽、击败后是否保持消失、何时清空等属于 gameplay Runtime policy，不是当前 Realm State schema gap。
 
 # Authority 对照
 
@@ -416,15 +388,15 @@ current transient battle/body state
 | Dialogue / Event / Mutation | Content |
 | Encounter definition | Content |
 | StoryIndex | generated Content |
-| Event current state | Realm State / EventStateList |
+| durable resume/checkpoint | Realm State |
+| Event current state | Realm State |
 | Relationship / Contract | Realm State |
 | current Card party | Realm State |
-| durable resume location（若需要） | Realm State |
 | live map / player pose | Map Runtime Memory |
 | current NPC Instances | World / Map Runtime Memory |
 | current Dialogue cursor | Dialogue Runtime Memory |
 | current Battle actor state | Battle Runtime Memory |
-| current generated Encounter set | Encounter / World Runtime Memory，直到产品另有持久策略 |
+| current generated Encounter set | Encounter / World Runtime Memory |
 
 一句话：
 
@@ -434,38 +406,29 @@ Realm State = 这一局跨系统共享的长期业务事实
 Runtime Memory = 当前系统正在执行什么
 ```
 
-判断顺序：
+# 当前仍开放的数据问题
+
+Realm State 核心物理结构已由 `67` 冻结；PokeMan Content 主体 FSDB physical schema 已由 `68` 收口。
+
+当前真正仍开放的主要数据问题：
+
+1. Battle package 的 BattleActor / BattleSkill 正式 serialization namespace / key/reference encoding。
+2. Encounter generation 的具体概率 / 数量 /权重 / spawn selection / seed 参数。
+3. StoryIndex 最终为 Resolver 查询保留哪些派生字段。
+4. 本地化与 richer presentation metadata。
+
+以下不是当前 data physical-schema gap：
 
 ```text
-安装后只读定义？
-→ Content
-
-当前某个 Subsystem 的 live execution authority？
-→ Runtime Memory
-
-这一局已经发生、并且必须跨 Subsystem 共享？
-→ Realm State
-
-只是可由前两者稳定重建的 projection？
-→ 不建立新的 authority
+Relationship / Contract Record layout
+CarriedCards Record layout / uniqueness constraints
+EventStateList namespace / key
+PlayerWorld mapId type
+Encounter re-entry / persistence policy
+Mutation mismatch / OCC / OUTCOME_UNKNOWN handling
+Dialogue / Contract write ordering
+non-Dialogue business fact → Mutation Runtime handler
+progression / training
+Runtime instanceId generation
+live player movement control
 ```
-
-# 当前数据物理未决项
-
-Content 的主要 FSDB 物理结构已经在 [66-content-fsdb.md](./66-content-fsdb.md) 收口。当前仍真正开放的数据问题主要是：
-
-1. Relationship / Contract 最终 Realm State Record identity / JSON encoding。
-2. Card 最终 Realm State list/record layout 与唯一约束。
-3. Battle package 的 BattleActor / BattleSkill 正式 serialization namespace / key/reference encoding。
-4. Encounter generation 的具体概率 / 数量 / seed 等 Content 字段。
-5. EventStateList Realm State Record 最终 namespace / key。
-
-以下不是当前数据 physical-schema gap：
-
-- Encounter re-entry / persistence policy；
-- Event Mutation mismatch / OCC retry / OUTCOME_UNKNOWN 处理；
-- Dialogue / Contract 跨写入顺序；
-- 非 Dialogue business fact → Mutation 的 Runtime handler 放置；
-- progression / training；
-- Runtime `instanceId` 生成算法；
-- live player position 的 Map Runtime 控制逻辑。
