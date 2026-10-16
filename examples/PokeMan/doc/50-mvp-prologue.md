@@ -15,11 +15,11 @@
 - 人与人可以建立真实角色卡关系，并且可以双向成立；
 - 玩家本人也能被角色卡代表；
 - 角色本体不会因为角色卡或 Battle Manifestation 消失；
-- 已收服卡与当前随身卡是不同概念；
+- 已建立契约与当前随身 Card 是不同概念；
 - 序章随身上限为 1，宿敌卡占据唯一随身位；
 - 随身角色才是本次旅行的 Pocket Companion 和主要 Battle 调用对象；
-- Battle Manifestation 的 HP 表示角色卡完整度，不是角色本体生命；
-- 卡片损耗可以跨 Battle 持续，并在中心修复；
+- Battle Manifestation 的 HP 在产品上表现为角色卡完整度，但技术 authority 是 `Relationship.contract.integrity`，不是 Card State，也不是角色本体生命；
+- Contract Integrity 的损耗可以跨 Battle 持续，并在中心修复；
 - 从者在 Battle 中具有自己的 Decision；
 - 道路 Encounter 以可见人物为基础；
 - 普通 Encounter 可以在进入地图时随机生成，但生成以后真实可见；
@@ -40,7 +40,7 @@ System Menu #root
 主角家
 → 小镇
 → 博士研究所
-→ 与宿敌建立真实双向角色卡
+→ 与宿敌建立真实双向角色卡契约
 → 宿敌卡进入唯一随身位
 → 教学 Battle
 
@@ -51,7 +51,7 @@ System Menu #root
 → 环境反馈
 → 地图进入时生成 / 放置可见 Encounter
 → 第一次敌对 Encounter / 强制 Battle
-→ 宿敌卡 Battle 状态持续
+→ 宿敌 Contract Integrity 持续
 → Battle 后 Pocket Dialogue
 → 独立从者 / 修行者
 → 可绕过 / 可选 Challenge
@@ -61,7 +61,7 @@ System Menu #root
 【第一个城镇】
 进入真正的城镇空间
 → 普通居民与功能 NPC
-→ 中心 / 管理设施承担角色卡修复与未来管理入口
+→ 中心 / 管理设施承担 Contract Integrity 修复与未来管理入口
 → 完成博士交代的外出目标
 → 发现新的重要人物 / 潜在从者
 → Pocket Dialogue
@@ -100,6 +100,8 @@ System Menu #root
 
 宿敌卡直接进入玩家唯一随身位。
 
+技术上，这意味着两个方向各自建立 `Relationship.contract`；当前 Card 只是随后形成的随身事实。
+
 ### 5. 第一次角色卡反馈
 
 最低需要让玩家明确：
@@ -127,7 +129,9 @@ Battle：
           Simulation
 ```
 
-这一战证明：人物本体仍在现实中、角色卡可以调用战斗化身、战斗化身自主 Decision，而且 Battle HP 属于对应角色卡的显现完整度，不等于人物本体受伤。
+这一战证明：人物本体仍在现实中、角色卡可以调用战斗化身、战斗化身自主 Decision，而且 Battle HP 属于对应 Contract 的显现完整度，不等于人物本体受伤。
+
+产品 UI / 文案可以继续把它称为“角色卡完整度”“卡片受损”；技术上持久值保存于 `Relationship.contract.integrity`。
 
 ### 7. Battle 后再次面对本体
 
@@ -166,7 +170,7 @@ Hostile
 ↓
 强制 Battle
 ↓
-宿敌卡完整度下降并持续到 Map
+宿敌 Contract Integrity 下降并持续到 Map
 ```
 
 战斗结束后立即发生 Pocket Dialogue。
@@ -188,7 +192,7 @@ World Dialogue
 [拒绝]
 ```
 
-因为宿敌卡可能已在前一场 Battle 中受损，所以“是否接受 Challenge”第一次具有实际资源决策意义。
+因为宿敌 Contract Integrity 可能已在前一场 Battle 中受损，所以“是否接受 Challenge”第一次具有实际资源决策意义。
 
 该人物可以成为序章以后继续发展关系和收服的 persistent character，但 MVP 不要求完成其收服。
 
@@ -207,9 +211,11 @@ World Dialogue
 
 ### 14. 中心与角色卡恢复
 
-第一个城镇开始展示类似 Pokémon 的旅行恢复节奏：玩家可以在中心恢复宿敌卡的 Card Integrity，使受损 / 残破卡重新回到完好状态。
+第一个城镇开始展示类似 Pokémon 的旅行恢复节奏：玩家可以在中心恢复宿敌契约的 Integrity，使产品上“受损 / 残破”的角色卡重新回到完好状态。
 
-MVP 不要求完整多角色管理 UI，但中心应让玩家理解：以后全部角色卡的完整资料、修复和随身队伍管理都在这里完成。
+MVP 中修满目标来自宿敌基础 `BattleActor.max_hp`；Card 自身不保存 HP / Integrity。
+
+MVP 不要求完整多角色管理 UI，但中心应让玩家理解：以后全部已契约 Relationship / Contract 的完整资料、修复和随身 Card 管理都在这里完成。
 
 ### 15. 功能 NPC 也是角色
 
@@ -225,11 +231,11 @@ MVP 不要求完整多角色管理 UI，但中心应让玩家理解：以后全�
 
 ```text
 认识角色
-→ 建立角色卡关系
-→ 编入随身位
+→ 建立 Relationship.contract
+→ 编入随身 Card slot
 → Pocket Dialogue
 → Battle
-→ 卡片状态与关系继续存在
+→ Contract Integrity / Relationship 继续存在
 ```
 
 ### 遭遇循环
@@ -247,11 +253,11 @@ Map Enter
 ### 旅行循环
 
 ```text
-中心整理 / 修复角色卡
+中心整理随身 Card / 修复 Contract Integrity
 → 安全区
 → 道路
 → 可见 Encounter
-→ 卡片逐渐受损
+→ Contract Integrity 逐渐受损
 → 新城镇
 → 中心恢复
 → 重新出发
