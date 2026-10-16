@@ -104,6 +104,7 @@ classDiagram
     class DialogueDefinition {
       <<Content>>
       id
+      speakerName?
       lines[]
       choices[]?
       mutationRef?
@@ -192,7 +193,7 @@ classDiagram
     CharacterDefinition "1" <-- "0..*" Card : holder
     CharacterDefinition "1" <-- "0..*" Card : servant
 
-    CharacterDefinition --> DialogueDefinition : speaker refs
+    CharacterDefinition --> DialogueDefinition : optional Line.speaker refs
     DialogueDefinition "1" *-- "0..*" DialogueChoice : choices
     DialogueChoice --> DialogueDefinition : target
     DialogueDefinition --> EventStateMutation : optional mutation ref
@@ -347,6 +348,36 @@ Choice
 
 Event State NPC interaction 只保存入口 `dialogueId`。
 
+## Dialogue speaker 解析
+
+```mermaid
+flowchart TB
+    L[Dialogue Line] --> S{Line.speaker?}
+    S -->|有| C[按 Character identity 解析]
+    S -->|无| D{Dialogue.speakerName?}
+    D -->|有| N[使用默认显示名]
+    D -->|无| R[旁白]
+```
+
+当前规则：
+
+```text
+Line.speaker
+= 持久 Character identity
+
+Dialogue.speakerName
+= 默认 presentation fallback
+= 不是 Character identity
+```
+
+因此 transient Encounter NPC 可以复用：
+
+```text
+Dialogue.speakerName = "路霸"
+```
+
+而不需要制造 `generic-bandit` 之类的通用 Character。多个不同 transient NPC Instance 复用同一 Dialogue，也不会因此成为同一个人。
+
 ## 非 Dialogue 业务的 Mutation 路径
 
 ```mermaid
@@ -495,7 +526,7 @@ Character defaults
 - 仅对完全未被 active Event 提到的 Character 生效
 
 Final resolved Map
-- (mapId,npcId) 必须唯一
+- (mapId, npcId) 必须唯一
 ```
 
 `instanceId` 继续满足 `@loomrealm-game/map` 的实例 contract，但不能用不同 `instanceId` 绕过 PokeMan 的同图 `npcId` 唯一约束。
@@ -577,6 +608,11 @@ absent
 = Event 提到 Character，但本 Event 不提供 placement
 = 不压制 peer Event placement
 
+Dialogue.speakerName
+= 默认显示名
+= transient speaker presentation fallback
+= 不是 Character identity
+
 Dialogue / Mutation Content
 = 数据，不执行
 
@@ -619,7 +655,6 @@ Battle Runtime Actor
 - Event / EventStateMutation 的最终 Content namespace / key；
 - EventStateList Realm State Record 的最终 namespace / key 名字；
 - Event placement / `instanceId` / `absent` 的最终 JSON shape；
-- transient Encounter NPC 的固定 Dialogue speaker identity；
 - Encounter re-entry 与生成结果持久化细节。
 
 BattleSkill 本身的静态字段和执行语义不再作为 PokeMan 自己的未决 schema；它直接跟随 `@loomrealm-game/battle` 当前规范。
