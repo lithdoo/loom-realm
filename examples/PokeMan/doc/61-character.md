@@ -1,6 +1,6 @@
 # 人物
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义持久 Character、NPC / Map Instance、Relationship / Contract、Card 与 Battle 数据边界。Content 的 FSDB 物理编码见 [Content FSDB 物理模型](./66-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义持久 Character、NPC / Map Instance、Relationship / Contract、Card 与 Battle 数据边界。Realm State 物理结构见 [67-realm-state-records.md](./67-realm-state-records.md)，Content FSDB 编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 归宿总表见 [数据落点](./60-data-placement.md)。
 
@@ -14,7 +14,7 @@
 → key = characterId
 ```
 
-**Character identity 由 FSDB record key 提供；PokeMan source record 不再重复保存 `id` 字段。**
+**Character identity 由 FSDB record key 提供；PokeMan source record 不重复保存 `id`。**
 
 主角、家人、博士、宿敌、店主，以及以后可以建立契约的修行者，都是 Character。随机生成的普通混混、路霸等 transient Encounter NPC 不要求建立 Character。
 
@@ -84,14 +84,14 @@ BattleActor / BattleSkill 的 gameplay contract 直接复用 `@loomrealm-game/ba
 
 ```text
 BattleActor
-├─ id / logical definition identity
+├─ logical definition identity
 ├─ name
 ├─ character graphics reference
 ├─ max_hp
 └─ skills[] → BattleSkill
 
 BattleSkill
-├─ id / logical definition identity
+├─ logical definition identity
 ├─ name
 ├─ range
 ├─ damage
@@ -185,15 +185,6 @@ NPCPlacement
 = final business uniqueness
 ```
 
-因此允许：
-
-```text
-map 1 → rival-casual
-map 2 → rival-casual
-```
-
-但不允许最终同一 Map 中出现两个 `rival-casual`，即使它们的 `instanceId` 不同。
-
 不同 Event source 可以都引用相同 `npcId`；跨 source 不做 author-time 全局唯一。Story Resolver 合并当前 active sources 后，如果同一 Map 得到重复 `npcId`，必须 deterministic conflict，不做 last-wins。
 
 # Character default scene / Event takeover
@@ -221,8 +212,6 @@ character = X
 
 ## absent
 
-Event directive 的：
-
 ```json
 {
   "character": "rival",
@@ -234,31 +223,36 @@ Event directive 的：
 
 > 这个 Event 当前明确提到 Character `rival`，但本 Event 不贡献 placement。
 
-`absent` 不压制其他 Event 的 placement，也不建立 Event priority：
-
-```text
-Event A → X absent
-Event B → X placement at town
-
-→ X 已被 Event 接管
-→ default 不参与
-→ Event A 不贡献 placement
-→ Event B 的 town placement 生效
-```
+`absent` 不压制其他 Event 的 placement，也不建立 Event priority。
 
 如果 active Event 已经接管 X，而所有相关 source 都不贡献 placement，则 X 当前不出现。
 
 # Relationship
 
-Relationship 是 Realm State 中两个 Character 之间的有向长期关系：
+Relationship 是 Realm State 中两个 Character 之间的有向长期关系。
+
+物理 identity 已冻结：
 
 ```text
-Relationship(A → B)
-├─ fromCharacterId
-├─ toCharacterId
+namespace = pokeman.Relationship
+key       = <fromCharacterId>/<toCharacterId>
+```
+
+例如：
+
+```text
+pokeman.Relationship / player/rival
+```
+
+表示 `player → rival`。
+
+value 不重复保存 from / to：
+
+```text
+RelationshipValue
 ├─ affinity
 ├─ hostile
-├─ dynamic relationship text
+├─ relationshipText
 └─ contract?
    ├─ integrity
    └─ skills[]
@@ -266,39 +260,33 @@ Relationship(A → B)
 
 `A → B` 与 `B → A` 是独立 Relationship，不要求对称。
 
-**Relationship 存在不表示 Contract 已成立。** A 与 B 可以先有 affinity / hostile / relationship text，而 `contract` 不存在。
+**Relationship Record 存在不表示 Contract 已成立。** Record 可以保存 affinity / hostile / relationshipText，而 `contract` 缺失。
 
-`affinity` 是整数。`hostile` 与 affinity 是独立事实：
+`affinity` 是有限整数。`hostile` 与 affinity 是独立事实。
 
-```text
-affinity = -20
-hostile = false
-```
-
-是合法状态。
-
-动态关系文本用于 AI 自由对话理解这一局形成的关系语境，不替代给规则读取的结构化字段。
+`relationshipText` 是 dynamic relationship text 的最终字段名，主要给 AI 自由对话理解这一局形成的关系语境，不替代规则字段。
 
 # Contract
 
 存在：
 
 ```text
-Relationship(A → B).contract
+pokeman.Relationship / A/B
+value.contract
 ```
 
 表示：
 
 > A 已作为主公与 B 这个从者建立正式契约。
 
-Contract 不建立独立 Realm State authority，而是 Relationship 内的一段长期状态。
+Contract 不建立独立 Realm State Record，而是 Relationship value 内的可选对象。
 
-MVP Contract 只有：
+MVP Contract：
 
 ```text
 contract
-├─ integrity
-└─ skills[]
+├─ integrity: integer >= 0
+└─ skills: ordered unique string[]
 ```
 
 建立 Contract 时，从当前交互目标 NPC Instance 解析基础 BattleActor：
@@ -319,13 +307,7 @@ Contract Integrity 上限也来自同一 `BattleActor.max_hp`；不保存 `maxIn
 
 目标 NPC 本体某一场 Battle 的当前 HP 与 Contract Integrity 是不同产品语义。
 
-Contract 成立后，当前实际拥有技能以：
-
-```text
-Relationship.contract.skills[]
-```
-
-为长期 authority。基础 BattleActor.skills 不会自动覆盖已有 Contract。
+Contract 成立后，当前实际拥有技能以 `Relationship.contract.skills[]` 为长期 authority。基础 BattleActor.skills 不会自动覆盖已有 Contract。
 
 MVP 不定义：
 
@@ -339,41 +321,49 @@ learnedSkillIds
 baseSkills + learnedSkills merge
 ```
 
-这些未来玩法不属于当前 schema gap。
+同一个 Character 可以与多个主公分别建立 Contract；它们共享 Character / base BattleActor Content，但 Contract 状态独立。
 
-同一个 Character 可以与多个主公分别建立 Contract：
+# Card / CarriedCards
+
+Card 是 Realm State 当前随身事实，但没有独立 `cardId`。
+
+物理 Record 已冻结为按 holder 聚合：
 
 ```text
-player → rival
-└─ contract: integrity / skills[]
-
-lord-b → rival
-└─ contract: integrity / skills[]
+namespace = pokeman.CarriedCards
+key       = <holderCharacterId>
+value     = [{ slot, servantCharacterId }]
 ```
 
-它们共享 Character / base BattleActor Content，但 Contract 状态独立。
-
-# Card
-
-Card 是独立 Realm State 当前随身事实：
+例如：
 
 ```text
-Card
-├─ holderCharacterId
-├─ servantCharacterId
-└─ slot
+pokeman.CarriedCards / player
 ```
 
+```json
+[
+  {
+    "slot": 0,
+    "servantCharacterId": "rival"
+  }
+]
+```
+
+固定约束：
+
+- `slot >= 0`；
+- 同一 holder 内 slot 唯一；
+- 同一 holder 内 servantCharacterId 唯一；
+- 数组按 slot 升序保存；
+- 空编队使用 `[]`；
+- holder 已在 Record key 中，不在 entry 重复保存。
+
+核心 invariant：
+
 ```text
-Relationship(A → B).contract exists
-= 长期契约成立
-
-Card(A,B) exists
-= 当前随身
-
-Card(A,B) absent
-= 当前不随身
-= Contract 继续存在
+CarriedCards(A) contains B
+→ Relationship(A → B).contract exists
 ```
 
 Card 不保存：
@@ -388,22 +378,21 @@ Character name
 AI character text
 ```
 
-**MVP 不建立 Card identity / `cardId`。** 当前 Card 只表达 holder / servant / slot。
-
-Card 最终使用一个 list Record 还是其他 Realm State 物理布局，以及 holder+slot / holder+servant 唯一约束，仍在 Realm State schema 收口时决定。
-
 中心里的“已管理角色卡”只是对已成立 Relationship / Contract 的管理视图，不建立 `ManagedCard` State authority。
 
 # Card Battle
 
-当前随身 Card 进入 Battle：
+当前随身从者进入 Battle：
 
 ```text
-Card(holder=A, servant=B)
+pokeman.CarriedCards / A
+→ servant B
 +
-Relationship(A → B).contract.integrity / skills[]
+pokeman.Relationship / A/B
+→ contract.integrity / skills[]
 +
-Character B → base BattleActor Content
+struct.Character / B
+→ base BattleActor
 ↓
 @loomrealm-game/battle Runtime Actor
 ```
@@ -413,25 +402,10 @@ Battle Simulation 拥有本场 live authority：
 - 初始 HP 来自 Contract Integrity；
 - 当前可用技能来自 Contract skills；
 - max HP / repair target 来自 base BattleActor.max_hp；
-- BattleActor 继续提供静态 actor definition / graphics / BattleSkill definitions；
+- BattleActor 提供静态 actor definition / graphics / BattleSkill definitions；
 - 战斗结束后需要长期保留的结果写回 Relationship.contract。
 
-普通剧情本体或 transient 敌方不要求为了 Battle 制造 Relationship / Contract / Card：
-
-```text
-persistent body
-→ Character.battleActor
-
-transient body
-→ Encounter / Event battleActor
-
-↓
-Battle Runtime Actor
-↓
-Battle 完成
-↓
-Runtime actor 丢弃
-```
+普通剧情本体或 transient 敌方不要求为了 Battle 制造 Relationship / Contract / Card。
 
 所以：
 
@@ -447,9 +421,7 @@ Character
 
 # Card 自由对话
 
-Card 自由对话不复制 Character / Relationship 数据。
-
-对于 `Card(holder=A, servant=B)`：
+对于 holder A / servant B：
 
 ```text
 Character B
@@ -473,16 +445,13 @@ LLM 一次生成的台词默认只是输出，不自动修改 Character Content�
 
 # Map Enter
 
-概念流程：
-
 ```text
-Map Enter
-→ StoryIndex 查找该 Map 相关 Character / Event
+StoryIndex 查找该 Map 相关 Character / Event
 → 读取 EventStateList
 → 找到相关 active Event State
 → 收集 Event 明确提到的 Character
-→ 未被 Event 提到的 Character：使用 defaultScenes
-→ 被 Event 提到的 Character：只使用 Event directives
+→ 未被 Event 提到：Character.defaultScenes
+→ 被 Event 提到：Event directives only
 → 合并 transient Story / Encounter sources
 → 校验 final npcId uniqueness
 → 生成 World-side NPC Instances
@@ -495,13 +464,14 @@ Map Enter
 
 Builder 应检查：
 
-- `struct.Character` record identity 来自 FSDB key，不接受重复 `id` 字段；
+- `struct.Character` identity 来自 FSDB key，source 不重复保存 `id`；
 - Character `battleActor` ContentRef 可解析；
 - Character `defaultScenes` map key 是合法正 safe integer；
-- `defaultScenes` 中 `npcId` 指向存在的 `struct.NPC`；
+- `defaultScenes` npcId 指向存在的 `struct.NPC`；
 - `interaction.dialogue` 指向存在的 `struct.Dialogue`；
 - placement 坐标 / direction / pattern 合法；
-- Event 等 source 引用的 Character / NPC / Map / BattleActor 存在；
+- Realm State Character ids 满足稳定 token 规则并对应 Character identity；
+- CarriedCards 的 slot / servant 唯一并满足对应 Contract invariant；
 - StoryIndex 与 Character / Event 源 Content 一致。
 
 Builder 不因为以下情况失败：
@@ -519,11 +489,9 @@ Event A 对 X absent + Event B 对 X placement
 
 # 当前未决
 
-Character Content 的 FSDB table / identity / defaultScenes 基本 shape 已冻结在 [66-content-fsdb.md](./66-content-fsdb.md)。当前仍未冻结的相关问题只包括：
+Character / Relationship / Contract / CarriedCards 的 PokeMan 物理结构已经分别由 `68` / `67` 冻结。
 
-- Battle package 正式 BattleActor serialization namespace / key；
-- Relationship / Contract Realm State 最终 record/key encoding；
-- Card Realm State 最终 layout / uniqueness constraints；
-- Runtime `instanceId` 具体生成算法。
+当前相关开放项只包括：
 
-这些不改变本文已经确定的 ownership。
+- Battle package 正式 BattleActor / BattleSkill serialization namespace / key/reference encoding；
+- Runtime `instanceId` 具体生成算法（Runtime，不是 Content schema）。
