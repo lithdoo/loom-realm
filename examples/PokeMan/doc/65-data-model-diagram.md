@@ -16,7 +16,7 @@ flowchart TB
     StoryIndex["struct.StoryIndex / current"]
     Graphics["resource.Graphics / ..."]
     BattleActor["BattleActor Content"]
-    BattleSkill["BattleSkill Content"]
+    BattleSkill["BattleSkill Content\nid / skillId: string"]
   end
 
   subgraph State[Realm State]
@@ -95,7 +95,7 @@ source value
 != 再保存一份 id
 ```
 
-固定目标 table 的引用只保存 key；BattleActor 等外部 package serialization namespace 尚未冻结的对象使用 `{namespace,key}` ContentRef。
+固定目标 table 的引用只保存 key；`battleActor` 使用 `{namespace,key}` ContentRef。BattleSkill / Contract skill identity 直接复用 battle 模块的 string id，不建立第二套引用。
 
 # Character / NPC / Battle
 
@@ -109,7 +109,7 @@ flowchart LR
   TransientSource["Encounter / Event transient source"] --> BaseActor
   TransientInstance["transient NPC Instance"] --> TransientSource
 
-  BaseActor --> Skills["BattleSkill definitions"]
+  BaseActor --> Skills["BattleSkill id definitions"]
 ```
 
 固定：
@@ -141,7 +141,7 @@ flowchart TD
   EventOnly --> Result
 ```
 
-`absent:true` 只表示该 Event 明确提到 Character 但不贡献 placement；它不压制其他 Event placement，也不建立 priority。
+`absent:true` 只表示该 Event 明确提到 Character 但不贡献 placement；它不压制其他 Event placement，也不建立 priority。`absent:true` 必须带 `character`，且不允许同时有 `placement / battleActor / interaction`。
 
 # Event FSDB shape
 
@@ -171,7 +171,8 @@ flowchart LR
 ```
 
 ```text
-choices XOR mutation
+choices 与 mutation 互斥
+允许两者都不存在
 ```
 
 # Event state
@@ -193,7 +194,7 @@ no EventStateList entry
 = logical current state null
 ```
 
-Mutation 只改变 Event current state，不创建 Contract / Card / Battle。
+Mutation 只改变 Event current state，不创建 Contract / Card / Battle。数据结构只要求 `to` 非空，不额外证明每次执行都一定改变值。
 
 # Relationship / Contract / Card
 
@@ -221,7 +222,7 @@ Contract initialization：
 
 ```text
 integrity = BattleActor.max_hp
-skills[]  = copy(BattleActor.skills[])
+skills[]  = copy(BattleActor.skills[])  # BattleSkill id string[]
 ```
 
 MVP 不保存 `maxIntegrity`，也不建立 `cardId`。
@@ -265,7 +266,7 @@ flowchart LR
   Encounter --> Runtime["generated Encounter Runtime set"]
 ```
 
-re-entry reroll、defeated persistence、清理时机属于 Runtime/gameplay policy，不在图中建立额外 Realm State authority。
+真正还缺的是 authored generation 数量 / template 选择分布。re-entry reroll、seed、respawn、defeated persistence、清理时机属于 Runtime/gameplay policy，不在图中建立额外 Content / Realm State 字段。
 
 # 一句话总览
 
