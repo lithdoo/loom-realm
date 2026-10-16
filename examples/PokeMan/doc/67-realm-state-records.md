@@ -1,29 +1,45 @@
 # Realm State Record 设计
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文在 [数据 Authority 清单](./66-data-authority.md) 的基础上，冻结 PokeMan MVP 核心 Realm State 的**物理 Record 粒度、namespace / key 编码、value shape 与数据约束**。本文只讨论数据结构，不讨论谁提交、何时提交、事务、冲突或失败处理。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文冻结 PokeMan MVP 核心 Realm State 的物理 Record 粒度、namespace/key 编码、value shape 与数据约束。Content FSDB 物理结构见 [Content FSDB 物理模型](./68-content-fsdb.md)。本文只讨论数据结构，不讨论谁提交、何时提交、事务、冲突或失败处理。
 
-## 总体结构
+# Authority 前提
+
+Realm State 记录的是 session-level shared mutable business facts。
+
+需要特别区分：
+
+```text
+live player map / x / y / direction / motion
+→ Map Runtime authority
+
+durable resume/checkpoint location
+→ Realm State pokeman.PlayerWorld/current
+```
+
+`pokeman.PlayerWorld/current` **不是第二份 live player pose authority**。它只表示产品 Save / Load / checkpoint workflow 需要的恢复位置；Runtime 可以在明确的 save/checkpoint 时机把 Map Runtime 当前位置提交为新的 resume point。
+
+# 总体结构
 
 MVP 核心 Realm State 固定为四类 Record：
 
 | 业务事实 | namespace | key | value |
 | --- | --- | --- | --- |
-| 玩家世界位置 | `pokeman.PlayerWorld` | `current` | `{ mapId, x, y, direction }` |
+| durable world resume/checkpoint | `pokeman.PlayerWorld` | `current` | `{ mapId, x, y, direction }` |
 | Event current state | `pokeman.EventStateList` | `current` | `[{ eventId, stateId }]` |
 | 有向 Relationship / Contract | `pokeman.Relationship` | `<fromCharacterId>/<toCharacterId>` | `{ affinity, hostile, relationshipText, contract? }` |
 | 当前随身 Card 编队 | `pokeman.CarriedCards` | `<holderCharacterId>` | `[{ slot, servantCharacterId }]` |
 
 不建立一个巨大的全局 `GameState` Record，也不为每张 Card 建立独立 Record。
 
-## ID 与 key 编码
+# ID 与 key 编码
 
-PokeMan 参与这些 Realm State key 的业务 id 使用稳定 token：
+PokeMan 参与 Realm State key 的业务 character/event id 使用稳定 token：
 
 ```text
 [a-z0-9][a-z0-9._-]*
 ```
 
-因此 `/` 不属于合法业务 id 字符，可以安全用于编码 Relationship 的有向复合 identity。
+因此 `/` 不属于合法业务 id 字符，可以安全用于 Relationship 的有向复合 identity。
 
 例如：
 
@@ -40,20 +56,30 @@ Relationship(player → rival)
 
 `player/rival` 与 `rival/player` 是两个不同 key。
 
+Content FSDB record key 作为 Character / Event identity 时，应满足 Realm State 需要的稳定 token 约束；Builder 必须在跨 Content / State identity 使用处验证这一点。
+
 # PlayerWorld Record
 
-物理 identity：
+## Record identity
 
 ```text
 namespace = pokeman.PlayerWorld
 key       = current
 ```
 
-value：
+## 业务含义
+
+它表示：
+
+> **如果现在从已提交的 durable world checkpoint 恢复游戏，应从哪里重新创建 Map Runtime。**
+
+它不表示 Map Runtime 当前每一帧 / 每一步的 live player pose。
+
+## Value
 
 ```json
 {
-  "mapId": "town-01",
+  "mapId": 1,
   "x": 12,
   "y": 8,
   "direction": 2
@@ -64,37 +90,54 @@ value：
 
 ```text
 PlayerWorldValue
-├─ mapId: string
-├─ x: integer
-├─ y: integer
+├─ mapId: positive safe integer
+├─ x: non-negative integer
+├─ y: non-negative integer
 └─ direction: 2 | 4 | 6 | 8
 ```
 
-数据约束：
+`mapId` 与 `@loomrealm-game/map` 使用同一业务 identity：正 safe integer。Content 中 Event / Character defaultScenes / Encounter 等因为 JSON object key 或 FSDB key 必须是字符串，会使用其十进制字符串形式；Realm State value 直接保存整数。
 
-- `mapId` 是非空稳定 id；
-- `x / y` 是整数；
-- `direction` 只能是 `2 / 4 / 6 / 8`。
-
-该 Record 不重复保存：
+该 Record 不保存：
 
 ```text
 playerCharacterId
 npcId
 instanceId
+motion
+scene epoch
 Character name / sprite / static data
 ```
 
+## Runtime 关系
+
+```text
+Load / New Session
+→ read pokeman.PlayerWorld/current
+→ create / enter Map Runtime at checkpoint
+
+live movement
+→ Map Runtime only
+
+explicit save/checkpoint
+→ project current Map Runtime location
+→ replace pokeman.PlayerWorld/current
+```
+
+具体何时 checkpoint、失败怎么处理属于 Runtime / Save workflow，不由本数据 shape 决定。
+
 # EventStateList Record
 
-物理 identity：
+## Record identity
 
 ```text
 namespace = pokeman.EventStateList
 key       = current
 ```
 
-value 直接是稀疏数组，不再包一层没有额外业务语义的对象：
+## Value
+
+value 直接是稀疏数组：
 
 ```json
 [
@@ -124,10 +167,12 @@ EventStateEntry
 
 - `eventId` 非空且在列表内唯一；
 - `stateId` 非空；
-- 不保存 `stateId: null`；
+- `eventId` 必须对应存在的 `struct.Event` key；
+- `stateId` 必须存在于对应 Event Content；
+- 不保存 `stateId:null`；
 - 空状态使用 `[]`。
 
-业务含义保持：
+业务读取：
 
 ```text
 存在 eventId entry
@@ -158,13 +203,11 @@ pokeman.Relationship / rival/player
 pokeman.Relationship / lord-b/rival
 ```
 
-分别表示三条独立 Relationship。
-
-因为 `fromCharacterId / toCharacterId` 已经属于 Record key，value 不重复保存它们，避免出现两套 identity source。
+因为 from / to 已经属于 Record key，value 不重复保存它们。
 
 ## Value
 
-未建立 Contract：
+没有 Contract：
 
 ```json
 {
@@ -174,7 +217,7 @@ pokeman.Relationship / lord-b/rival
 }
 ```
 
-已建立 Contract：
+有 Contract：
 
 ```json
 {
@@ -205,24 +248,24 @@ ContractValue
 └─ skills: string[]
 ```
 
-`relationshipText` 是此前文档中 dynamic relationship text 的最终字段名。
+`relationshipText` 是 dynamic relationship text 的最终字段名。
 
-## Relationship 三种物理状态
+## 三种物理状态
 
 ```text
 Relationship Record 不存在
 = 没有持久化这段有向关系
 
 Relationship Record 存在
-+ contract 字段缺失
-= 有长期关系，但没有正式契约
++ contract field absent
+= 有长期关系，没有正式契约
 
 Relationship Record 存在
-+ contract 字段存在
++ contract field present
 = 正式主公 / 从者契约成立
 ```
 
-因此不增加：
+不增加：
 
 ```text
 hasRelationship
@@ -230,15 +273,13 @@ hasContract
 contracted
 ```
 
-`contract` 的存在性就是契约成立事实。
-
 ## affinity
 
 ```text
-affinity: integer
+affinity: finite integer
 ```
 
-MVP 数据结构不冻结人为数值范围，例如 `-100..100`。它只要求是有限整数；具体数值区间属于以后独立的玩法数值设计。
+MVP 不冻结人为数值范围，例如 `-100..100`。
 
 ## hostile
 
@@ -246,7 +287,7 @@ MVP 数据结构不冻结人为数值范围，例如 `-100..100`。它只要求�
 hostile: boolean
 ```
 
-它是独立结构化事实，不由 `affinity` 正负推导。
+它与 affinity 独立，不由 affinity 正负推导。
 
 ## relationshipText
 
@@ -254,21 +295,11 @@ hostile: boolean
 relationshipText: string
 ```
 
-字段必需，允许空字符串：
-
-```json
-{
-  "affinity": 0,
-  "hostile": false,
-  "relationshipText": ""
-}
-```
-
-这样所有 Relationship 都拥有稳定的基础 value shape。
+字段必需，允许空字符串。
 
 # Contract Value
 
-Contract 继续嵌在 Relationship value 内，不建立独立 Record。
+Contract 嵌在 Relationship value 内，不建立独立 Record。
 
 ```text
 contract
@@ -284,21 +315,20 @@ integrity: integer >= 0
 
 不保存 `maxIntegrity`。
 
-MVP 的最大值继续来自稳定基础 BattleActor：
+最大值与新 Contract 初始值来自稳定基础 BattleActor：
 
 ```text
 Character
-→ BattleActor
-→ max_hp
+→ Character.battleActor
+→ BattleActor.max_hp
 ```
 
-新 Contract 的初始值语义已经固定为：
+固定：
 
 ```text
-integrity = BattleActor.max_hp
+new contract.integrity = BattleActor.max_hp
+max contract.integrity = BattleActor.max_hp
 ```
-
-但这里只记录最终物理字段，不展开创建过程。
 
 ## skills
 
@@ -313,7 +343,13 @@ skills: string[]
 - 保留数组顺序；
 - 空技能集使用 `[]`。
 
-因此 `skills` 是一个 **ordered unique list**。
+所以 `skills` 是 ordered unique list。
+
+新 Contract 初始化：
+
+```text
+contract.skills = copy(BattleActor.skills[])
+```
 
 Contract 不保存：
 
@@ -329,7 +365,7 @@ learnedSkillIds
 
 ## Record identity
 
-Card 没有独立 identity，因此不采用“一张 Card 一条 Record”。
+Card 没有独立 identity，不采用“一张 Card 一条 Record”。
 
 当前随身编队按 holder 聚合：
 
@@ -338,14 +374,13 @@ namespace = pokeman.CarriedCards
 key       = <holderCharacterId>
 ```
 
-例如玩家当前编队：
+例如：
 
 ```text
-namespace = pokeman.CarriedCards
-key       = player
+pokeman.CarriedCards / player
 ```
 
-value：
+## Value
 
 ```json
 [
@@ -356,7 +391,7 @@ value：
 ]
 ```
 
-多个随身位时：
+多个随身位：
 
 ```json
 [
@@ -371,9 +406,20 @@ value：
 ]
 ```
 
-因为 holder 已经属于 Record key，entry 不重复保存 `holderCharacterId`。
+最终结构：
 
-逻辑上的一张当前 Card 仍由三部分表达：
+```text
+CarriedCardsValue
+= CarriedCardEntry[]
+
+CarriedCardEntry
+├─ slot: integer
+└─ servantCharacterId: string
+```
+
+holder 已属于 Record key，所以 entry 不重复保存 `holderCharacterId`。
+
+逻辑上一张当前 Card：
 
 ```text
 holderCharacterId
@@ -386,34 +432,21 @@ slot
 = entry field
 ```
 
-## Value
-
-```text
-CarriedCardsValue
-= CarriedCardEntry[]
-
-CarriedCardEntry
-├─ slot: integer
-└─ servantCharacterId: string
-```
-
 数据约束：
 
 - `slot` 是 `integer >= 0`；
 - 同一 Record 内 `slot` 唯一；
 - 同一 Record 内 `servantCharacterId` 唯一；
-- 数组按 `slot` 升序保存，形成稳定 canonical JSON 表示；
+- 数组按 `slot` 升序保存；
 - 空编队使用 `[]`；
-- `null` 不作为空编队的第二种编码。
+- `null` 不作为空编队第二种编码。
 
-数据一致性要求：
+数据一致性 invariant：
 
 ```text
 CarriedCards(A) 中存在 servant B
 → Relationship(A → B).contract 必须存在
 ```
-
-这是 PokeMan 数据模型 invariant；本文只记录约束本身，不讨论由谁、何时验证。
 
 Card 不保存：
 
@@ -425,11 +458,11 @@ BattleActor / BattleSkill
 Character name / personality
 ```
 
-# `null` 与 absence 规则
+# null 与 absence
 
-这四类 MVP Realm State 的业务 value 不使用 `null` 作为内部状态编码。
+这四类 MVP Realm State canonical business value 不使用 `null` 作为内部状态编码。
 
-统一规则：
+统一：
 
 ```text
 optional object
@@ -438,45 +471,31 @@ optional object
 empty collection
 → []
 
-普通业务字段
-→ 实际值
+ordinary field
+→ actual value
 ```
 
-具体表现：
+具体：
 
 ```text
-没有 Contract
-→ 缺少 contract 字段
+no Contract
+→ contract field absent
 
 Event current state = null
-→ EventStateList 中缺少该 eventId entry
+→ no EventStateList entry
 
-空 EventStateList
+empty EventStateList
 → []
 
-空 CarriedCards
+empty CarriedCards
 → []
 ```
 
-不使用：
-
-```json
-{ "contract": null }
-```
-
-也不使用：
-
-```json
-{ "stateId": null }
-```
-
-Realm State 基础 contract 本身允许 Record value 为 `null`，但 PokeMan 这四类 canonical Record shape 不把 `null` 作为业务 value 的内部编码。
+Realm State 底层 contract 可以允许 record value `null`，但 PokeMan 这四类 canonical value 不使用它。
 
 # 完整示例
 
-下面展示一组序章状态的物理表示。
-
-## PlayerWorld
+## durable PlayerWorld checkpoint
 
 ```text
 pokeman.PlayerWorld / current
@@ -484,7 +503,7 @@ pokeman.PlayerWorld / current
 
 ```json
 {
-  "mapId": "lab",
+  "mapId": 1,
   "x": 8,
   "y": 12,
   "direction": 2
@@ -547,7 +566,7 @@ pokeman.Relationship / rival/player
 }
 ```
 
-## 玩家当前随身
+## player carried cards
 
 ```text
 pokeman.CarriedCards / player
@@ -562,29 +581,12 @@ pokeman.CarriedCards / player
 ]
 ```
 
-## 宿敌当前随身
-
-```text
-pokeman.CarriedCards / rival
-```
-
-```json
-[
-  {
-    "slot": 0,
-    "servantCharacterId": "player"
-  }
-]
-```
-
 # 当前冻结结论
-
-MVP 核心 Realm State 物理结构已经冻结为：
 
 ```text
 pokeman.PlayerWorld / current
-→ {
-    mapId,
+→ durable resume/checkpoint {
+    mapId: positive safe integer,
     x,
     y,
     direction
@@ -617,30 +619,32 @@ pokeman.CarriedCards / <holder>
 同时冻结：
 
 ```text
-业务 id token = [a-z0-9][a-z0-9._-]*
+business id token = [a-z0-9][a-z0-9._-]*
 Relationship key = <from>/<to>
-空列表 = []
+empty list = []
 optional Contract = field absence
-内部业务 shape 不使用 null
-Relationship value 不重复 from/to
-CarriedCards value 不重复 holder
+business value shape does not use null
+Relationship value does not repeat from/to
+CarriedCards value does not repeat holder
 skills[] ordered + unique
-CarriedCards 按 slot 升序且 slot / servant 均唯一
+CarriedCards sorted by slot
+slot unique
+servantCharacterId unique per holder
+Carried Card requires corresponding Contract
+PlayerWorld is durable checkpoint, not live Map authority
+PlayerWorld.mapId is positive safe integer
 ```
 
 # 当前仍未解决的数据结构问题
 
-Realm State 核心四类 Record 的粒度、namespace/key 与 value shape 已不再是未决项。
+Realm State 核心四类 Record 的粒度、namespace/key 与 value shape 已冻结，不再是未决项。
 
-当前剩余的数据结构工作主要转向 Content：
+Content physical schema 由 [68-content-fsdb.md](./68-content-fsdb.md) 收口。当前真正仍开放的主要数据项是：
 
 ```text
-Character / NPC / Visual 的精确 Content schema / namespace
-Character → BattleActor Content reference 编码
-Encounter / Story → BattleActor Content reference 编码
-Event / EventStateMutation Content namespace / key
-Event placement / instanceId / absent 的最终 JSON shape
-Dialogue Content 的最终 namespace / key 与 schema 命名收口
+Battle package 正式 BattleActor / BattleSkill serialization namespace / key/reference encoding
+Encounter generation 的概率 / 数量 / seed 等具体参数
+StoryIndex 最终为 Resolver 查询保留哪些派生字段
 ```
 
 当前不建立通用：
@@ -652,4 +656,4 @@ flags: Record<string, unknown>
 generic key/value bag
 ```
 
-只有未来出现无法由现有 domain data 表达、且确实需要持久化的新业务事实时，再单独设计对应数据结构。
+只有未来出现无法由现有 domain data 表达、且确实需要长期共享的新业务事实时，再单独设计对应数据结构。
