@@ -46,15 +46,24 @@ Simulation
 
 **Decision 决定想做什么；Simulation 决定能不能做、什么时候发生以及结果是什么。**
 
-## HP 对契约关系意味着 Card Integrity
+## HP 对契约关系意味着 Contract Integrity
 
 对于通过角色卡形成的 **Battle Manifestation**，Battle 中的 `HP` 不表示角色本体生命值，而表示：
 
-> **这份有向 Relationship / Contract 的战斗完整度 / 显现稳定度（Card Integrity）。**
+> **这份有向 Relationship 中 Contract 的战斗完整度 / 显现稳定度。**
 
-Integrity 是这份契约关系的长期状态，不属于“当前是否随身”的 Card State。当前 Card 只表示这份已成立契约是否被编入随身队伍以及所在 slot。
+MVP Contract 是 Relationship 内的长期状态：
 
-内部 Simulation 可以继续使用连续数值 `hp`，产品上把它解释为角色卡完整度。例如概念上：
+```text
+Relationship(holder → servant)
+└─ contract
+   ├─ integrity
+   └─ skills[]
+```
+
+当前 Card 只表示这份已成立契约是否被编入随身队伍以及所在 slot。
+
+内部 Simulation 可以继续使用连续数值 `hp`，产品上把它解释为契约完整度。例如概念上：
 
 | 卡片状态 | Battle HP / Integrity | 产品语义 |
 | --- | ---: | --- |
@@ -63,16 +72,17 @@ Integrity 是这份契约关系的长期状态，不属于“当前是否随身�
 | 残破 | 很低但大于 0 | 显现非常不稳定，接近无法继续战斗 |
 | 失效 | 0 | 当前无法继续形成战斗化身 |
 
-具体状态名称、视觉效果和百分比阈值以后再调；当前只固定 **Battle HP 映射 Relationship 上这份契约的 Integrity，而不是角色本体生命值**。
+具体状态名称、视觉效果和百分比阈值以后再调；当前只固定 **Battle HP 映射 `Relationship.contract.integrity`，而不是角色本体生命值**。
 
-因此：
+例如：
 
 ```text
 宿敌本体：仍然在研究所正常生活
 
 Relationship(player → rival):
-contract = true
-integrity = 35%
+contract:
+  integrity: 35
+  skills: [firebolt, grab]
 
 Card(player, rival):
 slot = 0        // 当前随身
@@ -82,10 +92,10 @@ slot = 0        // 当前随身
 
 `Integrity = 0` 表示这份契约当前无法继续形成 Battle Manifestation，并不意味着角色本人昏迷、死亡或受到同等物理伤害。
 
-长期 Integrity 在 Battle 结束后写回 Relationship，因此即使随后把 Card 从随身队伍移除，损耗也不会消失：
+长期 Integrity 在 Battle 结束后写回同一 Contract，因此即使随后把 Card 从随身队伍移除，损耗也不会消失：
 
 ```text
-Relationship(player → rival).integrity = 100
+Relationship(player → rival).contract.integrity = 100
 ↓
 Card(player, rival, slot=0) 进入 Battle
 ↓
@@ -93,7 +103,7 @@ Battle hp 100 → 48
 ↓
 Battle 结束
 ↓
-Relationship(player → rival).integrity = 48
+Relationship(player → rival).contract.integrity = 48
 ↓
 Card 可以继续随身，也可以从随身队伍移除
 ↓
@@ -101,7 +111,7 @@ Integrity 仍然是 48
 ↓
 到达中心
 ↓
-修复 Relationship.integrity → 100
+修复 contract.integrity → 100
 ```
 
 这样道路上的连续战斗会产生类似传统 Pokémon 的旅行资源压力，但设定上消耗的是契约关系的战斗显现能力，而不是远处角色本人的生命值。
@@ -110,12 +120,10 @@ Integrity 仍然是 48
 
 普通敌对人物、独立从者等可以由世界本体直接进入同一个 Battle Simulation。此时 Simulation 中的 HP 可以表达**本场战斗内的体力 / 战斗状态 / 被击败程度**，不要求把这份数值保存成角色长期生命条。
 
-也就是说：
-
 ```text
 契约关系调用的 Battle Manifestation HP
-→ 从 Relationship.integrity 初始化
-→ Battle 结束后写回 Relationship.integrity
+→ 从 Relationship.contract.integrity 初始化
+→ Battle 结束后写回 Relationship.contract.integrity
 → 可跨 Battle / 随身切换持续，并由中心修复
 
 世界本体直接参战 HP
@@ -124,6 +132,46 @@ Integrity 仍然是 48
 ```
 
 二者共用 Battle 机制，但产品语义不同。
+
+## MVP 技能来源
+
+PokeMan 不定义平行 Skill schema，技能定义仍然来自 `@loomrealm-game/battle` 的 BattleSkill Content。
+
+当前 BattleActor 静态 Content 自带：
+
+```text
+BattleActor.skills[]
+```
+
+MVP 规则：
+
+```text
+没有 Contract 的本体 / transient actor
+→ 直接使用 BattleActor.skills[]
+
+建立新 Contract
+→ copy BattleActor.skills[]
+→ Relationship.contract.skills[]
+
+Contract 对应的 Card Battle
+→ 当前可用技能来自 Relationship.contract.skills[]
+```
+
+也就是说，`BattleActor.skills[]` 是人物的基础 / 默认技能 baseline，而 `Relationship.contract.skills[]` 是**这份具体契约当前实际拥有的技能集**。
+
+MVP 不增加：
+
+```text
+experience
+skill points
+unlock tree
+learnedSkillIds
+baseSkills + learnedSkills merge
+forget skill
+skill slot progression
+```
+
+以后真的做技能学习时，可以直接修改 / 扩展 `contract.skills[]` 的业务规则，不要求现在先设计完整成长系统。
 
 ## 多随身卡后的默认 Battle 使用方式
 
@@ -134,9 +182,9 @@ Integrity 仍然是 48
 ↓
 Battle 开始前选择 1 张
 ↓
-通过 holder / servant 找到对应 Relationship
+通过 holder / servant 找到对应 Relationship.contract
 ↓
-读取 Relationship.integrity / progression
+读取 contract.integrity / skills[]
 ↓
 形成 Battle Manifestation
 ↓
@@ -157,25 +205,29 @@ Battle 中换卡
 
 ## 角色性格真实影响战斗
 
-同一句 Guidance，不同人物应产生不同理解和执行方式。角色性格、能力、经验、关系和当前战局共同影响 Decision，避免所有从者最终表现为同一种通用 AI。
+同一句 Guidance，不同人物应产生不同理解和执行方式。角色性格、能力、关系和当前战局共同影响 Decision，避免所有从者最终表现为同一种通用 AI。
 
-同一个 Character 被不同主公契约时，各自的有向 Relationship 可以拥有独立的 affinity、Integrity、训练 / 成长与未来 Guidance 相关状态，因此同一人物的不同契约 Battle Manifestation 也可以形成不同表现。
+同一个 Character 被不同主公契约时，各自有向 Relationship 的 affinity、Contract Integrity、技能集以及未来 Guidance / 成长状态可以不同，因此同一人物的不同契约 Battle Manifestation 也可以形成不同表现。
 
 ## 长期养成方向
 
-序章不实现完整养成系统，但长期方向已确认：
+序章 / MVP **不实现也不冻结完整 progression / training State schema**。
 
-- **训练**：提高这份契约关系能够发挥的战斗能力；长期训练 / progression 状态属于 Relationship，而不是当前 Card；
-- **好感度 / 信赖**：提高从者理解、信任和采纳主公战术意图的程度，也属于有向 Relationship；
+长期仍可以有：
+
+- **训练**：提高这份契约关系能够发挥的战斗能力；
+- **技能学习**：改变该 Contract 当前拥有的 `skills[]`；
+- **好感度 / 信赖**：影响从者理解、信任和采纳主公战术意图的程度；
 - **关系成长**：来自 Dialogue、Event、选择和共同经历；
-- **随行成长**：来自一起旅行、Pocket Dialogue 和角色事件，并沉淀到对应 Relationship 的长期状态；
+- **随行成长**：来自一起旅行、Pocket Dialogue 和角色事件；
 - **主公成长**：提升组织、携带、调用和表达复杂 Guidance 的能力。
 
-核心语义是：
+这些是未来产品方向，不要求 MVP 先引入 `progression` 字段、等级系统或通用训练模型。当前 Contract 只需要：
 
 ```text
-训练 = “这份契约能做到什么”
-好感 / 信赖 = “从者愿意多大程度采纳这个主公的意图”
+contract
+├─ integrity
+└─ skills[]
 ```
 
-具体 Level、属性、技能成长、训练方式、契约阶段和 Guidance UX 均不在序章阶段设计。
+等真实玩法出现以后，再扩展 Contract 的长期状态。
