@@ -15,11 +15,12 @@
 5. **PokeMan 不重复定义 BattleActor / BattleSkill。** 战斗静态数据直接复用 `@loomrealm-game/battle` 当前 Content contract。
 6. **Event 保持为剧情状态与场景 / 交互定义。** 不扩成通用 Trigger / Action / Command / Flow engine。
 7. **Event current state 使用一个 EventStateList Realm State Record。** 列表只保存非空 state；没有 entry 等价于 `null`。
-8. **Event state 的声明式变化独立为 EventStateMutation Content。** `from` 是 AND 前置集合，`to` 是赋值集合；OR 用多条 Mutation 表达。
-9. **Content 只定义，Subsystem 执行。** PokeMan Dialogue Subsystem 读取 Dialogue / Mutation Content 并通过 `scope.state` 更新 EventStateList。
-10. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以引用一个 EventStateMutation。
-11. **`choices` 与 `mutation` 互斥。** 需要状态变化的 Choice 必须先跳到新的无 Choice Dialogue，再由新 Dialogue 触发 Mutation。
-12. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
+8. **Character default scene 是纯 fallback。** 只要任一 active Event State 提到某个 Character，该 Character 的所有 default scene instances 都退出解析，当前 scene 完全由 Event sources 决定。
+9. **Event state 的声明式变化独立为 EventStateMutation Content。** `from` 是 AND 前置集合，`to` 是赋值集合；OR 用多条 Mutation 表达。
+10. **Content 只定义，Subsystem 执行。** PokeMan Dialogue Subsystem 读取 Dialogue / Mutation Content 并通过 `scope.state` 更新 EventStateList。
+11. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以引用一个 EventStateMutation。
+12. **`choices` 与 `mutation` 互斥。** 需要状态变化的 Choice 必须先跳到新的无 Choice Dialogue，再由新 Dialogue 触发 Mutation。
+13. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
 
 ## 总体关系
 
@@ -33,26 +34,19 @@ Character Content
       │                 ├─ affinity / hostile / contract
       │                 └─ integrity / progression
       │
-      ├────────────→ NPC Instance → NPC Definition → Visual
+      ├────────────→ default scene instances
+      │                 └─ only when no active Event mentions Character
       │
       └────────────→ current carried Card
                         holder / servant / slot
 
 Realm State EventStateList
-→ eventId → stateId（只有非空项）
-→ 缺 entry = null
 → active Event State
-→ mapId / npcId / placement
-→ interaction.dialogue
-→ PokeMan Dialogue Subsystem
-→ choices? → target Dialogue
-→ terminal Dialogue
-→ mutation?
-→ EventStateMutation Content
-→ Dialogue Subsystem validate from
-→ Dialogue Subsystem 计算新 EventStateList
-→ scope.state.commit() 替换整个列表
-→ Story Resolver re-resolve
+→ collect Character scene directives
+→ mentioned Character: Event sources only
+→ unmentioned Character: use defaults
+→ merge transient NPC / Encounter sources
+→ validate final (mapId,npcId) uniqueness
 
 Current Card
 +
@@ -84,6 +78,8 @@ CharacterDefinition
 ```
 
 Character 不保存当前 affinity、hostile、contract、Integrity 或 Battle Runtime hp。所有持久 Character 都准备好 Card / Battle 所需静态素材，但这不等于 `canContract`。
+
+`default scene instances` 只在当前所有 active Event State 都没有提到这个 Character 时作为 fallback 使用；它不是与 Event placement 并列竞争的 scene source。
 
 ## BattleActor / BattleSkill
 
@@ -189,7 +185,7 @@ EventDefinition
             └─ npcs
                └─ [npcId]
                   ├─ characterId?
-                  ├─ placement
+                  ├─ placement / absent
                   └─ interaction?
                      └─ dialogue
 ```
@@ -201,13 +197,15 @@ Event State
 = 某个合法剧情阶段的 Content
 
 Event State NPC
-= 当前阶段这个 NPC 在哪、入口 Dialogue 是什么
+= 当前阶段对 NPC / Character 的 scene directive
 
 Dialogue
 = 台词、Choice 跳转，以及无 Choice 完成时可选的 Mutation ref
 ```
 
 Event State NPC 不维护 `terminalDialogueId → Mutation` 映射。
+
+对持久 Character，Event State 中只要有 `characterId = X` 的 scene directive，就表示当前 active Event 已经提到 Character X。只有 `npcId`、没有 `characterId` 的 transient / 非 Character NPC source 不参与 Character default fallback 判定。
 
 # Realm State
 
@@ -449,36 +447,43 @@ Runtime 不扫描全部 Mutation 自动执行。Mutation 必须被明确 Dialogu
 
 未来 Battle 完成、到达地点等业务也可以显式引用同一种 Mutation，但 Mutation Content 本身不拥有 trigger，也不参与执行。
 
-# Event NPC source 与最终 Map 唯一性
+# Character scene fallback / Event takeover
 
-不同 Event 可以都声明同一个 NPC；同一个 Event state 也可以让同一 `npcId` 出现在多个不同 Map。
-
-```text
-同一个 Event state
-→ (mapId, npcId) 不可重复
-
-不同 Event
-→ 允许重复引用同一个 npcId
-
-EventStateList 无该 Event entry
-→ 不参与投影
-
-Runtime 合并当前 active Event 来源
-→ 每张最终 Map 内 npcId 必须唯一
-```
-
-多个来源最终同时产生同一 `(mapId, npcId)` 时，Story Resolver 确定性报冲突，不做隐式 last-wins。
-
-Story Index 是 Builder 生成的派生 Content：
+Character default scene 与 Event scene 的关系已经固定：
 
 ```text
-Story Index
-├─ by Map
-├─ by Character
-└─ by Event
+当前没有任何 active Event State 提到 Character X
+→ 使用 Character X 的 default scene instances
+
+当前至少一个 active Event State 提到 Character X
+→ Character X 的所有 default scene instances 全部退出解析
+→ X 当前 scene 完全由相关 Event sources 决定
 ```
 
-它可以重建，不进入 Save。
+“提到 Character”指 active Event State 中存在明确 `characterId = X` 的 scene directive。
+
+`absent` 是一种 Event scene directive，但不拥有跨 Event 的压制优先级。它只表示：
+
+```text
+这个 Event 当前提到了 Character X
+但这个 Event 不为 X 提供 placement
+```
+
+因此：
+
+```text
+Event A → X absent
+Event B → X placement at town
+
+→ default 关闭
+→ A 不贡献 placement
+→ B 贡献 town placement
+→ 最终使用 town placement
+```
+
+如果所有提到 X 的 active Event 都没有提供 placement，则 X 当前不出现。
+
+多个 Event placement 可以合并；最终继续检查 `(mapId,npcId)` 唯一。不同 Map 上使用同一 `npcId` 允许，同一 Map 最终重复同一 `npcId` 则 deterministic conflict，不做隐式 last-wins。
 
 # Encounter
 
@@ -526,11 +531,14 @@ Character / Event Content
 +
 Encounter generated state
 ↓
-只读取有 EventStateList entry 的相关 Event
+读取相关 active Event State
 ↓
-Story Resolver
+收集 active Event 明确提到的 Character 集合
 ↓
-合并 NPC sources
+未被 Event 提到的 Character → default scene instances
+被 Event 提到的 Character   → Event scene directives only
+↓
+合并 transient NPC / Encounter sources
 ↓
 校验当前 Map npcId 唯一
 ↓
@@ -607,6 +615,7 @@ Mutation 使用 stateId → null 清空 Event
 同一个 npcId 被多个不同 Event 引用
 同一个 npcId 在同一 Event state 中出现在多个不同 Map
 同一个 Character 被多个 Event 引用
+一个 Event 对 Character 声明 absent、另一个 Event 对同一 Character 提供 placement
 Dialogue 之间形成合法 cycle
 同一个 Character 被多个 Relationship / contract 引用
 ```
@@ -617,6 +626,8 @@ Runtime：
 - EventStateList 内 `eventId` 唯一；
 - 缺 entry 等价于 Event current state `null`；
 - 缺 entry 的 Event 不参与 Event State 投影；
+- active Event 一旦提到 Character，该 Character default scene fallback 全部关闭；
+- `absent` 不压制另一个 Event 的明确 placement；
 - 只应用被明确引用的 Mutation；
 - Content 不执行 Mutation；对应 PokeMan Subsystem 执行；
 - Mutation 的全部 `from` 必须同时匹配，包括显式 `null`；
@@ -626,15 +637,14 @@ Runtime：
 - Battle 的契约级长期 Integrity / Progression 回写 Relationship，而不是 Card；
 - 合并当前 NPC 来源后，每张最终 Map 内 `npcId` 唯一。
 
-# 当前继续设计的问题
+# 当前继续设计的数据问题
 
 - Character / NPC / Visual 的精确 Content schema / namespace；
 - Character 到 BattleActor Content 的最终引用编码；
 - Event / EventStateMutation 的最终 Content namespace / key；
 - EventStateList Realm State Record 的最终 namespace / key 名字；
+- Event placement / `instanceId` / `absent` 的最终 JSON shape；
 - 非 Dialogue Subsystem 如何在各自 Content 中引用 Mutation；
-- Mutation `from` mismatch / OCC conflict 的产品错误表现；
-- `absent` 与跨 Event NPC 冲突 / 显式 override 规则；
 - Dialogue condition、本地化与 presentation metadata；
 - Relationship 的最终 Realm State key / 精确 progression shape；
 - Card 的最终 key / 是否需要独立 `cardId`；
