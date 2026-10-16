@@ -8,11 +8,11 @@
 
 固定 Dialogue 保持一个很小的模型：
 
-> **一个 Dialogue 是一段线性台词列表；列表末尾可以结束，或者出现 Choice。Choice 只跳到另一个 Dialogue。没有 Choice 的 Dialogue 可以在正常完成时引用一个 EventStateMutation。**
+> **一个 Dialogue 是一段线性台词列表；可以提供一个默认 `speakerName` 作为没有持久 Character identity 的说话者显示名；列表末尾可以结束，或者出现 Choice。Choice 只跳到另一个 Dialogue。没有 Choice 的 Dialogue 可以在正常完成时引用一个 EventStateMutation。**
 
 因此不在 Dialogue 内设计通用 Node、Flow、脚本命令或任意业务 action。
 
-人物日常对话、主线剧情对话、支线剧情对话使用同一种 Dialogue Content。区别只在于谁从哪里启动它，以及无 Choice Dialogue 完成后是否引用一个 EventStateMutation。
+人物日常对话、主线剧情对话、支线剧情对话和 transient Encounter NPC 的固定对话使用同一种 Dialogue Content。区别只在于 speaker 如何显示、谁从哪里启动它，以及无 Choice Dialogue 完成后是否引用一个 EventStateMutation。
 
 Content 永远只是定义数据。**真正解释 Dialogue graph 并执行 Mutation 的是 PokeMan Dialogue Subsystem。**
 
@@ -23,8 +23,9 @@ Content 永远只是定义数据。**真正解释 Dialogue graph 并执行 Mutat
 ```text
 Dialogue
 ├─ id
+├─ speakerName?        // 默认说话者显示名；不是 Character identity
 ├─ lines[]
-│  ├─ speaker?
+│  ├─ speaker?         // 持久 Character identity；存在时覆盖 speakerName
 │  └─ text
 ├─ choices?[]
 │  ├─ text
@@ -61,11 +62,11 @@ mutation 存在
    → complete
 ```
 
-## Line
+## Speaker 与 Line
 
 一个 Line 表示一句固定台词。
 
-对于持久 Character，`speaker` 引用 Character identity，而不是复制人物名称、头像或其他人物资料：
+对于持久 Character，`Line.speaker` 引用 Character identity，而不是复制人物名称、头像或其他人物资料：
 
 ```json
 {
@@ -74,15 +75,45 @@ mutation 存在
 }
 ```
 
-没有 `speaker` 的 Line 表示旁白：
+如果 Line 没有 `speaker`，则按 Dialogue 的默认 `speakerName` 解析：
 
-```json
-{
-  "text": "门外传来一阵脚步声。"
-}
+```text
+Line.speaker 存在
+→ speaker 是持久 Character
+→ 显示 Character.name / Character presentation
+
+Line.speaker 不存在
++ Dialogue.speakerName 存在
+→ 显示 Dialogue.speakerName
+→ 不产生 Character identity
+
+Line.speaker 不存在
++ Dialogue.speakerName 不存在
+→ 旁白
 ```
 
-临时 Encounter NPC 等非持久 Character 的 speaker identity 等 Encounter / Dialogue 真正接起来时再定，不提前扩大 Character 模型。
+因此 transient Encounter NPC 不需要为了固定 Dialogue 建立通用 Character。它可以直接复用一段带默认显示名的 Dialogue：
+
+```yaml
+id: roadside-threat
+speakerName: 路霸
+lines:
+  - text: "站住。"
+  - text: "把值钱的东西留下。"
+```
+
+这里的 `路霸` 只是当前 Dialogue 的 presentation fallback：
+
+```text
+speakerName
+!= characterId
+!= npcId
+!= instanceId
+```
+
+它不能用于 Relationship、Contract、Event character takeover、Battle actor identity 等业务关联，也不会把多个使用同一 Dialogue 的 transient NPC 解释成同一个人。
+
+当前保持最小模型：对于设置了 `speakerName` 的 Dialogue，缺少 `Line.speaker` 就使用该默认名。若以后确实需要在同一段带默认 speaker 的 Dialogue 内显式混入旁白或多个不同 transient speaker，再按真实需求扩展，不在 MVP 提前增加 speaker binding / participant registry。
 
 ## Choice 只能出现在末尾
 
@@ -298,6 +329,11 @@ PokeMan Dialogue Subsystem 收到入口 Dialogue
 ↓
 读取 Dialogue Content
 ↓
+解析每个 Line 的 speaker display：
+  Line.speaker → Character
+  否则 Dialogue.speakerName → 默认显示名
+  两者都没有 → 旁白
+↓
 调用 @loomrealm-game/rpg-dialogue 展示当前 lines / choices
 ↓
 是否有 choices？
@@ -340,10 +376,13 @@ Dialogue definitions 是 immutable Content：
 Content
 └─ Dialogue
    ├─ id
+   ├─ speakerName?
    ├─ lines[]
    ├─ choices?[]
    └─ mutation?
 ```
+
+`speakerName` 是静态 presentation data，不进入 Realm State，也不是 identity。
 
 EventStateMutation 也是 immutable Content。
 
@@ -357,7 +396,7 @@ Builder 应检查：
 
 - Dialogue identity 重复；
 - Choice `target` 引用了不存在的 Dialogue；
-- 持久 Character speaker 引用了不存在的 Character；
+- 持久 Character `Line.speaker` 引用了不存在的 Character；
 - Line 缺少需要的文本；
 - Choice 缺少显示文本或 target；
 - 同一个 Dialogue 同时存在 `choices` 与 `mutation`；
@@ -372,15 +411,19 @@ Builder 不因为合法的 Dialogue cycle 失败。
 
 - Dialogue Content 的最终 namespace / key 格式；
 - 本地化文本的最终组织方式；
-- 临时 Encounter NPC 的 speaker identity 表达；
 - 对话中的头像切换、表情、音效等 presentation metadata；
 - 根据 Realm State 动态隐藏 / 显示 Choice 的条件系统；
-- Dialogue Mutation 的 `from` mismatch / OCC conflict 时具体 UI / Message 表现。
+- Dialogue Mutation 的 `from` mismatch / OCC conflict 时具体 UI / Message 表现；
+- 同一段 Dialogue 内多个 transient speaker / 默认 speaker 与显式旁白混排的扩展方式（仅在真实需求出现时设计）。
 
 当前优先保持：
 
 ```text
-Dialogue = 线性 lines + choices? + mutation?
+Dialogue = speakerName? + 线性 lines + choices? + mutation?
+Line.speaker = 可选持久 Character identity
+缺 Line.speaker + 有 speakerName = 默认显示名
+缺 Line.speaker + 无 speakerName = 旁白
+speakerName = presentation fallback，不是 Character identity
 choices 与 mutation 互斥
 Choice = 下一段 Dialogue 的引用
 无 Choice Dialogue = 可以声明 EventStateMutation ref
