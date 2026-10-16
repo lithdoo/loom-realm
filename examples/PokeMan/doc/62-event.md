@@ -1,6 +1,6 @@
 # 事件
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义 Event / EventStateMutation / EventStateList 的业务语义；FSDB 物理编码见 [Content FSDB 物理模型](./66-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义 Event / EventStateMutation / EventStateList 的业务语义；Realm State 物理结构见 [67-realm-state-records.md](./67-realm-state-records.md)，FSDB 编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 # 定位
 
@@ -22,8 +22,6 @@ Event / Mutation **不是**通用 Trigger / Action / Command / Workflow engine�
 Content 永远只声明数据；真正读取当前 State、解释 Mutation 并执行 `scope.state.commit()` 的是 PokeMan Runtime。
 
 # Event FSDB record
-
-Event 使用：
 
 ```text
 [struct]Event/<eventId>.json
@@ -99,11 +97,7 @@ source 不重复保存这些 identity 字段。
 
 # Event State NPC directive
 
-Event State NPC 表示：
-
-> 当前 Event state 对这个 NPC / Character 的 scene directive，以及玩家与它交互时从哪段固定 Dialogue 开始。
-
-当前 directive：
+Event State NPC 表示当前 Event state 对某个 NPC / Character 的 scene directive，以及玩家与它交互时从哪段固定 Dialogue 开始。
 
 ```text
 EventNPCDirective
@@ -125,13 +119,13 @@ Placement
 └─ pattern?: 0 | 1 | 2 | 3
 ```
 
-固定约束：
+固定：
 
 ```text
 placement XOR absent:true
 ```
 
-`instanceId` 不属于 Event Content。它由 Story Resolver / World Runtime 在构造当前 NPC Instance 时生成。
+`instanceId` 不属于 Event Content。它由 Story Resolver / World Runtime 构造当前 NPC Instance 时生成。
 
 ## 持久 Character
 
@@ -192,25 +186,29 @@ character 不存在
 
 # EventStateList
 
-Event current state 统一保存在 Realm State 的一个列表 Record：
+Event current state 的 Realm State physical identity 已冻结：
 
 ```text
-EventStateList
-└─ entries[]
-   ├─ eventId
-   └─ stateId
+namespace = pokeman.EventStateList
+key       = current
 ```
 
-例如：
+value：
 
 ```json
 [
-  { "eventId": "professor-intro", "stateId": "waiting" },
-  { "eventId": "home-intro", "stateId": "active" }
+  {
+    "eventId": "professor-intro",
+    "stateId": "waiting"
+  },
+  {
+    "eventId": "home-intro",
+    "stateId": "active"
+  }
 ]
 ```
 
-读取语义：
+读取：
 
 ```text
 列表中存在 eventId
@@ -223,15 +221,13 @@ EventStateList
 约束：
 
 - `eventId` 在列表中唯一；
+- `eventId` 对应 `struct.Event` key；
 - `stateId` 必须是对应 Event Content 存在的非空 state；
-- 列表不保存 `stateId:null` 项；
-- baseline 只列开局真正 active 的 Event，不为所有 Event 预建 inactive entry。
-
-EventStateList 最终 Realm State namespace / key 仍待后续 State schema 冻结；“所有 Event state 放在一个列表 Record”已经确定。
+- 不保存 `stateId:null`；
+- 空列表使用 `[]`；
+- baseline 只列开局真正 active 的 Event。
 
 # EventStateMutation FSDB record
-
-Mutation 使用：
 
 ```text
 [struct]EventStateMutation/<mutationId>.json
@@ -301,21 +297,11 @@ to[eventId] = null
 → 成功后删除该 eventId entry
 ```
 
-`null` 是 Mutation / read 语义，不是 EventStateList 实际存储值。
+`null` 是 Mutation / read 语义，不是 EventStateList 实际 entry value。
 
 ## from 是 AND
 
-同一 Mutation 多个 `from` 项全部是 AND：
-
-```text
-A == waiting
-AND
-B == null
-AND
-C == ready
-```
-
-需要 OR 时定义多条独立 Mutation，由业务分支选择；不加入 `or / anyOf / condition tree / expression`。
+同一 Mutation 多个 `from` 全部是 AND。需要 OR 时定义多条独立 Mutation，由业务分支选择；不加入 `or / anyOf / condition tree / expression`。
 
 ## from / to 不要求同 key set
 
@@ -330,26 +316,10 @@ C == ready
 = direct assign/delete
 ```
 
-例如：
-
-```json
-{
-  "from": {
-    "tutorial-battle": "completed"
-  },
-  "to": {
-    "tutorial-battle": null,
-    "town-route": "open"
-  }
-}
-```
-
 # Mutation 执行
 
-执行一条 Mutation：
-
 ```text
-scope.state.read(EventStateList)
+scope.state.read(pokeman.EventStateList/current)
 ↓
 得到 list + version
 ↓
@@ -368,9 +338,9 @@ scope.state.commit()
   write     = new EventStateList
 ```
 
-所以多个 Event 同时变化天然对应一个 Record replacement / 一个 Realm State commit。
+多个 Event 同时变化天然对应一个 Record replacement / 一个 Realm State commit。
 
-Mutation mismatch、OCC conflict、OUTCOME_UNKNOWN 的具体恢复 / UI 是 Runtime 设计，不是当前数据 physical-schema gap。
+Mutation mismatch、OCC conflict、OUTCOME_UNKNOWN 的恢复 / UI 是 Runtime 设计，不是数据 physical-schema gap。
 
 # Mutation ownership
 
@@ -482,15 +452,6 @@ Character `defaultScenes` 是纯 fallback。
 
 它不压制其他 Event placement，也不建立 Event priority。
 
-```text
-Event A → X absent
-Event B → X placement at town
-
-→ default 不参与
-→ A 不贡献 placement
-→ B 贡献 town placement
-```
-
 如果 Event 已接管 X，而所有相关 source 都不贡献 placement，则 X 当前不出现。
 
 # NPC uniqueness
@@ -515,7 +476,7 @@ maps.<mapId>.npcs.<npcId>
 
 # StoryIndex
 
-Runtime 不扫描全部 Event 来回答“这张 Map 有哪些相关剧情 source”。Builder 生成：
+Builder 生成：
 
 ```text
 struct.StoryIndex/current
@@ -558,7 +519,7 @@ Builder 应检查：
 - `character` 指向存在的 `struct.Character`；
 - `interaction.dialogue` 指向存在的 `struct.Dialogue`；
 - directive 满足 `placement XOR absent:true`；
-- placement 坐标 / direction / pattern 合法；
+- placement 合法；
 - directive 有 `character` 时禁止 `battleActor`；
 - transient directive 的 `battleActor` ContentRef 可解析；
 - Dialogue Choice target / mutation 引用存在；
@@ -584,11 +545,12 @@ Event A 对 X absent + Event B 对 X placement
 
 # 当前未决
 
-Event / EventStateMutation 的 FSDB table / key / basic JSON shape 已冻结在 [66-content-fsdb.md](./66-content-fsdb.md)。当前相关未决只剩：
+Event / EventStateMutation Content physical schema 与 EventStateList Realm State physical identity 已分别由 `68` / `67` 冻结。
 
-- EventStateList Realm State 最终 namespace / key；
+当前相关开放项只剩：
+
 - Runtime `instanceId` 生成算法；
-- 非 Dialogue business fact → Mutation 的 Runtime handler 具体实现；
-- Mutation failure / OCC / UI 行为。
+- 非 Dialogue business fact → Mutation handler 的 Runtime 实现；
+- Mutation mismatch / OCC / UI 行为。
 
-后两项属于 Runtime，不是数据物理结构问题。
+这些都不是 Event data physical-schema gap。
