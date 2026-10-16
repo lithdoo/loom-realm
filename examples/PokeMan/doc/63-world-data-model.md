@@ -18,9 +18,10 @@
 8. **Character default scene 是纯 fallback。** 只要任一 active Event State 提到某个 Character，该 Character 的所有 default scene instances 都退出解析，当前 scene 完全由 Event sources 决定。
 9. **Event state 的声明式变化独立为 EventStateMutation Content。** `from` 是 AND 前置集合，`to` 是赋值集合；OR 用多条 Mutation 表达。
 10. **Content 只定义，Runtime 执行。** PokeMan Dialogue Subsystem 可以根据 `Dialogue.mutation` 执行 Mutation；非 Dialogue 业务通过 `session-event` 表达业务事实，由 PokeMan session-level 业务运行时决定是否以及执行哪个 Mutation。
-11. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以引用一个 EventStateMutation。
-12. **`choices` 与 `mutation` 互斥。** 需要状态变化的 Choice 必须先跳到新的无 Choice Dialogue，再由新 Dialogue 触发 Mutation。
-13. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
+11. **Transient Dialogue speaker 不创建 Character。** Dialogue 可以提供默认 `speakerName`；它只是 presentation fallback，不是 identity。
+12. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以引用一个 EventStateMutation。
+13. **`choices` 与 `mutation` 互斥。** 需要状态变化的 Choice 必须先跳到新的无 Choice Dialogue，再由新 Dialogue 触发 Mutation。
+14. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
 
 ## 总体关系
 
@@ -39,6 +40,10 @@ Character Content
       │
       └────────────→ current carried Card
                         holder / servant / slot
+
+Dialogue Content
+→ Line.speaker? = persistent Character identity
+→ Dialogue.speakerName? = default display name for non-Character speaker
 
 Realm State EventStateList
 → active Event State
@@ -140,14 +145,44 @@ npcId != characterId
 ```text
 Dialogue
 ├─ id
+├─ speakerName?        // 默认显示名；不是 Character identity
 ├─ lines[]
-│  ├─ speaker?
+│  ├─ speaker?         // 持久 Character identity
 │  └─ text
 ├─ choices?[]
 │  ├─ text
 │  └─ target Dialogue
 └─ mutation? → EventStateMutation
 ```
+
+Speaker 解析规则：
+
+```text
+Line.speaker 存在
+→ 按持久 Character identity 解析显示
+
+Line.speaker 不存在
++ Dialogue.speakerName 存在
+→ 使用默认 speakerName
+→ 不产生 Character identity
+
+Line.speaker 不存在
++ Dialogue.speakerName 不存在
+→ 旁白
+```
+
+因此随机生成的 transient Encounter NPC 不需要创建一个“通用 Character”。多个不同 transient NPC Instance 可以复用同一个带 `speakerName` 的 Dialogue，而不会被解释成同一个人。
+
+`speakerName` 只是 presentation data：
+
+```text
+speakerName
+!= characterId
+!= npcId
+!= instanceId
+```
+
+它不能参与 Relationship / Contract / Event Character takeover / Battle actor identity 等业务关联。
 
 约束：
 
@@ -206,7 +241,7 @@ Event State NPC
 = 当前阶段对 NPC / Character 的 scene directive
 
 Dialogue
-= 台词、Choice 跳转，以及无 Choice 完成时可选的 Mutation ref
+= 台词、默认 speakerName、Choice 跳转，以及无 Choice 完成时可选的 Mutation ref
 ```
 
 Event State NPC 不维护 `terminalDialogueId → Mutation` 映射。
@@ -428,6 +463,8 @@ frame.call(PokeMan Dialogue Subsystem)
 ↓
 Dialogue Subsystem 读取 Dialogue Content
 ↓
+按 Line.speaker / Dialogue.speakerName 解析当前说话者显示
+↓
 使用 @loomrealm-game/rpg-dialogue 展示当前 Conversation
 ↓
 有 choices？
@@ -544,6 +581,8 @@ EncounterDefinition
 
 Encounter 可以生成 transient NPC Instance，也可以提供临时 Battle 输入；不要求为临时敌人建立 Character Relationship 或 Card。
 
+Transient Encounter NPC 使用固定 Dialogue 时，如果只需要一个通用说话者显示名，直接由该 Dialogue 的 `speakerName` 提供，例如 `speakerName: 路霸`。这不会给 NPC 建立 Character identity。
+
 # Runtime / Projection
 
 ## NPC Instance
@@ -623,7 +662,7 @@ current line index
 pending choice
 ```
 
-正常完成结果是 `terminalDialogueId`。Mutation definition 与 Dialogue working state 都不进入 Save。
+正常完成结果是 `terminalDialogueId`。`speakerName`、Mutation definition 与 Dialogue working state 都不进入 Save；`speakerName` 来自 immutable Dialogue Content。
 
 # Builder / Runtime 检查边界
 
@@ -634,6 +673,7 @@ Builder 应检查：
 - 安装初始化 EventStateList 重复 `eventId`；
 - EventStateList 中的 `eventId / stateId` 引用了不存在的 Event / state；
 - Dialogue Choice target 不存在；
+- 持久 Character `Line.speaker` 引用了不存在的 Character；
 - 同一个 Dialogue 同时存在 `choices` 与 `mutation`；
 - Dialogue `mutation` 引用了不存在的 EventStateMutation；
 - `interaction.dialogue` 不存在；
@@ -660,6 +700,7 @@ Mutation 使用 stateId → null 清空 Event
 一个 Event 对 Character 声明 absent、另一个 Event 对同一 Character 提供 placement
 Dialogue 之间形成合法 cycle
 同一个 Character 被多个 Relationship / contract 引用
+transient NPC 复用带 speakerName 的 Dialogue
 ```
 
 Runtime：
@@ -670,6 +711,7 @@ Runtime：
 - 缺 entry 的 Event 不参与 Event State 投影；
 - active Event 一旦提到 Character，该 Character default scene fallback 全部关闭；
 - `absent` 不压制另一个 Event 的明确 placement；
+- `Dialogue.speakerName` 只是显示 fallback，不产生 Character identity；
 - Content 不执行 Mutation；
 - Dialogue 根据明确 `Dialogue.mutation` 执行 Mutation；
 - 非 Dialogue 业务通过 `session-event` 表达业务事实，session-level 业务运行时决定是否以及执行哪个 Mutation；
@@ -692,7 +734,6 @@ Runtime：
 - Relationship 的最终 Realm State key / 精确 progression shape；
 - Card 的最终 key / 是否需要独立 `cardId`；
 - Skill 学习 / 成长如何影响 BattleActor `skills[]` 的长期业务状态；
-- Encounter transient speaker identity；
 - Encounter re-entry / persistence；
 - Guidance、训练和多卡编队；
 - NPC patrol / chase / 独立移动。
