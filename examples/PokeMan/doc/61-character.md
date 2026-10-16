@@ -52,20 +52,25 @@ BattleSkill
 
 Character 只需要稳定关联到相应 BattleActor Content，不再复制另一份 Skill definition。
 
-MVP 中 `BattleActor.skills[]` 有两个用途：
+MVP 中，`BattleActor` 是 NPC Instance battle data 的重要静态来源，但 **Contract 不再直接从 Character / BattleActor 初始化**。世界中的具体 NPC Instance 先根据 Character、Encounter、Story 等来源解析出本实例当前的 battle data；建立 Contract 时再从这个 resolved result 做 snapshot。
 
 ```text
-没有 Contract 的本体 / transient Battle actor
-→ 直接使用 BattleActor.skills[]
-
-新 Contract 建立
-→ 以 BattleActor.skills[] 作为初始技能 baseline
-→ copy 到 Relationship.contract.skills[]
+Character / Encounter / Story sources
+↓
+NPC Instance resolved battle data
+├─ resolved actor / max values
+└─ resolved skills[]
+↓ contract creation snapshot
+Relationship.contract
+├─ integrity
+└─ skills[]
 ```
+
+对于没有 Contract 的本体 / transient Battle actor，本场 Battle 同样使用该 NPC Instance 当前 resolved battle data；没有额外覆盖时，它通常直接解析到 BattleActor Content。
 
 契约成立以后，这份契约当前实际拥有的技能以 `Relationship.contract.skills[]` 为准；MVP 不设计 `baseSkills + learnedSkills` 合并算法，也不设计经验、技能点、技能树等 progression schema。
 
-当前也不额外增加 `attack / defense / speed / MP / accuracy / critical / element / cooldown / Buff / Debuff` 等 Battle v0 没有定义的字段。将来 PokeMan 确实需要新的战斗机制时，优先在 `@loomrealm-game/battle` 中设计并冻结，再由 Character Content 引用。
+当前也不额外增加 `attack / defense / speed / MP / accuracy / critical / element / cooldown / Buff / Debuff` 等 Battle v0 没有定义的字段。将来 PokeMan 确实需要新的战斗机制时，优先在 `@loomrealm-game/battle` 中设计并冻结，再由 Character / NPC Instance 的 battle source 解析使用。
 
 ## Character、NPC 与 Map Instance
 
@@ -125,7 +130,22 @@ NPCPlacement
 └─ pattern?
 ```
 
-`@loomrealm-game/map` 根据 `npcId` 读取 `[struct]NPC/<npcId>` 的窄 `name + sprite` 定义。Character Content 负责“这个人是谁以及人物 / Card / Battle 所需的静态数据引用”，Map NPC definition 负责地图表现，World / Story Resolver 负责“当前 Map 应该出现哪些实例”。
+PokeMan 自己在投影之前使用的 World-side NPC Instance 可以比 Map 的 `NPCPlacement` 丰富。除了地图位置与可选 `characterId`，它还可以在 Runtime 中拥有已经解析好的 battle data，供本体 Battle 或 Contract 创建使用：
+
+```text
+PokeMan NPC Instance
+├─ instanceId
+├─ npcId
+├─ characterId?
+├─ map / placement
+└─ resolved battle data
+   ├─ resolved actor / max values
+   └─ resolved skills[]
+```
+
+这里的 `resolved battle data` 是概念职责，不代表最终 JSON 必须嵌套成这一形状；NPC Instance 如何引用 / 解析 BattleActor 的最终 schema 后续再冻结。
+
+`@loomrealm-game/map` 只看到它需要的 `NPCPlacement`。`@loomrealm-game/map` 根据 `npcId` 读取 `[struct]NPC/<npcId>` 的窄 `name + sprite` 定义。Character Content 负责“这个人是谁以及人物 / Card / Battle 所需的静态数据引用”，Map NPC definition 负责地图表现，World / Story Resolver 负责“当前 Map 应该出现哪些实例”。
 
 ## Relationship：A → B 的长期关系与契约状态
 
@@ -206,7 +226,18 @@ Card(A, B)
 - `integrity`：这份契约的 Battle Manifestation 长期完整度；
 - `skills[]`：这份契约当前实际可用的 BattleSkill ids。
 
-建立新 Contract 时，MVP 默认以对应 `BattleActor.skills[]` 初始化 `contract.skills[]`。之后 Battle 不再动态把静态 `BattleActor.skills[]` 与其他 learned-skill 数据合并，而是直接读取这份 Contract 的 `skills[]`。
+建立新 Contract 时，MVP 从**目标 NPC Instance 当前 resolved battle data** 初始化这两个值：
+
+```text
+目标 NPC Instance resolved battle defaults
+↓ snapshot
+contract.integrity
+contract.skills[]
+```
+
+这不是从 Character 的固定 BattleActor Content 直接复制 Contract，也不是读取目标 NPC 某场本体 Battle 结束后的当前 HP。BattleActor / Encounter / Story 等只负责参与解析这个 NPC Instance 的 battle data；Contract 创建面对的是这个具体世界实例。
+
+Contract 创建完成以后，`contract.integrity / skills[]` 成为该 Contract 的长期 authority。NPC Instance 之后变化，不会自动同步覆盖已有 Contract。
 
 MVP **不定义 `progression` / `training` State shape**。未来真正加入训练、学习技能、等级等玩法时，再扩展 Contract；这些未来方向不作为当前 schema 的未决阻塞项。
 
@@ -282,17 +313,15 @@ Card
 
 Card 不保存 Integrity、技能集、训练 / 成长，不复制 BattleActor / BattleSkill、人物姓名、人格或固定 AI 描述。长期契约状态从对应 Relationship.contract 读取；静态人物 / Battle 数据从 `servantCharacterId` 所对应的 Character / Battle Content 读取。
 
-Card 的独立 `cardId` **尚未冻结**。是否直接使用 `(holderCharacterId, servantCharacterId)` 作为当前随身 Card identity，等 Card Record shape 最终设计时再决定。
+**MVP 不为 Card 建立独立 identity / `cardId`。** Card 只是当前随身状态记录，使用 `holderCharacterId + servantCharacterId + slot` 表达当前编队事实。是否采用一个列表 Record、以及 holder/slot 等最终唯一约束，在 Realm State schema 收口时决定，但不再引入 Card 自身 identity。
 
 ## Battle 数据边界
 
 PokeMan 的 Battle 数据直接接入 `@loomrealm-game/battle`：
 
 ```text
-Character
-→ BattleActor Content
-   ├─ max_hp
-   └─ skills[] → BattleSkill   // direct actor / new Contract baseline
+Character / Encounter / Story sources
+→ NPC Instance resolved battle data
 
 Relationship(holder → servant)
 └─ contract
@@ -330,16 +359,15 @@ Battle Simulation 拥有本场权威运行状态。对于 Card Battle Manifestat
 
 - 初始 HP 来自 `Relationship.contract.integrity`；
 - 当前可用技能来自 `Relationship.contract.skills[]`；
-- BattleActor 继续提供静态 actor 定义、`max_hp`、表现资源和 BattleSkill definitions 的引用来源；
+- BattleActor 继续提供静态 actor 定义、表现资源和 BattleSkill definitions 的来源；
 - 战斗结束后需要持久的 Integrity 结果写回同一 `Relationship.contract.integrity`。
 
 普通剧情战斗或临时敌方本体不需要为了 Battle 制造 Relationship / contract / 持久 Card：
 
 ```text
-Story / Encounter Battle definition
-+
-BattleActor Content
-  └─ skills[] 直接作为本体 / transient actor 技能
+Story / Encounter / Character sources
+↓
+NPC Instance resolved battle data
 ↓
 Battle Runtime Actor
 ↓
@@ -351,7 +379,7 @@ Runtime 丢弃
 所以：
 
 ```text
-Character != Relationship != Card != Battle Runtime Actor
+Character != NPC Instance != Relationship != Contract != Card != Battle Runtime Actor
 ```
 
 ## Card 自由对话如何使用 Character 与 Relationship
@@ -450,8 +478,9 @@ Builder 应检查构建期即可确定的错误，例如：
 - 单个定义中重复 `instanceId`；
 - 引用了不存在的 Character / NPC / Map；
 - 非法坐标、方向或不完整 placement；
-- Character 引用了不存在的 BattleActor Content；
+- Character / Encounter / Story battle source 引用了不存在的 BattleActor Content；
 - BattleActor 引用了不存在的 BattleSkill / resource；
+- 可静态验证的 NPC Instance battle source / resolved skill 引用不合法；
 - 初始化 Contract 的 `skills[]` 引用了不存在的 BattleSkill；
 - Story Index 与源 Content 不一致。
 
@@ -485,6 +514,8 @@ npcId 唯一
 
 如果不同剧情来源最终在同一 Map 产生重复 `npcId`，Story Resolver 必须确定性处理为冲突，不能因为 `instanceId` 不同而同时保留。
 
+Contract 创建时，Runtime 从交互目标的 NPC Instance resolved battle data 创建一次 snapshot；已有 Contract 不随该 NPC Instance 后续变化自动同步。
+
 ## 进图与读档
 
 Map Enter 概念流程：
@@ -499,7 +530,8 @@ Map Enter
 → 对被 Event 提到的 Character 只使用 Event scene directives
 → 合并其他 NPC / Encounter 来源
 → 校验 npcId 唯一
-→ 得到 NPC Instance 集合
+→ 得到 PokeMan NPC Instance 集合
+→ 解析各实例需要的业务数据，包括需要时的 battle data
 → 映射为 NPCPlacement[]
 → context.setNPC(...)
 ```
