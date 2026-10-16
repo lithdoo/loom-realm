@@ -1,6 +1,6 @@
 # 数据模型图
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文只提供当前数据 authority / FSDB identity 的总览图；字段细节以 [Content FSDB 物理模型](./66-content-fsdb.md)、[人物](./61-character.md)、[事件](./62-event.md)、[固定对话](./64-dialogue.md) 为准。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文只提供当前 data authority / FSDB identity 的总览图；Realm State 物理结构以 [67-realm-state-records.md](./67-realm-state-records.md) 为准，Content FSDB 结构以 [68-content-fsdb.md](./68-content-fsdb.md) 为准。
 
 # Content / State / Runtime
 
@@ -20,17 +20,17 @@ flowchart TB
   end
 
   subgraph State[Realm State]
-    EventStateList["EventStateList"]
-    Relationship["Relationship A → B"]
+    PlayerWorld["pokeman.PlayerWorld / current\ndurable checkpoint"]
+    EventStateList["pokeman.EventStateList / current"]
+    Relationship["pokeman.Relationship / <from>/<to>"]
     Contract["contract? { integrity, skills[] }"]
-    Card["Card { holder, servant, slot }"]
-    Resume["resume/checkpoint location? "]
+    Carried["pokeman.CarriedCards / <holder>"]
   end
 
   subgraph Runtime[Runtime Memory]
     StoryResolver["Story Resolver"]
     NPCInstance["World-side NPC Instance"]
-    MapRuntime["Map Runtime\nmap / player pose / motion / scene"]
+    MapRuntime["Map Runtime\nlive map / player pose / motion / scene"]
     DialogueRuntime["Dialogue Runtime\ncurrent dialogue / line / choice"]
     BattleRuntime["Battle Runtime Actor"]
     EncounterRuntime["generated Encounter set"]
@@ -60,7 +60,7 @@ flowchart TB
   NPCInstance --> MapRuntime
 
   Relationship --> Contract
-  Card --> Relationship
+  Carried --> Relationship
   Character --> Relationship
   Contract --> BattleRuntime
   Character --> BattleRuntime
@@ -70,7 +70,8 @@ flowchart TB
   Mutation --> DialogueRuntime
   DialogueRuntime --> EventStateList
 
-  MapRuntime -. explicit checkpoint only .-> Resume
+  MapRuntime -. explicit save/checkpoint .-> PlayerWorld
+  PlayerWorld -. load / resume .-> MapRuntime
   Encounter --> EncounterRuntime
 ```
 
@@ -85,8 +86,6 @@ flowchart LR
   XFile["[struct]Encounter/2.json"] --> XId["struct.Encounter / 2\nmapId = 2"]
   GFile["[resource]Graphics/Characters/Rival.png"] --> GId["resource.Graphics / Characters/Rival"]
 ```
-
-规则：
 
 ```text
 PokeMan struct record key
@@ -171,8 +170,6 @@ flowchart LR
   Dialogue --> Mutation["mutation? → EventStateMutation key"]
 ```
 
-固定：
-
 ```text
 choices XOR mutation
 ```
@@ -182,7 +179,7 @@ choices XOR mutation
 ```mermaid
 flowchart LR
   EventContent["struct.Event / <eventId>"] --> LegalStates["legal stateIds"]
-  EventStateList["Realm State EventStateList"] --> Current["eventId → current non-null stateId"]
+  EventStateList["pokeman.EventStateList / current"] --> Current["eventId → current non-null stateId"]
   Mutation["struct.EventStateMutation / <mutationId>"] --> From["from: eventId → stateId | null"]
   Mutation --> To["to: eventId → stateId | null"]
   From --> Commit["Runtime validates all from"]
@@ -202,22 +199,22 @@ Mutation 只改变 Event current state，不创建 Contract / Card / Battle。
 
 ```mermaid
 flowchart LR
-  A["Character A"] --> Rel["Relationship A → B"]
+  A["Character A"] --> Rel["pokeman.Relationship / A/B"]
   B["Character B"] --> Rel
-  Rel --> Affinity["affinity / hostile / dynamic text"]
+  Rel --> Affinity["affinity / hostile / relationshipText"]
   Rel --> Contract["contract?\nintegrity / skills[]"]
-  Contract --> Card["Card?\nholder=A servant=B slot"]
+  Contract --> Carried["pokeman.CarriedCards / A\nslot + servant B"]
   B --> BaseActor["base BattleActor"]
   BaseActor --> ContractInit["new Contract init"]
   ContractInit --> Contract
 ```
 
 ```text
-Relationship exists
+Relationship Record exists
 != Contract exists
 
 Contract exists
-!= Card currently carried
+!= currently carried
 ```
 
 Contract initialization：
@@ -233,9 +230,9 @@ MVP 不保存 `maxIntegrity`，也不建立 `cardId`。
 
 ```mermaid
 flowchart TD
-  Card["Card holder=A servant=B"] --> Select["Select servant B"]
-  Contract["Relationship A→B.contract\nintegrity / skills[]"] --> Build["Build Battle Runtime Actor"]
-  Character["Character B"] --> ActorRef["base BattleActor ContentRef"]
+  Carried["pokeman.CarriedCards / A\nservant B"] --> Select["Select servant B"]
+  Contract["pokeman.Relationship / A/B\ncontract.integrity / skills[]"] --> Build["Build Battle Runtime Actor"]
+  Character["struct.Character / B"] --> ActorRef["base BattleActor ContentRef"]
   ActorRef --> BaseActor["base BattleActor\nmax_hp / definitions"]
   BaseActor --> Build
   Select --> Build
@@ -250,7 +247,7 @@ Battle live HP / tile / action / plan 等只属于 Battle Runtime。
 
 ```mermaid
 flowchart LR
-  MapRuntime["Map Runtime\nlive mapId / x / y / direction / motion"] -->|explicit save/checkpoint| Resume["Realm State resume location?"]
+  MapRuntime["Map Runtime\nlive mapId / x / y / direction / motion"] -->|explicit save/checkpoint| Resume["pokeman.PlayerWorld / current\nmapId is integer"]
   Resume -->|Load / start new Map Runtime| MapRuntime2["new Map Runtime"]
 ```
 
