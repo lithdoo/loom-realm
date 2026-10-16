@@ -83,10 +83,10 @@ Transient Encounter / Story source
 
 ```text
 integrity = BattleActor.max_hp
-skills[]  = copy(BattleActor.skills[])
+skills[]  = copy(BattleActor.skills[])  # BattleSkill id string[]
 ```
 
-Contract 不保存 `maxIntegrity`。
+Contract 不保存 `maxIntegrity`，也不建立另一套 Skill reference。
 
 ## Dialogue
 
@@ -101,7 +101,7 @@ struct.Dialogue / <dialogueId>
 └─ mutation? → EventStateMutation key
 ```
 
-`speakerName` 只是 presentation fallback，不是 Character identity。
+`speakerName` 只是 presentation fallback，不是 Character identity。`choices` 与 `mutation` 互斥，允许两者都不存在。
 
 ## Event / EventStateMutation
 
@@ -114,28 +114,32 @@ struct.Event / <eventId>
    └─ interaction.dialogue?
 ```
 
+`absent:true` 必须有 `character`，且不得同时出现 `placement / battleActor / interaction`。
+
 ```text
 struct.EventStateMutation / <mutationId>
 ├─ from: eventId → stateId | null
 └─ to: eventId → stateId | null
 ```
 
-Event current state 本身不在 Content，而在 Realm State `EventStateList`。
+Event current state 本身不在 Content，而在 Realm State `EventStateList`。Mutation 只要求 `to` 非空，不增加 semantic no-op proof。
 
 ## Encounter
 
 ```text
 struct.Encounter / <decimal-mapId>
+├─ count
 ├─ spawnPoints[]
 └─ templates
    └─ <templateId>
+      ├─ weight
       ├─ npc
       ├─ engagement
       ├─ dialogue?
       └─ battleActor
 ```
 
-当前某次 Map Enter 实际生成哪些 Encounter 不属于 Content。
+`count` 和 `weight` 是 authored Content：前者定义每次生成数量，后者定义 template 之间的相对选择权重。当前某次 Map Enter 实际抽到哪些 template、使用哪些 spawn point，属于 Runtime。
 
 ## StoryIndex
 
@@ -146,7 +150,7 @@ struct.StoryIndex / current
 └─ byEvent
 ```
 
-它是 Builder-generated read model，可由源 Content 重建，不进入 Realm State。
+它是 Builder-generated read model，可由源 Content 重建，不进入 Realm State。精确派生字段是实现细节，不形成新的业务 authority。
 
 # Realm State
 
@@ -218,6 +222,26 @@ pokeman.CarriedCards / <holder>
 Card 只表示当前随身编队，不保存 Integrity、skills、BattleActor 或 Character 静态资料。
 
 MVP 不建立 `cardId`。
+
+## Record-level absence
+
+```text
+PlayerWorld/current absent
+→ invalid PokeMan State
+→ baseline 必须提供
+
+EventStateList/current absent
+→ invalid PokeMan State
+→ baseline 必须提供
+→ 没有 active Event 用 []
+
+Relationship/A:B absent
+→ 没有持久化这段 Relationship
+
+CarriedCards/A absent
+→ 业务值 []
+→ 与 materialized [] 在当前编队业务上等价
+```
 
 # Runtime Memory
 
@@ -369,6 +393,9 @@ Contract integrity / skills → Realm State
 
 Dialogue cursor → Runtime
 Dialogue definition / Mutation definition → Content
+
+Encounter count / template weight → Content
+actual generated Encounter set → Runtime
 ```
 
-当前不因为 Save / Load、Encounter persistence、future progression 等潜在需求建立额外通用 State bag。
+当前 MVP 核心业务数据 physical schema 已经收口。`.info.meta`、Builder validator、随机算法、Save / Load、Encounter persistence、future progression 等属于实现或后续产品设计，不建立额外通用 State bag。
