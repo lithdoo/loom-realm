@@ -63,7 +63,7 @@ Relationship(holder → servant)
 
 当前 Card 只表示这份已成立契约是否被编入随身队伍以及所在 slot。
 
-内部 Simulation 可以继续使用连续数值 `hp`，产品上把它解释为契约完整度。例如概念上：
+内部 Simulation 可以继续使用连续数值 `hp`，产品上把它解释为角色卡完整度；技术 authority 始终是 `Relationship.contract.integrity`。例如概念上：
 
 | 卡片状态 | Battle HP / Integrity | 产品语义 |
 | --- | ---: | --- |
@@ -111,7 +111,7 @@ Integrity 仍然是 48
 ↓
 到达中心
 ↓
-修复 contract.integrity → 100
+修复 contract.integrity → BattleActor.max_hp
 ```
 
 这样道路上的连续战斗会产生类似传统 Pokémon 的旅行资源压力，但设定上消耗的是契约关系的战斗显现能力，而不是远处角色本人的生命值。
@@ -133,62 +133,97 @@ Integrity 仍然是 48
 
 二者共用 Battle 机制，但产品语义不同。
 
-## Contract 建立时的 Battle 默认值来源
+## 基础 BattleActor 与 NPC Instance
 
-Contract 不是直接从 Character 的某个固定 BattleActor baseline 机械复制出来，而是在**与当前世界中的目标 NPC Instance 建立契约时**，从这个实例已经解析出来的 battle data 初始化。
+MVP 不设计 NPC Instance 专属的 BattleActor variant。
 
-概念链路：
+对于持久 Character：
 
 ```text
-Character / Encounter / Story battle sources
+Character
+→ stable BattleActor Content
+```
+
+同一个 Character 即使在不同 Map、不同 Event state、不同服装 / NPC Definition 下出现：
+
+```text
+Character rival
+├─ NPC Instance A
+├─ NPC Instance B
+└─ NPC Instance C
+```
+
+这些实例解析到的基础 BattleActor identity 仍然相同。NPC Instance 只表示“当前世界中具体出现的是谁 / 哪个实例”，不改变这个 Character 的 BattleActor identity。
+
+对于没有 Character 的 transient Encounter / Story NPC：
+
+```text
+Encounter / Story static source
+→ BattleActor Content
+→ transient NPC Instance
+```
+
+也就是说，NPC Instance 在 Runtime 中可以**解析到一个基础 BattleActor**，但 MVP 不另外生成 `resolved BattleActor`、`battle profile variant` 或一份覆盖后的 actor definition。
+
+## Contract 建立时的 Battle 默认值
+
+建立 Contract 时，Runtime 以当前交互目标 NPC Instance 为对象，并通过它解析到对应基础 BattleActor：
+
+```text
+目标 NPC Instance
 ↓
-当前目标 NPC Instance
-↓
-resolved battle data
-├─ resolved BattleActor / max values
-└─ resolved skills[]
-↓ contract creation snapshot
-Relationship.contract
-├─ integrity
+基础 BattleActor Content
+├─ max_hp
 └─ skills[]
+↓ create Contract
+Relationship.contract
+├─ integrity = BattleActor.max_hp
+└─ skills[] = copy(BattleActor.skills[])
 ```
 
-因此一个 Character 在不同剧情阶段、不同 NPC 表现或不同业务来源下，即使解析到不同 battle defaults，Contract 也可以准确反映**建立契约当时那个具体 NPC Instance** 的状态。
-
-这里有两个重要边界：
+MVP 同时固定：
 
 ```text
-NPC Instance resolved battle data
-= Contract 创建时的初始化来源
-
-Relationship.contract
-= Contract 创建后的长期 authority
+Contract 初始 Integrity = BattleActor.max_hp
+Contract Integrity 上限 = BattleActor.max_hp
 ```
 
-Contract 创建完成以后，NPC Instance 后续 battle data 的变化不会自动同步到已有 Contract；后续 Contract 技能变化直接修改 `contract.skills[]`。
+Contract 不额外保存 `maxIntegrity`；需要完整值 / 修复上限时，通过这名 servant 的稳定基础 BattleActor 读取 `max_hp`。
 
-`contract.integrity` 也来自 NPC Instance 的 resolved battle defaults，而不是目标 NPC 刚结束某场本体 Battle 后剩余的当前 HP。本体 Battle HP 与 Contract Integrity 仍是不同语义。
+这里读取的是**基础 BattleActor 静态默认值**，不是目标 NPC 刚结束某场本体 Battle 后剩余的当前 HP。本体 Battle HP 与 Contract Integrity 仍是不同语义。
 
-NPC Instance 最终怎样引用 / 解析 BattleActor，以及 resolved battle data 的精确字段，属于后续 schema 收口；这里先固定**初始化来源是 NPC Instance，而不是直接 Character baseline**。
+Contract 建立完成以后，`contract.integrity / skills[]` 成为这份 Contract 的长期状态。BattleActor 的 `skills[]` 仍是初始 baseline；已有 Contract 的 `skills[]` 不会因为之后重新读取基础 BattleActor 而被自动覆盖。
 
 ## MVP 技能来源
 
 PokeMan 不定义平行 Skill schema，技能定义仍然来自 `@loomrealm-game/battle` 的 BattleSkill Content。
 
-对于没有 Contract 的本体 / transient actor，Battle 使用该 NPC Instance 当前 resolved battle data 中的技能；如果没有额外覆盖，这些技能通常来自其 BattleActor Content 的 `skills[]`。
-
-对于 Contract：
+没有 Contract 的本体 / transient actor：
 
 ```text
-建立新 Contract
-→ snapshot 当前目标 NPC Instance resolved skills[]
-→ Relationship.contract.skills[]
-
-Contract 对应的 Card Battle
-→ 当前可用技能来自 Relationship.contract.skills[]
+NPC Instance
+→ 基础 BattleActor
+→ BattleActor.skills[]
+→ 本场 Battle Runtime Actor
 ```
 
-也就是说，`BattleActor.skills[]` 仍然是重要静态定义来源，但 **Contract 的直接初始化来源是目标 NPC Instance 的 resolved battle data**。
+建立 Contract：
+
+```text
+NPC Instance
+→ 基础 BattleActor.skills[]
+→ copy
+→ Relationship.contract.skills[]
+```
+
+Contract 对应的 Card Battle：
+
+```text
+Relationship.contract.skills[]
+→ 当前实际可用技能
+```
+
+也就是说，`BattleActor.skills[]` 是人物 / 临时 actor 的基础技能定义，也是新 Contract 的初始化 baseline；Contract 建立以后，该契约当前实际技能集由自己的 `contract.skills[]` 持有。
 
 MVP 不增加：
 
@@ -214,6 +249,8 @@ skill slot progression
 Battle 开始前选择 1 张
 ↓
 通过 holder / servant 找到对应 Relationship.contract
+↓
+读取 servant Character 的基础 BattleActor
 ↓
 读取 contract.integrity / skills[]
 ↓
