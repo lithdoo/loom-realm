@@ -17,7 +17,7 @@
 7. **Event current state 使用一个 EventStateList Realm State Record。** 列表只保存非空 state；没有 entry 等价于 `null`。
 8. **Character default scene 是纯 fallback。** 只要任一 active Event State 提到某个 Character，该 Character 的所有 default scene instances 都退出解析，当前 scene 完全由 Event sources 决定。
 9. **Event state 的声明式变化独立为 EventStateMutation Content。** `from` 是 AND 前置集合，`to` 是赋值集合；OR 用多条 Mutation 表达。
-10. **Content 只定义，Subsystem 执行。** PokeMan Dialogue Subsystem 读取 Dialogue / Mutation Content 并通过 `scope.state` 更新 EventStateList。
+10. **Content 只定义，Runtime 执行。** PokeMan Dialogue Subsystem 可以根据 `Dialogue.mutation` 执行 Mutation；非 Dialogue 业务通过 `session-event` 表达业务事实，由 PokeMan session-level 业务运行时决定是否以及执行哪个 Mutation。
 11. **Dialogue 保持为线性台词与末尾 Choice。** Choice 只跳到下一个 Dialogue；无 Choice Dialogue 可以引用一个 EventStateMutation。
 12. **`choices` 与 `mutation` 互斥。** 需要状态变化的 Choice 必须先跳到新的无 Choice Dialogue，再由新 Dialogue 触发 Mutation。
 13. **最终 Map 场景按 `npcId` 去重。** 同一 `npcId` 可以出现在不同 Map，但同一张 Map 的最终解析结果中只能出现一次。
@@ -57,6 +57,12 @@ Character servant → BattleActor Content
 @loomrealm-game/battle Runtime Actor
 ↓
 Battle Simulation
+
+Non-Dialogue business fact
+→ session-event
+→ PokeMan session-level business runtime
+→ decide whether / which EventStateMutation
+→ update EventStateList
 ```
 
 # Content
@@ -326,7 +332,7 @@ Event、Dialogue 与 EventStateMutation definitions 都是 Content；Save 只保
 
 # EventStateMutation
 
-EventStateMutation 是独立 Content，不嵌在某个 Event 内成为专属 transition。
+EventStateMutation 是独立 Content，不嵌在某个 Event 内成为专属 transition，也不声明自己的 trigger。
 
 ```text
 EventStateMutation
@@ -346,7 +352,7 @@ AND
 eventB == null
 ```
 
-Mutation 不拥有 `or / anyOf / condition tree`。需要 OR 时，为每个分支定义独立 Mutation，由对应 Dialogue / 业务分支引用。
+Mutation 不拥有 `or / anyOf / condition tree`。需要 OR 时，为每个分支定义独立 Mutation，由具体业务路径选择对应 Mutation。
 
 ## `from` / `to` 不一一对应
 
@@ -387,7 +393,7 @@ to:
 
 ## 原子 commit
 
-对应 PokeMan Subsystem 执行 Mutation 时：
+对应 PokeMan Runtime 执行 Mutation 时：
 
 ```text
 read EventStateList + version
@@ -443,9 +449,45 @@ Dialogue Subsystem 读取 Dialogue Content
 返回 terminalDialogueId
 ```
 
-Runtime 不扫描全部 Mutation 自动执行。Mutation 必须被明确 Dialogue 或其他业务结果引用，并由对应 PokeMan Subsystem 执行。
+固定 Dialogue 的 `mutation` reference 是 Dialogue Content 自己的一部分；Dialogue Subsystem 根据这条明确引用执行 Mutation。
 
-未来 Battle 完成、到达地点等业务也可以显式引用同一种 Mutation，但 Mutation Content 本身不拥有 trigger，也不参与执行。
+# 非 Dialogue 业务 → session-event → EventStateMutation
+
+Battle、World、Encounter 等非 Dialogue 业务不需要为了剧情推进在自己的 Content 中增加 `mutationRef`。
+
+这些业务先在 Runtime 通过 `session-event` 表达已经发生的业务事实，例如概念上的：
+
+```text
+BattleCompleted
+MapEntered / DestinationReached
+EncounterCompleted
+```
+
+PokeMan 的 session-level 业务运行时捕获相关事件，根据事件 payload、当前业务上下文和 EventStateList 判断这件事是否应该推进剧情，并在需要时选择对应 EventStateMutation 执行：
+
+```text
+业务 Subsystem
+→ session-event：发生了什么
+→ PokeMan session-level 业务运行时
+→ 判断这件事对剧情意味着什么
+→ 如需要，选择 EventStateMutation
+→ 更新 EventStateList
+```
+
+因此职责是：
+
+```text
+session-event
+= 发生了什么
+
+PokeMan session-level 业务运行时
+= 这件事对剧情意味着什么
+
+EventStateMutation
+= Event state 怎么改
+```
+
+`session-event` 不需要携带 EventStateMutation identity，Mutation 也不拥有 trigger。Runtime 不扫描全部 Mutation 自动执行。
 
 # Character scene fallback / Event takeover
 
@@ -628,8 +670,10 @@ Runtime：
 - 缺 entry 的 Event 不参与 Event State 投影；
 - active Event 一旦提到 Character，该 Character default scene fallback 全部关闭；
 - `absent` 不压制另一个 Event 的明确 placement；
-- 只应用被明确引用的 Mutation；
-- Content 不执行 Mutation；对应 PokeMan Subsystem 执行；
+- Content 不执行 Mutation；
+- Dialogue 根据明确 `Dialogue.mutation` 执行 Mutation；
+- 非 Dialogue 业务通过 `session-event` 表达业务事实，session-level 业务运行时决定是否以及执行哪个 Mutation；
+- Battle / Map / Encounter Content 不因剧情推进增加 Mutation ref；
 - Mutation 的全部 `from` 必须同时匹配，包括显式 `null`；
 - Mutation 用 EventStateList Record version 做 OCC；
 - Mutation 的全部 `to` 通过一次 EventStateList replacement 原子提交；
@@ -644,7 +688,6 @@ Runtime：
 - Event / EventStateMutation 的最终 Content namespace / key；
 - EventStateList Realm State Record 的最终 namespace / key 名字；
 - Event placement / `instanceId` / `absent` 的最终 JSON shape；
-- 非 Dialogue Subsystem 如何在各自 Content 中引用 Mutation；
 - Dialogue condition、本地化与 presentation metadata；
 - Relationship 的最终 Realm State key / 精确 progression shape；
 - Card 的最终 key / 是否需要独立 `cardId`；
