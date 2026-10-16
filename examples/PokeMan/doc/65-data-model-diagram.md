@@ -227,6 +227,24 @@ skills[]  = copy(BattleActor.skills[])  # BattleSkill id string[]
 
 MVP 不保存 `maxIntegrity`，也不建立 `cardId`。
 
+# Realm State absence
+
+```text
+PlayerWorld/current absent
+→ invalid PokeMan State
+
+EventStateList/current absent
+→ invalid PokeMan State
+→ empty active set = []
+
+Relationship/A:B absent
+→ no persisted Relationship
+
+CarriedCards/A absent
+→ business []
+→ equivalent to materialized [] for party semantics
+```
+
 # Card Battle
 
 ```mermaid
@@ -258,15 +276,23 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  Encounter["struct.Encounter / <mapId>"] --> Spawn["spawnPoints[]"]
+  Encounter["struct.Encounter / <mapId>"] --> Count["count"]
+  Encounter --> Spawn["spawnPoints[]"]
   Encounter --> Templates["templates.<templateId>"]
+  Templates --> Weight["weight"]
   Templates --> NPC["npc → struct.NPC"]
   Templates --> Dialogue["dialogue? → struct.Dialogue"]
   Templates --> Actor["battleActor → ContentRef"]
   Encounter --> Runtime["generated Encounter Runtime set"]
 ```
 
-真正还缺的是 authored generation 数量 / template 选择分布。re-entry reroll、seed、respawn、defeated persistence、清理时机属于 Runtime/gameplay policy，不在图中建立额外 Content / Realm State 字段。
+```text
+count = 每次生成数量
+weight = template 相对选择权重
+count <= spawnPoints.length
+```
+
+具体随机抽取、spawn selection、seed、re-entry reroll、respawn、defeated persistence、清理时机属于 Runtime/gameplay policy，不建立额外 Content / Realm State 字段。
 
 # 一句话总览
 
@@ -280,3 +306,5 @@ Realm State
 Runtime Memory
 = 当前 Subsystem 正在执行的 live authority / working set
 ```
+
+当前 MVP 核心业务数据 physical schema 已收口；后续 `.info.meta` / validator / Runtime 实现属于落地工作。
