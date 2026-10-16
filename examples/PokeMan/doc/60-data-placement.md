@@ -190,16 +190,32 @@ Encounter 是 Content，但 re-entry / defeated persistence 等是 Runtime / gam
 
 ```text
 struct.Encounter/<decimal-mapId>
+├─ count
 ├─ spawnPoints[]
 └─ templates
    └─ <templateId>
+      ├─ weight
       ├─ npc → struct.NPC
       ├─ engagement
       ├─ dialogue? → struct.Dialogue
       └─ battleActor → ContentRef
 ```
 
-当前真正尚未补齐的是 **author-authored generation distribution**：例如每次生成数量范围，以及多个 template 之间如何表达相对选择权重/概率。
+固定：
+
+```text
+count
+→ positive safe integer
+→ count <= spawnPoints.length
+
+weight
+→ positive safe integer
+
+spawnPoints
+→ (x,y) 在同一 Encounter record 内不重复
+```
+
+`count` 表示每次生成几个 Encounter NPC；`weight` 表示 template 之间的相对选择权重。数据不规定具体随机算法。
 
 以下不作为当前 Content 数据字段预先设计：
 
@@ -307,6 +323,30 @@ MVP 不建立 `cardId`。
 CarriedCards(A) contains B
 → Relationship(A → B).contract exists
 ```
+
+## Record-level absence
+
+Realm State v1 允许 Record 从未 materialize；PokeMan 对四类核心 Record 的业务解释已经冻结：
+
+```text
+PlayerWorld/current absent
+→ invalid PokeMan State
+→ baseline 必须提供
+
+EventStateList/current absent
+→ invalid PokeMan State
+→ baseline 必须提供
+→ 没有 active Event 用 []
+
+Relationship/A:B absent
+→ 没有持久化这段 Relationship
+
+CarriedCards/A absent
+→ 业务值 []
+→ 与 materialized [] 在当前编队业务上等价
+```
+
+因此不需要为了“空编队”给所有 Character 预先创建空 `CarriedCards` Record。
 
 # Runtime Memory
 
@@ -425,16 +465,11 @@ Realm State = 这一局跨系统共享的长期业务事实
 Runtime Memory = 当前系统正在执行什么
 ```
 
-# 当前仍开放的数据问题
+# 当前数据结构状态
 
-经过当前一致性复核，不再把 battle serialization、StoryIndex 派生字段、本地化 / richer presentation、Encounter persistence 等列成 MVP 核心数据缺口。
+经过当前一致性复核，Realm State 核心四类 Record 与 MVP Content 核心业务 shape 已经收口；当前没有剩余的 MVP 核心业务 data physical-schema gap。
 
-当前真正仍需要继续确定的只有：
-
-1. **Encounter authored generation 数据**：生成数量如何表达，以及 template 之间使用哪种简单的相对选择分布（例如 weight）。
-2. **Realm State Record-level absence 语义**：`PlayerWorld/current`、`EventStateList/current`、`CarriedCards/<holder>` 在 Record 从未 materialize 时，PokeMan 业务上分别如何解释；Relationship absence 已经明确。
-
-把当前冻结 shape 写成各 FSDB table 的 exact `.info.meta` / schema 文件属于实现落地工作，不是新的产品数据模型问题。
+把冻结 shape 写成各 FSDB table 的 exact `.info.meta` / schema、Builder validator，以及 Runtime 随机/加载/保存逻辑，属于实现工作，不重新算作业务数据模型未决项。
 
 以下不是当前 data physical-schema gap：
 
@@ -442,11 +477,13 @@ Runtime Memory = 当前系统正在执行什么
 BattleSkill identity / Contract.skills[] encoding
 Relationship / Contract Record layout
 CarriedCards Record layout / uniqueness constraints
+Realm State Record-level absence
 EventStateList namespace / key
 PlayerWorld mapId type
 Dialogue choices / mutation runtime behavior
 Event absent 的第二套数据结构
 EventStateMutation semantic no-op proof
+Encounter count / template weight
 StoryIndex 最终派生字段
 本地化 / richer presentation metadata
 Encounter seed / re-entry / respawn / defeated persistence
