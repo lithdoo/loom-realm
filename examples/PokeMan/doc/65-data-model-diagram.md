@@ -15,6 +15,7 @@ classDiagram
       description
       fixedAICharacterText
       tags
+      defaultSceneInstances[]
       battleActorRef
     }
 
@@ -135,7 +136,7 @@ classDiagram
       <<Content>>
       npcId
       characterId?
-      placement
+      placementOrAbsent
       interaction?
     }
 
@@ -200,7 +201,8 @@ classDiagram
     EventDefinition "1" *-- "1..*" EventState : states
     EventStateList --> EventDefinition : current non-null entries
     EventState "1" *-- "0..*" EventStateNPC : map/npc entries
-    EventStateNPC --> NPCInstance : defines source projection
+    EventStateNPC --> CharacterDefinition : optional character takeover
+    EventStateNPC --> NPCInstance : placement source
     EventStateNPC "1" *-- "0..1" EventNPCInteraction : interaction
     EventNPCInteraction --> DialogueDefinition : entry dialogue
     EventStateMutation --> EventStateList : validate / replace list
@@ -280,10 +282,10 @@ flowchart LR
     FIND -->|否| SKIP[Event current state = null<br/>不提供投影]
     FIND -->|是| ES[Event State Content]
     ES --> MAP[mapId]
-    MAP --> NPC[npcId + placement]
+    MAP --> NPC[npcId + characterId? + placement/absent]
     NPC --> I{interaction?}
 
-    I -->|无| SCENE[只作为场景 NPC]
+    I -->|无| SCENE[只作为 scene directive]
     I -->|有| D[entry Dialogue]
 
     D --> DS[PokeMan Dialogue Subsystem]
@@ -298,7 +300,6 @@ flowchart LR
 
     MUT --> READ[scope.state.read<br/>EventStateList + version]
     READ --> CHECK{全部 from 匹配?}
-    CHECK -->|否| FAIL[mutation 不成立]
     CHECK -->|是| BUILD[生成新 EventStateList]
     BUILD --> COMMIT[scope.state.commit<br/>一次 Record replacement]
     COMMIT --> DONE
@@ -365,21 +366,6 @@ flowchart TB
     BUILD --> ATOMIC[一次 EventStateList Record commit]
 ```
 
-例如：
-
-```text
-from
-  professor-intro = waiting
-  rival-story = null
-
-AND 全部满足后
-
-to
-  professor-intro = contracted
-  rival-story = contracted
-  tutorial-battle = ready
-```
-
 `from: null` 表示当前列表没有该 Event entry。
 
 `to` 的解释：
@@ -398,14 +384,65 @@ Mutation 是“一组 Event state/null 前置条件 → 一组列表变更”，
 
 EventStateMutation 只拥有 Event current state，不修改 Relationship / Contract / Card / Battle / player position 等其他 Realm State。
 
-Runtime 也不会扫描全部 Mutation 自动执行。必须由明确业务路径中的 PokeMan Subsystem 读取并执行 Mutation。
+## Character default fallback / Event takeover
+
+```mermaid
+flowchart TB
+    E[所有 active Event State] --> Q{是否有 scene directive<br/>characterId = X?}
+
+    Q -->|否| DEF[使用 Character X<br/>default scene instances]
+    Q -->|是| TAKE[Character X 被 Event 接管<br/>default 全部退出]
+
+    TAKE --> P[收集所有 Event placements for X]
+    TAKE --> A[absent directives<br/>不贡献 placement]
+
+    P --> MERGE[合并 Event placements]
+    A --> MERGE
+    MERGE --> FINAL[最终 scene]
+```
+
+当前规则：
+
+```text
+没有 active Event 提到 Character X
+→ 才使用 Character default
+
+任一 active Event 提到 Character X
+→ default 完全不参与
+→ 只看 Event scene directives
+```
+
+`absent` 的语义非常窄：
+
+```text
+这个 Event 提到了 Character X
+但这个 Event 不提供 X 的 placement
+```
+
+它不会压制其他 Event 的明确 placement，也不建立 priority / override。
+
+例如：
+
+```text
+Event A → rival absent
+Event B → rival at town
+
+→ rival default 不参与
+→ Event A 无 placement
+→ Event B 提供 town
+→ 最终 rival at town
+```
+
+如果所有提到 X 的 active Event 都没有 placement，则 X 当前不出现。
+
+只有 `npcId`、没有 `characterId` 的 transient / 非 Character NPC source，不会触发 Character default takeover。
 
 ## NPC / Event / Map 唯一性
 
 ```mermaid
 flowchart LR
     L[EventStateList] --> R[Story Resolver]
-    CC[Character defaults] --> R
+    CC[Character defaults<br/>unmentioned Characters only] --> R
     EN[Encounter generated NPCs] --> R
 
     R --> V{validate final Map}
@@ -417,11 +454,15 @@ flowchart LR
 
 ```text
 Source Content
-- 不同 Event 可以引用同一个 npcId
+- 不同 Event 可以引用同一个 npcId / Character
 - 同一个 Event state 可以让同一个 npcId 出现在多个不同 Map
+- absent + peer Event placement 合法
 
 EventStateList
 - 只有有 entry 的 Event 参与投影
+
+Character defaults
+- 仅对完全未被 active Event 提到的 Character 生效
 
 Final resolved Map
 - (mapId, npcId) 必须唯一
@@ -498,6 +539,14 @@ EventStateList
 = 一个 Realm State Record
 = 只保存非空 Event state
 
+Character default scene
+= 纯 fallback
+= 任一 active Event 提到 Character 后整体关闭
+
+absent
+= Event 提到 Character，但本 Event 不提供 placement
+= 不压制 peer Event placement
+
 Dialogue / Mutation Content
 = 数据，不执行
 
@@ -523,7 +572,7 @@ Battle Runtime Actor
 = @loomrealm-game/battle 本场 Simulation actor
 ```
 
-## 图中故意没有解决的问题
+## 图中故意没有解决的数据问题
 
 以下仍然留白：
 
@@ -533,10 +582,8 @@ Battle Runtime Actor
 - 技能学习 / 成长如何改变某个契约长期可用的 `skills[]`；
 - Event / EventStateMutation 的最终 Content namespace / key；
 - EventStateList Realm State Record 的最终 namespace / key 名字；
+- Event placement / `instanceId` / `absent` 的最终 JSON shape；
 - 非 Dialogue Subsystem 如何在各自 Content 中引用 Mutation；
-- Mutation `from` mismatch / OCC conflict 时的产品错误表现；
-- 跨 Event 的同一 `(mapId,npcId)` 冲突未来是否需要显式 override；
-- `absent` 与其他 Event 出现定义同时命中时的解析；
 - transient Encounter NPC 的固定 Dialogue speaker identity；
 - Encounter re-entry 与生成结果持久化细节。
 
