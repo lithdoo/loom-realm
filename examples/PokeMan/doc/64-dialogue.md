@@ -238,7 +238,7 @@ terminal Dialogue completion
    → PokeMan business Runtime
    → current target NPC Instance
    → resolve base BattleActor
-   → create pokeman.Relationship/<holder>/<servant>.contract
+   → create pokeman.Relationship/<holder>:<servant>.contract
       ├─ integrity = BattleActor.max_hp
       └─ skills[] = copy(BattleActor.skills[])
 ```
