@@ -37,14 +37,19 @@
 - **同一场 Battle 可以同时存在代表同一人物的多个 Battle Manifestation，不设置唯一显现限制。**
 - **从者首先是持续存在于世界中的人物。**
 - **角色卡表达正式关系和力量调用，不是装着人物的容器。**
-- **契约、已管理卡、随身卡是不同事实；放回中心不会解除契约。**
+- **Relationship 与 Contract 是长期关系事实；当前 Card 只表示一份已成立 Contract 是否随身以及所在 slot。**
+- **中心里的“已管理角色卡”只是已成立 Relationship / Contract 的管理视图，不建立额外 ManagedCard State authority；放回中心不会解除 Contract。**
+- **MVP Card 没有独立 `cardId` / Card identity。**
 - **序章随身上限为 1，后续随剧情解锁更多随身位。**
 - **解锁多随身卡后，默认 Battle 仍为开战前选择一张出战卡的 1v1。**
 - **“口袋”意味着当前随身人物持续陪伴，而不只是 Battle 卡槽。**
-- **中心管理器作为主要城镇中的标准化角色卡服务节点，承担全量角色卡管理、完整属性核实与卡片修复。**
+- **中心管理器作为主要城镇中的标准化角色卡服务节点，展示全部已成立 Relationship / Contract，承担完整资料核实、当前随身 Card 调整与 Contract Integrity 修复。**
 - **不提供随身全角色 Pokédex 式完整数据库。**
-- **Battle Manifestation 的 HP 表示角色卡完整度 / 显现稳定度，不表示人物本体生命值。**
-- **Card HP 可以跨 Battle 持续；0 HP 表示卡片暂时失效，而非人物死亡。**
+- **Battle Manifestation 的 HP 在产品上表现为角色卡完整度 / 显现稳定度，技术 authority 是 `Relationship.contract.integrity`，不表示人物本体生命值。**
+- **Contract Integrity 可以跨 Battle 持续；`integrity = 0` 表示这份契约暂时无法形成 Battle Manifestation，而非人物死亡。**
+- **持久 Character 的基础 BattleActor 是稳定静态定义；同一 Character 的不同 NPC Instance 不改变 BattleActor identity。**
+- **Transient Encounter NPC 的基础 BattleActor 由其 Encounter / Story 静态来源指定。**
+- **建立 Contract 时，从当前目标 NPC Instance 解析到的基础 BattleActor 初始化：`integrity = BattleActor.max_hp`，`skills[] = BattleActor.skills[]`；Integrity 上限同样来自该基础 BattleActor 的 `max_hp`。**
 - **本体直接参战时的 HP 是本场 Battle condition，不需要成为持久人物生命条。**
 - **道路以 Visible Encounter 为基础，普通 Encounter 在进入地图时生成后直接可见。**
 - **普通 Encounter Entity 可以是 transient，重要人物才需要完整长期 Character identity。**
