@@ -104,8 +104,12 @@ Relationship(A → B)
 
 - `integrity` 是这份契约的 Battle Manifestation 长期完整度；
 - `skills[]` 是这份契约当前实际拥有的 BattleSkill ids；
-- Contract 建立时，以人物对应的 `BattleActor.skills[]` 作为初始技能 baseline；
+- Contract 建立时，从**目标 NPC Instance 当前 resolved battle data** 初始化 `integrity / skills[]`；
+- NPC Instance 的 resolved battle data 可以来自 Character / BattleActor / Encounter 等静态来源的组合与解析，但 Contract 创建面对的是这次世界中具体目标实例，而不是直接重新读取一个固定 Character baseline；
+- Contract 创建完成后，这些值成为该 Contract 的长期 snapshot；NPC Instance 后续变化不会自动改写已有 Contract；
 - 后续真的加入技能学习时，可以改变这份 Contract 的 `skills[]`。
+
+Contract Integrity 的初始化来源是 NPC Instance 的 resolved battle defaults，而不是“这名 NPC 刚打完一场 Battle 后剩余多少本体 HP”。本体 Battle HP 与 Contract Integrity 仍是不同产品语义。
 
 **MVP 不定义独立 `progression / training` State。** 训练、等级、技能成长等仍是长期产品方向，但等真实玩法出现以后再扩展 Contract，不提前冻结成长 schema。
 
@@ -149,6 +153,16 @@ Card / 随身角色卡
 > **已收服多少人物，与本次旅行能够携带多少人物，是两个独立概念。**
 
 产品文案仍可以把中心里可查看、可编队的契约称为“已管理角色卡”，但技术上它不是额外的 `ManagedCard` State authority：中心管理器展示的是已成立 Relationship / Contract 及其长期状态；当前真正随身的那一部分再由 `Card` State 表示。
+
+MVP 不为 Card 建立独立 identity / `cardId`。当前 Card 只需要表达：
+
+```text
+holderCharacterId
+servantCharacterId
+slot
+```
+
+它没有脱离当前随身状态之外的独立生命周期；长期 identity 与状态来自对应 Relationship / Contract。
 
 ## 随身角色卡数量有限
 
