@@ -8,16 +8,27 @@
 - [30-battle.md](./30-battle.md) — Battle、Card Integrity、1v1 与长期养成方向
 - [40-encounter-loop.md](./40-encounter-loop.md) — Visible Encounter、Challenge、Hostile 与核心游戏循环
 - [50-mvp-prologue.md](./50-mvp-prologue.md) — MVP 序章场景与验证循环
-- [60-data-placement.md](./60-data-placement.md) — Content、Realm State 与临时内存的模块归宿和业务边界
-- [61-character.md](./61-character.md) — Character、Relationship、当前随身 Card 与 Map NPC Instance
-- [62-event.md](./62-event.md) — Event、Event State、场景实例与 Story Index
-- [63-world-data-model.md](./63-world-data-model.md) — Character / NPC / Story / Relationship / Card / Battle 的整体数据模型
-- [64-dialogue.md](./64-dialogue.md) — 固定 Dialogue 的线性台词、末尾 Choice、分支与循环
-- [65-data-model-diagram.md](./65-data-model-diagram.md) — 当前数据模型的 Mermaid UML 总览与 Relationship / Card / Battle 关键链路
+- [60-data-placement.md](./60-data-placement.md) — Content、Realm State 与 Runtime Memory 的模块归宿和业务边界
+- [61-character.md](./61-character.md) — Character、Relationship、Contract、Card 与 Map NPC Instance
+- [62-event.md](./62-event.md) — Event、EventStateMutation、EventStateList、场景 directive 与 Story Index
+- [63-world-data-model.md](./63-world-data-model.md) — Character / NPC / Story / Relationship / Card / Battle 整体数据模型
+- [64-dialogue.md](./64-dialogue.md) — 固定 Dialogue 的线性台词、末尾 Choice、分支、Mutation 与 FSDB identity
+- [65-data-model-diagram.md](./65-data-model-diagram.md) — 当前数据 authority、FSDB identity 与关键链路 Mermaid 总览
 - [66-data-authority.md](./66-data-authority.md) — Content / Realm State / Runtime Memory 三层 authority 清单
-- [67-realm-state-records.md](./67-realm-state-records.md) — MVP 核心 Realm State 的最终 Record 粒度、namespace/key 编码、value shape 与数据约束
+- [67-realm-state-records.md](./67-realm-state-records.md) — MVP 核心 Realm State 的 Record 粒度、namespace/key、value shape 与约束
+- [68-content-fsdb.md](./68-content-fsdb.md) — PokeMan Content 的 FSDB table、record identity、引用编码与 JSON shape
 - [90-scope-principles.md](./90-scope-principles.md) — MVP 非要求、设计原则与当前非目标
 
-`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`67` 是其后新增的技术设计，不回写 `DESIGN.md`。
+`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`68` 是其后新增的技术设计，不回写 `DESIGN.md`。
 
-Realm State 的**物理 Record 结构以 `67-realm-state-records.md` 为当前 canonical source**。如果 `60`–`66` 中仍存在“Relationship / Card 的 Record 粒度、namespace/key 或字段 shape 尚未冻结”之类的早期说明，以 `67` 的最新结论为准。后续 Content schema 设计继续新增独立技术文档。
+当前 physical data canonical sources：
+
+```text
+Realm State
+→ 67-realm-state-records.md
+
+Content / FSDB
+→ 68-content-fsdb.md
+```
+
+如果 `60`–`66` 中仍出现早期的 Record / namespace / key / Content identity 表述，以 `67` / `68` 的最新结论为准。Runtime / gameplay policy 仍由对应模块文档定义，不因为 physical schema 已冻结就自动转成数据问题。
