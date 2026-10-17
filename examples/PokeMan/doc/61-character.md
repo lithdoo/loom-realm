@@ -16,6 +16,14 @@
 
 **Character identity 由 FSDB record key 提供；PokeMan source record 不重复保存 `id`。**
 
+MVP 玩家 Character identity 固定为：
+
+```text
+struct.Character / player
+```
+
+因此 `[struct]Character/player.json` 是 PokeMan MVP 必需 Content。玩家自己的 Relationship / Contract / CarriedCards 都使用这个 Character identity，不另建 `playerCharacterId` State 字段。
+
 主角、家人、博士、宿敌、店主，以及以后可以建立契约的修行者，都是 Character。随机生成的普通混混、路霸等 transient Encounter NPC 不要求建立 Character。
 
 当前核心数据：
@@ -42,7 +50,7 @@ Character
   "description": "从小与主公一起长大的竞争对手。",
   "aiCharacterText": "好胜、自信，不愿轻易服输。",
   "battleActor": {
-    "namespace": "<battle content namespace>",
+    "namespace": "struct.BattleActor",
     "key": "rival"
   },
   "defaultScenes": {
@@ -65,9 +73,9 @@ Character
 其中：
 
 - `name / description / aiCharacterText` 是 immutable author data；
-- `battleActor` 稳定引用这个 Character 的基础 BattleActor；
+- `battleActor` 稳定引用这个 Character 的基础 BattleActor，MVP 中 `namespace` 固定为 `struct.BattleActor`；
 - `defaultScenes` 是当前 active Event 没有接管该 Character 时的 fallback scene source；
-- `<mapId>` 是 Map package 正 safe integer `mapId` 的十进制字符串形式；
+- `<mapId>` 是 Map package 正 safe integer `mapId` 的十进制字符串形式，并且必须对应存在的 `struct.Map`；
 - `<npcId>` 是 `struct.NPC` key；
 - `interaction.dialogue` 是 `struct.Dialogue` key；
 - default scene source 不保存 Runtime `instanceId`。
@@ -100,11 +108,20 @@ BattleSkill
 └─ effect
 ```
 
+PokeMan Game Package 对现有 battle Content 的具体 FSDB 绑定固定为：
+
+```text
+struct.BattleActor / <battleActorId>
+struct.BattleSkill / <battleSkillId>
+```
+
+这只是 PokeMan Game Package 的物理 table / namespace 绑定；BattleActor / BattleSkill 的字段与 gameplay 语义仍由 `@loomrealm-game/battle` contract 定义，不在 PokeMan 复制第二套 schema。因为 battle authored contract 自身包含 `id`，PokeMan binding 要求 FSDB record key 与 value 内 `id` 相等。
+
 Battle v0 的 Simulation-facing contract 本身就使用 `skillId: string`，BattleActor 当前 authored shape 也是 `skills: string[]`。因此 PokeMan 不再把 Contract skill identity 当成另一套待设计引用：
 
 ```text
 BattleActor.skills[]
-= BattleSkill id string[]
+= struct.BattleSkill record key string[]
 
 Relationship.contract.skills[]
 = ordered unique BattleSkill id string[]
@@ -112,7 +129,7 @@ Relationship.contract.skills[]
 
 新 Contract 直接复制 `BattleActor.skills[]`。这里不增加 `BattleSkillRef`、`ContentRef[]` 或 PokeMan 自己的第二套 Skill identity。
 
-`Character.battleActor` 自身仍使用 `{ namespace, key }` ContentRef，是因为它定位的是一条基础 BattleActor Content definition；这与 `skills[]` 保存 BattleSkill id 是两件不同的事，不构成数据缺口。
+`Character.battleActor` 自身仍使用 `{ namespace, key }` ContentRef；在 PokeMan MVP 中 `namespace` 必须为 `struct.BattleActor`，`key` 必须存在。它定位的是一条基础 BattleActor Content definition；这与 `skills[]` 保存 BattleSkill id 是两件不同的事。
 
 MVP 不增加 `attack / defense / speed / MP / accuracy / critical / element / universal cooldown / ammo` 等 Battle v0 没有的字段。
 
@@ -156,6 +173,7 @@ Persistent NPC Instance
 → characterId
 → struct.Character/<characterId>
 → Character.battleActor
+→ struct.BattleActor/<battleActorId>
 → base BattleActor
 ```
 
@@ -165,6 +183,7 @@ transient Encounter / Story NPC：
 Transient NPC Instance
 → Encounter / Event static source
 → battleActor ContentRef
+→ struct.BattleActor/<battleActorId>
 → base BattleActor
 ```
 
@@ -268,6 +287,8 @@ pokeman.Relationship / player:rival
 
 `:` 不属于 Character id，因此 `A:B` 可无歧义拆回两个 Character identity；最大复合 key 为 241 bytes，满足 Realm State v1 的 256-byte key 上限。
 
+Relationship key 中的 from / to 都必须对应存在的 `struct.Character`。
+
 value 不重复保存 from / to：
 
 ```text
@@ -325,7 +346,13 @@ Relationship.contract
 └─ skills[] = copy(BattleActor.skills[])
 ```
 
-Contract Integrity 上限也来自同一 `BattleActor.max_hp`；不保存 `maxIntegrity`。
+Contract Integrity 上限也来自同一 `BattleActor.max_hp`；不保存 `maxIntegrity`。因此任意合法持久状态满足：
+
+```text
+0 <= contract.integrity <= servant Character base BattleActor.max_hp
+```
+
+`contract.skills[]` 中每个 id 必须对应存在的 `struct.BattleSkill` record。
 
 目标 NPC 本体某一场 Battle 的当前 HP 与 Contract Integrity 是不同产品语义。
 
@@ -374,9 +401,11 @@ pokeman.CarriedCards / player
 
 固定约束：
 
+- holder Character 必须存在；
 - `slot >= 0`；
 - 同一 holder 内 slot 唯一；
 - 同一 holder 内 servantCharacterId 唯一；
+- 每个 servantCharacterId 必须对应存在的 `struct.Character`；
 - 数组按 slot 升序保存；
 - 空编队使用 `[]`；
 - holder 已在 Record key 中，不在 entry 重复保存。
@@ -414,7 +443,7 @@ pokeman.Relationship / A:B
 → contract.integrity / skills[]
 +
 struct.Character / B
-→ base BattleActor
+→ struct.BattleActor / <battleActorId>
 ↓
 @loomrealm-game/battle Runtime Actor
 ```
@@ -487,13 +516,18 @@ StoryIndex 查找该 Map 相关 Character / Event
 Builder 应检查：
 
 - `struct.Character` identity 来自 FSDB key，source 不重复保存 `id`；
-- Character `battleActor` ContentRef 可解析；
-- Character `defaultScenes` map key 是合法正 safe integer；
+- `struct.Character/player` 必须存在；
+- Character `battleActor.namespace === "struct.BattleActor"`，且 key 指向存在的 BattleActor；
+- `struct.BattleActor/<id>` 与 `struct.BattleSkill/<id>` 的 record key 必须等于 battle contract value 内 `id`；
+- BattleActor `skills[]` 的每个 skill id 指向存在的 `struct.BattleSkill`；
+- Character `defaultScenes` map key 是合法正 safe integer，并指向存在的 `struct.Map`；
 - `defaultScenes` npcId 指向存在的 `struct.NPC`；
 - `interaction.dialogue` 指向存在的 `struct.Dialogue`；
 - placement 坐标 / direction / pattern 合法；
-- 进入 Relationship / CarriedCards key 的 Character identity 满足 `[a-z0-9][a-z0-9._-]{0,119}`；
-- CarriedCards 的 slot / servant 唯一并满足对应 Contract invariant；
+- 进入 Relationship / CarriedCards key 的 Character identity 满足 `[a-z0-9][a-z0-9._-]{0,119}` 且对应存在的 Character；
+- Contract `integrity` 不超过 servant Character 基础 BattleActor 的 `max_hp`；
+- Contract `skills[]` 中每个 id 指向存在的 `struct.BattleSkill`；
+- CarriedCards 的 holder / servant 存在，slot / servant 唯一并满足对应 Contract invariant；
 - StoryIndex 与 Character / Event 源 Content 一致。
 
 Builder 不因为以下情况失败：
@@ -511,8 +545,8 @@ Event A 对 X absent + Event B 对 X placement
 
 # 当前未决
 
-Character / Relationship / Contract / CarriedCards 的 PokeMan 物理结构已经分别由 `68` / `67` 冻结。
+Character / Battle Content binding / Relationship / Contract / CarriedCards 的 MVP 物理结构已经分别由 `68` / `67` 冻结。
 
-当前没有 BattleSkill identity / Contract.skills physical gap：`Contract.skills[]` 直接复用 battle 模块既有的 `skillId: string`。
+当前没有 BattleSkill identity / Contract.skills physical gap：`Contract.skills[]` 直接复用 battle 模块既有的 `skillId: string`；PokeMan Game Package 的 Battle Content table 绑定也已经固定为 `struct.BattleActor` / `struct.BattleSkill`。
 
 剩余 `instanceId` 具体生成算法属于 Runtime，不是 Content / Realm State data physical-schema gap。
