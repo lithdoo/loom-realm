@@ -9,14 +9,15 @@ flowchart TB
   subgraph Content[Content / FSDB]
     Character["struct.Character / <characterId>"]
     NPC["struct.NPC / <npcId>"]
+    BattleActor["struct.BattleActor / <battleActorId>"]
+    BattleSkill["struct.BattleSkill / <battleSkillId>"]
+    BattleEffect["struct.BattleEffect / <battleEffectId>"]
     Dialogue["struct.Dialogue / <dialogueId>"]
     Event["struct.Event / <eventId>"]
     Mutation["struct.EventStateMutation / <mutationId>"]
     Encounter["struct.Encounter / <mapId>"]
     StoryIndex["struct.StoryIndex / current"]
     Graphics["resource.Graphics / ..."]
-    BattleActor["BattleActor Content"]
-    BattleSkill["BattleSkill Content\nid / skillId: string"]
   end
 
   subgraph State[Realm State]
@@ -39,6 +40,7 @@ flowchart TB
   NPC --> Graphics
   Character --> BattleActor
   BattleActor --> BattleSkill
+  BattleSkill --> BattleEffect
   Character --> NPC
   Character --> Dialogue
 
@@ -79,7 +81,11 @@ flowchart TB
 
 ```mermaid
 flowchart LR
+  PFile["[struct]Character/player.json"] --> PId["struct.Character / player\nMVP player identity"]
   CFile["[struct]Character/rival.json"] --> CId["struct.Character / rival"]
+  AFile["[struct]BattleActor/rival.json"] --> AId["struct.BattleActor / rival"]
+  SFile["[struct]BattleSkill/firebolt.json"] --> SId["struct.BattleSkill / firebolt"]
+  FFile["[struct]BattleEffect/firebolt.json"] --> FId["struct.BattleEffect / firebolt"]
   DFile["[struct]Dialogue/lab-rival-intro.json"] --> DId["struct.Dialogue / lab-rival-intro"]
   EFile["[struct]Event/prologue.json"] --> EId["struct.Event / prologue"]
   MFile["[struct]EventStateMutation/prologue-to-route.json"] --> MId["struct.EventStateMutation / prologue-to-route"]
@@ -88,20 +94,24 @@ flowchart LR
 ```
 
 ```text
-PokeMan struct record key
+PokeMan 自有 struct record key
 = definition identity
 
-source value
+PokeMan 自有 source value
 != 再保存一份 id
+
+BattleActor / BattleSkill / BattleEffect
+= package-owned contract
+= PokeMan binding 要求 FSDB key = value.id
 ```
 
-固定目标 table 的引用只保存 key；`battleActor` 使用 `{namespace,key}` ContentRef。BattleSkill / Contract skill identity 直接复用 battle 模块的 string id，不建立第二套引用。
+固定目标 PokeMan table 的引用只保存 key；`battleActor` 使用 `{namespace,key}` ContentRef，但 MVP namespace 固定为 `struct.BattleActor`。BattleSkill / Contract skill identity 直接复用 battle 模块的 string id，不建立第二套引用。
 
 # Character / NPC / Battle
 
 ```mermaid
 flowchart LR
-  Character["struct.Character / rival"] -->|battleActor ContentRef| BaseActor["base BattleActor"]
+  Character["struct.Character / rival"] -->|battleActor ContentRef| BaseActor["struct.BattleActor / rival"]
   Character -->|defaultScenes mapId + npcId| NPCDef["struct.NPC / rival-casual"]
   NPCDef --> Sprite["resource.Graphics / Characters/RivalCasual"]
 
@@ -109,12 +119,16 @@ flowchart LR
   TransientSource["Encounter / Event transient source"] --> BaseActor
   TransientInstance["transient NPC Instance"] --> TransientSource
 
-  BaseActor --> Skills["BattleSkill id definitions"]
+  BaseActor --> Skills["struct.BattleSkill / <skillId>"]
+  Skills --> Effect["struct.BattleEffect / <effectId>"]
 ```
 
 固定：
 
 ```text
+MVP player Character
+→ struct.Character/player
+
 Persistent NPC Instance
 → Character
 → same base BattleActor
@@ -122,6 +136,12 @@ Persistent NPC Instance
 Transient NPC Instance
 → Encounter / Story source
 → base BattleActor
+
+BattleActor.skills[]
+→ existing struct.BattleSkill ids
+
+BattleSkill.effect
+→ existing struct.BattleEffect id
 ```
 
 不建立 NPC Instance BattleActor variant / resolved Battle profile authority。
@@ -148,12 +168,12 @@ flowchart TD
 ```mermaid
 flowchart LR
   EventRecord["struct.Event / prologue"] --> States["states.<stateId>"]
-  States --> Maps["maps.<decimal-mapId>"]
+  States --> Maps["maps.<decimal-mapId>\n→ existing struct.Map"]
   Maps --> Npcs["npcs.<npcId>"]
   Npcs --> CharacterRef["character? → Character key"]
   Npcs --> Placement["placement XOR absent:true"]
   Npcs --> DialogueRef["interaction.dialogue? → Dialogue key"]
-  Npcs -. transient only .-> BattleRef["battleActor? → ContentRef"]
+  Npcs -. transient only .-> BattleRef["battleActor? → struct.BattleActor ContentRef"]
 ```
 
 `eventId / stateId / mapId / npcId` 都由 FSDB / object key 表达，不在 value 里重复保存。
@@ -200,12 +220,12 @@ Mutation 只改变 Event current state，不创建 Contract / Card / Battle。�
 
 ```mermaid
 flowchart LR
-  A["Character A"] --> Rel["pokeman.Relationship / A:B"]
-  B["Character B"] --> Rel
+  A["struct.Character / A"] --> Rel["pokeman.Relationship / A:B"]
+  B["struct.Character / B"] --> Rel
   Rel --> Affinity["affinity / hostile / relationshipText"]
   Rel --> Contract["contract?\nintegrity / skills[]"]
   Contract --> Carried["pokeman.CarriedCards / A\nslot + servant B"]
-  B --> BaseActor["base BattleActor"]
+  B --> BaseActor["struct.BattleActor / base actor"]
   BaseActor --> ContractInit["new Contract init"]
   ContractInit --> Contract
 ```
@@ -218,11 +238,13 @@ Contract exists
 != currently carried
 ```
 
-Contract initialization：
+Contract initialization / invariant：
 
 ```text
 integrity = BattleActor.max_hp
-skills[]  = copy(BattleActor.skills[])  # BattleSkill id string[]
+0 <= integrity <= BattleActor.max_hp
+skills[]  = copy(BattleActor.skills[])
+skills[]  → existing struct.BattleSkill ids
 ```
 
 MVP 不保存 `maxIntegrity`，也不建立 `cardId`。
@@ -251,8 +273,8 @@ CarriedCards/A absent
 flowchart TD
   Carried["pokeman.CarriedCards / A\nservant B"] --> Select["Select servant B"]
   Contract["pokeman.Relationship / A:B\ncontract.integrity / skills[]"] --> Build["Build Battle Runtime Actor"]
-  Character["struct.Character / B"] --> ActorRef["base BattleActor ContentRef"]
-  ActorRef --> BaseActor["base BattleActor\nmax_hp / definitions"]
+  Character["struct.Character / B"] --> ActorRef["battleActor ContentRef"]
+  ActorRef --> BaseActor["struct.BattleActor\nmax_hp / definitions"]
   BaseActor --> Build
   Select --> Build
   Build --> Battle["Battle Simulation"]
@@ -266,7 +288,7 @@ Battle live HP / tile / action / plan 等只属于 Battle Runtime。
 
 ```mermaid
 flowchart LR
-  MapRuntime["Map Runtime\nlive mapId / x / y / direction / motion"] -->|explicit save/checkpoint| Resume["pokeman.PlayerWorld / current\nmapId is integer"]
+  MapRuntime["Map Runtime\nlive mapId / x / y / direction / motion"] -->|explicit save/checkpoint| Resume["pokeman.PlayerWorld / current\nmapId → existing struct.Map"]
   Resume -->|Load / start new Map Runtime| MapRuntime2["new Map Runtime"]
 ```
 
@@ -276,29 +298,32 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  Encounter["struct.Encounter / <mapId>"] --> Count["count"]
-  Encounter --> Spawn["spawnPoints[]"]
+  Encounter["struct.Encounter / <mapId>\n→ existing struct.Map"] --> Count["count"]
+  Encounter --> Spawn["spawnPoints[]\nunique (x,y)"]
   Encounter --> Templates["templates.<templateId>"]
   Templates --> Weight["weight"]
-  Templates --> NPC["npc → struct.NPC"]
+  Templates --> NPC["npc → struct.NPC\nunique per Encounter record"]
   Templates --> Dialogue["dialogue? → struct.Dialogue"]
-  Templates --> Actor["battleActor → ContentRef"]
-  Encounter --> Runtime["generated Encounter Runtime set"]
+  Templates --> Actor["battleActor → struct.BattleActor"]
+  Encounter --> Runtime["weighted selection\nwithout replacement"]
 ```
 
 ```text
 count = 每次生成数量
 weight = template 相对选择权重
 count <= spawnPoints.length
+count <= number of templates
+template.npc unique per Encounter record
+one template selected at most once per generation
 ```
 
-具体随机抽取、spawn selection、seed、re-entry reroll、respawn、defeated persistence、清理时机属于 Runtime/gameplay policy，不建立额外 Content / Realm State 字段。
+具体 weighted sampling 实现、spawn selection、seed、re-entry reroll、respawn、defeated persistence、清理时机属于 Runtime/gameplay policy，不建立额外 Content / Realm State 字段。
 
 # 一句话总览
 
 ```text
 Content
-= 安装后只读定义；FSDB key 是 PokeMan struct identity
+= 安装后只读定义；FSDB identity / package binding 已闭环
 
 Realm State
 = 这一局跨 Subsystem 共享的长期 mutable facts
@@ -307,4 +332,4 @@ Runtime Memory
 = 当前 Subsystem 正在执行的 live authority / working set
 ```
 
-当前 MVP 核心业务数据 physical schema 已收口；后续 `.info.meta` / validator / Runtime 实现属于落地工作。
+当前 MVP 核心业务数据 physical schema 与跨 record reference graph 已收口；后续 `.info.meta` / validator / Runtime 实现属于落地工作。
