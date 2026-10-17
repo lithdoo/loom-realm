@@ -82,7 +82,7 @@ test("invalid closed Session and Runner bootstraps fail before business side eff
           formatVersion: 1, sessionEpoch: "bad", installationId: "bad",
           expectedServiceWorker: { protocolVersion: 1, buildId: "bad", generation: "bad" },
           subsystemKey: "bad", bootstrapToken: "bad", logicalModule: "bad.mjs",
-          runtimeControlPort: control.port2, realmStatePort: state.port2, provisioningPort: provisioning.port2,
+          runtimeControlPort: control.port2, sharedStatePort: state.port2, provisioningPort: provisioning.port2,
           unknown: true,
         }, [control.port2, state.port2, provisioning.port2]);
       });

@@ -29,7 +29,7 @@ Render Store state is not exported as business authority and is never reverse-sy
 
 ## Boundary rules
 
-- Renderer owns readonly/current presentation replica, not Main control or Subsystem/Realm State business truth;
+- Renderer owns readonly/current presentation replica, not Main control or Subsystem/Shared State business truth;
 - DOM/custom elements own only private presentation state;
 - Viewport observation does not become a new projection/business authority;
 - package-private presentation helpers do not expand the root public API accidentally;

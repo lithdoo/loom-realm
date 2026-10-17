@@ -7,7 +7,7 @@ export type {
   MainPlatform,
   MainPolicy,
   MainRuntimeFailure,
-  MainRealmStateFatalSource,
+  MainSharedStateFatalSource,
   MainSessionEventsFatalSource,
   MainSessionResult,
   RunMainOptions,

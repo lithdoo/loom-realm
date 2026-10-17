@@ -7,7 +7,7 @@
 ```text
 Foundation / Wire          carrier + bounded encoding mechanics
 Protocol packages          schema/profile validation + conformance
-Main / Realm State         session authority + shared state lifecycle
+Main / Shared State         session authority + shared state lifecycle
 Subsystem                  domain execution + RenderDomain authority
 Renderer                    readonly replica + input producer gate
 Platform / Launchers       physical hosting/provisioning/currentness

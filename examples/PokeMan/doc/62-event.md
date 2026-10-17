@@ -1,6 +1,6 @@
 # 事件
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义 Event / EventStateMutation / EventStateList 的业务语义；Realm State 物理结构见 [67-realm-state-records.md](./67-realm-state-records.md)，FSDB 编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义 Event / EventStateMutation / EventStateList 的业务语义；Shared State 物理结构见 [67-shared-state-records.md](./67-shared-state-records.md)，FSDB 编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 # 定位
 
@@ -11,7 +11,7 @@ Event
 = 持久剧情阶段 + 当前阶段的场景 / 交互定义
 
 EventStateList
-= 当前所有非空 Event state 的唯一 Realm State 列表 Record
+= 当前所有非空 Event state 的唯一 Shared State 列表 Record
 
 EventStateMutation
 = 一组 Event state 前置条件 + 一组 Event state 赋值
@@ -195,7 +195,7 @@ character 不存在
 
 # EventStateList
 
-Event current state 的 Realm State physical identity 已冻结：
+Event current state 的 Shared State physical identity 已冻结：
 
 ```text
 namespace = pokeman.EventStateList
@@ -347,7 +347,7 @@ scope.state.commit()
   write     = new EventStateList
 ```
 
-多个 Event 同时变化天然对应一个 Record replacement / 一个 Realm State commit。
+多个 Event 同时变化天然对应一个 Record replacement / 一个 Shared State commit。
 
 Mutation mismatch、OCC conflict、OUTCOME_UNKNOWN 的恢复 / UI 是 Runtime 设计，不是数据 physical-schema gap。
 
@@ -365,7 +365,7 @@ createCard
 startBattle
 modifyIntegrity
 movePlayer
-任意 Realm State path/value mutation
+任意 Shared State path/value mutation
 ```
 
 Relationship / Contract / Card / Battle 等由各自业务 owner 处理。
@@ -514,7 +514,7 @@ validate final npcId uniqueness
 Runtime NPC Instances
 ```
 
-StoryIndex 是 derived Content，不进入 Realm State / Save；其精确派生字段可以随 Resolver 查询实现调整，不视为新的业务数据 authority 或 MVP 核心 schema 缺口。
+StoryIndex 是 derived Content，不进入 Shared State / Save；其精确派生字段可以随 Resolver 查询实现调整，不视为新的业务数据 authority 或 MVP 核心 schema 缺口。
 
 # Builder 检查
 
@@ -556,7 +556,7 @@ Event A 对 X absent + Event B 对 X placement
 
 # 当前未决
 
-Event / EventStateMutation Content physical schema 与 EventStateList Realm State physical identity 已分别由 `68` / `67` 冻结。
+Event / EventStateMutation Content physical schema 与 EventStateList Shared State physical identity 已分别由 `68` / `67` 冻结。
 
 当前相关开放项只剩 Runtime 行为：
 

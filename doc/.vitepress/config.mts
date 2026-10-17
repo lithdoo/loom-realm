@@ -47,7 +47,7 @@ export default defineConfig({
         { text: '渲染', link: '/10-architecture/rendering-system' },
         { text: 'Subsystem', link: '/10-architecture/subsystem-model' },
         { text: '存储与 Content', link: '/10-architecture/storage-system' },
-        { text: 'Realm State', link: '/10-architecture/realm-state-system' },
+        { text: 'Shared State', link: '/10-architecture/shared-state-system' },
         { text: 'Viewport', link: '/10-architecture/viewport-capability' },
       ] },
       { text: '正式契约', items: [

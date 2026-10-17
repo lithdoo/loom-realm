@@ -1,6 +1,6 @@
 # 世界数据模型
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文汇总当前 Character、NPC、Story、Dialogue、Encounter、Relationship、Contract、Card 与 Battle 数据职责。Realm State 物理结构以 [67-realm-state-records.md](./67-realm-state-records.md) 为准；Content FSDB 物理结构以 [68-content-fsdb.md](./68-content-fsdb.md) 为准。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文汇总当前 Character、NPC、Story、Dialogue、Encounter、Relationship、Contract、Card 与 Battle 数据职责。Shared State 物理结构以 [67-shared-state-records.md](./67-shared-state-records.md) 为准；Content FSDB 物理结构以 [68-content-fsdb.md](./68-content-fsdb.md) 为准。
 
 相关文档：
 
@@ -10,7 +10,7 @@
 - [固定对话](./64-dialogue.md)
 - [数据模型图](./65-data-model-diagram.md)
 - [数据 Authority 清单](./66-data-authority.md)
-- [Realm State Record 设计](./67-realm-state-records.md)
+- [Shared State Record 设计](./67-shared-state-records.md)
 - [Content FSDB 物理模型](./68-content-fsdb.md)
 
 # 当前边界
@@ -26,7 +26,7 @@
 9. **Contract 从基础 BattleActor 初始化。** `integrity = max_hp`，`skills[] = copy(BattleActor.skills[])`，Integrity 上限也来自 `max_hp`。
 10. **MVP 不定义 progression / training schema。**
 11. **Event 是剧情状态 + scene / interaction definition。** 不扩成通用 Trigger / Action / Command engine。
-12. **Event current state 使用一个 EventStateList Realm State Record。** 缺 entry = `null`。
+12. **Event current state 使用一个 EventStateList Shared State Record。** 缺 entry = `null`。
 13. **Character default scene 是纯 fallback。** 任一 active Event 提到 Character 后，default 全部退出解析。
 14. **EventStateMutation 只拥有 Event state。** Relationship / Contract / Card / Battle 变化由对应业务 Runtime 处理。
 15. **Dialogue 只保存线性 lines、末尾 choices 或 terminal mutation。** choices 与 mutation 互斥，但允许两者都不存在。
@@ -316,7 +316,7 @@ struct.StoryIndex/current
 
 StoryIndex 是 Builder-generated read model，不是业务 authority，可由 Character / Event 等源 Content 重建。精确派生字段可以跟随 Resolver 查询实现调整，不视为 MVP 核心业务数据缺口。
 
-# Realm State
+# Shared State
 
 ## durable PlayerWorld checkpoint
 
@@ -452,7 +452,7 @@ pending choice
 terminalDialogueId completion result
 ```
 
-这些不进入 Realm State。
+这些不进入 Shared State。
 
 ## Battle
 
@@ -468,7 +468,7 @@ actionGeneration
 decisionGeneration
 ```
 
-Battle Runtime 完成后，只有真正需要长期持续的 Contract Integrity 等结果写回 Realm State。
+Battle Runtime 完成后，只有真正需要长期持续的 Contract Integrity 等结果写回 Shared State。
 
 ## Encounter
 
@@ -536,7 +536,7 @@ long-lived integrity result
 
 # 当前数据结构状态
 
-经过最终闭环复核，当前 MVP Realm State 核心四类 Record、Content 核心业务 shape、Battle Content FSDB binding 与跨 record referential invariants 已经收口；没有剩余的 MVP 核心业务 data physical-schema gap。
+经过最终闭环复核，当前 MVP Shared State 核心四类 Record、Content 核心业务 shape、Battle Content FSDB binding 与跨 record referential invariants 已经收口；没有剩余的 MVP 核心业务 data physical-schema gap。
 
 其余以下事项不再当作 MVP 核心 data gap：
 
@@ -548,7 +548,7 @@ Dialogue choices XOR mutation
 Event absent 的第二套结构
 EventStateMutation semantic no-op proof
 Encounter generation count / template weight / duplicate-template semantics
-Realm State Record-level absence
+Shared State Record-level absence
 StoryIndex 最终派生字段
 本地化 / richer presentation metadata
 Encounter seed / respawn / persistence

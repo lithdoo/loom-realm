@@ -8,7 +8,7 @@
 
 Main does **not** consume Game Entry files, platform launch manifests, Hostra/PWA configuration, DOM APIs, filesystem Content realization or concrete Node/Worker/WebSocket/MessagePort implementations. Platform PREPARE resolves those physical concerns before/during composition and presents Main only with the capabilities required by the formal logical contracts.
 
-Realm State is a sibling authority composed for the same Session; Main does not own Realm State record values or versions.
+Shared State is a sibling authority composed for the same Session; Main does not own Shared State record values or versions.
 
 ## Authority owned here
 
@@ -25,7 +25,7 @@ DataAuthority derived from committed current facts
 failure unwind / terminal convergence
 ```
 
-Subsystem business state/RenderDomain, Realm State records, Renderer replica/DOM state, Content definitions and platform physical hosting are not Main state.
+Subsystem business state/RenderDomain, Shared State records, Renderer replica/DOM state, Content definitions and platform physical hosting are not Main state.
 
 ## Runtime bootstrap realization
 
@@ -96,10 +96,10 @@ apps/* / Hostra / PWA implementations
 browser DOM
 filesystem Content realization
 platform-specific executable resolution
-Realm State record implementation details
+Shared State record implementation details
 ```
 
-A concrete platform MAY construct Main together with RealmStateAuthority, RuntimeHosting and other capabilities, but composition does not become a third application authority.
+A concrete platform MAY construct Main together with SharedStateAuthority, RuntimeHosting and other capabilities, but composition does not become a third application authority.
 
 ## Package invariants
 
@@ -110,6 +110,6 @@ A concrete platform MAY construct Main together with RealmStateAuthority, Runtim
 - terminal/failure transitions converge through Main's existing unwind model;
 - new observable semantics belong in formal contracts/ADR first, not only in this package file.
 
-Current normative references: [Runtime Control v1](../../doc/15-contracts/runtime-control-profile-v1.md), [Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md), [Main ⇄ Renderer Control v1](../../doc/15-contracts/main-renderer-control-v1.md), [Renderer ⇄ Subsystem Data Connection v1](../../doc/15-contracts/renderer-subsystem-data-connection-v1.md), and [Realm State architecture](../../doc/10-architecture/realm-state-system.md).
+Current normative references: [Runtime Control v1](../../doc/15-contracts/runtime-control-profile-v1.md), [Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md), [Main ⇄ Renderer Control v1](../../doc/15-contracts/main-renderer-control-v1.md), [Renderer ⇄ Subsystem Data Connection v1](../../doc/15-contracts/renderer-subsystem-data-connection-v1.md), and [Shared State architecture](../../doc/10-architecture/shared-state-system.md).
 
 Qualification/currentness follows [subject and staleness rules](../../doc/30-development/qualification.md); historical milestone labels are provenance only and are intentionally not maintained here.

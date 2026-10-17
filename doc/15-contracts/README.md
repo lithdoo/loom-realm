@@ -7,7 +7,7 @@
 - [Game Package v1](./game-package-v1.md)
 - [Hostra Launcher / Node Runner](./nodejs-launcher-profile-v1.md)
 - [PWA Launcher / Worker Runner](./pwa-launcher-profile-v1.md)
-- [Realm State v1](./realm-state-v1.md)
+- [Shared State v1](./shared-state-v1.md)
 - [Session Events v1](./session-events-v1.md) · [Runtime Integration Profile](./session-events-runtime-profile-v1.md) · [Conformance](./session-events-conformance-v1.md) — Session-scoped cross-Subsystem transient event protocol；exact-channel routing；logical contract允许与 Shared State 共进程/共 carrier，但 current Hostra/PWA v1 profile 冻结为每 Runtime dedicated Events carrier。
 - [Subsystem Control v1](./subsystem-control-protocol-v1.md)
 - [Runtime Control v1](./runtime-control-profile-v1.md)

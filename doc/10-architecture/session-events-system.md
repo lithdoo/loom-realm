@@ -26,7 +26,7 @@ SessionEventClient
     Runtime-scoped publish / subscribe capability
 ```
 
-Shared State 重命名完成前，现有 `Realm State` contract/code 与本文的 `Shared State` 指同一 shared mutable business-state capability。
+Shared State 重命名完成前，现有 `Shared State` contract/code 与本文的 `Shared State` 指同一 shared mutable business-state capability。
 
 ---
 

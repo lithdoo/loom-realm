@@ -7,7 +7,7 @@
 > 稳定程度：**Architecture + Logical Semantics + Deterministic Surface Frozen**  
 > 架构来源：[Session Events：Session 级跨 Subsystem 事件系统](../10-architecture/session-events-system.md)  
 > 可执行断言：[Session Events v1 Conformance](./session-events-conformance-v1.md)  
-> 相关契约：[Realm State v1](./realm-state-v1.md) · [Session Events Runtime Integration Profile v1](./session-events-runtime-profile-v1.md)  
+> 相关契约：[Shared State v1](./shared-state-v1.md) · [Session Events Runtime Integration Profile v1](./session-events-runtime-profile-v1.md)  
 > 最近复核：2026-10-14
 
 本文定义 Session Events v1 的 normative logical contract。本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
@@ -29,7 +29,7 @@
 Main
     Control Authority
 
-Shared State / current Realm State
+Shared State / current Shared State
     Session Shared Business State Authority
 
 SessionEventHub

@@ -45,7 +45,7 @@ const node = (...args) => run(process.execPath, args);
 function buildRegressionStack() {
   // npm run build --workspaces is not dependency-topological. Build the known
   // authority/product stack in its explicit dependency order before tests.
-  npm("run", "build:realm-state-stack");
+  npm("run", "build:shared-state-stack");
   npm("run", "build", "-w", "@loomrealm/fsdb-http");
 }
 
@@ -56,7 +56,7 @@ function buildMapStack() {
     "-w", "@loomrealm/fsdb-http",
     "-w", "@loomrealm/foundation",
     "-w", "@loomrealm/wire",
-    "-w", "@loomrealm/realm-state",
+    "-w", "@loomrealm/shared-state",
     "-w", "@loomrealm/session-events",
     "-w", "@loomrealm/game-package",
     "-w", "@loomrealm/platform-ports",
@@ -78,7 +78,7 @@ function buildPwaStack() {
     "run", "build",
     "-w", "@loomrealm/foundation",
     "-w", "@loomrealm/wire",
-    "-w", "@loomrealm/realm-state",
+    "-w", "@loomrealm/shared-state",
     "-w", "@loomrealm/session-events",
     "-w", "@loomrealm/game-package",
     "-w", "@loomrealm/platform-ports",
@@ -227,10 +227,10 @@ const capabilities = {
   },
 
   "state-windows"() {
-    npm("run", "test:realm-state");
-    npm("run", "test:realm-state:qualification:run");
+    npm("run", "test:shared-state");
+    npm("run", "test:shared-state:qualification:run");
     npm("test", "-w", "@loomrealm/desktop");
-    npm("pack", "-w", "@loomrealm/realm-state", "-w", "@loomrealm/game-launcher-pwa", "--dry-run");
+    npm("pack", "-w", "@loomrealm/shared-state", "-w", "@loomrealm/game-launcher-pwa", "--dry-run");
   },
 
   "hostra-conformance"() {

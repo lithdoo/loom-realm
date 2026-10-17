@@ -27,7 +27,7 @@ test("Session Events package and Subsystem author boundary expose the frozen sur
   assert.match(subsystemModel, /readonly events: SessionEventClient/);
   assert.match(host, /SessionEventsRuntimeCapability/);
   assert.match(hostRuntime, /readonly events: SessionEventsRuntimeCapability/);
-  assert.match(hostRuntime, /readonly state: RealmStateRuntimeCapability/);
+  assert.match(hostRuntime, /readonly state: SharedStateRuntimeCapability/);
   assert.doesNotMatch(gamePackage, /session-events/);
   assert.doesNotMatch(renderer, /session-events/);
 });
@@ -72,7 +72,7 @@ test("PWA keeps the closed bootstrap and provisions a dedicated Event MessagePor
     [
       "formatVersion", "sessionEpoch", "installationId", "expectedServiceWorker",
       "subsystemKey", "bootstrapToken", "logicalModule", "runtimeControlPort",
-      "realmStatePort", "provisioningPort",
+      "sharedStatePort", "provisioningPort",
     ],
   );
   assert.doesNotMatch(bootstrap, /sessionEvents|eventPort|bindingId/);

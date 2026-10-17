@@ -16,7 +16,7 @@ Desktop 的 readonly storage core 使用 `@loomrealm/fsdb`；`@loomrealm/fsdb-ht
 
 PWA 使用 browser-native physical composition（Service Worker/private installation/runtime-info boundary）提供同一 logical Content contract；Node-only FSDB mechanics 不被提升为 universal framework ABI。
 
-Content capability != executable resolver，URL != filesystem path。Content failure 按 contract 投影，不自动结束 Runtime/Frame；mutable Realm State 与 Render replica 也不能借 Content 建立第二份 truth。
+Content capability != executable resolver，URL != filesystem path。Content failure 按 contract 投影，不自动结束 Runtime/Frame；mutable Shared State 与 Render replica 也不能借 Content 建立第二份 truth。
 
 ## Ownership / validation
 

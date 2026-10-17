@@ -29,7 +29,7 @@ session-scoped PwaPlatform.prepareGame({ installationId })
     ├── Executable Index resolution/preflight
     ├── freeze PwaLaunchPlan
     ├── project LogicalGameBootstrap
-    └── project PreparedRealmStateDefinition
+    └── project PreparedSharedStateDefinition
         ↓
 PreparedPwaGame
         ↓
@@ -42,7 +42,7 @@ Dependencies MAY include existing logical/runtime host packages such as：
 
 ```text
 @loomrealm/game-package
-@loomrealm/realm-state
+@loomrealm/shared-state
 @loomrealm/subsystem/host
 @loomrealm/foundation
 @loomrealm/transport-messageport
@@ -64,7 +64,7 @@ exact subsystem key-set join
 Executable Index resolver/preflight
 immutable PwaLaunchPlan
 LogicalGameBootstrap projection
-PreparedRealmStateDefinition projection
+PreparedSharedStateDefinition projection
 plan lookup helpers for concrete RuntimeHosting
 Worker Runner bootstrap validation helpers
 Runner executable import/ABI validation integration
@@ -79,7 +79,7 @@ PWA installation writes / staging / publish / uninstall / GC
 Service Worker registration/update/routes
 Browser Window lifecycle
 Main authority
-RealmStateAuthority lifecycle ownership
+SharedStateAuthority lifecycle ownership
 Renderer host
 DataAuthority generation/profile
 full DataConnectionBroker policy
@@ -103,7 +103,7 @@ Conceptual internal API：
 ```ts
 interface PreparedPwaGame {
   readonly logicalBootstrap: LogicalGameBootstrap;
-  readonly state: PreparedRealmStateDefinition;
+  readonly state: PreparedSharedStateDefinition;
   readonly launchPlan: PwaLaunchPlan;
 }
 
@@ -181,7 +181,7 @@ credentials
 open complete/current installation
 → obtain Game Entry
 → validate Game Package
-→ project PreparedRealmStateDefinition
+→ project PreparedSharedStateDefinition
 → obtain + validate launch.pwa.json
 → exact key-set join
 → validate every selected logical module
@@ -215,7 +215,7 @@ MUST NOT contain：
 
 ```text
 GameEntry document brand/formatVersion
-Realm State records
+Shared State records
 installationId
 PwaLaunchPlan
 logicalModule/moduleUrl
@@ -277,7 +277,7 @@ Runner sequence：
 validate PwaRunnerBootstrapV1
 → verify expected Service Worker generation via runtime-info
 → construct RuntimeControlBinding
-→ construct Runtime-scoped RealmStateClient
+→ construct Runtime-scoped SharedStateClient
 → construct SubsystemDataBinding from provisioning port
 → construct same-origin PWA ContentClient
 → resolve/import exact planned business module
@@ -379,7 +379,7 @@ bare/absolute/external/dynamic import rejection
 all selected executable entries resolve before Worker side effect
 PwaLaunchPlan immutable/private
 logicalBootstrap excludes physical facts
-PreparedRealmStateDefinition projection
+PreparedSharedStateDefinition projection
 PwaRunnerBootstrapV1 closed-schema validation
 planned module selected exactly
 Definition default export ABI validation
@@ -423,4 +423,4 @@ Complete product remains `apps/pwa` composition root。
 9. Runner bootstrap schema comes from the formal PWA Profile；
 10. Runner constructs same-origin PWA ContentClient, not Desktop bearer distribution；
 11. provisioning stays distinct from application protocols；
-12. this package does not own installer、Renderer、Content service、Main or Realm State authority。
+12. this package does not own installer、Renderer、Content service、Main or Shared State authority。

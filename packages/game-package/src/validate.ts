@@ -9,9 +9,9 @@ import {
   type WirePathSegment,
 } from "@loomrealm/wire";
 import {
-  RealmStateError,
-  prepareRealmStateDefinition,
-} from "@loomrealm/realm-state";
+  SharedStateError,
+  prepareSharedStateDefinition,
+} from "@loomrealm/shared-state";
 import { GamePackageError, type GamePackageErrorCode } from "./errors.js";
 import type { ValidatedGameEntryV1 } from "./model.js";
 import { createValidatedGameEntrySnapshot } from "./snapshot.js";
@@ -112,7 +112,7 @@ function member(object: JsonObject, key: string, path: readonly WirePathSegment[
 
 function isDuplicateInitialRecordFailure(
   records: JsonValue,
-  error: RealmStateError,
+  error: SharedStateError,
 ): boolean {
   if (
     error.code !== "INVALID_REQUEST" ||
@@ -207,7 +207,7 @@ export function validateGameEntryV1(value: unknown): ValidatedGameEntryV1 {
     const state = exactObject(member(entry, "state", []), STATE_KEYS, ["state"]);
     const records = member(state, "records", ["state"]);
     try {
-      const prepared = prepareRealmStateDefinition(records);
+      const prepared = prepareSharedStateDefinition(records);
       const byNamespace = new Map<string, Map<string, (typeof prepared.records)[number]>>();
       for (const record of prepared.records) {
         let collection = byNamespace.get(record.key.namespace);
@@ -225,13 +225,13 @@ export function validateGameEntryV1(value: unknown): ValidatedGameEntryV1 {
         return Object.freeze({ namespace, key, value: preparedRecord.value });
       }));
     } catch (error) {
-      if (error instanceof RealmStateError) {
+      if (error instanceof SharedStateError) {
         const path = Object.freeze(["state", ...(error.path ?? [])] as WirePathSegment[]);
         const code = error.code === "LIMIT_EXCEEDED"
-          ? "REALM_STATE_INITIAL_LIMIT_EXCEEDED"
+          ? "SHARED_STATE_INITIAL_LIMIT_EXCEEDED"
           : isDuplicateInitialRecordFailure(records, error)
-            ? "REALM_STATE_INITIAL_DUPLICATE"
-            : "REALM_STATE_INITIAL_INVALID";
+            ? "SHARED_STATE_INITIAL_DUPLICATE"
+            : "SHARED_STATE_INITIAL_INVALID";
         fail(code, path, error);
       }
       throw error;

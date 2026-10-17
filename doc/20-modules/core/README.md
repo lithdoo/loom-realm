@@ -10,7 +10,7 @@ LoomRealm 分为 **framework/runtime (`packages/`) → reusable game business (`
 | --- | --- | --- | --- |
 | Foundation / Wire / Game Package | 基础类型、bounded message mechanics、logical game topology/validation | `packages/foundation`、`packages/wire`、[`game-package`](../game-package/README.md) | workspace tests / contract conformance |
 | Main / Runtime Control | Session、Runtime、Frame、Activation、InputTarget、DataAuthority 与 failure unwind | `packages/main`、`packages/runtime-control`、[`Main`](../main-system/README.md) | runtime/main qualification suites |
-| Realm State | Session shared mutable Records、versions、OCC、subscriptions、commit revision | `packages/realm-state`、[architecture](../../10-architecture/realm-state-system.md) | `test:realm-state` + integration |
+| Shared State | Session shared mutable Records、versions、OCC、subscriptions、commit revision | `packages/shared-state`、[architecture](../../10-architecture/shared-state-system.md) | `test:shared-state` + integration |
 | Session Events | Session-scoped transient exact-channel routing、bounded serial delivery、replaceable Runtime client | `packages/session-events`、[module](../session-events/README.md) | `test:session-events:packages` + qualification |
 | Subsystem | Domain execution、local business state、Input Interest、Render Domains、Content author API | `packages/subsystem`、[Subsystem](../../10-architecture/subsystem-model.md) | subsystem/render/content tests |
 | Renderer / Web Presentation | current replica、input producer gate、resource client、Web Projector 与 DOM projection | `packages/renderer` 与 related packages、[Renderer](../web-renderer/README.md) | render/input/presentation + Chromium |
@@ -27,7 +27,7 @@ LoomRealm 分为 **framework/runtime (`packages/`) → reusable game business (`
 Game Entry
 → Platform PREPARE / Game Package
 → Session composition
-→ Main + RealmStateAuthority
+→ Main + SharedStateAuthority
 → RuntimeHosting / Runner
 → Subsystem business authority
 → RenderDomain
@@ -35,7 +35,7 @@ Game Entry
 → Web Projector / game-owned Web Components
 ```
 
-输入方向相反，但必须经过 Renderer producer gate、current Data identity、Main InputTarget/Activation 和 Subsystem Interest。Content 通过 prepared readonly boundary 进入业务，不与 mutable Realm State 或 Render replica 混为一类 authority。
+输入方向相反，但必须经过 Renderer producer gate、current Data identity、Main InputTarget/Activation 和 Subsystem Interest。Content 通过 prepared readonly boundary 进入业务，不与 mutable Shared State 或 Render replica 混为一类 authority。
 
 ## 使用约定
 

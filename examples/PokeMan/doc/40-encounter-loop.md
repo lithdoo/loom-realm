@@ -64,7 +64,7 @@ Runtime policy 决定
 └─ 其他业务行为
 ```
 
-只有未来这套行为规则真的要求跨 Frame / Map / Session 持续某些事实时，才根据最小需求决定是否需要 Realm State，以及具体保存什么。
+只有未来这套行为规则真的要求跨 Frame / Map / Session 持续某些事实时，才根据最小需求决定是否需要 Shared State，以及具体保存什么。
 
 因此当前数据设计**不预设**：
 

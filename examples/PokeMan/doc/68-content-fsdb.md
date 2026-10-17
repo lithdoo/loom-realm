@@ -1,6 +1,6 @@
 # Content FSDB 物理模型
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文冻结 PokeMan 当前 Content 的 FSDB 物理组织、record identity、引用编码与跨 record 数据约束。Realm State 物理结构以 [Realm State Record 设计](./67-realm-state-records.md) 为准；业务语义分别见 [人物](./61-character.md)、[事件](./62-event.md)、[固定对话](./64-dialogue.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文冻结 PokeMan 当前 Content 的 FSDB 物理组织、record identity、引用编码与跨 record 数据约束。Shared State 物理结构以 [Shared State Record 设计](./67-shared-state-records.md) 为准；业务语义分别见 [人物](./61-character.md)、[事件](./62-event.md)、[固定对话](./64-dialogue.md)。
 
 # FSDB 前提
 
@@ -149,7 +149,7 @@ BattleActor / BattleSkill / BattleEffect 是 **package-owned contract 的 PokeMa
 
 ## Character key 的额外业务约束
 
-`struct.Character` key 还会进入 `pokeman.Relationship` 与 `pokeman.CarriedCards` 的 Realm State Record key，因此额外固定为：
+`struct.Character` key 还会进入 `pokeman.Relationship` 与 `pokeman.CarriedCards` 的 Shared State Record key，因此额外固定为：
 
 ```text
 [a-z0-9][a-z0-9._-]{0,119}
@@ -161,7 +161,7 @@ BattleActor / BattleSkill / BattleEffect 是 **package-owned contract 的 PokeMa
 <fromCharacterId>:<toCharacterId>
 ```
 
-最大长度为 241 bytes，满足 Realm State v1 的 256-byte key 上限。
+最大长度为 241 bytes，满足 Shared State v1 的 256-byte key 上限。
 
 MVP 玩家 Character identity 固定为：
 
@@ -525,7 +525,7 @@ EventStateMutation
    └─ <eventId>: stateId | null
 ```
 
-`null` 是 Mutation 语义，不是 Realm State 内部 entry 编码：
+`null` 是 Mutation 语义，不是 Shared State 内部 entry 编码：
 
 ```text
 from[eventId] = null
@@ -567,7 +567,7 @@ id
 trigger
 action
 command
-generic Realm State path mutation
+generic Shared State path mutation
 ```
 
 # Event
@@ -876,7 +876,7 @@ defeated persistence
 
 # StoryIndex
 
-StoryIndex 是 Builder 从 Character / Event 等源 Content 生成的派生只读 Content，不是作者业务 authority，也不进入 Realm State。
+StoryIndex 是 Builder 从 Character / Event 等源 Content 生成的派生只读 Content，不是作者业务 authority，也不进入 Shared State。
 
 物理位置：
 
@@ -941,9 +941,9 @@ positive safe integer
 
 在 Character `defaultScenes`、Event `maps`、Encounter record key 中都必须可无歧义解析成对应正整数 Map id，并且必须对应存在的 `struct.Map` record。
 
-Realm State 的 `pokeman.PlayerWorld/current` 只作为 durable resume/checkpoint location，不是 live Map authority；其 `mapId` 同样使用整数业务值并必须指向存在的 Map。当前 live map / x / y / direction 仍由 Map Runtime 拥有。
+Shared State 的 `pokeman.PlayerWorld/current` 只作为 durable resume/checkpoint location，不是 live Map authority；其 `mapId` 同样使用整数业务值并必须指向存在的 Map。当前 live map / x / y / direction 仍由 Map Runtime 拥有。
 
-跨 Content / Realm State 的完整 referential invariant：
+跨 Content / Shared State 的完整 referential invariant：
 
 ```text
 struct.Character/player
@@ -1018,9 +1018,9 @@ CarriedCards(A).servantCharacterId = B
 - Encounter template `battleActor.namespace === "struct.BattleActor"`，且 key 可解析；
 - StoryIndex 与源 Content 一致。
 
-# 与 Realm State 的衔接
+# 与 Shared State 的衔接
 
-Content physical schema 只定义静态数据。长期业务事实已经由 [67-realm-state-records.md](./67-realm-state-records.md) 冻结：
+Content physical schema 只定义静态数据。长期业务事实已经由 [67-shared-state-records.md](./67-shared-state-records.md) 冻结：
 
 ```text
 pokeman.PlayerWorld / current

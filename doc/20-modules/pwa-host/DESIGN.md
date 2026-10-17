@@ -44,7 +44,7 @@ Browser Window
 
 Session Worker (Dedicated Worker)
 ├── Main                         Control Authority
-├── RealmStateAuthority          Session business-state authority
+├── SharedStateAuthority          Session business-state authority
 ├── session-scoped PwaPlatform core
 ├── frozen PwaLaunchPlan
 ├── RuntimeHosting
@@ -66,13 +66,13 @@ Persistent browser installation storage
 └── installation-local immutable OPFS objects
 ```
 
-`Main` and `RealmStateAuthority` are physically co-located but logically separate。
+`Main` and `SharedStateAuthority` are physically co-located but logically separate。
 
-Browser Window MUST NOT host Main or RealmStateAuthority in the v1 baseline。
+Browser Window MUST NOT host Main or SharedStateAuthority in the v1 baseline。
 
 Each Subsystem Runtime MUST live in its own Dedicated Worker。
 
-Service Worker MUST NOT own Session/Runtime/Frame/Input/Renderer/Realm State authority。
+Service Worker MUST NOT own Session/Runtime/Frame/Input/Renderer/Shared State authority。
 
 ---
 
@@ -102,7 +102,7 @@ Desktop/PWA mapping：
 ```text
 Desktop Node                      PWA Session Worker
 ├── Main                          ├── Main
-├── RealmStateAuthority           ├── RealmStateAuthority
+├── SharedStateAuthority           ├── SharedStateAuthority
 └── RuntimeHosting                └── RuntimeHosting
 
 BrowserWindow                     Browser Window
@@ -413,7 +413,7 @@ Launcher flow：
 ```text
 open complete/current installation
 → parse/validate Game Entry
-→ project PreparedRealmStateDefinition
+→ project PreparedSharedStateDefinition
 → parse/validate launch.pwa.json
 → exact Game ↔ PWA subsystem key-set join
 → validate selected executable logical paths
@@ -523,8 +523,8 @@ validate bootstrap
 → runtime-info generation match
 → create PwaPlatform
 → PREPARE
-→ construct RealmStateAuthority
-→ Realm State READY
+→ construct SharedStateAuthority
+→ Shared State READY
 → run Main
 ```
 
@@ -586,7 +586,7 @@ RuntimeHosting is inside Session Worker PwaPlatform。
 Main RuntimeHosting.launch({ subsystemKey, bootstrapToken })
 → lookup frozen PwaLaunchPlan
 → create Runtime Control MessageChannel
-→ create Realm State MessageChannel
+→ create Shared State MessageChannel
 → create Runner provisioning MessageChannel
 → new nested Worker(worker-runner.js, { type: "module" })
 → transfer PwaRunnerBootstrapV1
@@ -604,7 +604,7 @@ interface PwaRunnerBootstrapV1 {
   readonly bootstrapToken: string;
   readonly logicalModule: string;
   readonly runtimeControlPort: MessagePort;
-  readonly realmStatePort: MessagePort;
+  readonly sharedStatePort: MessagePort;
   readonly provisioningPort: MessagePort;
 }
 ```
@@ -615,7 +615,7 @@ Runner：
 validate closed bootstrap
 → runtime-info generation match
 → create RuntimeControlBinding
-→ create Runtime-scoped RealmStateClient
+→ create Runtime-scoped SharedStateClient
 → create SubsystemDataBinding
 → create same-origin PWA ContentClient
 → import exact planned module through private executable route
@@ -629,16 +629,16 @@ Unexpected Worker termination → Runtime failure → Main-owned unwind；v1 no 
 
 ---
 
-## 13. Realm State
+## 13. Shared State
 
 Physical v1：
 
 ```text
 Session Worker
-RealmStateAuthority
+SharedStateAuthority
         ↕ dedicated private MessagePort
 Subsystem Worker
-Runtime-scoped ReplaceableRealmStateClient
+Runtime-scoped ReplaceableSharedStateClient
         ↓
 SubsystemScope.state
 ```
@@ -654,7 +654,7 @@ old client/subscriptions terminal
 != Session terminal
 ```
 
-Existing Realm State replacement fencing、OCC、`OUTCOME_UNKNOWN` semantics stay unchanged。
+Existing Shared State replacement fencing、OCC、`OUTCOME_UNKNOWN` semantics stay unchanged。
 
 ---
 
@@ -777,7 +777,7 @@ Main commits terminal
 → stop new Runtime/Data admission
 → revoke Data/Control/State bindings
 → request/observe Subsystem Worker termination
-→ dispose RealmStateAuthority
+→ dispose SharedStateAuthority
 → close Session-side bridge/material
 → terminate Session Worker
 → Window disposes Renderer/Input/Viewport/Presentation adapters
@@ -958,7 +958,7 @@ Window bootstrap
 → runtime-info generation match
 → PwaPlatform.prepareGame({ installationId })
 → complete PREPARE
-→ Realm State READY
+→ Shared State READY
 → Main running outside Window event loop
 → RuntimeHosting nested Worker
 → Runner generation match
@@ -981,7 +981,7 @@ manifest/key-set/module/graph failure
 nested Worker creation/bootstrap failure
 module load/ABI failure
 Runtime Control hello/ready/loss
-real Realm State client + stale binding fencing
+real Shared State client + stale binding fencing
 unexpected Worker termination / no auto restart
 Renderer Control Window↔Session establishment
 Window main-thread stall without Main physical colocation
@@ -1036,7 +1036,7 @@ Equivalence：
 ```text
 same logical input sequence
 → same Frame/Call observable semantics
-→ same Realm State business facts
+→ same Shared State business facts
 → same game result
 → equivalent logical Render state
 → equivalent logical failure classification / cleanup guarantee
@@ -1074,7 +1074,7 @@ PWA-1 apps/pwa build + root-scope SW + Session Worker bootstrap
 PWA-2 installation bundle/store/staging/publish
 PWA-3 Launcher PREPARE + executable graph/index
 PWA-4 RuntimeHosting + nested Runner + Runtime Control
-PWA-5 Realm State + lifecycle/failure
+PWA-5 Shared State + lifecycle/failure
 PWA-6 same-origin ContentClient + SW Content
 PWA-7 Window Renderer Control/Data
 PWA-8 Input/Viewport/Presentation
@@ -1126,7 +1126,7 @@ Browser adapters should implement these ports, not replace them with a new gener
 ## 27. Final Invariants
 
 1. Window owns presentation/browser adapters only；
-2. Main + RealmStateAuthority live in Session Worker and remain separate logical authorities；
+2. Main + SharedStateAuthority live in Session Worker and remain separate logical authorities；
 3. every Subsystem Runtime is a dedicated Worker；
 4. Service Worker owns only physical Content/executable/runtime-info serving；
 5. PWA runtime host owns `/` SW scope and reserves `/_lr/` in the v1 deployment baseline；
@@ -1139,7 +1139,7 @@ Browser adapters should implement these ports, not replace them with a new gener
 12. executable graph is install-time enumerable relative ESM inside one installation；
 13. Session/Runner bootstrap schemas are frozen by the formal Profile；
 14. Window bridge is provisioning-only；
-15. Renderer Control、Runtime Control、Realm State、Renderer Data remain distinct planes；
+15. Renderer Control、Runtime Control、Shared State、Renderer Data remain distinct planes；
 16. PWA ContentClient uses same-origin Fetch and does not make Desktop bearer optional；
 17. Main receives no module/Worker/Port/storage facts；
 18. Worker Runner is Host-owned constructor entry；

@@ -1,6 +1,6 @@
 # 数据模型图
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文只提供当前 data authority / FSDB identity 的总览图；Realm State 物理结构以 [67-realm-state-records.md](./67-realm-state-records.md) 为准，Content FSDB 结构以 [68-content-fsdb.md](./68-content-fsdb.md) 为准。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文只提供当前 data authority / FSDB identity 的总览图；Shared State 物理结构以 [67-shared-state-records.md](./67-shared-state-records.md) 为准，Content FSDB 结构以 [68-content-fsdb.md](./68-content-fsdb.md) 为准。
 
 # Content / State / Runtime
 
@@ -20,7 +20,7 @@ flowchart TB
     Graphics["resource.Graphics / ..."]
   end
 
-  subgraph State[Realm State]
+  subgraph State[Shared State]
     PlayerWorld["pokeman.PlayerWorld / current\ndurable checkpoint"]
     EventStateList["pokeman.EventStateList / current"]
     Relationship["pokeman.Relationship / <from>:<to>"]
@@ -249,7 +249,7 @@ skills[]  → existing struct.BattleSkill ids
 
 MVP 不保存 `maxIntegrity`，也不建立 `cardId`。
 
-# Realm State absence
+# Shared State absence
 
 ```text
 PlayerWorld/current absent
@@ -292,7 +292,7 @@ flowchart LR
   Resume -->|Load / start new Map Runtime| MapRuntime2["new Map Runtime"]
 ```
 
-不允许 Map Runtime 与 Realm State 同时成为“当前 live player pose”的 authority。
+不允许 Map Runtime 与 Shared State 同时成为“当前 live player pose”的 authority。
 
 # Encounter
 
@@ -317,7 +317,7 @@ template.npc unique per Encounter record
 one template selected at most once per generation
 ```
 
-具体 weighted sampling 实现、spawn selection、seed、re-entry reroll、respawn、defeated persistence、清理时机属于 Runtime/gameplay policy，不建立额外 Content / Realm State 字段。
+具体 weighted sampling 实现、spawn selection、seed、re-entry reroll、respawn、defeated persistence、清理时机属于 Runtime/gameplay policy，不建立额外 Content / Shared State 字段。
 
 # 一句话总览
 
@@ -325,7 +325,7 @@ one template selected at most once per generation
 Content
 = 安装后只读定义；FSDB identity / package binding 已闭环
 
-Realm State
+Shared State
 = 这一局跨 Subsystem 共享的长期 mutable facts
 
 Runtime Memory

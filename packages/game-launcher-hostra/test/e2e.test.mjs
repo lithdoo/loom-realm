@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MainRuntimeFatalError, runMain } from "@loomrealm/main";
-import { createRealmStateAuthority } from "@loomrealm/realm-state";
+import { createSharedStateAuthority } from "@loomrealm/shared-state";
 import { createSessionEventHub } from "@loomrealm/session-events";
 import {
   createHostraRuntimeHosting,
@@ -33,7 +33,7 @@ const scheduler = Object.freeze({
 });
 
 function mainPlatform(prepared) {
-  const authority = createRealmStateAuthority(prepared.state);
+  const authority = createSharedStateAuthority(prepared.state);
   let eventsFatal = false;
   const eventFatalListeners = new Set();
   const sessionEventHub = createSessionEventHub({ onFatal() {
@@ -52,7 +52,7 @@ function mainPlatform(prepared) {
     opaqueMaterial: Object.freeze({ generate: () => randomBytes(32).toString("base64url") }),
     runtimeHosting: createHostraRuntimeHosting({
       launchPlan: prepared.launchPlan,
-      realmStateAuthority: authority,
+      sharedStateAuthority: authority,
       sessionEventHub,
     }),
     sessionEventsFatal,
@@ -148,7 +148,7 @@ test("real Main ↔ Hostra Runner vertical preserves the M5 nested Frame outcome
 });
 
 test("real Game Package → Hostra → Runner State plane shares one Authority across Subsystems", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "loomrealm-state-e2e-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "loomshared-state-e2e-"));
   t.after(async () => {
     const { rm } = await import("node:fs/promises");
     await rm(root, { recursive: true, force: true });

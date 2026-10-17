@@ -4,12 +4,12 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createRendererDataPeer } from "@loomrealm/data";
 import { createMainRuntimeControlPeer } from "@loomrealm/runtime-control";
 import {
-  RealmStateError,
-  createInMemoryRealmStateBinding,
-  createRealmStateAuthority,
-  createRealmStateClient,
-  prepareRealmStateDefinition,
-} from "@loomrealm/realm-state";
+  SharedStateError,
+  createInMemorySharedStateBinding,
+  createSharedStateAuthority,
+  createSharedStateClient,
+  prepareSharedStateDefinition,
+} from "@loomrealm/shared-state";
 import {
   createInMemorySessionEventBinding,
   createSessionEventClient,
@@ -115,7 +115,7 @@ async function createSession(factory, mainOverrides = {}, policy = defaultPolicy
     },
     ...(data === undefined ? {} : { data }),
     state: state ?? (() => {
-      const client = createRealmStateClient();
+      const client = createSharedStateClient();
       return Object.freeze({ client, terminate: () => client.terminate() });
     })(),
     events: events ?? (() => {
@@ -175,7 +175,7 @@ test("production runSubsystem rejects a missing State capability before business
 test("production runSubsystem rejects a missing Session Events capability before business side effects", async () => {
   let definitionCalls = 0;
   let controlAcquires = 0;
-  const stateClient = createRealmStateClient();
+  const stateClient = createSharedStateClient();
   await assert.rejects(runSubsystem({
     definition: () => {
       definitionCalls += 1;
@@ -229,8 +229,8 @@ test("SubsystemScope.events is Runtime-scoped, Frame-independent, and terminal w
 });
 
 test("SubsystemScope.state is Runtime-scoped, Frame-independent, and terminal with the Runtime", async () => {
-  const authority = createRealmStateAuthority(prepareRealmStateDefinition([]));
-  const client = createRealmStateClient(createInMemoryRealmStateBinding(authority));
+  const authority = createSharedStateAuthority(prepareSharedStateDefinition([]));
+  const client = createSharedStateClient(createInMemorySharedStateBinding(authority));
   let scopeState;
   const session = await createSession(
     defineSubsystem((scope) => {
@@ -253,7 +253,7 @@ test("SubsystemScope.state is Runtime-scoped, Frame-independent, and terminal wi
   assert.equal(scopeState, client);
   assert.equal((await scopeState.read([target])).records[0].value, true);
   await shutdown(session);
-  await assert.rejects(scopeState.read([target]), (error) => error instanceof RealmStateError && error.code === "TERMINAL");
+  await assert.rejects(scopeState.read([target]), (error) => error instanceof SharedStateError && error.code === "TERMINAL");
 });
 
 function rendererDataPeer(carrier) {
@@ -904,7 +904,7 @@ test("terminal cleanup is bounded and hook failure never replaces the primary ca
       controlProtocolVersions: [1],
     },
     state: (() => {
-      const client = createRealmStateClient();
+      const client = createSharedStateClient();
       return Object.freeze({ client, terminate: () => client.terminate() });
     })(),
     events: (() => {

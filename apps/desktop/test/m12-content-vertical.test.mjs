@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { createHostraRuntimeHosting as createProductionHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
-import { createRealmStateAuthority, prepareRealmStateDefinition } from "@loomrealm/realm-state";
+import { createSharedStateAuthority, prepareSharedStateDefinition } from "@loomrealm/shared-state";
 import { createSessionEventHub } from "@loomrealm/session-events";
 import { createRendererResourceClient } from "@loomrealm/renderer/resource-client";
 import { createDesktopContentService, prepareDesktopContentView } from "../dist/index.js";
@@ -17,7 +17,7 @@ const scheduler = Object.freeze({ schedule(delayMs, callback) { const timer = se
 const sha256 = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const createHostraRuntimeHosting = (options) => createProductionHostraRuntimeHosting({
   ...options,
-  realmStateAuthority: createRealmStateAuthority(prepareRealmStateDefinition([])),
+  sharedStateAuthority: createSharedStateAuthority(prepareSharedStateDefinition([])),
   sessionEventHub: createSessionEventHub(),
 });
 

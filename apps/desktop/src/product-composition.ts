@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain, type MainSessionResult } from "@loomrealm/main";
-import { createRealmStateAuthority, type RealmStateAuthority } from "@loomrealm/realm-state";
+import { createSharedStateAuthority, type SharedStateAuthority } from "@loomrealm/shared-state";
 import { createSessionEventFatalLatch, createSessionEventHub, type SessionEventHub } from "@loomrealm/session-events";
 import { createDesktopContentService, prepareDesktopContentView, type DesktopContentGrant, type PreparedDesktopContentView } from "./content-service.js";
 import { DesktopDataConnectionBroker } from "./data-broker.js";
@@ -51,7 +51,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
   let broker: DesktopDataConnectionBroker | null = null;
   let rendererControl: LoopbackRendererControlBinding | null = null;
   let main: Promise<MainSessionResult> | null = null;
-  let realmState: RealmStateAuthority | null = null;
+  let sharedState: SharedStateAuthority | null = null;
   let sessionEvents: SessionEventHub | null = null;
   let windowId: string | null = null;
   let termination: Promise<void> | null = null;
@@ -82,7 +82,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
         try { await main; } catch (cause) { mainFailure = cause; }
         observe({ type: "termination-main-finished" });
       }
-      realmState?.terminate();
+      sharedState?.terminate();
       sessionEvents?.terminate();
       retireDocument(reason);
       rendererControl?.close();
@@ -134,14 +134,14 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
     const prepared = await prepareHostraGame({ source: { installationRoot }, runnerPolicy });
     let fatalListener: (() => void) | null = null;
     let fatalLatched = false;
-    realmState = createRealmStateAuthority(prepared.state, {
+    sharedState = createSharedStateAuthority(prepared.state, {
       onFatal() {
         fatalLatched = true;
         fatalListener?.();
       },
     });
-    observe({ type: "startup-stage", stage: "realm-state" });
-    const realmStateFatal = Object.freeze({
+    observe({ type: "startup-stage", stage: "shared-state" });
+    const sharedStateFatal = Object.freeze({
       subscribe(listener: () => void) {
         fatalListener = listener;
         if (fatalLatched) queueMicrotask(listener);
@@ -203,7 +203,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
       launchPlan: prepared.launchPlan,
       contentAccess: { origin: runtimeAccess.origin.href, installationId: runtimeAccess.installationId, token: runtimeAccess.token },
       onRuntimeDataProvisioner: broker.onRuntimeDataProvisioner,
-      realmStateAuthority: realmState,
+      sharedStateAuthority: sharedState,
       sessionEventHub: sessionEvents,
     });
     main = runMain({
@@ -216,7 +216,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
         runtimeHosting,
         rendererControl: rendererControl.binding,
         dataConnections: broker.sink,
-        realmStateFatal,
+        sharedStateFatal,
         sessionEventsFatal: sessionEventsFatal.source,
       }),
     });

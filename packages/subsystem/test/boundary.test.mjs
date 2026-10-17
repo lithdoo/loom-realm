@@ -50,17 +50,17 @@ test("trusted host keeps the exact M8 protocol and port dependency direction", a
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), [
     "@loomrealm/data",
     "@loomrealm/platform-ports",
-    "@loomrealm/realm-state",
     "@loomrealm/runtime-control",
     "@loomrealm/session-events",
+    "@loomrealm/shared-state",
     "@loomrealm/wire",
   ]);
   const declaration = await readFile(new URL("../dist/host/run-subsystem.d.ts", import.meta.url), "utf8");
   assert.match(declaration, /readonly data\?: SubsystemDataBinding/);
-  assert.match(declaration, /readonly state: RealmStateRuntimeCapability/);
+  assert.match(declaration, /readonly state: SharedStateRuntimeCapability/);
   assert.match(declaration, /readonly events: SessionEventsRuntimeCapability/);
   const model = await readFile(new URL("../dist/model.d.ts", import.meta.url), "utf8");
-  assert.match(model, /readonly state: RealmStateClient/);
+  assert.match(model, /readonly state: SharedStateClient/);
   assert.match(model, /readonly events: SessionEventClient/);
 });
 

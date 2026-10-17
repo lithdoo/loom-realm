@@ -2,22 +2,22 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving；Realm State bootstrap semantics synchronized / not implemented / not qualified；Session Events v1 bootstrap/lifetime + current runtime integration profile implemented / qualified
-> 主要定义：Launcher-owned Game/Platform PREPARE、Main/Realm State prepared projection、Realm State + SessionEventHub READY barrier、Runtime Runner / Renderer 的逻辑启动顺序、Control/Data/State/Events 建立关系与 Platform provisioning  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Realm State](./realm-state-system.md)、[Session Events](./session-events-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)  
+> 稳定程度：Evolving；Shared State bootstrap semantics synchronized / not implemented / not qualified；Session Events v1 bootstrap/lifetime + current runtime integration profile implemented / qualified
+> 主要定义：Launcher-owned Game/Platform PREPARE、Main/Shared State prepared projection、Shared State + SessionEventHub READY barrier、Runtime Runner / Renderer 的逻辑启动顺序、Control/Data/State/Events 建立关系与 Platform provisioning  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Shared State](./shared-state-system.md)、[Session Events](./session-events-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)  
 > 被以下文档实现：[程序主系统模块](../20-modules/main-system/README.md)、[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
-> 正式化：[Game Package v1](../15-contracts/game-package-v1.md)、[Realm State v1](../15-contracts/realm-state-v1.md)、[Session Events v1](../15-contracts/session-events-v1.md)、[Session Events Runtime Integration Profile v1](../15-contracts/session-events-runtime-profile-v1.md)、[Hostra Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](../15-contracts/pwa-launcher-profile-v1.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
+> 正式化：[Game Package v1](../15-contracts/game-package-v1.md)、[Shared State v1](../15-contracts/shared-state-v1.md)、[Session Events v1](../15-contracts/session-events-v1.md)、[Session Events Runtime Integration Profile v1](../15-contracts/session-events-runtime-profile-v1.md)、[Hostra Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](../15-contracts/pwa-launcher-profile-v1.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
 > 最近复核：2026-10-13
 
 ---
 
-## 1. Main vs Realm State vs Session Events vs Platform
+## 1. Main vs Shared State vs Session Events vs Platform
 
 ```text
 Main
     owns logical Session Control / Runtime / Frame / Data authority
 
-RealmStateAuthority
+SharedStateAuthority
     owns Session shared mutable business facts
 
 SessionEventHub
@@ -32,9 +32,9 @@ Platform / Session Composition
     owns construction order / wiring / disposal only
 ```
 
-Main 不直接依赖 Node/Worker/WebSocket/MessagePort/module resolver，也不依赖 `@loomrealm/game-package`、concrete launcher 或 Realm State business document。
+Main 不直接依赖 Node/Worker/WebSocket/MessagePort/module resolver，也不依赖 `@loomrealm/game-package`、concrete launcher 或 Shared State business document。
 
-RealmStateAuthority / SessionEventHub MAY 与 Main 同进程/Worker，但不是 Main-owned business fields。Platform/Session composition 即使 physically owns these components，也不得成为第三 application authority。
+SharedStateAuthority / SessionEventHub MAY 与 Main 同进程/Worker，但不是 Main-owned business fields。Platform/Session composition 即使 physically owns these components，也不得成为第三 application authority。
 
 ---
 
@@ -49,7 +49,7 @@ Game source / installation
 → session-scoped concrete Platform.prepareGame(...)
     → matching Launcher component
         → @loomrealm/game-package parse/validate
-        → validate optional Realm State state.records document
+        → validate optional Shared State state.records document
         → current Platform Launch Manifest parse/validate
 ```
 
@@ -63,16 +63,16 @@ initial.input
 subsystems[] {key}
 ```
 
-完整 Subsystem key set 在任何 executable planning/Runtime side effect前校验。Realm State Record identities/values在同一 common Game Entry validation阶段校验，但不参与 executable key-set join。
+完整 Subsystem key set 在任何 executable planning/Runtime side effect前校验。Shared State Record identities/values在同一 common Game Entry validation阶段校验，但不参与 executable key-set join。
 
 ```text
 Subsystem key = logical Runtime/application identity
-RealmStateKey = shared business Record identity
+SharedStateKey = shared business Record identity
 ```
 
-Game Entry不声明 executable module、Realm State physical endpoint、Session Events physical endpoint 或 runtime version/revision metadata。
+Game Entry不声明 executable module、Shared State physical endpoint、Session Events physical endpoint 或 runtime version/revision metadata。
 
-Game Package 的 `state` 是 document representation，不是 RealmStateAuthority runtime bootstrap ABI。
+Game Package 的 `state` 是 document representation，不是 SharedStateAuthority runtime bootstrap ABI。
 
 Session Events v1 不引入 Game Entry event history、channel registry 或 initial subscription document；Event Hub 是 Session service，不需要 Launcher projection业务事件数据。
 
@@ -91,7 +91,7 @@ Launcher component
     → validate current Platform hosting/security capability
     → freeze immutable PlatformLaunchPlan
     → project/freeze LogicalGameBootstrap
-    → project/freeze PreparedRealmStateDefinition
+    → project/freeze PreparedSharedStateDefinition
 
 Concrete Platform
     → install/freeze PlatformLaunchPlan internally
@@ -120,13 +120,13 @@ Prepared current-platform result 概念上包含三个正交 pieces：
 LogicalGameBootstrap
     → Main-visible logical topology / initial Frame input
 
-PreparedRealmStateDefinition
-    → detached/immutable RealmStateAuthority bootstrap baseline
+PreparedSharedStateDefinition
+    → detached/immutable SharedStateAuthority bootstrap baseline
 
 prepared concrete Platform instance
     → owns PlatformLaunchPlan privately
     → exposes narrow Main-facing capability view
-    → owns physical Realm State + Session Events Runtime-binding realization
+    → owns physical Shared State + Session Events Runtime-binding realization
 ```
 
 概念 shape：
@@ -134,7 +134,7 @@ prepared concrete Platform instance
 ```ts
 interface PreparedLogicalGame {
   readonly main: LogicalGameBootstrap;
-  readonly state: PreparedRealmStateDefinition;
+  readonly state: PreparedSharedStateDefinition;
 }
 ```
 
@@ -142,10 +142,10 @@ Launcher owns the projection：
 
 ```text
 ValidatedGameEntryV1.state
-→ PreparedRealmStateDefinition
+→ PreparedSharedStateDefinition
 ```
 
-RealmStateAuthority MUST NOT consume `GameEntryV1` / `RealmStateGameDefinitionV1` as its runtime bootstrap ABI。
+SharedStateAuthority MUST NOT consume `GameEntryV1` / `SharedStateGameDefinitionV1` as its runtime bootstrap ABI。
 
 Composition sequence：
 
@@ -156,11 +156,11 @@ platform.prepareGame(source)
 → returns PreparedLogicalGame {main,state}
 
 select New Game or validated Load sparse current seed
-→ physically construct fresh RealmStateAuthority from prepared.state
+→ physically construct fresh SharedStateAuthority from prepared.state
 → install prepared State immutable baseline
 → apply sparse current overrides
 → revision/version = 0
-→ Realm State READY
+→ Shared State READY
 
 → physically construct fresh SessionEventHub
 → install bounded routing/subscription infrastructure
@@ -192,8 +192,8 @@ Main 不接收：
 ```text
 GameEntryV1 / ValidatedGameEntryV1
 formatVersion
-RealmStateGameDefinitionV1
-PreparedRealmStateDefinition / initial Records
+SharedStateGameDefinitionV1
+PreparedSharedStateDefinition / initial Records
 PlatformLaunchPlan
 module/path/URL
 raw Platform manifest
@@ -205,11 +205,11 @@ Session Event channel/subscription state
 ```text
 first business Runtime side effect
     ⇒ PREPARE complete
-    ∧ Realm State READY
+    ∧ Shared State READY
     ∧ SessionEventHub READY
 ```
 
-Session/Platform composition 在此只拥有 physical construction/order/binding/disposal，不拥有 Main control state、Realm State Record/OCC semantics 或 Session Event business semantics。
+Session/Platform composition 在此只拥有 physical construction/order/binding/disposal，不拥有 Main control state、Shared State Record/OCC semantics 或 Session Event business semantics。
 
 Pre-READY State/Event service construction failure 是 Session bootstrap failure，不要求向一个尚未成为 live lifecycle owner 的 Main伪造 fatal report。
 
@@ -226,7 +226,7 @@ Main creates current Launch Attempt for key
 → RuntimeHosting.launch({subsystemKey:key, bootstrapToken})
 → RuntimeHosting lookup frozen PlatformLaunchPlan[key]
 → Platform creates Host-owned Runner Container
-→ Platform/Runner installs exact Runtime-scoped RealmStateClient binding
+→ Platform/Runner installs exact Runtime-scoped SharedStateClient binding
 → Platform/Runner installs exact Runtime-scoped SessionEventClient binding
 → required initial State/Event bindings are usable
 → Runner loads exact planned Definition Module
@@ -240,7 +240,7 @@ Main creates current Launch Attempt for key
 → status(ready)
 ```
 
-Realm State / Session Events bindings MUST be available **before Definition Module import/initialization can produce business side effects** and before business code can observe `SubsystemScope.state` / `SubsystemScope.events`。
+Shared State / Session Events bindings MUST be available **before Definition Module import/initialization can produce business side effects** and before business code can observe `SubsystemScope.state` / `SubsystemScope.events`。
 
 Current Session Events physical profile：
 
@@ -257,7 +257,7 @@ PWA
 
 ```text
 PREPARE valid
-!= Realm State READY
+!= Shared State READY
 != SessionEventHub READY
 != process/Worker created
 != module loaded
@@ -281,7 +281,7 @@ Hostra Node Runner / PWA Worker Runner
 M6 RuntimeControlBinding
 M8+ SubsystemDataBinding
 M12+ ContentClient
-RealmStateClient
+SharedStateClient
 SessionEventClient
         │
         ▼
@@ -291,11 +291,11 @@ SessionEventClient
 Platform-planned Definition Module
 ```
 
-Runner不创建 RealmStateAuthority / SessionEventHub，也不读取 Game Entry State document或 `PreparedRealmStateDefinition`。它只接收/构造 concrete composition 已绑定到 current Session services 的 Runtime-scoped client capabilities。
+Runner不创建 SharedStateAuthority / SessionEventHub，也不读取 Game Entry State document或 `PreparedSharedStateDefinition`。它只接收/构造 concrete composition 已绑定到 current Session services 的 Runtime-scoped client capabilities。
 
 Definition Module 不读取 Game Entry/Launch Manifest，不接触 physical bootstrap material，也不创建第二 Runtime/State authority或 Event Hub。
 
-Runner/Subsystem host MUST NOT require Frame/Activation identity to install or authorize RealmStateClient / SessionEventClient operations。
+Runner/Subsystem host MUST NOT require Frame/Activation identity to install or authorize SharedStateClient / SessionEventClient operations。
 
 Session Event business-visible `source.subsystemKey` MUST derive from the binding's Runtime identity；business code不能提供/覆盖 source。
 
@@ -317,17 +317,17 @@ Data provisioning offer happened
 Frame/Render/InputTarget exists
 ```
 
-Realm State / Session Events不同：
+Shared State / Session Events不同：
 
 ```text
 business Runtime bootstrap began
-    ⇒ Realm State was READY
+    ⇒ Shared State was READY
     ∧ SessionEventHub was READY
-    ∧ required RealmStateClient binding existed
+    ∧ required SharedStateClient binding existed
     ∧ required SessionEventClient binding existed
 ```
 
-但 `ready` 不代表某个 particular Realm State Record 被 materialized/modified/subscribed，也不代表某个 Session Event channel 已订阅。
+但 `ready` 不代表某个 particular Shared State Record 被 materialized/modified/subscribed，也不代表某个 Session Event channel 已订阅。
 
 Platform Data provisioning capability可以已安装，但“当前没有 Data offer”完全合法。
 
@@ -360,7 +360,7 @@ failed
 
 module path/PID/Worker handle/launchId都不是 protocol identity。
 
-Realm State Record version/global revision、Session Event internal routing/subscription ids也不是 Runtime lifecycle identity。
+Shared State Record version/global revision、Session Event internal routing/subscription ids也不是 Runtime lifecycle identity。
 
 ---
 
@@ -370,7 +370,7 @@ Realm State Record version/global revision、Session Event internal routing/subs
 
 ```text
 Runner/container creation failure
-required Runtime-scoped RealmStateClient binding unavailable before business bootstrap
+required Runtime-scoped SharedStateClient binding unavailable before business bootstrap
 required Runtime-scoped SessionEventClient binding unavailable before business bootstrap
 planned module load/default-export ABI failure
 Control carrier/hello failure
@@ -380,7 +380,7 @@ unexpected Runtime termination
 
 Phase 1 all-required → whole Game Bootstrap失败并统一 cleanup。
 
-RealmStateAuthority fatal / SessionEventHub invariant fatal 是 Session-fatal condition，不作为“仅重启一个 Runtime”恢复点。Service先 self-terminal，再报告；Main/Session lifecycle owner提交 Session terminal/unwind。
+SharedStateAuthority fatal / SessionEventHub invariant fatal 是 Session-fatal condition，不作为“仅重启一个 Runtime”恢复点。Service先 self-terminal，再报告；Main/Session lifecycle owner提交 Session terminal/unwind。
 
 SessionEventHub invariant fatal 报告通过 `MainSessionEventsFatalSource` 的 latched one-shot seam；composition implementing Session Events 必须在 `runMain()` 前提供该 source。Pre-READY Hub construction failure 不走该 live-Hub seam。
 
@@ -407,9 +407,9 @@ InputTarget
 DataAuthority {subsystemKey,generation,dataProfile}
 ```
 
-不携 endpoint/ticket/Port/provisioning handle/module target，也不携 Realm State Records/revision/client material或 Session Event channel/subscription material。
+不携 endpoint/ticket/Port/provisioning handle/module target，也不携 Shared State Records/revision/client material或 Session Event channel/subscription material。
 
-Renderer v1 不直接成为 Realm State / Session Events client。
+Renderer v1 不直接成为 Shared State / Session Events client。
 
 ---
 
@@ -433,11 +433,11 @@ Profile改变是 authority replacement，必须 fresh generation。
 
 ```text
 DataAuthority exists != Data carrier current
-DataAuthority exists != Realm State authority/currentness
+DataAuthority exists != Shared State authority/currentness
 DataAuthority exists != SessionEventHub/client currentness
 ```
 
-Realm State global revision、Session Event channel/source/subscription identity不使用 Data generation/profile。
+Shared State global revision、Session Event channel/source/subscription identity不使用 Data generation/profile。
 
 ---
 
@@ -451,7 +451,7 @@ Main current DataAuthority(S,G,P)
 → install at most one current Data Connection
 ```
 
-Broker不拥有 generation/profile，也不拥有 Realm State binding/authority或 Session Event binding/Hub。
+Broker不拥有 generation/profile，也不拥有 Shared State binding/authority或 Session Event binding/Hub。
 
 ---
 
@@ -471,13 +471,13 @@ Broker
 ```text
 Provisioning != Runtime Control
 Provisioning != ready payload
-Provisioning != Realm State binding
+Provisioning != Shared State binding
 Provisioning != Session Events binding
 ```
 
 Hostra Session Events binding 使用独立 host-owned Events endpoint/environment seam，不依赖 later Renderer Data provisioning。
 
-RealmStateClient / SessionEventClient 是 Runtime bootstrap时已有的 Session capabilities，不依赖 later Renderer Data provisioning。
+SharedStateClient / SessionEventClient 是 Runtime bootstrap时已有的 Session capabilities，不依赖 later Renderer Data provisioning。
 
 ---
 
@@ -524,9 +524,9 @@ carrier A current
 ```text
 restart Runtime
 resume Frame
-replace RealmStateClient
+replace SharedStateClient
 replace SessionEventClient
-reset RealmStateAuthority
+reset SharedStateAuthority
 reset/replay SessionEventHub
 reuse old Input state
 reuse old Render patch base
@@ -551,9 +551,9 @@ Render
     then Patch/Event
 ```
 
-Data reconnect不重建 business capability objects，包括 ContentClient / RealmStateClient / SessionEventClient / Viewport object。
+Data reconnect不重建 business capability objects，包括 ContentClient / SharedStateClient / SessionEventClient / Viewport object。
 
-Realm State subscription recovery是独立机制：old State binding/subscription terminal → 如果 profile 支持恢复则建立 fresh logical client binding → fresh subscribe → fresh Realm State baseline；它不由 Data reconnect触发，也不 transparent reattach old identity。
+Shared State subscription recovery是独立机制：old State binding/subscription terminal → 如果 profile 支持恢复则建立 fresh logical client binding → fresh subscribe → fresh Shared State baseline；它不由 Data reconnect触发，也不 transparent reattach old identity。
 
 Session Events subscription recovery同样独立：old Event binding loss → old subscriptions `binding-terminal` → 如果 profile支持则 fresh binding under same live logical client → future publish + fresh subscribe → no missed-history replay / no old reattach。
 
@@ -564,7 +564,7 @@ Session Events subscription recovery同样独立：old Event binding loss → ol
 Initial Frame source来自已安装的 `LogicalGameBootstrap.initial`：
 
 ```text
-Realm State READY
+Shared State READY
 ∧ SessionEventHub READY
 → Main reads LogicalGameBootstrap initial target/input
 → allocates starting Frame
@@ -575,11 +575,11 @@ Realm State READY
 → publish InputTarget
 ```
 
-Main 不回读 Game Entry document、PreparedRealmStateDefinition、Realm State business data 或 Session Event routing state。
+Main 不回读 Game Entry document、PreparedSharedStateDefinition、Shared State business data 或 Session Event routing state。
 
 Data current不是 Frame activate前置条件；active Frame + no Data/Interest 可以合法暂时没有 ordinary input。
 
-Realm State / Session Events 已经是 business Runtime side effect前置条件；Frame handler 可以通过 Runtime-scoped `scope.state` / `scope.events` 使用它们，但 State commit / Event publish不消费该 Frame/Activation authority。
+Shared State / Session Events 已经是 business Runtime side effect前置条件；Frame handler 可以通过 Runtime-scoped `scope.state` / `scope.events` 使用它们，但 State commit / Event publish不消费该 Frame/Activation authority。
 
 ---
 
@@ -595,13 +595,13 @@ Renderer Control lost
 → Input/Render fresh baselines
 ```
 
-Frame/Render authoritative lifecycles不由 reload推导。RealmStateAuthority/SessionEventHub、Runtime State/Event clients/subscriptions不因 Renderer reload自动替换；只有各自 binding/lifetime规则可改变它们。
+Frame/Render authoritative lifecycles不由 reload推导。SharedStateAuthority/SessionEventHub、Runtime State/Event clients/subscriptions不因 Renderer reload自动替换；只有各自 binding/lifetime规则可改变它们。
 
 ---
 
-## 19. Realm State Failure / Rebinding
+## 19. Shared State Failure / Rebinding
 
-Realm State ordinary operation：
+Shared State ordinary operation：
 
 ```text
 INVALID_REQUEST / LIMIT_EXCEEDED / CONFLICT
@@ -634,7 +634,7 @@ fresh physical binding under same logical client
 → fresh subscribe + fresh baseline
 ```
 
-RealmStateAuthority fatal：
+SharedStateAuthority fatal：
 
 ```text
 → Authority self-terminal
@@ -717,7 +717,7 @@ Hub self-terminal/inert
 ```text
 Main establishes shutdown intent
 → subsystem.shutdown
-→ SDK aborts instance/frame signals and terminals owned Realm State / Session Events observations
+→ SDK aborts instance/frame signals and terminals owned Shared State / Session Events observations
 → if shutdown accepted: bounded wait HostedRuntime.terminated
 → if no successful termination observation: requestTermination()
 → only HostedRuntime.terminated resolution is physical stopped evidence
@@ -725,7 +725,7 @@ Main establishes shutdown intent
 
 如果 Runtime先进入 fatal failure，则走 Main-owned failure terminal path。
 
-Main/Session owner提交 Session terminal 后同时使 RealmStateAuthority / SessionEventHub terminal；individual Runtime terminal只终止该 Runtime State/Event clients/subscriptions，不单独销毁 shared Session services。
+Main/Session owner提交 Session terminal 后同时使 SharedStateAuthority / SessionEventHub terminal；individual Runtime terminal只终止该 Runtime State/Event clients/subscriptions，不单独销毁 shared Session services。
 
 ---
 
@@ -734,17 +734,17 @@ Main/Session owner提交 Session terminal 后同时使 RealmStateAuthority / Ses
 ```text
 1  create session-scoped concrete HostraPlatform / PwaPlatform
 2  platform.prepareGame(source) delegates to matching Launcher component
-3  Launcher validates Game Entry including optional Realm State state document
+3  Launcher validates Game Entry including optional Shared State state document
 4  validate current Platform Launch Manifest
 5  exact Game↔Platform Subsystem key-set join
 6  resolve/preflight all required executable/security capabilities
 7  freeze immutable PlatformLaunchPlan
-8  project/freeze LogicalGameBootstrap + PreparedRealmStateDefinition
+8  project/freeze LogicalGameBootstrap + PreparedSharedStateDefinition
 9  platform installs PlatformLaunchPlan privately; return PreparedLogicalGame {main,state}
 10 select New Game or validated Load sparse current seed
-11 composition constructs fresh RealmStateAuthority from prepared.state
+11 composition constructs fresh SharedStateAuthority from prepared.state
 12 install prepared Game baseline + sparse current overrides; revision/version=0
-13 Realm State READY
+13 Shared State READY
 14 composition constructs SessionEventHub; Session Events READY
 15 install private Runtime State + Event binding factories + sessionEventsFatal source
 16 runMain({bootstrap:prepared.main, platform, policy})
@@ -759,7 +759,7 @@ Main/Session owner提交 Session terminal 后同时使 RealmStateAuthority / Ses
 25 M7+ realize Renderer and publish Renderer Control authority
 26 M8/M9+ publish DataAuthority / provision Data carriers
 27 M10/M11+ establish Input/Render fresh baselines
-28 Realm State operations proceed independently of Renderer Data and Frame/Activation currentness
+28 Shared State operations proceed independently of Renderer Data and Frame/Activation currentness
 29 Session Event publish/subscribe proceeds independently with exact-channel routing + serial subscription delivery
 30 binding recovery remains per-plane; State fresh baseline / Event fresh subscribe, no replay
 31 Main/Session terminal owner commits terminal; State/Event services terminal + graceful Runtime shutdown converge
@@ -772,15 +772,15 @@ Main/Session owner提交 Session terminal 后同时使 RealmStateAuthority / Ses
 ## 23. Final Invariants
 
 1. Game Package validation由 matching Launcher在 Runtime-product path 内调用；
-2. Main不读取 Game Entry、不依赖 Game Package/Realm State document；
-3. PREPARE返回平级 `LogicalGameBootstrap` + `PreparedRealmStateDefinition`；Session Events无 Game history/bootstrap projection；
+2. Main不读取 Game Entry、不依赖 Game Package/Shared State document；
+3. PREPARE返回平级 `LogicalGameBootstrap` + `PreparedSharedStateDefinition`；Session Events无 Game history/bootstrap projection；
 4. executable binding由 current Platform Launch Manifest拥有；
 5. Game/current-platform Subsystem key set严格相等；State Records不参与 executable join；
 6. complete PlatformLaunchPlan + Main/State prepared projections在 Runtime side effect前闭合；
-7. RealmStateAuthority + SessionEventHub fresh construction/READY在任何 business Runtime side effect前完成；
+7. SharedStateAuthority + SessionEventHub fresh construction/READY在任何 business Runtime side effect前完成；
 8. Session/Platform composition只拥有 physical assembly/binding/disposal，不成为第三 application authority；
 9. Main Runtime launch request仍只携 logical key + bootstrapToken，不携 State/Event payload/transport；
-10. Host-owned Runner加载 plan-selected Definition Module并安装 composition-bound RealmStateClient + SessionEventClient；
+10. Host-owned Runner加载 plan-selected Definition Module并安装 composition-bound SharedStateClient + SessionEventClient；
 11. current Session Events profile requires dedicated Hostra WS / PWA MessagePort binding before business Definition import；
 12. launch != loaded != connected != identified != ready；
 13. ready不要求 Renderer Data，但 business Runtime bootstrap要求 State/Event services READY；

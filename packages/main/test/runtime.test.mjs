@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { prepareRendererHelloResultV1 } from "@loomrealm/renderer-control";
-import { createRealmStateClient } from "@loomrealm/realm-state";
+import { createSharedStateClient } from "@loomrealm/shared-state";
 import { createSessionEventClient } from "@loomrealm/session-events";
 import {
   FrameCallRejectedError,
@@ -108,7 +108,7 @@ function createFakePlatform(definitions, options = {}) {
             controlProtocolVersions: [1],
           },
           state: (() => {
-            const client = createRealmStateClient();
+            const client = createSharedStateClient();
             return Object.freeze({ client, terminate: () => client.terminate() });
           })(),
           events: (() => {
@@ -178,9 +178,9 @@ function createFakePlatform(definitions, options = {}) {
     ...(options.dataConnections === undefined
       ? {}
       : { dataConnections: options.dataConnections }),
-    ...(options.realmStateFatal === undefined
+    ...(options.sharedStateFatal === undefined
       ? {}
-      : { realmStateFatal: options.realmStateFatal }),
+      : { sharedStateFatal: options.sharedStateFatal }),
     ...(options.sessionEventsFatal === undefined
       ? {}
       : { sessionEventsFatal: options.sessionEventsFatal }),
@@ -198,7 +198,7 @@ function createFakePlatform(definitions, options = {}) {
   };
 }
 
-test("Realm State fatal fact enters Main's sole Session terminal/unwind path", async () => {
+test("Shared State fatal fact enters Main's sole Session terminal/unwind path", async () => {
   let listener = null;
   const source = Object.freeze({
     subscribe(next) {
@@ -209,7 +209,7 @@ test("Realm State fatal fact enters Main's sole Session terminal/unwind path", a
   const never = new Promise(() => {});
   const fake = createFakePlatform({
     root: defineSubsystem(() => ({ frame: () => never })),
-  }, { realmStateFatal: source });
+  }, { sharedStateFatal: source });
   const result = runMain({
     bootstrap: bootstrap(["root"], "root"),
     platform: fake.platform,
@@ -219,7 +219,7 @@ test("Realm State fatal fact enters Main's sole Session terminal/unwind path", a
   listener();
   await assert.rejects(result, (error) => {
     assert.ok(error instanceof MainRuntimeFatalError);
-    assert.equal(error.failure.code, "REALM_STATE_AUTHORITY_FATAL");
+    assert.equal(error.failure.code, "SHARED_STATE_AUTHORITY_FATAL");
     return true;
   });
   assert.equal(fake.runtimes.get("root").terminated, true);

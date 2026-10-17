@@ -2,11 +2,11 @@ import type { MessageCarrier } from "@loomrealm/foundation";
 import type { PwaLaunchPlan } from "@loomrealm/game-launcher-pwa";
 import type { HostedRuntime, RuntimeHosting, RuntimeLaunchRequest, SubsystemDataBindingResult } from "@loomrealm/platform-ports";
 import {
-  createRealmStateMessagePortCarrier,
-  serveRealmStateCarrier,
-  type RealmStateClient,
-  type RealmStateCarrierServer,
-} from "@loomrealm/realm-state";
+  createSharedStateMessagePortCarrier,
+  serveSharedStateCarrier,
+  type SharedStateClient,
+  type SharedStateCarrierServer,
+} from "@loomrealm/shared-state";
 import {
   createSessionEventMessagePortCarrier,
   serveSessionEventCarrier,
@@ -278,7 +278,7 @@ function requestValid(request: RuntimeLaunchRequest): void {
 export function createPwaRuntimeHosting(options: {
   readonly launchPlan: PwaLaunchPlan;
   readonly sessionEpoch: string;
-  readonly realmStateAuthority: RealmStateClient;
+  readonly sharedStateAuthority: SharedStateClient;
   readonly sessionEventHub: SessionEventHub;
   readonly onRuntimeDataProvisioner?: (runtime: HostedRuntime, provisioner: PwaRuntimeDataProvisioner) => void;
   readonly onRuntimeSessionEventProvisioner?: (
@@ -303,7 +303,7 @@ export function createPwaRuntimeHosting(options: {
       const provisioning = new MessageChannel();
       const provisioner = new RunnerDataProvisioner(provisioning.port1, request.subsystemKey);
       const eventProvisioner = new RunnerSessionEventProvisioner(provisioning.port1, request.subsystemKey);
-      let stateServer: RealmStateCarrierServer | null = serveRealmStateCarrier(options.realmStateAuthority, createRealmStateMessagePortCarrier(state.port1));
+      let stateServer: SharedStateCarrierServer | null = serveSharedStateCarrier(options.sharedStateAuthority, createSharedStateMessagePortCarrier(state.port1));
       let eventServer: SessionEventCarrierServer | null = null;
       const worker = new Worker(new URL("./worker-runner.js", import.meta.url), { type: "module", name: `loomrealm-${request.subsystemKey}` });
       const ended = deferred<void>();
@@ -344,7 +344,7 @@ export function createPwaRuntimeHosting(options: {
         logicalModule: runtime.logicalModule,
         bootstrapToken: request.bootstrapToken,
         runtimeControlPort: control.port2,
-        realmStatePort: state.port2,
+        sharedStatePort: state.port2,
         provisioningPort: provisioning.port2,
       });
       try { worker.postMessage(bootstrap, [control.port2, state.port2, provisioning.port2]); }

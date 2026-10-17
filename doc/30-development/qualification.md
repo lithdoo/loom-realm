@@ -21,7 +21,7 @@ behavior / qualification-input change
 
 2026-10-09 项目级 qualification backlog 已收口；最终已记录的 Terrain/performance executable/qualification-input subject 为 `8131f6dd140ac21edb52879eb9ec1fd1a8cd7ba9`。该事实只描述当时的已测 subject，不承诺未来 HEAD 自动 Qualified。
 
-长期规则而不是 milestone ledger 才是 Current SSOT。旧 M11/M14/M15、Realm State、Viewport、PWA ledger 仍作为 exact-subject evidence 保留在 `../30-implementation/`，但不再承担导航或项目路线图职责。
+长期规则而不是 milestone ledger 才是 Current SSOT。旧 M11/M14/M15、Shared State、Viewport、PWA ledger 仍作为 exact-subject evidence 保留在 `../30-implementation/`，但不再承担导航或项目路线图职责。
 
 ## Evidence 最低要求
 

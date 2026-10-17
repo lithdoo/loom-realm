@@ -1,5 +1,5 @@
 import type { JsonObject, JsonValue } from "@loomrealm/wire";
-import type { GameEntryV1, RealmStateGameRecordV1, ValidatedGameEntryV1 } from "./model.js";
+import type { GameEntryV1, SharedStateGameRecordV1, ValidatedGameEntryV1 } from "./model.js";
 
 interface CloneFrame {
   readonly source: JsonObject | readonly JsonValue[];
@@ -84,7 +84,7 @@ export function createValidatedGameEntrySnapshot(
   initialSubsystem: string,
   initialInput: JsonValue,
   subsystemKeys: readonly string[],
-  stateRecords?: readonly RealmStateGameRecordV1[],
+  stateRecords?: readonly SharedStateGameRecordV1[],
 ): ValidatedGameEntryV1 {
   const input = snapshotJsonValue(initialInput);
   const initial = Object.freeze({ subsystem: initialSubsystem, input });

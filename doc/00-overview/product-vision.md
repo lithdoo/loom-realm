@@ -18,7 +18,7 @@ LoomRealm 是一个将 **platform-neutral logical game runtime** 与 **platform-
 - concrete game 声明 logical Subsystem topology、初始输入与只读安装内容；
 - Platform Launcher 完成当前平台 executable/provisioning PREPARE；
 - Main 管理 Session/control-flow，而不解析安装文档或业务状态；
-- Realm State 独立持有 session 共享可变业务状态；
+- Shared State 独立持有 session 共享可变业务状态；
 - Subsystem 持有 domain execution、local state 与 authoritative Render Domains；
 - Renderer 维护 current readonly presentation replica，并作为受控 Input producer；
 - Content 是 installation-scoped readonly definition authority；
@@ -31,7 +31,7 @@ Main
     Control Authority
     Session / Runtime / Frame / Activation / InputTarget / DataAuthority
 
-Realm State
+Shared State
     Session Shared Business State Authority
     Records / versions / OCC / commit revision
 
@@ -82,7 +82,7 @@ Game logical topology
 ```text
 Platform PREPARE
 → Session composition
-→ Main + RealmStateAuthority READY
+→ Main + SharedStateAuthority READY
 → RuntimeHosting launches Subsystem Runtime
 → Subsystem business behavior
 → RenderDomain authoritative updates
@@ -91,9 +91,9 @@ Platform PREPARE
 → Web presentation projection
 ```
 
-Input 反向流动，但只能经过 current Renderer/Data/InputTarget/Activation/Interest gates；DOM 或业务 Web Component 不得反向成为 Store、Main、Realm State 或 Subsystem authority。
+Input 反向流动，但只能经过 current Renderer/Data/InputTarget/Activation/Interest gates；DOM 或业务 Web Component 不得反向成为 Store、Main、Shared State 或 Subsystem authority。
 
-Realm State 与 Renderer Data 是两个不同 lifetime/currentness domain：共享业务状态不会因为 Renderer reload 或 Data reconnect 被重置；presentation 只能通过 Subsystem business logic → RenderDomain → Renderer projection 间接反映 Realm State。
+Shared State 与 Renderer Data 是两个不同 lifetime/currentness domain：共享业务状态不会因为 Renderer reload 或 Data reconnect 被重置；presentation 只能通过 Subsystem business logic → RenderDomain → Renderer projection 间接反映 Shared State。
 
 ## 5. Content 与 game libraries
 
@@ -140,7 +140,7 @@ Browser Window
     Renderer / Input / Viewport / Presentation
         ↕ dedicated application ports
 Session Worker
-    Main + Realm State
+    Main + Shared State
         ↓
 Dedicated Subsystem Workers
 
@@ -159,8 +159,8 @@ Service Worker
 ## 8. Product invariants
 
 1. logical game definition 与 physical platform binding 分离；
-2. Main 只拥有 Control Authority，不吸收 Realm State 或业务 local state；
-3. Realm State 只拥有 session shared mutable business truth；
+2. Main 只拥有 Control Authority，不吸收 Shared State 或业务 local state；
+3. Shared State 只拥有 session shared mutable business truth；
 4. Subsystem 是业务执行与 RenderDomain authority；
 5. Renderer 是 readonly/current presentation replica，不是业务 authority；
 6. Content 是 readonly installation definition authority；

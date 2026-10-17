@@ -5,19 +5,19 @@
 > Profile Version：1  
 > M6 Runtime Slice：Frozen / Implemented / Qualified；conditional Electron-composition execution corrected by [ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
 > M8+ Data / M12+ Content slices：Implemented / qualified on their owner milestones  
-> Realm State slice：Implemented / dedicated Hostra binding / independently qualified
+> Shared State slice：Implemented / dedicated Hostra binding / independently qualified
 > M6 冻结日期：2026-09-02  
-> 依赖：[Game Package v1](./game-package-v1.md)、[Realm State v1](./realm-state-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)、[Renderer Data Profile v1](./renderer-data-profile-v1.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
+> 依赖：[Game Package v1](./game-package-v1.md)、[Shared State v1](./shared-state-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)、[Renderer Data Profile v1](./renderer-data-profile-v1.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
 > 相关：[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-10-05
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
-> **本 Profile 描述 `@loomrealm/game-launcher-hostra` 的 PREPARE + Node Runner contract。它不描述 external `lithdoo/hostra` Electron shell/window manager。Canonical M15 outer composition由 ADR0034 + M15 physical SSOT拥有。Realm State v1 使用独立 binding 与 qualification，且不扩大历史 M6/M8/M12/M15 evidence。**
+> **本 Profile 描述 `@loomrealm/game-launcher-hostra` 的 PREPARE + Node Runner contract。它不描述 external `lithdoo/hostra` Electron shell/window manager。Canonical M15 outer composition由 ADR0034 + M15 physical SSOT拥有。Shared State v1 使用独立 binding 与 qualification，且不扩大历史 M6/M8/M12/M15 evidence。**
 
 核心原则：
 
-> **Hostra Launcher 是 Hostra launch-profile Runtime-product Game Entry consumer。它在任何 Subsystem Runtime side effect 前完成 common Game validation、Hostra executable binding、安全 preflight、immutable HostraLaunchPlan，并分别投影 Main 的 LogicalGameBootstrap 与 Realm State 的 PreparedRealmStateDefinition。Host-owned Node Runner 是唯一 business Runtime process entry；它只安装 Runtime-scoped RealmStateClient，不拥有 RealmStateAuthority。**
+> **Hostra Launcher 是 Hostra launch-profile Runtime-product Game Entry consumer。它在任何 Subsystem Runtime side effect 前完成 common Game validation、Hostra executable binding、安全 preflight、immutable HostraLaunchPlan，并分别投影 Main 的 LogicalGameBootstrap 与 Shared State 的 PreparedSharedStateDefinition。Host-owned Node Runner 是唯一 business Runtime process entry；它只安装 Runtime-scoped SharedStateClient，不拥有 SharedStateAuthority。**
 
 ---
 
@@ -42,11 +42,11 @@ M8+
 M12+
     ContentClient / Content integration
 
-Realm State v1 slice
+Shared State v1 slice
     validate Game Entry optional state through Game Package
-    project PreparedRealmStateDefinition
-    Session RealmStateAuthority READY barrier
-    Runtime-scoped RealmStateClient binding
+    project PreparedSharedStateDefinition
+    Session SharedStateAuthority READY barrier
+    Runtime-scoped SharedStateClient binding
 ```
 
 因此：
@@ -54,7 +54,7 @@ Realm State v1 slice
 ```text
 M6 MUST NOT create dormant provisioning IPC merely for future conformance
 M6 Runtime slice conformance != full future Profile v1 capability completion
-historical M6/M8/M12/M15 qualification != Realm State qualification
+historical M6/M8/M12/M15 qualification != Shared State qualification
 ```
 
 Sections explicitly describing later capability additions do not retroactively change frozen historical implementation evidence。
@@ -63,7 +63,7 @@ Sections explicitly describing later capability additions do not retroactively c
 
 ## 2. Runtime Product Flow
 
-Current + Realm State prepared target：
+Current + Shared State prepared target：
 
 ```text
 Hostra installation
@@ -77,15 +77,15 @@ Hostra Launcher PREPARE
     ├── current trusted process.execPath / Runner preflight
     ├── immutable HostraLaunchPlan
     ├── immutable LogicalGameBootstrap
-    └── immutable PreparedRealmStateDefinition
+    └── immutable PreparedSharedStateDefinition
         ↓
 PreparedHostraGame
         ↓
 session-scoped composition installs plan
         ↓
-construct RealmStateAuthority from prepared State
+construct SharedStateAuthority from prepared State
 → optional validated Load current overrides
-→ Realm State READY
+→ Shared State READY
         ↓
 existing Main launch({subsystemKey, bootstrapToken})
         ↓
@@ -93,14 +93,14 @@ plan-bound RuntimeHosting
         ↓
 attempt-local WS + Host-owned Node Runner
         ↓
-install Runtime-scoped RealmStateClient
+install Runtime-scoped SharedStateClient
         ↓
 selected Definition Module
 ```
 
 ```text
 PREPARE valid
-!= Realm State READY
+!= Shared State READY
 != Runner spawned
 != business module imported
 != connected
@@ -108,7 +108,7 @@ PREPARE valid
 != ready
 ```
 
-Business Runtime side effect requires PREPARE complete + Realm State READY once the Realm State slice is implemented。
+Business Runtime side effect requires PREPARE complete + Shared State READY once the Shared State slice is implemented。
 
 Product application MUST NOT be required to call `@loomrealm/game-package` before Hostra Launcher。
 
@@ -152,13 +152,13 @@ Control endpoint
 bootstrap token
 Data endpoint/ticket
 Content credential
-Realm State endpoint/credential/persistence policy
+Shared State endpoint/credential/persistence policy
 Supervisor policy
 absolute path
 external URL
 ```
 
-Realm State namespace/key/value MUST NOT appear in Hostra Launch Manifest as executable configuration；they remain Game Package document/business facts。
+Shared State namespace/key/value MUST NOT appear in Hostra Launch Manifest as executable configuration；they remain Game Package document/business facts。
 
 ---
 
@@ -189,10 +189,10 @@ ValidatedGameEntryV1.initial/subsystems
     → LogicalGameBootstrap
 
 ValidatedGameEntryV1.state
-    → PreparedRealmStateDefinition
+    → PreparedSharedStateDefinition
 ```
 
-`RealmStateGameDefinitionV1` is a Game Package document type。It MUST NOT be passed directly to RealmStateAuthority as runtime bootstrap ABI。`PreparedRealmStateDefinition` is owned by Realm State semantics and MUST be detached/immutable/platform-neutral。
+`SharedStateGameDefinitionV1` is a Game Package document type。It MUST NOT be passed directly to SharedStateAuthority as runtime bootstrap ABI。`PreparedSharedStateDefinition` is owned by Shared State semantics and MUST be detached/immutable/platform-neutral。
 
 ---
 
@@ -221,7 +221,7 @@ duplicate Hostra binding key
 
 Ordering MAY differ。Runtime identity always comes from logical key；module path is never a second identity。
 
-Realm State Record identities do not participate in executable key-set join。
+Shared State Record identities do not participate in executable key-set join。
 
 ---
 
@@ -283,7 +283,7 @@ interface ResolvedHostraSubsystemModuleV1 {
 }
 ```
 
-`physicalModule` MUST NOT enter Game Entry、LogicalGameBootstrap、PreparedRealmStateDefinition、Main authority、Realm State values、Renderer、Frame、Data、Render or business payload。
+`physicalModule` MUST NOT enter Game Entry、LogicalGameBootstrap、PreparedSharedStateDefinition、Main authority、Shared State values、Renderer、Frame、Data、Render or business payload。
 
 M6 freezes：
 
@@ -412,7 +412,7 @@ Ordinary launch MUST NOT re-read Game/manifest or re-resolve selected module pol
 
 ---
 
-## 10. Main / Realm State Prepared Projections
+## 10. Main / Shared State Prepared Projections
 
 Main projection：
 
@@ -426,12 +426,12 @@ interface LogicalGameBootstrap {
 }
 ```
 
-Realm State sibling projection：
+Shared State sibling projection：
 
 ```ts
 interface PreparedLogicalGame {
   readonly main: LogicalGameBootstrap;
-  readonly state: PreparedRealmStateDefinition;
+  readonly state: PreparedSharedStateDefinition;
 }
 ```
 
@@ -440,13 +440,13 @@ interface PreparedLogicalGame {
 ```text
 formatVersion
 validated Game brand/model
-Realm State records
+Shared State records
 module/logicalModule/physicalModule
 HostraLaunchPlan
 Node/Runner/process material
 ```
 
-`PreparedRealmStateDefinition` MUST contain only Realm State prepared baseline facts allowed by Realm State v1 and MUST NOT contain：
+`PreparedSharedStateDefinition` MUST contain only Shared State prepared baseline facts allowed by Shared State v1 and MUST NOT contain：
 
 ```text
 Game Package formatVersion/document brand
@@ -457,7 +457,7 @@ Frame/Activation/InputTarget
 
 Prepared result MUST NOT be released until HostraLaunchPlan + both logical projections are complete and immutable。
 
-Realm State physical realization remains independent from projection：Hostra uses its dedicated private State WebSocket plane；this rule does not create a universal transport。
+Shared State physical realization remains independent from projection：Hostra uses its dedicated private State WebSocket plane；this rule does not create a universal transport。
 
 ---
 
@@ -470,11 +470,11 @@ launch({subsystemKey, bootstrapToken}, signal)
 → HostedRuntime
 ```
 
-Main MUST NOT pass GameEntry、manifest、module/path、Node flags、PreparedRealmStateDefinition、Realm State value/revision or Hostra material。
+Main MUST NOT pass GameEntry、manifest、module/path、Node flags、PreparedSharedStateDefinition、Shared State value/revision or Hostra material。
 
 No public `launchId` is required。Internal attempt ids MAY exist for diagnostics but are not Runtime identity/protocol/request material。
 
-RuntimeHosting owns physical creation facts only；it does not own Frame/Activation/InputTarget/Runtime ready/failure unwind authority，也不拥有 Realm State Record/OCC/Session-terminal policy。
+RuntimeHosting owns physical creation facts only；it does not own Frame/Activation/InputTarget/Runtime ready/failure unwind authority，也不拥有 Shared State Record/OCC/Session-terminal policy。
 
 ---
 
@@ -501,7 +501,7 @@ WS capability != bootstrapToken != Runtime identity
 
 MUST NOT add query-token、Authorization or custom transport hello。Existing Runtime Control `subsystemKey + bootstrapToken` owns identification/authentication。
 
-Realm State binding is a separate Runtime-scoped capability and MUST NOT be encoded as Runtime Control identity/auth material。
+Shared State binding is a separate Runtime-scoped capability and MUST NOT be encoded as Runtime Control identity/auth material。
 
 ---
 
@@ -567,7 +567,7 @@ spawned != connected != identified != ready
 
 RuntimeHosting owns spawned/connected；existing Runtime Control/Main own identified/ready。
 
-Realm State READY is a sibling Session bootstrap condition and MUST NOT be inferred from Runtime Control connected/identified/ready。
+Shared State READY is a sibling Session bootstrap condition and MUST NOT be inferred from Runtime Control connected/identified/ready。
 
 ---
 
@@ -600,15 +600,15 @@ Encoded JSON MUST be ≤ 16_384 UTF-8 bytes and closed-validated。
 MUST NOT contain：
 
 ```text
-GameEntryV1 / LogicalGameBootstrap / PreparedRealmStateDefinition
-Realm State business values/revision/version
+GameEntryV1 / LogicalGameBootstrap / PreparedSharedStateDefinition
+Shared State business values/revision/version
 Frame/Activation
 business initial input
 Renderer/Data material
 Content bearer
 ```
 
-The exact physical RealmStateClient binding material, when implemented, MUST use a private dedicated bootstrap/binding seam owned by concrete composition；it MUST NOT silently expand this frozen M6 Control bootstrap envelope unless a later profile revision explicitly freezes such a change。
+The exact physical SharedStateClient binding material, when implemented, MUST use a private dedicated bootstrap/binding seam owned by concrete composition；it MUST NOT silently expand this frozen M6 Control bootstrap envelope unless a later profile revision explicitly freezes such a change。
 
 Runner MUST consume/scrub Control bootstrap before business import：
 
@@ -659,7 +659,7 @@ arbitrary secrets
 
 External Hostra shell credentials MUST NOT leak merely because canonical M15 LoomRealm Desktop is its `HOSTRA_SUBCMD` child；the launch profile's child env remains this strict allowlist + explicitly frozen LoomRealm host-owned values。
 
-Realm State binding material MUST NOT reuse Content bearer、Data ticket、bootstrapToken or external Hostra credential。
+Shared State binding material MUST NOT reuse Content bearer、Data ticket、bootstrapToken or external Hostra credential。
 
 ---
 
@@ -698,11 +698,11 @@ consume/scrub Control bootstrap
 → runSubsystem(...)
 ```
 
-Realm State v1 adds only role-local capability installation before business Definition can observe scope：
+Shared State v1 adds only role-local capability installation before business Definition can observe scope：
 
 ```text
-Realm State already READY at Session level
-→ concrete composition establishes Runtime-scoped RealmStateClient binding
+Shared State already READY at Session level
+→ concrete composition establishes Runtime-scoped SharedStateClient binding
 → Runner passes binding/client into @loomrealm/subsystem/host
 → Business Definition observes scope.state
 ```
@@ -710,16 +710,16 @@ Realm State already READY at Session level
 Runner MUST NOT：
 
 ```text
-create RealmStateAuthority
-parse GameEntryV1.state / PreparedRealmStateDefinition
-interpret Realm State namespace/value
+create SharedStateAuthority
+parse GameEntryV1.state / PreparedSharedStateDefinition
+interpret Shared State namespace/value
 require Frame/Activation to authorize state.commit()
 map State binding loss to Main Runtime/Session failure by itself
 ```
 
 Runner MUST NOT fallback to package main、directory index、CommonJS、alternate module or arbitrary argv。
 
-M6 historical `runSubsystem` received Runtime Control capability only。Subsystem Data binding is M8+；Content integration is M12+；Realm State v1 is now a separately implemented/qualified slice。
+M6 historical `runSubsystem` received Runtime Control capability only。Subsystem Data binding is M8+；Content integration is M12+；Shared State v1 is now a separately implemented/qualified slice。
 
 ---
 
@@ -735,7 +735,7 @@ be accepted as SubsystemDefinitionFactory by @loomrealm/subsystem/host
 
 Different platforms MAY select different artifacts while preserving shared author/host ABI and business-observable semantics。
 
-Realm State author surface, when implemented, is supplied through `@loomrealm/subsystem` as Runtime-scoped `scope.state`; Definition Module MUST NOT import launcher/Authority/transport internals。
+Shared State author surface, when implemented, is supplied through `@loomrealm/subsystem` as Runtime-scoped `scope.state`; Definition Module MUST NOT import launcher/Authority/transport internals。
 
 Runner-local module load/ABI failures MAY use bounded diagnostics and nonzero exit；M6 does not require a second Runner→Parent typed-status protocol。
 
@@ -761,7 +761,7 @@ unexpected socket/error → {kind:"lost", cause}
 
 MUST NOT parse JSON/JSON-RPC、authenticate Runtime hello、retry、reconnect or own application deadlines。
 
-This M6 Runtime Control WS is not Realm State transport。Realm State uses a separate private WebSocket endpoint without changing this Control profile。
+This M6 Runtime Control WS is not Shared State transport。Shared State uses a separate private WebSocket endpoint without changing this Control profile。
 
 ---
 
@@ -794,7 +794,7 @@ Caller abort before commit rejects without starting convergence。Caller abort a
 
 POSIX/Windows mechanics MAY differ；observable requirement is bounded physical convergence + actual exit fact。No automatic restart in v1。
 
-Realm State binding loss alone MUST NOT trigger this physical Runtime termination convergence。RealmStateAuthority fatal is reported to Main/Session owner; only the owner-committed Session terminal feeds the existing product termination/cleanup chain。
+Shared State binding loss alone MUST NOT trigger this physical Runtime termination convergence。SharedStateAuthority fatal is reported to Main/Session owner; only the owner-committed Session terminal feeds the existing product termination/cleanup chain。
 
 M15 external Hostra shell may independently signal its direct LoomRealm `HOSTRA_SUBCMD` child；that product-level signal is outside this Profile and must converge through Main/RuntimeHosting rather than directly killing this Runner from Desktop code。
 
@@ -829,11 +829,11 @@ Subsystem host fatal failure
 
 After HostedRuntime ownership transfer, unexpected process exit—including code 0 without Main termination intent—is a physical fact consumed by existing Main Runtime failure authority；Launcher MUST NOT duplicate that state machine。
 
-Realm State failure ownership remains separate：
+Shared State failure ownership remains separate：
 
 ```text
 State invalid/limit/conflict
-    caller-visible Realm State result
+    caller-visible Shared State result
 
 State subscription listener failure
     Runtime-local containment / diagnostics
@@ -841,13 +841,13 @@ State subscription listener failure
 State physical binding loss
     affected State binding/client terminal only
 
-RealmStateAuthority fatal
+SharedStateAuthority fatal
     Session-fatal condition report to Main/Session lifecycle owner
 ```
 
 Launcher/Runner MUST NOT convert these facts into a second Runtime/Session failure state machine。
 
-User-facing material MUST NOT leak bootstrap token、attempt capability、sensitive env、Realm State private binding material、unnecessary physical paths or internal stack。
+User-facing material MUST NOT leak bootstrap token、attempt capability、sensitive env、Shared State private binding material、unnecessary physical paths or internal stack。
 
 ---
 
@@ -869,7 +869,7 @@ Broker/Launcher MUST NOT mint generation/profile。Provisioning failure remains 
 
 This extension reuses the same Runner child/process boundary；it is independent of whether the conditional ADR0033 Electron execution branch is used。
 
-Realm State binding MUST NOT use Data candidate/current provisioning or generation/profile as its identity/currentness model。
+Shared State binding MUST NOT use Data candidate/current provisioning or generation/profile as its identity/currentness model。
 
 ---
 
@@ -879,51 +879,51 @@ ContentClient/Content bearer integration enters the same Runner only through the
 
 Runner environment MAY contain the dedicated host-generated Content access value required by current M12 implementation；business code receives only bound `ContentClient` and not bearer/origin/path。
 
-Content bearer MUST NOT be reused as Realm State credential/binding authority。Readonly Content definition and mutable Realm State remain separate application authorities/capabilities。
+Content bearer MUST NOT be reused as Shared State credential/binding authority。Readonly Content definition and mutable Shared State remain separate application authorities/capabilities。
 
 ---
 
-## 24. Realm State v1 Slice — Implemented Boundary
+## 24. Shared State v1 Slice — Implemented Boundary
 
-This section is **not historical M6/M8/M12 evidence**。The implemented Hostra State plane and its independent qualification preserve the ownership compatibility required by Realm State v1。
+This section is **not historical M6/M8/M12 evidence**。The implemented Hostra State plane and its independent qualification preserve the ownership compatibility required by Shared State v1。
 
 Required logical flow：
 
 ```text
 Hostra Launcher PREPARE
     validates GameEntryV1.state through Game Package
-    projects PreparedRealmStateDefinition
+    projects PreparedSharedStateDefinition
 
 Session composition
-    constructs one RealmStateAuthority
+    constructs one SharedStateAuthority
     applies optional validated Load seed
     reaches State READY
 
 for each Runtime
-    concrete composition creates Runtime-scoped RealmStateClient binding
+    concrete composition creates Runtime-scoped SharedStateClient binding
     Runner installs it before business Definition observes scope
 ```
 
-Hostra Realm State implementation MUST NOT：
+Hostra Shared State implementation MUST NOT：
 
 ```text
 put State business values in LogicalGameBootstrap
-put PreparedRealmStateDefinition in Main RuntimeLaunchRequest
+put PreparedSharedStateDefinition in Main RuntimeLaunchRequest
 put State requests in Runtime Control / renderer-data
 use Frame/Activation as commit authorization
-let Runner own RealmStateAuthority
+let Runner own SharedStateAuthority
 let State binding loss fail Runtime/Session automatically
 let Authority directly own Main Session/Frame unwind
 reuse Content/Data credentials implicitly
 ```
 
-RealmStateAuthority MAY run in the LoomRealm Desktop process next to Main, but same-process placement MUST preserve separate logical owner/API。
+SharedStateAuthority MAY run in the LoomRealm Desktop process next to Main, but same-process placement MUST preserve separate logical owner/API。
 
 Subscription callbacks MUST execute outside Authority serialized lane；listener failure remains Runtime-local, and listener reentrancy MUST NOT deadlock Authority。
 
-RealmStateAuthority fatal only reports Session-fatal condition。Main/Session lifecycle owner commits terminal; concrete Hostra product then converges through its existing termination/cleanup chain。
+SharedStateAuthority fatal only reports Session-fatal condition。Main/Session lifecycle owner commits terminal; concrete Hostra product then converges through its existing termination/cleanup chain。
 
-Exact client/binding interface、queue bound、wire/error shape and qualification remain owned by Realm State v1 and its independent ledger。
+Exact client/binding interface、queue bound、wire/error shape and qualification remain owned by Shared State v1 and its independent ledger。
 
 ---
 
@@ -960,10 +960,10 @@ Linux + Windows qualification
 actual packed Runner artifact smoke
 ```
 
-Realm State slice, once frozen/implemented, additionally requires its own qualification evidence for：
+Shared State slice, once frozen/implemented, additionally requires its own qualification evidence for：
 
 ```text
-Game document state → PreparedRealmStateDefinition projection
+Game document state → PreparedSharedStateDefinition projection
 State READY before business Runtime side effect
 Main launch request contains no State material
 Runner installs Runtime-scoped client but owns no Authority
@@ -992,7 +992,7 @@ external pinned Hostra shell
 → Runner
 ```
 
-The two evidence subjects must not be conflated；neither is Realm State qualification by itself。
+The two evidence subjects must not be conflated；neither is Shared State qualification by itself。
 
 ---
 
@@ -1000,25 +1000,25 @@ The two evidence subjects must not be conflated；neither is Realm State qualifi
 
 1. Hostra Launcher owns launch-profile Runtime-product Game Entry consumption；
 2. common Game validation including optional State document happens inside Launcher PREPARE；
-3. Game/Hostra Subsystem key sets are exactly equal；Realm State keys do not participate in executable join；
-4. HostraLaunchPlan + LogicalGameBootstrap + PreparedRealmStateDefinition freeze before business Runtime side effects；
-5. Game Package State document type is not RealmStateAuthority bootstrap ABI；
+3. Game/Hostra Subsystem key sets are exactly equal；Shared State keys do not participate in executable join；
+4. HostraLaunchPlan + LogicalGameBootstrap + PreparedSharedStateDefinition freeze before business Runtime side effects；
+5. Game Package State document type is not SharedStateAuthority bootstrap ABI；
 6. trusted Runner executable remains canonical `process.execPath`, embedded Node major ≥20；
 7. ADR0033 Electron Node mode is conditional on the RuntimeHosting composition process itself being Electron；
 8. canonical M15 under ADR0034 uses ordinary Node RuntimeHosting inside the LoomRealm `HOSTRA_SUBCMD` child；
-9. Main receives no Game/module/path/Node/Realm State prepared/business material；
+9. Main receives no Game/module/path/Node/Shared State prepared/business material；
 10. physical module material stays launch-profile private；
 11. package-owned Runner is the only business Runtime process entry；
-12. Runner may install RealmStateClient but does not own RealmStateAuthority、Frame/Activation authority or Session terminal policy；
-13. manifest cannot select executable/Runner/argv/env/endpoint/credential/Realm State physical policy；
+12. Runner may install SharedStateClient but does not own SharedStateAuthority、Frame/Activation authority or Session terminal policy；
+13. manifest cannot select executable/Runner/argv/env/endpoint/credential/Shared State physical policy；
 14. no public `launchId` is required；
-15. Runtime Control transport capability is not Runtime identity/authentication and is not Realm State transport；
+15. Runtime Control transport capability is not Runtime identity/authentication and is not Shared State transport；
 16. child `exit` is the sole successful stopped physical fact；State binding loss is not stopped/failure fact；
 17. launch abort cannot orphan a pending child/listener；
 18. physical termination is idempotent and bounded with force fallback；
 19. no automatic Runtime restart/reconnect；
-20. M8 Data、M12 Content、Realm State v1 extend the same Runner boundary without merging application authorities；
-21. Realm State operations do not consume Frame/Activation authority；
-22. Realm State binding loss does not automatically fail Runtime/Session；Authority fatal reports to Main/Session owner；
+20. M8 Data、M12 Content、Shared State v1 extend the same Runner boundary without merging application authorities；
+21. Shared State operations do not consume Frame/Activation authority；
+22. Shared State binding loss does not automatically fail Runtime/Session；Authority fatal reports to Main/Session owner；
 23. external Hostra shell Window/RPC/HOSTRA_SUBCMD ownership is outside this Profile and must not be folded into Launcher/Runner contracts；
 24. product-level M15 termination converges through existing Main/RuntimeHosting owner chain and does not add a second Runner kill authority。

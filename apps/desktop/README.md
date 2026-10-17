@@ -5,7 +5,7 @@ Canonical Desktop topology：
 ```text
 Hostra shell
 └─ HOSTRA_SUBCMD plain Node apps/desktop/dist/main-entry.js
-   ├─ Main + RealmStateAuthority + RuntimeHosting-owned Runner
+   ├─ Main + SharedStateAuthority + RuntimeHosting-owned Runner
    ├─ prepared readonly Content service
    ├─ navigation-only trusted document route
    ├─ one-shot loopback Renderer Control capability

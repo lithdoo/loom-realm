@@ -22,11 +22,11 @@ export interface MainPlatform {
   readonly runtimeHosting: RuntimeHosting;
   readonly rendererControl?: RendererControlBinding;
   readonly dataConnections?: DataConnectionAuthoritySink;
-  readonly realmStateFatal?: MainRealmStateFatalSource;
+  readonly sharedStateFatal?: MainSharedStateFatalSource;
   readonly sessionEventsFatal?: MainSessionEventsFatalSource;
 }
 
-export interface MainRealmStateFatalSource {
+export interface MainSharedStateFatalSource {
   subscribe(listener: () => void): () => void;
 }
 

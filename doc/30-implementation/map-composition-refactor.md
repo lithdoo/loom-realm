@@ -61,7 +61,7 @@ test/m14-vertical.test.mjs
 
 实施前的 `package.test.mjs` 还显式验证 named/default `mapDefinition` export。
 
-冻结基线所在的 `main` 已实现 Realm State v1，并把 `SubsystemScope.state` 加入 author scope；当时的 M14 vertical harness 也已注入 Realm State client。Map 在该基线不消费 `scope.state`，因此该变化不改变本方案的 Map runtime 设计，只改变 M14 harness 的实施前基线。
+冻结基线所在的 `main` 已实现 Shared State v1，并把 `SubsystemScope.state` 加入 author scope；当时的 M14 vertical harness 也已注入 Shared State client。Map 在该基线不消费 `scope.state`，因此该变化不改变本方案的 Map runtime 设计，只改变 M14 harness 的实施前基线。
 
 ---
 
@@ -133,7 +133,7 @@ Viewport
 AbortSignal
 ```
 
-本次不要求 Map 使用新增的 `SubsystemScope.state`，也不修改 Realm State 行为。
+本次不要求 Map 使用新增的 `SubsystemScope.state`，也不修改 Shared State 行为。
 
 Concrete Game 继续拥有：
 
@@ -151,7 +151,7 @@ Main / Frame authority
 Subsystem public ABI
 Renderer
 Content
-Realm State
+Shared State
 Game Package
 Platform / Hostra / PWA
 ```
@@ -420,7 +420,7 @@ const definition = defineSubsystem((scope) => ({
 
 不要改用 Essentials 的 `subsystems/map.mjs` 来顺便引入 guide NPC，因为那会改变实施前 M14 vertical 的业务可观察结果，扩大本次重构语义范围。
 
-Realm State v1 合入后该 harness 已负责提供 `state` capability；本次保持其现有注入不变。
+Shared State v1 合入后该 harness 已负责提供 `state` capability；本次保持其现有注入不变。
 
 ---
 
@@ -503,11 +503,11 @@ NPC semantics
 Content schema
 Render schema
 Viewport behavior
-Realm State semantics
+Shared State semantics
 Main / Frame authority
 ```
 
-不因为最新 `main` 新增 Realm State v1 而给 Map 增加 Realm State dependency 或业务状态迁移。
+不因为最新 `main` 新增 Shared State v1 而给 Map 增加 Shared State dependency 或业务状态迁移。
 
 ---
 

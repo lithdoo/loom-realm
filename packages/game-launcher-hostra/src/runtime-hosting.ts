@@ -9,10 +9,10 @@ import type {
 } from "@loomrealm/platform-ports";
 import WebSocket, { WebSocketServer } from "ws";
 import {
-  serveRealmStateCarrier,
-  type RealmStateClient,
-  type RealmStateCarrierServer,
-} from "@loomrealm/realm-state";
+  serveSharedStateCarrier,
+  type SharedStateClient,
+  type SharedStateCarrierServer,
+} from "@loomrealm/shared-state";
 import { HostraLauncherError, launcherError } from "./errors.js";
 import type { HostraLaunchPlan, HostraResolvedRuntime } from "./launch-plan.js";
 import { BOOTSTRAP_ENV_KEY, type RunnerBootstrapV1 } from "./runner/bootstrap.js";
@@ -21,7 +21,7 @@ import {
   type HostraRuntimeDataProvisioner,
 } from "./data-provisioning.js";
 import { CONTENT_ACCESS_ENV_KEY, encodeHostraContentAccess, validateHostraContentAccess, type HostraContentAccess } from "./content-access.js";
-import { createRealmStateWebSocketCarrier } from "./realm-state-websocket-carrier.js";
+import { createSharedStateWebSocketCarrier } from "./shared-state-websocket-carrier.js";
 import { createWebSocketCarrier } from "./websocket-carrier.js";
 import {
   serveSessionEventCarrier,
@@ -161,7 +161,7 @@ async function launchAttempt(
   runtimes: ReadonlyMap<string, HostraResolvedRuntime>,
   request: RuntimeLaunchRequest,
   signal: AbortSignal,
-  realmStateAuthority: RealmStateClient,
+  sharedStateAuthority: SharedStateClient,
   sessionEventHub: SessionEventHub,
   onRuntimeDataProvisioner?: (
     runtime: HostedRuntime,
@@ -204,10 +204,10 @@ async function launchAttempt(
     path: eventsCapabilityPath,
     verifyClient: ({ req }, done) => done(req.url === eventsCapabilityPath),
   });
-  let realmStateCarrierServer: RealmStateCarrierServer | null = null;
+  let sharedStateCarrierServer: SharedStateCarrierServer | null = null;
   let sessionEventCarrierServer: SessionEventCarrierServer | null = null;
-  const closeRealmStateCarrier = () => {
-    const active = realmStateCarrierServer;
+  const closeSharedStateCarrier = () => {
+    const active = sharedStateCarrierServer;
     if (active !== null) void active.close().catch(() => {});
   };
   const closeSessionEventCarrier = () => {
@@ -275,14 +275,14 @@ async function launchAttempt(
   const establishment = deferred<"spawned" | "exited">();
 
   const controlEndpoint = `ws://127.0.0.1:${address.port}${capabilityPath}`;
-  const realmStateEndpoint = `ws://127.0.0.1:${stateAddress.port}${stateCapabilityPath}`;
+  const sharedStateEndpoint = `ws://127.0.0.1:${stateAddress.port}${stateCapabilityPath}`;
   const sessionEventsEndpoint = `ws://127.0.0.1:${eventsAddress.port}${eventsCapabilityPath}`;
   const bootstrap: RunnerBootstrapV1 = Object.freeze({
     version: 1,
     subsystemKey: request.subsystemKey,
     physicalModule: runtime.physicalModule,
     controlEndpoint,
-    realmStateEndpoint,
+    sharedStateEndpoint,
     bootstrapToken: request.bootstrapToken,
     controlProtocolVersions: Object.freeze([1] as [1]),
     helloDeadlineMs: plan.runnerPolicy.helloDeadlineMs,
@@ -316,17 +316,17 @@ async function launchAttempt(
     convergeServerFailure?.();
   });
   stateServer.on("connection", (socket: WebSocket) => {
-    if (realmStateCarrierServer !== null || exited || attempt.ownership === "abandoned") {
+    if (sharedStateCarrierServer !== null || exited || attempt.ownership === "abandoned") {
       socket.terminate();
       return;
     }
-    const served = serveRealmStateCarrier(
-      realmStateAuthority,
-      createRealmStateWebSocketCarrier(socket),
+    const served = serveSharedStateCarrier(
+      sharedStateAuthority,
+      createSharedStateWebSocketCarrier(socket),
     );
-    realmStateCarrierServer = served;
+    sharedStateCarrierServer = served;
     void served.closed.then(() => {
-      if (realmStateCarrierServer === served) realmStateCarrierServer = null;
+      if (sharedStateCarrierServer === served) sharedStateCarrierServer = null;
     });
   });
   eventsServer.on("error", () => {
@@ -413,7 +413,7 @@ async function launchAttempt(
     closeServer(server);
     closeServer(stateServer);
     closeServer(eventsServer);
-    closeRealmStateCarrier();
+    closeSharedStateCarrier();
     closeSessionEventCarrier();
     void error;
     throw launcherError("PROCESS_SPAWN_FAILED");
@@ -439,7 +439,7 @@ async function launchAttempt(
     closeServer(server);
     closeServer(stateServer);
     closeServer(eventsServer);
-    closeRealmStateCarrier();
+    closeSharedStateCarrier();
     closeSessionEventCarrier();
     void controlCarrier?.close().catch(() => {});
     acquireWaiter?.reject(launcherError("PROCESS_EXITED_DURING_BOOTSTRAP"));
@@ -456,7 +456,7 @@ async function launchAttempt(
     closeServer(server);
     closeServer(stateServer);
     closeServer(eventsServer);
-    closeRealmStateCarrier();
+    closeSharedStateCarrier();
     closeSessionEventCarrier();
     throw error;
   }
@@ -542,7 +542,7 @@ export function createHostraRuntimeHosting(options: {
     runtime: HostedRuntime,
     provisioner: HostraRuntimeDataProvisioner,
   ) => void;
-  readonly realmStateAuthority: RealmStateClient;
+  readonly sharedStateAuthority: SharedStateClient;
   readonly sessionEventHub: SessionEventHub;
 }): RuntimeHosting {
   if (options === null || typeof options !== "object" || options.launchPlan === null) {
@@ -556,16 +556,16 @@ export function createHostraRuntimeHosting(options: {
     throw new TypeError("Invalid Runtime Data provisioner hook");
   }
   if (
-    options.realmStateAuthority === null ||
-    typeof options.realmStateAuthority !== "object" ||
-    typeof options.realmStateAuthority.read !== "function" ||
-    typeof options.realmStateAuthority.readInitial !== "function" ||
-    typeof options.realmStateAuthority.list !== "function" ||
-    typeof options.realmStateAuthority.scan !== "function" ||
-    typeof options.realmStateAuthority.commit !== "function" ||
-    typeof options.realmStateAuthority.subscribe !== "function"
+    options.sharedStateAuthority === null ||
+    typeof options.sharedStateAuthority !== "object" ||
+    typeof options.sharedStateAuthority.read !== "function" ||
+    typeof options.sharedStateAuthority.readInitial !== "function" ||
+    typeof options.sharedStateAuthority.list !== "function" ||
+    typeof options.sharedStateAuthority.scan !== "function" ||
+    typeof options.sharedStateAuthority.commit !== "function" ||
+    typeof options.sharedStateAuthority.subscribe !== "function"
   ) {
-    throw new TypeError("Invalid Realm State Authority capability");
+    throw new TypeError("Invalid Shared State Authority capability");
   }
   if (
     options.sessionEventHub === null ||
@@ -584,7 +584,7 @@ export function createHostraRuntimeHosting(options: {
         runtimes,
         request,
         signal,
-        options.realmStateAuthority,
+        options.sharedStateAuthority,
         options.sessionEventHub,
         options.onRuntimeDataProvisioner,
         contentAccess,

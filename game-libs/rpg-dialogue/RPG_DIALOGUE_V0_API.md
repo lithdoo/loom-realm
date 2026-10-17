@@ -307,7 +307,7 @@ Character Presentation 与 Conversation speaker 完全解耦。`active` 只描�
 { type: "cancelled" }
 ```
 
-Result 只代表当前 Conversation 的 interaction result。收到 Result 后，caller 才决定 History、Realm State、Quest、Inventory、Battle、Map 或下一次 `openConversation()`。
+Result 只代表当前 Conversation 的 interaction result。收到 Result 后，caller 才决定 History、Shared State、Quest、Inventory、Battle、Map 或下一次 `openConversation()`。
 
 Presentation → Subsystem 的 `submit` payload 会携带内部 `conversationId`；`RPGDialogue` 必须验证它仍等于当前 active operation，再验证当前 interaction mode 与 `choiceId` legality。该内部 correlation 不泄漏到 public Result。
 
@@ -328,7 +328,7 @@ RPGDialogue
 → 验证并投影 History
 → 管理 History modal interaction state
 
-Realm State（可选）
+Shared State（可选）
 → 当游戏需要 save/load、cross-map、cross-session persistence 时
    承担 durable history authority
 ```
@@ -339,7 +339,7 @@ History 的 `speakerName?` 与 Conversation 一样只是文本事实，不引用
 
 `setHistory(entries)` 是完整 replace，不是 patch API：调用后当前 session transcript 就是给定 entries。
 
-典型用途包括从 Realm State 恢复、切换业务 conversation context、测试建立初始状态或业务完成过滤/重排后的完整替换。
+典型用途包括从 Shared State 恢复、切换业务 conversation context、测试建立初始状态或业务完成过滤/重排后的完整替换。
 
 若 session RenderDomain 已存在，成功的 READY-state History mutation 同步改变下一份 retained Dialogue projection；它不创建新的 RenderDomain。
 
@@ -357,7 +357,7 @@ History 的 `speakerName?` 与 Conversation 一样只是文本事实，不引用
 
 ```text
 getHistorySnapshot()
-→ caller commits selected history to Realm State
+→ caller commits selected history to Shared State
 → later create new RPGDialogue
 → setHistory(savedHistory)
 ```

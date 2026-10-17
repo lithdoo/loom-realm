@@ -8,14 +8,14 @@
 - [30-battle.md](./30-battle.md) — Battle、Card Integrity、1v1 与长期养成方向
 - [40-encounter-loop.md](./40-encounter-loop.md) — Visible Encounter、Challenge、Hostile 与核心游戏循环
 - [50-mvp-prologue.md](./50-mvp-prologue.md) — MVP 序章场景与验证循环
-- [60-data-placement.md](./60-data-placement.md) — Content、Realm State 与 Runtime Memory 的模块归宿和业务边界
+- [60-data-placement.md](./60-data-placement.md) — Content、Shared State 与 Runtime Memory 的模块归宿和业务边界
 - [61-character.md](./61-character.md) — Character、Relationship、Contract、Card 与 Map NPC Instance
 - [62-event.md](./62-event.md) — Event、EventStateMutation、EventStateList、场景 directive 与 Story Index
 - [63-world-data-model.md](./63-world-data-model.md) — Character / NPC / Story / Relationship / Card / Battle 整体数据模型
 - [64-dialogue.md](./64-dialogue.md) — 固定 Dialogue 的线性台词、末尾 Choice、分支、Mutation 与 FSDB identity
 - [65-data-model-diagram.md](./65-data-model-diagram.md) — 当前数据 authority、FSDB identity 与关键链路 Mermaid 总览
-- [66-data-authority.md](./66-data-authority.md) — Content / Realm State / Runtime Memory 三层 authority 清单
-- [67-realm-state-records.md](./67-realm-state-records.md) — MVP 核心 Realm State 的 Record 粒度、namespace/key、value shape 与约束
+- [66-data-authority.md](./66-data-authority.md) — Content / Shared State / Runtime Memory 三层 authority 清单
+- [67-shared-state-records.md](./67-shared-state-records.md) — MVP 核心 Shared State 的 Record 粒度、namespace/key、value shape 与约束
 - [68-content-fsdb.md](./68-content-fsdb.md) — PokeMan Content 的 FSDB table、record identity、引用编码与 JSON shape
 - [90-scope-principles.md](./90-scope-principles.md) — MVP 非要求、设计原则与当前非目标
 
@@ -24,8 +24,8 @@
 当前 physical data canonical sources：
 
 ```text
-Realm State
-→ 67-realm-state-records.md
+Shared State
+→ 67-shared-state-records.md
 
 Content / FSDB
 → 68-content-fsdb.md

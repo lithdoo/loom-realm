@@ -1,5 +1,5 @@
 import type { JsonValue } from "@loomrealm/wire";
-import type { RealmStateClient } from "@loomrealm/realm-state";
+import type { SharedStateClient } from "@loomrealm/shared-state";
 import type { SessionEventClient } from "@loomrealm/session-events";
 import type { CreateInputListenerOptions, InputListener } from "./input.js";
 import type { RenderDomain, RenderDomainState } from "./render.js";
@@ -35,7 +35,7 @@ export interface Frame<TParams extends JsonValue = JsonValue> {
 
 export interface SubsystemScope {
   readonly signal: AbortSignal;
-  readonly state: RealmStateClient;
+  readonly state: SharedStateClient;
   readonly events: SessionEventClient;
   readonly content: ContentClient;
   readonly viewport: Viewport;

@@ -3,9 +3,9 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：只读 Game Package/Content、Platform executable installation、Realm State document/bootstrap boundary、逻辑 Content API、Package Index、Repository、资源和路径安全  
-> 依赖：[系统架构总览](./system-overview.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[Realm State](./realm-state-system.md)  
-> 正式契约：[Game Package v1](../15-contracts/game-package-v1.md)、[Realm State v1](../15-contracts/realm-state-v1.md)、[Hostra Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](../15-contracts/pwa-launcher-profile-v1.md)、[Content API v1](../15-contracts/content-api-v1.md)  
+> 主要定义：只读 Game Package/Content、Platform executable installation、Shared State document/bootstrap boundary、逻辑 Content API、Package Index、Repository、资源和路径安全  
+> 依赖：[系统架构总览](./system-overview.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[Shared State](./shared-state-system.md)  
+> 正式契约：[Game Package v1](../15-contracts/game-package-v1.md)、[Shared State v1](../15-contracts/shared-state-v1.md)、[Hostra Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](../15-contracts/pwa-launcher-profile-v1.md)、[Content API v1](../15-contracts/content-api-v1.md)  
 > 最近复核：2026-10-05
 
 ## 1. 设计目标
@@ -14,16 +14,16 @@
 
 ```text
 Game logical topology / initial document facts
-Prepared Realm State business baseline
+Prepared Shared State business baseline
 Platform executable binding/capability
 Readonly Content capability
 physical storage path / URL
 business persistence workflow/data
 ```
 
-> **Game Package声明 logical Subsystem identity、initial Frame input 与 optional Realm State initial document；Platform Launcher把 validated Game facts投影成 Main/Realm State prepared inputs并选择当前平台 executable implementation；trusted Runner拥有执行能力；Content API只拥有逻辑只读能力。Save/Load 若存在，是 business workflow，不成为 Realm State bootstrap 或 Content authority。**
+> **Game Package声明 logical Subsystem identity、initial Frame input 与 optional Shared State initial document；Platform Launcher把 validated Game facts投影成 Main/Shared State prepared inputs并选择当前平台 executable implementation；trusted Runner拥有执行能力；Content API只拥有逻辑只读能力。Save/Load 若存在，是 business workflow，不成为 Shared State bootstrap 或 Content authority。**
 
-Game Package、Content、Realm State 与 business persistence 职责不同：
+Game Package、Content、Shared State 与 business persistence 职责不同：
 
 ```text
 Game Package
@@ -32,7 +32,7 @@ Game Package
 Content
     readonly installation definitions/resources
 
-Realm State
+Shared State
     Session shared mutable business facts
 
 Save/Load business
@@ -50,7 +50,7 @@ Save/Load business
 ```text
 Validated Installation
 ├── game.json
-│     └── optional Realm State initial document definition
+│     └── optional Shared State initial document definition
 ├── launch.hostra.json          optional when Hostra-supported
 ├── launch.pwa.json             optional when PWA-supported
 ├── executable Definition artifacts
@@ -67,7 +67,7 @@ Installation Registry / Package Index
 
 Executable module与普通 Content Resource必须保持 capability 隔离。
 
-Game Entry 中的 Realm State `state.records` 是 declarative initial business document data；它不是 Content Resource、不是 executable material、不是 live RealmStateAuthority，也不是 Save/Load document。
+Game Entry 中的 Shared State `state.records` 是 declarative initial business document data；它不是 Content Resource、不是 executable material、不是 live SharedStateAuthority，也不是 Save/Load document。
 
 ### M12 Desktop implementable slice
 
@@ -86,20 +86,20 @@ successful Hostra prepare
 
 ---
 
-## 3. Game Entry / Realm State / Platform Launch / Content
+## 3. Game Entry / Shared State / Platform Launch / Content
 
 ```text
 Game Entry document
     logical topology
     initial Frame input
-    optional Realm State initial document definition
+    optional Shared State initial document definition
 
 Launcher prepared projections
     LogicalGameBootstrap
-    PreparedRealmStateDefinition
+    PreparedSharedStateDefinition
 
-RealmStateAuthority
-    consumes PreparedRealmStateDefinition
+SharedStateAuthority
+    consumes PreparedSharedStateDefinition
     owns Session mutable business Records
 
 Platform Launch Manifest
@@ -117,12 +117,12 @@ Content API
 
 ```text
 GameEntryV1.state
-    != PreparedRealmStateDefinition
-    != live RealmStateAuthority
+    != PreparedSharedStateDefinition
+    != live SharedStateAuthority
     != readonly Content resource
     != Save/Load data
 
-PreparedRealmStateDefinition
+PreparedSharedStateDefinition
     != LogicalGameBootstrap
     != PlatformLaunchPlan
     != persistence restore seed
@@ -133,14 +133,14 @@ PreparedRealmStateDefinition
 ```text
 Game Entry grant arbitrary executable capability
 Game Package document object become Runtime State authority
-RealmStateAuthority parse game.json / formatVersion / Platform manifest
+SharedStateAuthority parse game.json / formatVersion / Platform manifest
 Content API request arbitrary executable path
-Content API mutate Realm State
+Content API mutate Shared State
 Content API start Runtime
 Renderer execute Platform-selected Definition Module
 Render State carry physical module/content path
 business payload carry content/bootstrap credential
-Save/Load data become privileged Realm State bootstrap input
+Save/Load data become privileged Shared State bootstrap input
 ```
 
 ---
@@ -149,22 +149,22 @@ Save/Load data become privileged Realm State bootstrap input
 
 ```text
 read/validate game.json
-→ validate optional Realm State initial document definition
+→ validate optional Shared State initial document definition
 → read/validate current Platform Launch Manifest
 → exact Game↔Platform Subsystem key-set join
 → resolve every required current-platform Definition Module
 → validate installation containment/security + hosting capability
 → freeze immutable PlatformLaunchPlan
 → project/freeze LogicalGameBootstrap
-→ project/freeze PreparedRealmStateDefinition
+→ project/freeze PreparedSharedStateDefinition
 → freeze current prepared Content view when Content is required
 ────────────────────────────────────────────────────────────
 PREPARE complete
-→ construct fresh RealmStateAuthority from PreparedRealmStateDefinition
+→ construct fresh SharedStateAuthority from PreparedSharedStateDefinition
 → install immutable prepared Game baseline
 → derive initial materialized membership
 → revision/version = 0
-→ Realm State READY
+→ Shared State READY
 ────────────────────────────────────────────────────────────
 first business Runtime side effect may begin
 → Main creates logical Launch Attempt
@@ -172,15 +172,15 @@ first business Runtime side effect may begin
 → Host-owned Runner imports planned module
 ```
 
-Realm State bootstrap MUST NOT apply Save/Load current seed or sparse persistence override。If a game restores persistence data, that happens after business Runtime starts and is expressed through ordinary RealmStateClient operations。
+Shared State bootstrap MUST NOT apply Save/Load current seed or sparse persistence override。If a game restores persistence data, that happens after business Runtime starts and is expressed through ordinary SharedStateClient operations。
 
-Preflight config/join/resolution/capability failure必须发生在任何 business Runtime side effect前。Realm State READY 同样是 first business Runtime side effect 的前置条件。
+Preflight config/join/resolution/capability failure必须发生在任何 business Runtime side effect前。Shared State READY 同样是 first business Runtime side effect 的前置条件。
 
 Definition Module actual ESM import/default-export ABI validation MAY在 Runner中执行；失败属于 required Runtime bootstrap failure，并触发统一 cleanup。
 
 M12 required Content capability若在 business initialization前无法构造，同样属于 Runtime bootstrap failure；Runtime建立后的 ordinary Content read rejection不是自动 Runtime/Frame failure。
 
-Realm State ordinary conflict/binding-local failure也不是 Content/storage failure，不能由 Content Service/Repository 层解释或恢复。
+Shared State ordinary conflict/binding-local failure也不是 Content/storage failure，不能由 Content Service/Repository 层解释或恢复。
 
 ---
 
@@ -212,7 +212,7 @@ same business-observable result for same logical scenario
 
 不要求 same path/bytes/build artifact。
 
-RealmStateKey 是另一套 business Record identity；它不能替代 subsystemKey/executable identity，也不能被 module path/Content identity替代。
+SharedStateKey 是另一套 business Record identity；它不能替代 subsystemKey/executable identity，也不能被 module path/Content identity替代。
 
 ---
 
@@ -227,7 +227,7 @@ Platform Executable Module Resolver
 Readonly Content API
     reads logical installation content only
 
-RealmStateClient
+SharedStateClient
     reads/commits/subscribes Session shared mutable business Records
 
 Business persistence capability
@@ -236,14 +236,14 @@ Business persistence capability
 
 可以复用底层 Installation Registry、安全路径、hash/integrity primitive，但不得因为某文件可作为 executable module就扩大普通 Content client权限。
 
-Realm State runtime capability也不得通过 Content API、filesystem handle、FSDB record 或 Resource URL旁路实现。
+Shared State runtime capability也不得通过 Content API、filesystem handle、FSDB record 或 Resource URL旁路实现。
 
-Save/Load persistence capability likewise MUST NOT become RealmStateAuthority or Content authority merely because its backing storage is filesystem/FSDB/OPFS/etc。
+Save/Load persistence capability likewise MUST NOT become SharedStateAuthority or Content authority merely because its backing storage is filesystem/FSDB/OPFS/etc。
 
 ```text
 validated executable target
 != ordinary content resource
-!= Realm State Record
+!= Shared State Record
 != Save/Load document
 != executable sandbox
 ```
@@ -290,7 +290,7 @@ sha256:<64 lowercase hex>
 
 并基于 exact successful full-body representation bytes，而不是 process-local snapshot/fingerprint。
 
-Content `contentVersion` 与 Realm State Record `version` / global `revision` 完全独立；不得建立跨 plane version equivalence。
+Content `contentVersion` 与 Shared State Record `version` / global `revision` 完全独立；不得建立跨 plane version equivalence。
 
 ---
 
@@ -306,10 +306,10 @@ Executable module
     HostraLaunchPlan
     Host-owned Node Runner import
 
-Realm State preparation
+Shared State preparation
     game.json optional state validated by Game Package
-    Hostra Launcher projects PreparedRealmStateDefinition
-    Session composition later constructs RealmStateAuthority
+    Hostra Launcher projects PreparedSharedStateDefinition
+    Session composition later constructs SharedStateAuthority
 
 FSDB readonly core
     @loomrealm/fsdb
@@ -326,7 +326,7 @@ Content
     depends on @loomrealm/fsdb for FSDB-backed bodies
 ```
 
-`@loomrealm/fsdb-http` 与 Desktop Content Service是 `@loomrealm/fsdb` 的两个真实 production consumers；这只证明一个 FSDB-specific core，不证明 generic storage-provider framework，也不证明 Realm State 或 Save/Load business 应建立在 FSDB repository abstraction 上。
+`@loomrealm/fsdb-http` 与 Desktop Content Service是 `@loomrealm/fsdb` 的两个真实 production consumers；这只证明一个 FSDB-specific core，不证明 generic storage-provider framework，也不证明 Shared State 或 Save/Load business 应建立在 FSDB repository abstraction 上。
 
 ### PWA
 
@@ -338,9 +338,9 @@ Executable module
     PwaLaunchPlan
     Host-owned Worker Runner import
 
-Realm State preparation
+Shared State preparation
     same Game Package document validation
-    PWA Launcher projects equivalent PreparedRealmStateDefinition
+    PWA Launcher projects equivalent PreparedSharedStateDefinition
     later physical Authority/binding may differ from Desktop
 
 Content
@@ -349,9 +349,9 @@ Content
     OPFS / Cache Storage
 ```
 
-PWA不依赖 Node-only `@loomrealm/fsdb`；它必须实现同一 Content logical identity、representation/version/cache/error semantics。Realm State physical realization也不要求与 Hostra 使用相同 storage/transport primitive，只要求 logical contract等价。
+PWA不依赖 Node-only `@loomrealm/fsdb`；它必须实现同一 Content logical identity、representation/version/cache/error semantics。Shared State physical realization也不要求与 Hostra 使用相同 storage/transport primitive，只要求 logical contract等价。
 
-具体游戏的 Save/Load business 若使用 OPFS、filesystem、cloud storage 等，是其 persistence workflow选择，不进入 Realm State logical bootstrap contract。
+具体游戏的 Save/Load business 若使用 OPFS、filesystem、cloud storage 等，是其 persistence workflow选择，不进入 Shared State logical bootstrap contract。
 
 ---
 
@@ -376,13 +376,13 @@ module binding identity != content resource identity
 allowed to read content != allowed to execute module
 ```
 
-Realm State materialized Record index也不是 Installation/Content Index：
+Shared State materialized Record index也不是 Installation/Content Index：
 
 ```text
 Content Index
     installation readonly facts
 
-Realm State list()
+Shared State list()
     Session materialized mutable-business Record discovery
 ```
 
@@ -394,7 +394,7 @@ Platform manifest本身也不授予任意 filesystem/URL访问；resolver仍必�
 
 ## 10. Catalog / Repository
 
-Catalog/Repository是长期产品内容实现模式，不是 M12必须新增的 framework/package，也不是 Realm State abstraction。
+Catalog/Repository是长期产品内容实现模式，不是 M12必须新增的 framework/package，也不是 Shared State abstraction。
 
 当真实 Content consumer需要时，概念责任可包括：
 
@@ -413,8 +413,8 @@ error mapping
 ```text
 RuntimeHosting
 PlatformLaunchPlan
-Realm State OCC / commit revision
-Realm State subscription
+Shared State OCC / commit revision
+Shared State subscription
 Save/Load business policy
 module execution
 Frame Stack
@@ -443,7 +443,7 @@ Physical module/content path、filesystem handle、blob URL或 Content bearer不
 
 M12只冻结 Renderer logical resource identity → bytes capability；RenderNode/tag如何投影为 resource identity属于 M14 presentation。
 
-Realm State 可以存业务需要的 logical resource reference value，但这不会把资源 bytes/Content cache/contentVersion authority 转移给 Realm State。
+Shared State 可以存业务需要的 logical resource reference value，但这不会把资源 bytes/Content cache/contentVersion authority 转移给 Shared State。
 
 ---
 
@@ -459,15 +459,15 @@ Platform Runner bootstrap material
 Platform executable resolution capability
 Content bearer
 Data ticket / transferred Port authority
-Realm State private binding material
+Shared State private binding material
 business persistence credential/capability
 ```
 
-M12 Hostra Content material不得复用 M9 Data provisioning IPC。Realm State binding也不得借用 Content bearer 或 Data ticket 形成隐藏复用 authority。
+M12 Hostra Content material不得复用 M9 Data provisioning IPC。Shared State binding也不得借用 Content bearer 或 Data ticket 形成隐藏复用 authority。
 
 PWA使用 same-origin/Service Worker authority，不为了形式统一复制 Hostra bearer flow。
 
-Credential不进入 Frame params、Render State、Realm State business values或 ordinary business state。
+Credential不进入 Frame params、Render State、Shared State business values或 ordinary business state。
 
 ---
 
@@ -488,9 +488,9 @@ prefetch policy
 
 Hostra/PWA可有不同具体值，但 logical Content API semantics保持一致。
 
-Realm State 自己的 capacity/queue hard limits由 Realm State contract/profile拥有，不应复用 Content deployment policy。
+Shared State 自己的 capacity/queue hard limits由 Shared State contract/profile拥有，不应复用 Content deployment policy。
 
-`scan()` 是 Realm State 的 exceptional full-snapshot operation；Content/Storage layer不因此拥有或规定 Realm State aggregate State limit/pagination policy。
+`scan()` 是 Shared State 的 exceptional full-snapshot operation；Content/Storage layer不因此拥有或规定 Shared State aggregate State limit/pagination policy。
 
 ---
 
@@ -507,7 +507,7 @@ resource fetch
 
 不进入每 Tick hot path。Runtime tick读取已经准备好的 business state / immutable content view。
 
-Realm State 是 business coordination capability；它也不能成为“把所有 local tick/cache state塞进中心 store”的理由。高频纯局部/派生状态应留在 Subsystem/Render等原 owner。
+Shared State 是 business coordination capability；它也不能成为“把所有 local tick/cache state塞进中心 store”的理由。高频纯局部/派生状态应留在 Subsystem/Render等原 owner。
 
 `scan()` 尤其是 potentially expensive 非常规 snapshot operation，不应被设计成 business hot path query。
 
@@ -520,15 +520,15 @@ Realm State 是 business coordination capability；它也不能成为“把所�
 在 first business Runtime side effect前 MUST确保：
 
 ```text
-Game Entry valid including optional Realm State initial document
+Game Entry valid including optional Shared State initial document
 current Platform Launch Manifest valid
 exact Subsystem key-set join
 all required platform module bindings syntactically valid
 all required executable targets resolve safely
 all executable targets belong to selected installation/security boundary
 current required hosting capabilities available
-PreparedRealmStateDefinition projected and immutable
-fresh RealmStateAuthority created from prepared Game baseline and READY
+PreparedSharedStateDefinition projected and immutable
+fresh SharedStateAuthority created from prepared Game baseline and READY
 current required Content view/index can be formed
 ```
 
@@ -538,31 +538,31 @@ Content完整性校验按 current installation policy执行；PWA installation S
 
 Definition Module runtime import/ABI failure属于 launch-time Runtime bootstrap failure，不把 raw module location泄露给 Main/business。
 
-RealmStateAuthority fatal属于 Session-fatal fact并上报 Main；**Main 唯一提交 Session terminal / Runtime/Frame unwind**。Storage/Content/Installation/Platform layer不得直接执行 Runtime/Frame unwind。
+SharedStateAuthority fatal属于 Session-fatal fact并上报 Main；**Main 唯一提交 Session terminal / Runtime/Frame unwind**。Storage/Content/Installation/Platform layer不得直接执行 Runtime/Frame unwind。
 
 ---
 
 ## 16. Core Invariants
 
-1. Game Package安装/document layer只读，并声明 logical topology、initial input与 optional Realm State initial document；
-2. Game Package State document不是 live RealmStateAuthority，也不是 Authority bootstrap ABI；Launcher投影 `PreparedRealmStateDefinition`；
-3. Realm State bootstrap只消费 prepared Game baseline，不消费 Save/Load seed；
-4. Save/Load 是 business persistence workflow，通过普通 RealmStateClient read/commit 实现；
-5. `subsystemKey` 是唯一 Subsystem application identity；RealmStateKey是独立 business Record identity；
+1. Game Package安装/document layer只读，并声明 logical topology、initial input与 optional Shared State initial document；
+2. Game Package State document不是 live SharedStateAuthority，也不是 Authority bootstrap ABI；Launcher投影 `PreparedSharedStateDefinition`；
+3. Shared State bootstrap只消费 prepared Game baseline，不消费 Save/Load seed；
+4. Save/Load 是 business persistence workflow，通过普通 SharedStateClient read/commit 实现；
+5. `subsystemKey` 是唯一 Subsystem application identity；SharedStateKey是独立 business Record identity；
 6. executable `module` identity属于对应 Platform Launch Manifest，不属于 Game common Descriptor；
-7. PlatformLaunchPlan与 Main/Realm State prepared projections在 first Runtime side effect前完成 join、resolution与 capability preflight；
-8. Realm State READY在 first business Runtime side effect前成立；
-9. Platform Runner拥有 module execution capability，但不拥有 RealmStateAuthority；
-10. Content API只接受 logical readonly Content identity，不拥有 Realm State mutation；
+7. PlatformLaunchPlan与 Main/Shared State prepared projections在 first Runtime side effect前完成 join、resolution与 capability preflight；
+8. Shared State READY在 first business Runtime side effect前成立；
+9. Platform Runner拥有 module execution capability，但不拥有 SharedStateAuthority；
+10. Content API只接受 logical readonly Content identity，不拥有 Shared State mutation；
 11. record/group key是 single segment，ResourceKey可由多个 validated logical segments组成；
-12. Content version精确使用 Content API v1 SHA-256 representation，并与 Realm State version/revision独立；
-13. executable module不能伪装成 ordinary Resource；Content/FSDB不能伪装成 Realm State mutation channel；
-14. physical filesystem path/module URL不进入 business/application protocol或 Realm State value authority；
-15. Hostra/PWA可为同一 key选择不同 executable artifact，也可使用不同 Realm State physical binding；
-16. executable resolver与 Content resolver可复用底层安全 primitive，但 capability surface分离；Realm State不因此加入 generic Repository；
-17. Hostra M12 `@loomrealm/fsdb`只拥有 Node FSDB readonly core，不拥有 Content/HTTP/Realm State/application authority；
-18. Content credential、Runtime/Runner/Data credential、Realm State binding material与 business persistence capability分离；
-19. Service Worker/Content Service不拥有 Runtime/Frame/Render/Realm State authority；
-20. RealmStateAuthority fatal只上报 Main；Storage/Content/Platform不拥有 terminal/unwind；
+12. Content version精确使用 Content API v1 SHA-256 representation，并与 Shared State version/revision独立；
+13. executable module不能伪装成 ordinary Resource；Content/FSDB不能伪装成 Shared State mutation channel；
+14. physical filesystem path/module URL不进入 business/application protocol或 Shared State value authority；
+15. Hostra/PWA可为同一 key选择不同 executable artifact，也可使用不同 Shared State physical binding；
+16. executable resolver与 Content resolver可复用底层安全 primitive，但 capability surface分离；Shared State不因此加入 generic Repository；
+17. Hostra M12 `@loomrealm/fsdb`只拥有 Node FSDB readonly core，不拥有 Content/HTTP/Shared State/application authority；
+18. Content credential、Runtime/Runner/Data credential、Shared State binding material与 business persistence capability分离；
+19. Service Worker/Content Service不拥有 Runtime/Frame/Render/Shared State authority；
+20. SharedStateAuthority fatal只上报 Main；Storage/Content/Platform不拥有 terminal/unwind；
 21. Range/cache/resource policy不创造新的 application authority；
 22. safe module resolution不等于 executable sandbox。
