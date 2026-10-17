@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createHostraRuntimeHosting as createProductionHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
-import { createRealmStateAuthority, prepareRealmStateDefinition } from "@loomrealm/realm-state";
+import { createSharedStateAuthority, prepareSharedStateDefinition } from "@loomrealm/shared-state";
 import { createSessionEventHub } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { attachRendererPresentation } from "@loomrealm/renderer/web-presentation";
@@ -33,7 +33,7 @@ const scheduler = Object.freeze({
 });
 const createHostraRuntimeHosting = (options) => createProductionHostraRuntimeHosting({
   ...options,
-  realmStateAuthority: createRealmStateAuthority(prepareRealmStateDefinition([])),
+  sharedStateAuthority: createSharedStateAuthority(prepareSharedStateDefinition([])),
   sessionEventHub: createSessionEventHub(),
 });
 

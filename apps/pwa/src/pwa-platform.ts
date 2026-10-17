@@ -1,11 +1,11 @@
 import type { PwaLaunchPlan } from "@loomrealm/game-launcher-pwa";
 import type {
   MainPlatform,
-  MainRealmStateFatalSource,
+  MainSharedStateFatalSource,
   MainSessionEventsFatalSource,
 } from "@loomrealm/main";
 import type { RendererControlBinding } from "@loomrealm/platform-ports";
-import type { RealmStateAuthority } from "@loomrealm/realm-state";
+import type { SharedStateAuthority } from "@loomrealm/shared-state";
 import type { SessionEventHub } from "@loomrealm/session-events";
 import type { PwaInstallRendererControlV1 } from "./bootstrap-protocol.js";
 import { PwaDataBroker } from "./data-broker.js";
@@ -30,8 +30,8 @@ export class PwaPlatform {
     readonly launchPlan: PwaLaunchPlan;
     readonly sessionEpoch: string;
     readonly bridgePort: MessagePort;
-    readonly realmStateAuthority: RealmStateAuthority;
-    readonly realmStateFatal: MainRealmStateFatalSource;
+    readonly sharedStateAuthority: SharedStateAuthority;
+    readonly sharedStateFatal: MainSharedStateFatalSource;
     readonly sessionEventHub: SessionEventHub;
     readonly sessionEventsFatal: MainSessionEventsFatalSource;
     readonly observe?: (event: Readonly<Record<string, unknown> & { type: string }>) => void;
@@ -53,7 +53,7 @@ export class PwaPlatform {
     const runtimeHosting = createPwaRuntimeHosting({
       launchPlan: options.launchPlan,
       sessionEpoch: options.sessionEpoch,
-      realmStateAuthority: options.realmStateAuthority,
+      sharedStateAuthority: options.sharedStateAuthority,
       sessionEventHub: options.sessionEventHub,
       onRuntimeDataProvisioner: this.broker.onRuntimeDataProvisioner,
       observe: options.observe,
@@ -64,7 +64,7 @@ export class PwaPlatform {
       runtimeHosting,
       rendererControl,
       dataConnections: this.broker.sink,
-      realmStateFatal: options.realmStateFatal,
+      sharedStateFatal: options.sharedStateFatal,
       sessionEventsFatal: options.sessionEventsFatal,
     });
   }

@@ -10,7 +10,7 @@ import { chromium } from "playwright";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { parseGameEntryV1 } from "@loomrealm/game-package";
 import { runMain } from "@loomrealm/main";
-import { createRealmStateClient } from "@loomrealm/realm-state";
+import { createSharedStateClient } from "@loomrealm/shared-state";
 import { createSessionEventClient } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
@@ -178,7 +178,7 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
       const runtime = runSubsystem({
         definition: mapSubsystem, runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
         runtimePolicy, launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] }, data: hub.subsystemBinding, content,
-        state: (() => { const client = createRealmStateClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
+        state: (() => { const client = createSharedStateClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
         events: (() => { const client = createSessionEventClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
       });
       void runtime.catch(() => {});

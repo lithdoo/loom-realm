@@ -2,7 +2,7 @@
   "name": "@loomrealm/game-launcher-pwa",
   "version": "0.1.0-alpha.0",
   "type": "module",
-  "description": "PWA Realm State prepare projection and Worker-compatible integration primitives.",
+  "description": "PWA Shared State prepare projection and Worker-compatible integration primitives.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "sideEffects": false,
@@ -11,7 +11,7 @@
   "scripts": { "build": "tsc -p tsconfig.json", "test": "npm run build && node --test" },
   "dependencies": {
     "@loomrealm/game-package": "0.1.0-alpha.0",
-    "@loomrealm/realm-state": "0.1.0-alpha.0",
+    "@loomrealm/shared-state": "0.1.0-alpha.0",
     "@loomrealm/wire": "0.1.0-alpha.0",
     "es-module-lexer": "2.3.1"
   },

@@ -1,6 +1,6 @@
 import { preparePwaGame } from "@loomrealm/game-launcher-pwa";
 import { runMain } from "@loomrealm/main";
-import { createRealmStateAuthority } from "@loomrealm/realm-state";
+import { createSharedStateAuthority } from "@loomrealm/shared-state";
 import { createSessionEventFatalLatch, createSessionEventHub } from "@loomrealm/session-events";
 import { parsePwaRuntimeInfoV1, parsePwaSessionBootstrapV1, sameServiceWorkerGeneration } from "./bootstrap-protocol.js";
 import { getInstallation, readInstallationObject } from "./installation-store.js";
@@ -59,8 +59,8 @@ async function start(raw: unknown): Promise<void> {
   session.postMessage(Object.freeze({ type: "loomrealm.pwa.session-status", version: 1, status: "prepared", sessionEpoch: bootstrap.sessionEpoch }));
   let fatalListener: (() => void) | null = null;
   let fatal = false;
-  const authority = createRealmStateAuthority(prepared.state, { onFatal() { fatal = true; fatalListener?.(); } });
-  const realmStateFatal = Object.freeze({ subscribe(listener: () => void) { fatalListener = listener; if (fatal) queueMicrotask(listener); return () => { if (fatalListener === listener) fatalListener = null; }; } });
+  const authority = createSharedStateAuthority(prepared.state, { onFatal() { fatal = true; fatalListener?.(); } });
+  const sharedStateFatal = Object.freeze({ subscribe(listener: () => void) { fatalListener = listener; if (fatal) queueMicrotask(listener); return () => { if (fatalListener === listener) fatalListener = null; }; } });
   const sessionEventsFatal = createSessionEventFatalLatch();
   const sessionEventHub = createSessionEventHub({ onFatal: () => sessionEventsFatal.report() });
   const controller = new AbortController();
@@ -68,8 +68,8 @@ async function start(raw: unknown): Promise<void> {
     launchPlan: prepared.launchPlan,
     sessionEpoch: bootstrap.sessionEpoch,
     bridgePort: bootstrap.windowBridgePort,
-    realmStateAuthority: authority,
-    realmStateFatal,
+    sharedStateAuthority: authority,
+    sharedStateFatal,
     sessionEventHub,
     sessionEventsFatal: sessionEventsFatal.source,
     observe: (event) => session.postMessage(Object.freeze({ type: "loomrealm.pwa.observation", version: 1, sessionEpoch: bootstrap.sessionEpoch, event })),

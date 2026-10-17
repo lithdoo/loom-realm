@@ -6,7 +6,7 @@ export type {
   RunSubsystemOptions,
   SubsystemLaunchContext,
   SubsystemRuntimeControlPolicy,
-  RealmStateRuntimeCapability,
+  SharedStateRuntimeCapability,
   SessionEventsRuntimeCapability,
 } from "./run-subsystem.js";
 export {

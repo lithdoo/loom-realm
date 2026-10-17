@@ -16,7 +16,7 @@ const importMap = JSON.stringify({
     "@loomrealm/wire": "/packages/wire/dist/index.js",
     "@loomrealm/platform-ports": "/packages/platform-ports/dist/index.js",
     "@loomrealm/runtime-control": "/packages/runtime-control/dist/index.js",
-    "@loomrealm/realm-state": "/packages/realm-state/dist/index.js",
+    "@loomrealm/shared-state": "/packages/shared-state/dist/index.js",
     "@loomrealm/session-events": "/packages/session-events/dist/index.js",
     "@loomrealm/renderer-control": "/packages/renderer-control/dist/index.js",
     "@loomrealm/data": "/packages/data/dist/index.js",
@@ -85,11 +85,11 @@ async function setup(page, origin, { cancelable = true } = {}) {
     outsideFocusTarget.textContent = "Outside focus target";
     document.body.append(outsideFocusTarget);
     outsideFocusTarget.focus();
-    const [foundation, runtimeControl, rendererControl, realmState, sessionEvents, subsystem, subsystemHost, renderer, presentation, schemaForm] = await Promise.all([
+    const [foundation, runtimeControl, rendererControl, sharedState, sessionEvents, subsystem, subsystemHost, renderer, presentation, schemaForm] = await Promise.all([
       import("@loomrealm/foundation/testing"),
       import("@loomrealm/runtime-control"),
       import("@loomrealm/renderer-control"),
-      import("@loomrealm/realm-state"),
+      import("@loomrealm/shared-state"),
       import("@loomrealm/session-events"),
       import("@loomrealm/subsystem"),
       import("@loomrealm/subsystem/host"),
@@ -169,7 +169,7 @@ async function setup(page, origin, { cancelable = true } = {}) {
         },
       },
       state: (() => {
-        const client = realmState.createRealmStateClient();
+        const client = sharedState.createSharedStateClient();
         return Object.freeze({ client, terminate: () => client.terminate() });
       })(),
       events: (() => {

@@ -66,7 +66,7 @@ export interface PwaRunnerBootstrapV1 {
   readonly bootstrapToken: string;
   readonly logicalModule: string;
   readonly runtimeControlPort: MessagePort;
-  readonly realmStatePort: MessagePort;
+  readonly sharedStatePort: MessagePort;
   readonly provisioningPort: MessagePort;
 }
 
@@ -166,7 +166,7 @@ export function parsePwaRuntimeInfoV1(value: unknown): PwaRuntimeInfoV1 {
 }
 
 export function parsePwaRunnerBootstrapV1(value: unknown): PwaRunnerBootstrapV1 {
-  const item = object(value, ["formatVersion", "sessionEpoch", "installationId", "expectedServiceWorker", "subsystemKey", "bootstrapToken", "logicalModule", "runtimeControlPort", "realmStatePort", "provisioningPort"], "Runner bootstrap");
+  const item = object(value, ["formatVersion", "sessionEpoch", "installationId", "expectedServiceWorker", "subsystemKey", "bootstrapToken", "logicalModule", "runtimeControlPort", "sharedStatePort", "provisioningPort"], "Runner bootstrap");
   if (item.formatVersion !== 1) throw new TypeError("Invalid Runner bootstrap version");
   return Object.freeze({
     formatVersion: 1,
@@ -177,7 +177,7 @@ export function parsePwaRunnerBootstrapV1(value: unknown): PwaRunnerBootstrapV1 
     bootstrapToken: text(item.bootstrapToken, "bootstrapToken"),
     logicalModule: logicalModule(item.logicalModule),
     runtimeControlPort: port(item.runtimeControlPort),
-    realmStatePort: port(item.realmStatePort),
+    sharedStatePort: port(item.sharedStatePort),
     provisioningPort: port(item.provisioningPort),
   });
 }

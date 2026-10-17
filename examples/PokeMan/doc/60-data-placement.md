@@ -1,31 +1,31 @@
 # 数据落点
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文只定义 Content / Realm State / Runtime Memory 的 authority 边界；Realm State 物理结构见 [67-realm-state-records.md](./67-realm-state-records.md)，Content FSDB 物理结构见 [68-content-fsdb.md](./68-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文只定义 Content / Shared State / Runtime Memory 的 authority 边界；Shared State 物理结构见 [67-shared-state-records.md](./67-shared-state-records.md)，Content FSDB 物理结构见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 ## 三处归宿
 
 | 归宿 | 是什么 | 这一局会不会变 |
 | --- | --- | --- |
 | Content | 安装包里的只读定义、剧情内容、派生索引与资源 | 不会 |
-| Realm State | 这一局里跨 Subsystem 共享的可变业务事实 | 会 |
+| Shared State | 这一局里跨 Subsystem 共享的可变业务事实 | 会 |
 | Runtime Memory | 当前 Subsystem / Frame / Battle / Map 的运行工作集 | 会，但不是跨模块长期 authority |
 
 基本判断：
 
 - 所有新游戏安装后都相同的规则、角色定义、剧情定义和资源，放 Content。
-- 这一局已经发生并且需要跨 Subsystem 共享的业务事实，放 Realm State。
+- 这一局已经发生并且需要跨 Subsystem 共享的业务事实，放 Shared State。
 - 当前某个 Subsystem 自己正在执行的 live 状态，留在该 Subsystem Runtime Memory。
-- 能由 Content + 最小 Realm State 事实稳定重建的派生结果，不为了方便重复存一份 State。
-- 某个玩法“未来可能需要持久化”本身不是提前建立 Realm State shape 的理由。
+- 能由 Content + 最小 Shared State 事实稳定重建的派生结果，不为了方便重复存一份 State。
+- 某个玩法“未来可能需要持久化”本身不是提前建立 Shared State shape 的理由。
 
 需要特别避免一个常见误区：
 
 ```text
 可存档
-!= 一定属于 Realm State live authority
+!= 一定属于 Shared State live authority
 ```
 
-Realm State 的首要判断是 **session-level shared mutable business fact**，而不是“以后会不会写进存档文件”。Save / Load 可以把某个 Runtime 当前值投影成 durable checkpoint，但不能因此建立两个并行 live authority。
+Shared State 的首要判断是 **session-level shared mutable business fact**，而不是“以后会不会写进存档文件”。Save / Load 可以把某个 Runtime 当前值投影成 durable checkpoint，但不能因此建立两个并行 live authority。
 
 # Content
 
@@ -276,9 +276,9 @@ struct.StoryIndex/current
 
 StoryIndex 的精确派生字段可以跟随 Resolver 实现调整；这属于 generated read model 的实现细节，不作为 MVP 核心业务数据缺口。
 
-# Realm State
+# Shared State
 
-Realm State 的 canonical physical records 已冻结在 [67-realm-state-records.md](./67-realm-state-records.md)：
+Shared State 的 canonical physical records 已冻结在 [67-shared-state-records.md](./67-shared-state-records.md)：
 
 ```text
 pokeman.PlayerWorld / current
@@ -303,7 +303,7 @@ live player map / position / direction / motion
 → Map Runtime
 
 explicit durable resume/checkpoint
-→ Realm State
+→ Shared State
 ```
 
 `PlayerWorld.mapId` 是正 safe integer，并且必须对应存在的 `struct.Map`。
@@ -318,7 +318,7 @@ explicit durable resume/checkpoint
 → current state = null
 ```
 
-Realm State 不保存 `{ stateId:null }` 项。
+Shared State 不保存 `{ stateId:null }` 项。
 
 Mutation 执行时读取 EventStateList + version，校验全部 `from`，在内存生成新列表，再一次 commit 替换整个 Record。
 
@@ -336,7 +336,7 @@ Relationship(A → B)
 
 Relationship 可以存在而 Contract 不存在。存在 `contract` 才表示正式契约成立。
 
-Contract 不建立独立 Realm State authority。
+Contract 不建立独立 Shared State authority。
 
 跨 Content 固定：
 
@@ -374,7 +374,7 @@ CarriedCards(A) contains B
 
 ## Record-level absence
 
-Realm State v1 允许 Record 从未 materialize；PokeMan 对四类核心 Record 的业务解释已经冻结：
+Shared State v1 允许 Record 从未 materialize；PokeMan 对四类核心 Record 的业务解释已经冻结：
 
 ```text
 PlayerWorld/current absent
@@ -451,7 +451,7 @@ pending choice interaction
 terminalDialogueId completion result
 ```
 
-这些是当前调用工作状态，不进入 Realm State。
+这些是当前调用工作状态，不进入 Shared State。
 
 ## Battle Runtime
 
@@ -477,13 +477,13 @@ Character → struct.BattleActor
 Relationship.contract.integrity / skills[]
 ```
 
-构造 Runtime Actor；结束后只有真正需要长期持续的 Contract Integrity 等结果写回 Realm State。
+构造 Runtime Actor；结束后只有真正需要长期持续的 Contract Integrity 等结果写回 Shared State。
 
 ## Encounter Runtime
 
 当前 generated Encounter set / spawn assignments / transient body state 可以留在 Runtime Memory。
 
-是否重进地图重抽、击败后是否保持消失、何时清空等属于 gameplay Runtime policy，不是当前 Realm State schema gap。
+是否重进地图重抽、击败后是否保持消失、何时清空等属于 gameplay Runtime policy，不是当前 Shared State schema gap。
 
 # Authority 对照
 
@@ -495,10 +495,10 @@ Relationship.contract.integrity / skills[]
 | Dialogue / Event / Mutation | Content |
 | Encounter definition | Content |
 | StoryIndex | generated Content |
-| durable resume/checkpoint | Realm State |
-| Event current state | Realm State |
-| Relationship / Contract | Realm State |
-| current Card party | Realm State |
+| durable resume/checkpoint | Shared State |
+| Event current state | Shared State |
+| Relationship / Contract | Shared State |
+| current Card party | Shared State |
 | live map / player pose | Map Runtime Memory |
 | current NPC Instances | World / Map Runtime Memory |
 | current Dialogue cursor | Dialogue Runtime Memory |
@@ -509,13 +509,13 @@ Relationship.contract.integrity / skills[]
 
 ```text
 Content = 这个游戏本来怎么定义
-Realm State = 这一局跨系统共享的长期业务事实
+Shared State = 这一局跨系统共享的长期业务事实
 Runtime Memory = 当前系统正在执行什么
 ```
 
 # 当前数据结构状态
 
-经过最终闭环复核，Realm State 核心四类 Record、MVP Content 核心业务 shape、Battle Content FSDB binding 与跨 record referential invariants 都已经收口；当前没有剩余的 MVP 核心业务 data physical-schema gap。
+经过最终闭环复核，Shared State 核心四类 Record、MVP Content 核心业务 shape、Battle Content FSDB binding 与跨 record referential invariants 都已经收口；当前没有剩余的 MVP 核心业务 data physical-schema gap。
 
 把冻结 shape 写成各 FSDB table 的 exact `.info.meta` / schema、Builder validator，以及 Runtime 随机/加载/保存逻辑，属于实现工作，不重新算作业务数据模型未决项。
 
@@ -526,7 +526,7 @@ Battle Content table / namespace binding
 BattleSkill identity / Contract.skills[] encoding
 Relationship / Contract Record layout
 CarriedCards Record layout / uniqueness constraints
-Realm State Record-level absence
+Shared State Record-level absence
 EventStateList namespace / key
 PlayerWorld mapId type
 player Character identity

@@ -2,7 +2,7 @@
 
 > Current product entry. 实现位于 `apps/pwa`；逻辑/物理边界见本模块 DESIGN 与正式 PWA Profile，qualification 遵循 [`30-development/qualification`](../../30-development/qualification.md)。
 
-PWA v1 为 **Implementation Frozen / Implemented**。Browser Window 只承载 Renderer / Input / Viewport / Web Presentation；Main + RealmStateAuthority + SessionEventHub 共置独立 Session Worker；Subsystem Runtime 位于独立 Dedicated Worker；Service Worker 只承载 Content/private executable/runtime-info physical boundary。
+PWA v1 为 **Implementation Frozen / Implemented**。Browser Window 只承载 Renderer / Input / Viewport / Web Presentation；Main + SharedStateAuthority + SessionEventHub 共置独立 Session Worker；Subsystem Runtime 位于独立 Dedicated Worker；Service Worker 只承载 Content/private executable/runtime-info physical boundary。
 
 Session Events 通过既有 Runner provisioning control 只传递 `session-events/install` / `session-events/result` 和 dedicated MessagePort capability；publish、subscribe 与 event delivery 全部走专用 Event port。初始 ACK 先于 business Definition import，fresh replacement 绑定到同一 Runtime-scoped logical client，旧 subscription 不复活且不 replay。
 

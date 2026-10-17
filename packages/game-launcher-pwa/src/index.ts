@@ -4,9 +4,9 @@ import {
   type ValidatedGameEntryV1,
 } from "@loomrealm/game-package";
 import {
-  prepareRealmStateDefinition,
-  type PreparedRealmStateDefinition,
-} from "@loomrealm/realm-state";
+  prepareSharedStateDefinition,
+  type PreparedSharedStateDefinition,
+} from "@loomrealm/shared-state";
 import { utf8ByteLength, type JsonValue } from "@loomrealm/wire";
 import { init as initializeModuleLexer, parse as parseModule } from "es-module-lexer";
 
@@ -255,7 +255,7 @@ export interface LogicalGameBootstrap {
 
 export interface PreparedPwaGame {
   readonly logicalBootstrap: LogicalGameBootstrap;
-  readonly state: PreparedRealmStateDefinition;
+  readonly state: PreparedSharedStateDefinition;
   readonly launchPlan: PwaLaunchPlan;
 }
 
@@ -363,7 +363,7 @@ export async function preparePwaGame(request: PwaPrepareGameRequestV1, dependenc
   });
   return Object.freeze({
     logicalBootstrap,
-    state: prepareRealmStateDefinition(game.state?.records ?? []),
+    state: prepareSharedStateDefinition(game.state?.records ?? []),
     launchPlan: Object.freeze({
       installationId: request.installationId,
       installationGeneration: installationValue.generation as string,
@@ -375,7 +375,7 @@ export async function preparePwaGame(request: PwaPrepareGameRequestV1, dependenc
 }
 
 /** Shared PREPARE projection retained as a narrow low-level helper. */
-export function projectPwaPreparedRealmState(game: ValidatedGameEntryV1): PreparedRealmStateDefinition {
+export function projectPwaPreparedSharedState(game: ValidatedGameEntryV1): PreparedSharedStateDefinition {
   if (game === null || typeof game !== "object") throw new TypeError("Invalid validated Game Entry");
-  return prepareRealmStateDefinition(game.state?.records ?? []);
+  return prepareSharedStateDefinition(game.state?.records ?? []);
 }

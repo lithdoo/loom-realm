@@ -1,6 +1,6 @@
 # 数据 Authority 清单
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文把当前 PokeMan 数据按 **Content / Realm State / Runtime Memory** 三类 authority 统一梳理。Realm State 物理 Record 结构见 [67-realm-state-records.md](./67-realm-state-records.md)，Content FSDB 物理结构见 [68-content-fsdb.md](./68-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文把当前 PokeMan 数据按 **Content / Shared State / Runtime Memory** 三类 authority 统一梳理。Shared State 物理 Record 结构见 [67-shared-state-records.md](./67-shared-state-records.md)，Content FSDB 物理结构见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 # 三类 Authority
 
@@ -9,7 +9,7 @@ Content
 = 这个游戏本来怎么定义
 = 安装后只读
 
-Realm State
+Shared State
 = 这一局已经形成、需要跨 Subsystem 共享的 mutable business facts
 
 Runtime Memory
@@ -26,13 +26,13 @@ Runtime Memory
 → Runtime Memory
 
 这一局已经发生，而且以后其他 Subsystem 必须继续知道？
-→ Realm State
+→ Shared State
 
 可以由 Content + authoritative State 稳定重建？
 → 不建立新的 authority
 ```
 
-“将来可能要存档”本身不是把 live Runtime 数据提前复制进 Realm State 的理由。
+“将来可能要存档”本身不是把 live Runtime 数据提前复制进 Shared State 的理由。
 
 # Content
 
@@ -146,7 +146,7 @@ struct.EventStateMutation / <mutationId>
 └─ to: eventId → stateId | null
 ```
 
-Event current state 本身不在 Content，而在 Realm State `EventStateList`。Mutation 只要求 `to` 非空，不增加 semantic no-op proof。
+Event current state 本身不在 Content，而在 Shared State `EventStateList`。Mutation 只要求 `to` 非空，不增加 semantic no-op proof。
 
 ## Encounter
 
@@ -188,11 +188,11 @@ struct.StoryIndex / current
 └─ byEvent
 ```
 
-它是 Builder-generated read model，可由源 Content 重建，不进入 Realm State。精确派生字段是实现细节，不形成新的业务 authority。
+它是 Builder-generated read model，可由源 Content 重建，不进入 Shared State。精确派生字段是实现细节，不形成新的业务 authority。
 
-# Realm State
+# Shared State
 
-Realm State 回答“这一局已经形成哪些跨 Subsystem 的长期业务事实”。物理结构以 `67-realm-state-records.md` 为 canonical source。
+Shared State 回答“这一局已经形成哪些跨 Subsystem 的长期业务事实”。物理结构以 `67-shared-state-records.md` 为 canonical source。
 
 ## durable PlayerWorld checkpoint
 
@@ -242,7 +242,7 @@ pokeman.Relationship / <from>:<to>
   }
 ```
 
-进入 Relationship / CarriedCards key 的 Character business id 使用 `[a-z0-9][a-z0-9._-]{0,119}`；Relationship 以 `:` 组合两个 Character id，最大 241 bytes，满足 Realm State v1 key 限制。
+进入 Relationship / CarriedCards key 的 Character business id 使用 `[a-z0-9][a-z0-9._-]{0,119}`；Relationship 以 `:` 组合两个 Character id，最大 241 bytes，满足 Shared State v1 key 限制。
 
 `A → B` 与 `B → A` 独立。
 
@@ -320,7 +320,7 @@ Abort signal
 current Menu / Message frame instance
 ```
 
-这些属于 Main / Frame control plane，不进入 Realm State。
+这些属于 Main / Frame control plane，不进入 Shared State。
 
 ## Map Runtime
 
@@ -363,7 +363,7 @@ pending choice
 terminalDialogueId completion result
 ```
 
-不进入 Realm State。
+不进入 Shared State。
 
 ## Battle Runtime
 
@@ -379,7 +379,7 @@ actionGeneration
 decisionGeneration
 ```
 
-Battle 完成以后，只有需要长期持续的 Contract Integrity 等结果写回 Realm State。
+Battle 完成以后，只有需要长期持续的 Contract Integrity 等结果写回 Shared State。
 
 ## Encounter Runtime
 
@@ -403,7 +403,7 @@ Center "managed cards" view
 resolved Map scene projection
 ```
 
-它们都应能追溯到已有 Content / Realm State / Runtime authority。
+它们都应能追溯到已有 Content / Shared State / Runtime authority。
 
 # Authority 对照
 
@@ -415,10 +415,10 @@ resolved Map scene projection
 | Dialogue / Event / Mutation | Content |
 | Encounter definition | Content |
 | StoryIndex | generated Content / read model |
-| durable resume/checkpoint | Realm State |
-| Event current state | Realm State |
-| Relationship / Contract | Realm State |
-| current carried Card party | Realm State |
+| durable resume/checkpoint | Shared State |
+| Event current state | Shared State |
+| Relationship / Contract | Shared State |
+| current carried Card party | Shared State |
 | live map / player pose | Map Runtime |
 | current NPC Instances | World / Map Runtime |
 | current Dialogue cursor | Dialogue Runtime |
@@ -432,9 +432,9 @@ Content
 = immutable installation definitions
 = PokeMan FSDB shape / battle binding / reference graph in 68-content-fsdb.md
 
-Realm State
+Shared State
 = cross-Subsystem mutable business facts
-= physical records / referential invariants in 67-realm-state-records.md
+= physical records / referential invariants in 67-shared-state-records.md
 
 Runtime Memory
 = current live execution authority
@@ -446,14 +446,14 @@ Runtime Memory
 MVP player identity → struct.Character/player
 
 live player pose → Map Runtime
-PlayerWorld Realm State → durable resume/checkpoint only
+PlayerWorld Shared State → durable resume/checkpoint only
 
 NPC Instance → Runtime
 Event / Character scene source → Content
 
 BattleActor / BattleSkill / BattleEffect → Content
 Battle live state → Battle Runtime
-Contract integrity / skills → Realm State
+Contract integrity / skills → Shared State
 
 Dialogue cursor → Runtime
 Dialogue definition / Mutation definition → Content

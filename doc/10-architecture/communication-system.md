@@ -2,11 +2,11 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving；Realm State v1 logical plane + Hostra WS / Worker MessagePort physical realizations implemented and qualified；Session Events v1 logical semantics and dedicated Hostra/PWA physical realizations implemented / qualified
-> 主要定义：Control Plane、Renderer Data Plane、Realm State Plane、Session Events Plane、Content Plane、carrier/application mapping、authority/recovery 与 communication-facing Platform responsibilities  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Realm State](./realm-state-system.md)、[Session Events](./session-events-system.md)  
+> 稳定程度：Evolving；Shared State v1 logical plane + Hostra WS / Worker MessagePort physical realizations implemented and qualified；Session Events v1 logical semantics and dedicated Hostra/PWA physical realizations implemented / qualified
+> 主要定义：Control Plane、Renderer Data Plane、Shared State Plane、Session Events Plane、Content Plane、carrier/application mapping、authority/recovery 与 communication-facing Platform responsibilities  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Shared State](./shared-state-system.md)、[Session Events](./session-events-system.md)  
 > 被以下文档细化：[渲染系统](./rendering-system.md)、[Subsystem 模型](./subsystem-model.md)、[运行时启动系统](./runtime-bootstrap-system.md)  
-> 正式化：`doc/15-contracts` 对应协议/Profile；Realm State：[Realm State v1](../15-contracts/realm-state-v1.md)；Session Events：[Session Events v1](../15-contracts/session-events-v1.md) · [Conformance](../15-contracts/session-events-conformance-v1.md)  
+> 正式化：`doc/15-contracts` 对应协议/Profile；Shared State：[Shared State v1](../15-contracts/shared-state-v1.md)；Session Events：[Session Events v1](../15-contracts/session-events-v1.md) · [Conformance](../15-contracts/session-events-conformance-v1.md)  
 > 最近复核：2026-10-13
 
 ---
@@ -31,9 +31,9 @@ Renderer Data Plane
             Render Update v1
             Viewport role when current profile revision includes it
 
-Realm State Plane
-    RealmStateAuthority ⇄ Subsystem Runtime
-        loomrealm.realm-state/1
+Shared State Plane
+    SharedStateAuthority ⇄ Subsystem Runtime
+        loomrealm.shared-state/1
         read / readInitial / list / commit / subscribe
 
 Session Events Plane
@@ -53,22 +53,22 @@ Content Plane
 
 ```text
 Renderer Data reconnect
-    != Realm State reconnect/reset
+    != Shared State reconnect/reset
     != Session Events replay/reset
 
 Runtime Control loss
-    != ordinary Realm State conflict
+    != ordinary Shared State conflict
     != ordinary Session Event delivery failure
 
-Realm State binding loss
+Shared State binding loss
     != Runtime/Session failure
 
 Session Events binding loss
-    != Realm State reset
+    != Shared State reset
     != Renderer Data failure
     != Main control transition
 
-RealmStateAuthority fatal
+SharedStateAuthority fatal
     = Session-fatal condition report
     != binding reconnect event
     != direct Session unwind ownership
@@ -107,12 +107,12 @@ establishment
 reconnect policy
 Runtime failure
 Data generation/profile
-Realm State authority / commit semantics
+Shared State authority / commit semantics
 Session Events channel/routing/subscription semantics
 Session terminal policy
 ```
 
-Realm State logical contract **不要求** 一个统一 physical MessageCarrier：
+Shared State logical contract **不要求** 一个统一 physical MessageCarrier：
 
 ```text
 Desktop same-process
@@ -122,7 +122,7 @@ PWA / cross-process realization
     MAY use MessagePort / IPC / another bounded private carrier
 ```
 
-如果 Realm State realization 使用 message-oriented carrier，carrier仍只负责 transport facts；MUST NOT 自己 retry/duplicate mutation，也 MUST NOT 把 transport loss擅自解释为 `CONFLICT`、known no-commit、Runtime failure 或 Session terminal。
+如果 Shared State realization 使用 message-oriented carrier，carrier仍只负责 transport facts；MUST NOT 自己 retry/duplicate mutation，也 MUST NOT 把 transport loss擅自解释为 `CONFLICT`、known no-commit、Runtime failure 或 Session terminal。
 
 Session Events 同样不绑定某一种 carrier。Desktop 可使用 IPC / WebSocket / private carrier，PWA 可使用 MessagePort；carrier MUST NOT 自己创建 channel semantics、subscription registry、source identity、history replay、business retry 或 business authority。
 
@@ -156,7 +156,7 @@ MemoryCarrier  string
 
 Structured Clone只用于 Platform bootstrap/Port transfer；existing Control/Data application payload不允许出现第二套 structured-object model。
 
-Realm State v1 当前 Hostra realization 使用独立 JSON-text WebSocket carrier，browser/Worker realization 使用 private MessagePort string units；两者共享 [Realm State v1](../15-contracts/realm-state-v1.md) validation/size/evidence semantics，物理 carrier不是第二套数据模型。合法的大型 logical result 使用 State 专用透明分帧 `loomrealm.realm-state.frame/1`，不会引入 transport-specific logical size limit。
+Shared State v1 当前 Hostra realization 使用独立 JSON-text WebSocket carrier，browser/Worker realization 使用 private MessagePort string units；两者共享 [Shared State v1](../15-contracts/shared-state-v1.md) validation/size/evidence semantics，物理 carrier不是第二套数据模型。合法的大型 logical result 使用 State 专用透明分帧 `loomrealm.shared-state.frame/1`，不会引入 transport-specific logical size limit。
 
 Session Events v1 不冻结跨平台统一 byte encoding，但冻结 remote logical binding requirements。Remote realization MUST 能表达：
 
@@ -188,9 +188,9 @@ Control loss在无 shutdown intent时 Runtime-fatal；same-attempt无 reconnect�
 
 Platform只建立 carrier，不改变 hello/Frame transaction semantics。
 
-Realm State request MUST NOT 塞进 Runtime Control / Frame Call message namespace；`frame.call()` 继续只表达 control-flow composition。
+Shared State request MUST NOT 塞进 Runtime Control / Frame Call message namespace；`frame.call()` 继续只表达 control-flow composition。
 
-Realm State request也 MUST NOT 携带或依赖 `frameId` / `activationId` / InputTarget 来建立 State mutation authority。
+Shared State request也 MUST NOT 携带或依赖 `frameId` / `activationId` / InputTarget 来建立 State mutation authority。
 
 Session Event publish/subscribe 同样 MUST NOT 塞进 Frame/Call namespace，也 MUST NOT 用 `frame.call()` 模拟普通 event fan-out。Session Events 不拥有 control continuation、child result 或 Runtime supervision。
 
@@ -214,11 +214,11 @@ Data endpoint/ticket/Port
 Interest Registry
 Render State
 Content credential
-Realm State value / Realm State carrier material
+Shared State value / Shared State carrier material
 Session Event channel/subscription state
 ```
 
-Control loss使 Renderer失去 current Main authority，并 retire旧 Data connections；MUST NOT 因此 reset RealmStateAuthority 或要求 SessionEventHub replay。
+Control loss使 Renderer失去 current Main authority，并 retire旧 Data connections；MUST NOT 因此 reset SharedStateAuthority 或要求 SessionEventHub replay。
 
 Renderer 默认不直接订阅 Session Events；如果未来出现 Renderer-side event consumer，必须另行定义 explicit role，而不能借 Renderer Control 旁路。
 
@@ -247,7 +247,7 @@ fresh-carrier child baseline
 
 Connection Core本身 zero application messages。
 
-Realm State MUST NOT 成为 Renderer Data child protocol：它是 Session business-state authority，不是 current Renderer replica traffic。
+Shared State MUST NOT 成为 Renderer Data child protocol：它是 Session business-state authority，不是 current Renderer replica traffic。
 
 Session Events MUST NOT 成为 Renderer Data child protocol：它是 Session-scoped cross-Subsystem event distribution，不依赖 current Renderer/Data generation。
 
@@ -282,7 +282,7 @@ P
 
 同 generation/profile顺序 reconnect允许；profile change必须 fresh generation。
 
-Realm State Record identity/version/revision MUST NOT 使用 Data generation/profile 作为业务 identity 或 OCC metadata。
+Shared State Record identity/version/revision MUST NOT 使用 Data generation/profile 作为业务 identity 或 OCC metadata。
 
 Session Event channel/type/source/subscription identity MUST NOT 使用 Renderer Data generation/profile 作为业务 identity/currentness。Event client lifetime跟随 Runtime/Session，而不是 current Renderer participant。
 
@@ -306,7 +306,7 @@ PWA：Worker provisioning path + transferred MessagePort。
 
 Provisioning material不进入 Runtime Control / Renderer Control / business payload。
 
-RealmStateClient binding属于 Runtime-scoped Session capability bootstrap，不由 Renderer DataAuthority 动态授权，也不通过 Data Broker candidate/current机制建立。
+SharedStateClient binding属于 Runtime-scoped Session capability bootstrap，不由 Renderer DataAuthority 动态授权，也不通过 Data Broker candidate/current机制建立。
 
 SessionEventClient 同样属于 Runtime-scoped Session capability；其 binding/provisioning 不由 Renderer DataAuthority 授权，也不通过 Data candidate/current机制建立。
 
@@ -327,8 +327,8 @@ same-generation reconnect failure
 fail Runtime
 unwind Frame
 change Main DataAuthority
-reset Realm State
-terminal RealmStateClient
+reset Shared State
+terminal SharedStateClient
 terminal SessionEventClient
 ```
 
@@ -359,7 +359,7 @@ Authority first → no send until Interest
 
 不建立 cross-plane ACK/revision join/barrier。
 
-Realm State revision不是 Input/Render cross-plane barrier。Subsystem业务可以读取 State 后更新其 local/Render authority，但 Realm State `commit()` 本身不消费 Frame/Activation mutation permit，core也不建立 `Realm State revision == Render revision` 之类全局序列。
+Shared State revision不是 Input/Render cross-plane barrier。Subsystem业务可以读取 State 后更新其 local/Render authority，但 Shared State `commit()` 本身不消费 Frame/Activation mutation permit，core也不建立 `Shared State revision == Render revision` 之类全局序列。
 
 Session Event delivery也不是 Input mutation permit。Event listener 可以根据业务语义调用其拥有的 normal capabilities，但事件本身不创建 current Frame、Activation 或 InputTarget authority。
 
@@ -381,7 +381,7 @@ render.domains
 → patch/event
 ```
 
-Data carrier loss只丢 replica transport baseline，不销毁 Subsystem authoritative Domain，也不影响 Realm State authority或 SessionEventHub。
+Data carrier loss只丢 replica transport baseline，不销毁 Subsystem authoritative Domain，也不影响 Shared State authority或 SessionEventHub。
 
 必须区分：
 
@@ -401,12 +401,12 @@ Session Event
 
 ---
 
-## 12. Realm State Plane
+## 12. Shared State Plane
 
 Logical protocol：
 
 ```text
-loomrealm.realm-state/1
+loomrealm.shared-state/1
 ```
 
 至少表达：
@@ -426,11 +426,11 @@ Authority semantics：
 
 ```text
 one Session
-→ one logical RealmStateAuthority
-→ many Runtime-scoped RealmStateClient bindings
+→ one logical SharedStateAuthority
+→ many Runtime-scoped SharedStateClient bindings
 ```
 
-Realm State plane不建立：
+Shared State plane不建立：
 
 ```text
 Frame / Activation / InputTarget mutation authority
@@ -483,7 +483,7 @@ Authority captures notification
 
 Listener sync throw / returned rejected thenable MUST 本地隔离/诊断；MUST NOT retroactively fail commit、make Authority fatal、terminate Session 或作为 backpressure ACK。
 
-Listener MAY reenter RealmStateClient operations；binding MUST NOT 持有 Authority lock 调用 listener。
+Listener MAY reenter SharedStateClient operations；binding MUST NOT 持有 Authority lock 调用 listener。
 
 Subscription delivery MUST bounded。无法继续保证 ordered relevant changes时：
 
@@ -507,14 +507,14 @@ Binding loss本身 MUST NOT：
 fail Main Runtime
 unwind Frame
 terminate Session
-reset RealmStateAuthority
+reset SharedStateAuthority
 change DataAuthority
 reset SessionEventHub
 ```
 
 如果 profile 支持后续恢复，必须建立 fresh logical binding，再 fresh subscribe + fresh baseline；不 replay history。
 
-RealmStateAuthority fatal 则不同：它报告 Session-fatal condition，由 Main/Session lifecycle owner提交 terminal/unwind；Authority/carrier本身不直接拥有该 transition。
+SharedStateAuthority fatal 则不同：它报告 Session-fatal condition，由 Main/Session lifecycle owner提交 terminal/unwind；Authority/carrier本身不直接拥有该 transition。
 
 ---
 
@@ -687,7 +687,7 @@ PWA     → same-origin Fetch/SW
 
 Content credential/bootstrap mechanism属于 Platform implementation；logical route/cache/error/integrity由 Content API定义。
 
-Content 是 readonly definition authority；Realm State 是 mutable Session business-state authority；Session Events 是 transient notification plane。它们不得因为都传递 JSON/business data 而合并成 generic repository/event protocol。
+Content 是 readonly definition authority；Shared State 是 mutable Session business-state authority；Session Events 是 transient notification plane。它们不得因为都传递 JSON/business data 而合并成 generic repository/event protocol。
 
 ---
 
@@ -731,7 +731,7 @@ scope.events.publish("log", ...)
 Renderer Control → latest full snapshot
 User Input       → state coalesce + bounded event queue
 Render Update    → protocol revision/commit rules
-Realm State      → bounded request/subscription physical profile; commit lane never blocked by listener delivery
+Shared State      → bounded request/subscription physical profile; commit lane never blocked by listener delivery
 Session Events   → exact v1 queue/size limits + explicit subscription overflow terminal
 Diagnostics      → independent policy; MAY batch/sample/drop according to future diagnostics contract
 Content          → HTTP request/concurrency policy
@@ -739,7 +739,7 @@ Content          → HTTP request/concurrency policy
 
 Transport不得为了缓解 backpressure重试/duplicate application mutation/event。
 
-Realm State subscription queue 已按 v1 profile 实现 64 events / 8 MiB 双重上限；Authority 与 carrier delivery 均不得以 unbounded queue 取代该约束。
+Shared State subscription queue 已按 v1 profile 实现 64 events / 8 MiB 双重上限；Authority 与 carrier delivery 均不得以 unbounded queue 取代该约束。
 
 Session Events v1 同样固定 pending 64 events / 8 MiB per subscription。普通 business event delivery不允许 silent drop；would-overflow terminal affected subscription，但不 retroactively fail accepted publisher。
 
@@ -769,24 +769,24 @@ Shared carrier loss MAY simultaneously make State/Event physical bindings unavai
 Runtime Control ↛ total order with Renderer Control
 Renderer Control ↛ total order with Renderer Data
 Input ↛ shared revision with Render
-Realm State revision ↛ Main Control revision
-Realm State revision ↛ Renderer Data revision
-Session Event order ↛ Realm State revision
+Shared State revision ↛ Main Control revision
+Shared State revision ↛ Renderer Data revision
+Session Event order ↛ Shared State revision
 Session Event order ↛ Main Control revision
 Session Event order ↛ Render revision
-Content version ↛ Realm State revision
+Content version ↛ Shared State revision
 ```
 
-Realm State global revision只在 State Authority 内定义 commit order。Session Events 不引入 universal Session event sequence。
+Shared State global revision只在 State Authority 内定义 commit order。Session Events 不引入 universal Session event sequence。
 
 ---
 
 ## 18. Final Invariants
 
-1. Control、Renderer Data、Realm State、Session Events、Content是独立 logical communication planes；
-2. current Control/Data message-oriented profiles继续统一 UTF-8 JSON text string；Realm State/Session Events physical encoding可按 profile不同，但不得分叉 logical semantics；
+1. Control、Renderer Data、Shared State、Session Events、Content是独立 logical communication planes；
+2. current Control/Data message-oriented profiles继续统一 UTF-8 JSON text string；Shared State/Session Events physical encoding可按 profile不同，但不得分叉 logical semantics；
 3. Carrier只描述已建立 pipe，不描述 application authority/establishment/Session supervision；
-4. Runtime Control使用 one dispatcher + shared sender ID namespace；Realm State/Session Events不复用 Frame/Call logical namespace；
+4. Runtime Control使用 one dispatcher + shared sender ID namespace；Shared State/Session Events不复用 Frame/Call logical namespace；
 5. Renderer Control只复制 Main logical authority，不携 State values或 Event channel/subscription state；
 6. DataAuthority = S/G/dataProfile，不拥有 State/Event binding；
 7. State/Event operations不消费 Frame/Activation/InputTarget authority；

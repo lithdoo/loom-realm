@@ -9,7 +9,7 @@ import { chromium } from "playwright";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
-import { createRealmStateClient } from "@loomrealm/realm-state";
+import { createSharedStateClient } from "@loomrealm/shared-state";
 import { createSessionEventClient } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
@@ -223,7 +223,7 @@ try {
         data: hub.subsystemBinding,
         content: production.content,
         state: (() => {
-          const client = createRealmStateClient();
+          const client = createSharedStateClient();
           return Object.freeze({ client, terminate: () => client.terminate() });
         })(),
         events: (() => {

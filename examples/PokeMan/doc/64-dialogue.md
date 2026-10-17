@@ -171,7 +171,7 @@ setEventState
 setAffinity
 createContract
 startBattle
-任意 Realm State mutation
+任意 Shared State mutation
 ```
 
 例如：
@@ -278,7 +278,7 @@ Dialogue graph
 Choice target
 speaker resolution
 EventStateMutation interpretation
-Realm State commit
+Shared State commit
 ```
 
 执行概念：
@@ -308,7 +308,7 @@ choices?
 return terminalDialogueId
 ```
 
-`terminalDialogueId` 是当前 Frame completion result，不进入 Realm State。
+`terminalDialogueId` 是当前 Frame completion result，不进入 Shared State。
 
 # Runtime Memory
 
@@ -322,7 +322,7 @@ pending choice interaction
 
 这些都属于 Runtime Memory。
 
-Realm State 不保存：
+Shared State 不保存：
 
 ```text
 Dialogue definition copy
@@ -356,7 +356,7 @@ Builder 不因为合法 Dialogue cycle 失败。
 
 - 本地化文本最终组织；
 - 头像 / 表情 / 音效等 richer presentation metadata；
-- 根据 Realm State 动态隐藏 / 显示 Choice 的条件系统；
+- 根据 Shared State 动态隐藏 / 显示 Choice 的条件系统；
 - Mutation mismatch / OCC conflict 的 UI / Message 行为；
 - 一个 Dialogue 内多个 transient speaker / 显式 narration override。
 

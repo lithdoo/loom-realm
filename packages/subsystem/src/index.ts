@@ -54,7 +54,7 @@ export type {
   ViewportListener,
   ViewportSize,
 } from "./viewport.js";
-export type { RealmStateClient } from "@loomrealm/realm-state";
+export type { SharedStateClient } from "@loomrealm/shared-state";
 export {
   SessionEventError,
   isSessionEventFailure,

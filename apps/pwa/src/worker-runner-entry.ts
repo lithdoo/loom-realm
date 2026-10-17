@@ -1,10 +1,10 @@
 import type { MessageCarrier } from "@loomrealm/foundation";
 import type { DeadlineScheduler, RuntimeControlBinding, SubsystemDataBinding, SubsystemDataBindingResult } from "@loomrealm/platform-ports";
 import {
-  createRealmStateCarrierBinding,
-  createRealmStateClient,
-  createRealmStateMessagePortCarrier,
-} from "@loomrealm/realm-state";
+  createSharedStateCarrierBinding,
+  createSharedStateClient,
+  createSharedStateMessagePortCarrier,
+} from "@loomrealm/shared-state";
 import type { SubsystemDefinitionFactory } from "@loomrealm/subsystem";
 import { createSameOriginContentClient, runSubsystem } from "@loomrealm/subsystem/host";
 import {
@@ -129,7 +129,7 @@ async function run(raw: unknown): Promise<void> {
   if (!response.ok) throw new Error("Service Worker runtime-info unavailable");
   const runtimeInfo = parsePwaRuntimeInfoV1(await response.json());
   if (!sameServiceWorkerGeneration(runtimeInfo, bootstrap.expectedServiceWorker)) throw new Error("Service Worker generation mismatch");
-  const stateClient = createRealmStateClient(createRealmStateCarrierBinding(createRealmStateMessagePortCarrier(bootstrap.realmStatePort)));
+  const stateClient = createSharedStateClient(createSharedStateCarrierBinding(createSharedStateMessagePortCarrier(bootstrap.sharedStatePort)));
   const data = new RunnerDataBinding(bootstrap.provisioningPort, bootstrap.subsystemKey);
   const events = new RunnerSessionEventsBinding(bootstrap.provisioningPort, bootstrap.subsystemKey);
   await events.initial;

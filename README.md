@@ -1,6 +1,6 @@
 # LoomRealm
 
-LoomRealm 是将逻辑游戏 Runtime 与平台物理组合分离的模块化游戏运行平台。Main 持有 Session/Runtime/InputTarget/DataAuthority，Realm State 持有 session 共享业务状态，Subsystem 持有 domain execution 与 RenderDomain；Renderer 维护只读/current presentation replica 并产生输入。`game-libs/` 存放可复用游戏业务库，Desktop 与 PWA 采用不同 physical topology，但遵守相同逻辑 authority 与 contract。
+LoomRealm 是将逻辑游戏 Runtime 与平台物理组合分离的模块化游戏运行平台。Main 持有 Session/Runtime/InputTarget/DataAuthority，Shared State 持有 session 共享业务状态，Subsystem 持有 domain execution 与 RenderDomain；Renderer 维护只读/current presentation replica 并产生输入。`game-libs/` 存放可复用游戏业务库，Desktop 与 PWA 采用不同 physical topology，但遵守相同逻辑 authority 与 contract。
 
 **[文档首页](./doc/index.md) · [产品与治理](./doc/00-overview/product-vision.md) · [系统架构](./doc/10-architecture/system-overview.md) · [正式契约](./doc/15-contracts/README.md) · [已实现模块](./doc/20-modules/core/README.md) · [开发与资格](./doc/30-development/README.md) · [ADR](./doc/decisions/README.md)**
 

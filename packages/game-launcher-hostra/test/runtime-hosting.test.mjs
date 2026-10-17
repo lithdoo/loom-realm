@@ -11,9 +11,9 @@ import {
 } from "../dist/index.js";
 import { buildRunnerEnvironment } from "../dist/runtime-hosting.js";
 import {
-  createRealmStateAuthority,
-  prepareRealmStateDefinition,
-} from "@loomrealm/realm-state";
+  createSharedStateAuthority,
+  prepareSharedStateDefinition,
+} from "@loomrealm/shared-state";
 import { createSessionEventHub } from "@loomrealm/session-events";
 
 const policy = Object.freeze({
@@ -28,7 +28,7 @@ const policy = Object.freeze({
 function createHostraRuntimeHosting(options) {
   return createProductionHostraRuntimeHosting({
     ...options,
-    realmStateAuthority: createRealmStateAuthority(prepareRealmStateDefinition([])),
+    sharedStateAuthority: createSharedStateAuthority(prepareSharedStateDefinition([])),
     sessionEventHub: createSessionEventHub(),
   });
 }
@@ -85,11 +85,11 @@ test("Runner environment uses the exact allowlist and reserved bootstrap", () =>
   assert.equal(environment.ELECTRON_RUN_AS_NODE, undefined);
 });
 
-test("production RuntimeHosting rejects a missing Realm State Authority", async (t) => {
+test("production RuntimeHosting rejects a missing Shared State Authority", async (t) => {
   const game = await prepared(t);
   assert.throws(
     () => createProductionHostraRuntimeHosting({ launchPlan: game.launchPlan }),
-    /Realm State Authority/u,
+    /Shared State Authority/u,
   );
 });
 
@@ -308,7 +308,7 @@ test("dedicated Events endpoint rejects a wrong path and accepts a fresh sequent
     const second = await open(endpoint);
     await writeFile("events-rebind.json", JSON.stringify({
       wrongRejected,
-      distinct: endpoint !== bootstrap.controlEndpoint && endpoint !== bootstrap.realmStateEndpoint,
+      distinct: endpoint !== bootstrap.controlEndpoint && endpoint !== bootstrap.sharedStateEndpoint,
       scrubbed: process.env.LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT === undefined
     }));
     await new Promise((resolve) => { second.once("close", resolve); second.close(); });

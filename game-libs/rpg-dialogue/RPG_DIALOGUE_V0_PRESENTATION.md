@@ -240,7 +240,7 @@ removed semantic presence, then later returns
 
 `setHistory()` 的 replace 同样遵守这个规则；被移除的 History entry 以后即使以相同 `entryId` 再出现，也不能复用已 consumed 的旧 Render key。
 
-`RPGDialogue` 不拥有 Quest、Inventory、Battle、Map 或 Realm State gameplay authority。
+`RPGDialogue` 不拥有 Quest、Inventory、Battle、Map 或 Shared State gameplay authority。
 
 ## 5. Characters
 
@@ -388,7 +388,7 @@ conversation scroll position
 local focus / animation state
 ```
 
-它们不是 Renderer Store、Subsystem 或 Realm State authority。
+它们不是 Renderer Store、Subsystem 或 Shared State authority。
 
 ## 9. Conversation inbound events
 
@@ -488,7 +488,7 @@ caller
 RPGDialogue
 → current session History state / validation / projection
 
-Realm State (optional)
+Shared State (optional)
 → durable persistence
 
 WebComponent

@@ -5,16 +5,16 @@ import type { DeadlineScheduler, RuntimeControlBinding } from "@loomrealm/platfo
 import { createBoundContentClient, runSubsystem } from "@loomrealm/subsystem/host";
 import type { SubsystemDefinitionFactory } from "@loomrealm/subsystem";
 import {
-  createRealmStateCarrierBinding,
-  createRealmStateClient,
-} from "@loomrealm/realm-state";
+  createSharedStateCarrierBinding,
+  createSharedStateClient,
+} from "@loomrealm/shared-state";
 import {
   createSessionEventCarrierBinding,
   createSessionEventClient,
 } from "@loomrealm/session-events";
 import WebSocket from "ws";
 import { createWebSocketCarrier } from "../websocket-carrier.js";
-import { createRealmStateWebSocketCarrier } from "../realm-state-websocket-carrier.js";
+import { createSharedStateWebSocketCarrier } from "../shared-state-websocket-carrier.js";
 import { createSessionEventWebSocketCarrier } from "../session-events-websocket-carrier.js";
 import { createRunnerDataProvisioning } from "./data-provisioning.js";
 import type { HostraContentAccess } from "../content-access.js";
@@ -25,7 +25,7 @@ const BOOTSTRAP_KEYS = [
   "subsystemKey",
   "physicalModule",
   "controlEndpoint",
-  "realmStateEndpoint",
+  "sharedStateEndpoint",
   "bootstrapToken",
   "controlProtocolVersions",
   "helloDeadlineMs",
@@ -39,7 +39,7 @@ export interface RunnerBootstrapV1 {
   readonly subsystemKey: string;
   readonly physicalModule: string;
   readonly controlEndpoint: string;
-  readonly realmStateEndpoint: string;
+  readonly sharedStateEndpoint: string;
   readonly bootstrapToken: string;
   readonly controlProtocolVersions: readonly [1];
   readonly helloDeadlineMs: number;
@@ -96,9 +96,9 @@ export function parseRunnerBootstrap(encoded: string): RunnerBootstrapV1 {
   ) {
     throw new TypeError("Invalid Runner bootstrap");
   }
-  if (typeof object.realmStateEndpoint !== "string") throw new TypeError("Invalid Runner bootstrap");
+  if (typeof object.sharedStateEndpoint !== "string") throw new TypeError("Invalid Runner bootstrap");
   let stateEndpoint: URL;
-  try { stateEndpoint = new URL(object.realmStateEndpoint); } catch { throw new TypeError("Invalid Runner bootstrap"); }
+  try { stateEndpoint = new URL(object.sharedStateEndpoint); } catch { throw new TypeError("Invalid Runner bootstrap"); }
   if (
     stateEndpoint.protocol !== "ws:" || stateEndpoint.hostname !== "127.0.0.1" ||
     stateEndpoint.username !== "" || stateEndpoint.password !== "" || stateEndpoint.search !== "" ||
@@ -110,7 +110,7 @@ export function parseRunnerBootstrap(encoded: string): RunnerBootstrapV1 {
     subsystemKey: object.subsystemKey,
     physicalModule: object.physicalModule,
     controlEndpoint: object.controlEndpoint,
-    realmStateEndpoint: object.realmStateEndpoint,
+    sharedStateEndpoint: object.sharedStateEndpoint,
     bootstrapToken: object.bootstrapToken,
     controlProtocolVersions: Object.freeze([1] as [1]),
     helloDeadlineMs: object.helloDeadlineMs,
@@ -143,7 +143,7 @@ function connect(
       signal.removeEventListener("abort", onAbort);
       resolve(
         plane === "state"
-          ? createRealmStateWebSocketCarrier(socket)
+          ? createSharedStateWebSocketCarrier(socket)
           : plane === "events"
             ? createSessionEventWebSocketCarrier(socket)
             : createWebSocketCarrier(socket),
@@ -160,7 +160,7 @@ export async function runBootstrap(
   contentAccess?: HostraContentAccess,
 ): Promise<void> {
   const stateLifetime = new AbortController();
-  const stateClient = createRealmStateClient();
+  const stateClient = createSharedStateClient();
   const stateCarriers = new Set<MessageCarrier>();
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let installStateBinding!: (required: boolean) => Promise<void>;
@@ -176,7 +176,7 @@ export async function runBootstrap(
     if (stateLifetime.signal.aborted) return;
     try {
       const carrier = await connect(
-        bootstrap.realmStateEndpoint,
+        bootstrap.sharedStateEndpoint,
         stateLifetime.signal,
         "state",
       );
@@ -185,7 +185,7 @@ export async function runBootstrap(
         return;
       }
       stateCarriers.add(carrier);
-      const binding = createRealmStateCarrierBinding(carrier);
+      const binding = createSharedStateCarrierBinding(carrier);
       stateClient.attach(binding);
       void binding.terminal.then(() => {
         stateCarriers.delete(carrier);

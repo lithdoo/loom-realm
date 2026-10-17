@@ -14,7 +14,7 @@ Main current Renderer / DataAuthority
 → business-owned Custom Elements
 ```
 
-Renderer 拥有 **readonly/current presentation replica** 与受控 input producer gate，不拥有 Main Session/DataAuthority、Realm State business truth 或 Subsystem RenderDomain authority。DOM/Web Component 私有状态不得 reverse-sync Store。
+Renderer 拥有 **readonly/current presentation replica** 与受控 input producer gate，不拥有 Main Session/DataAuthority、Shared State business truth 或 Subsystem RenderDomain authority。DOM/Web Component 私有状态不得 reverse-sync Store。
 
 `PresentationResourceClient` 通过 trusted ResourceClient 获取 Content；业务元素只见 logical resource identity/version，不拿 bearer、filesystem path 或 physical endpoint。
 

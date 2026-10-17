@@ -5,7 +5,7 @@ import path from "node:path";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
-import { createRealmStateAuthority } from "@loomrealm/realm-state";
+import { createSharedStateAuthority } from "@loomrealm/shared-state";
 import { createSessionEventHub } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { inspectRendererRenderForQualification } from "../../../../packages/renderer/dist/internal/render-qualification.js";
@@ -43,7 +43,7 @@ export async function runDesktopEquivalenceReference() {
       writeFile(path.join(root, "[FSDB]content", "[struct]demo", "config.json"), '{"message":"ready"}'),
     ]);
     const prepared = await prepareHostraGame({ source: { installationRoot: root }, runnerPolicy });
-    authority = createRealmStateAuthority(prepared.state);
+    authority = createSharedStateAuthority(prepared.state);
     const view = await prepareDesktopContentView(prepared);
     service = await createDesktopContentService({ view });
     const access = service.access(service.createGrant({ permissions: ["records"], expiresAtUnixMs: Date.now() + 60_000 }));
@@ -69,7 +69,7 @@ export async function runDesktopEquivalenceReference() {
     });
     const runtimeHosting = createHostraRuntimeHosting({
       launchPlan: prepared.launchPlan,
-      realmStateAuthority: authority,
+      sharedStateAuthority: authority,
       sessionEventHub: createSessionEventHub(),
       contentAccess: { origin: access.origin.href, installationId: access.installationId, token: access.token },
       onRuntimeDataProvisioner: broker.onRuntimeDataProvisioner,

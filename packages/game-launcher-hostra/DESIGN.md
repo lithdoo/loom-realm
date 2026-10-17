@@ -140,11 +140,11 @@ export interface HostraRuntimeDataProvisioner {
 ```ts
 createHostraRuntimeHosting({
   launchPlan,
-  realmStateAuthority,
+  sharedStateAuthority,
   onRuntimeDataProvisioner,
 }: {
   readonly launchPlan: HostraLaunchPlan;
-  readonly realmStateAuthority: RealmStateClient;
+  readonly sharedStateAuthority: SharedStateClient;
   readonly onRuntimeDataProvisioner?: (
     runtime: HostedRuntime,
     provisioner: HostraRuntimeDataProvisioner,
@@ -154,7 +154,7 @@ createHostraRuntimeHosting({
 
 The hook is concrete Hostra composition integration, not a shared platform-ports capability。
 
-`realmStateAuthority` is required even for an empty prepared State definition；production Runtime bootstrap must never manufacture a permanently unbound logical client。
+`sharedStateAuthority` is required even for an empty prepared State definition；production Runtime bootstrap must never manufacture a permanently unbound logical client。
 
 ---
 

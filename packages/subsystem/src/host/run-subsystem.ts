@@ -4,8 +4,8 @@ import type {
   SubsystemDataBinding,
 } from "@loomrealm/platform-ports";
 import {
-  type RealmStateClient,
-} from "@loomrealm/realm-state";
+  type SharedStateClient,
+} from "@loomrealm/shared-state";
 import type { SessionEventClient } from "@loomrealm/session-events";
 import {
   createSubsystemDataPeer,
@@ -55,12 +55,12 @@ export interface RunSubsystemOptions {
   readonly launch: SubsystemLaunchContext;
   readonly data?: SubsystemDataBinding;
   readonly content?: ContentClient;
-  readonly state: RealmStateRuntimeCapability;
+  readonly state: SharedStateRuntimeCapability;
   readonly events: SessionEventsRuntimeCapability;
 }
 
-export interface RealmStateRuntimeCapability {
-  readonly client: RealmStateClient;
+export interface SharedStateRuntimeCapability {
+  readonly client: SharedStateClient;
   terminate(): void;
 }
 
@@ -191,7 +191,7 @@ function validateOptions(options: RunSubsystemOptions): void {
     typeof options.state.client.subscribe !== "function" ||
     typeof options.state.terminate !== "function"
   ) {
-    throw new TypeError("Invalid Realm State Runtime capability");
+    throw new TypeError("Invalid Shared State Runtime capability");
   }
   if (
     options.events === null ||
@@ -287,7 +287,7 @@ class SubsystemHost {
   private readonly input = new InputManager();
   private readonly render = new RenderManager();
   private readonly viewport = new ViewportManager();
-  private readonly runtimeState: RealmStateRuntimeCapability;
+  private readonly runtimeState: SharedStateRuntimeCapability;
   private readonly runtimeEvents: SessionEventsRuntimeCapability;
 
   constructor(private readonly options: RunSubsystemOptions) {

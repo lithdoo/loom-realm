@@ -190,12 +190,12 @@ function validateOptions(options: RunMainOptions): LogicalGameBootstrap {
     throw new TypeError("Invalid Data Connection authority sink");
   }
   if (
-    platform.realmStateFatal !== undefined &&
-    (platform.realmStateFatal === null ||
-      typeof platform.realmStateFatal !== "object" ||
-      typeof platform.realmStateFatal.subscribe !== "function")
+    platform.sharedStateFatal !== undefined &&
+    (platform.sharedStateFatal === null ||
+      typeof platform.sharedStateFatal !== "object" ||
+      typeof platform.sharedStateFatal.subscribe !== "function")
   ) {
-    throw new TypeError("Invalid Realm State fatal source");
+    throw new TypeError("Invalid Shared State fatal source");
   }
   if (
     platform.sessionEventsFatal !== undefined &&
@@ -308,7 +308,7 @@ class MainSessionRuntime {
   private nextActivation = 1;
   private mutationTail: Promise<void> = Promise.resolve();
   private detachExternalAbort: () => void = () => {};
-  private detachRealmStateFatal: () => void = () => {};
+  private detachSharedStateFatal: () => void = () => {};
   private detachSessionEventsFatal: () => void = () => {};
 
   constructor(private readonly options: RunMainOptions) {
@@ -320,11 +320,11 @@ class MainSessionRuntime {
   }
 
   run(): Promise<MainSessionResult> {
-    if (this.options.platform.realmStateFatal !== undefined) {
-      this.detachRealmStateFatal = this.options.platform.realmStateFatal.subscribe(() => {
+    if (this.options.platform.sharedStateFatal !== undefined) {
+      this.detachSharedStateFatal = this.options.platform.sharedStateFatal.subscribe(() => {
         void this.mutate(() => this.beginFatal(failure(
-          "REALM_STATE_AUTHORITY_FATAL",
-          "Realm State Authority became terminal",
+          "SHARED_STATE_AUTHORITY_FATAL",
+          "Shared State Authority became terminal",
         )));
       });
     }
@@ -1633,7 +1633,7 @@ class MainSessionRuntime {
       terminal.kind === "fatal" ? "bootstrap-abort" : "session-end",
     );
     this.detachExternalAbort();
-    this.detachRealmStateFatal();
+    this.detachSharedStateFatal();
     this.detachSessionEventsFatal();
 
     if (terminal.kind === "fatal") {

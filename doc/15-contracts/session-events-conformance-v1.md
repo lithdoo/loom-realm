@@ -390,7 +390,7 @@ Qualification MUST exercise a real Node Runner boundary and prove：
 
 ```text
 one dedicated private Events WebSocket per Runtime
-Events WS distinct from Runtime Control / Realm State / Renderer Data / Content / Hostra RPC
+Events WS distinct from Runtime Control / Shared State / Renderer Data / Content / Hostra RPC
 RuntimeHosting listens before Runner spawn
 LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT is host-generated, strict loopback capability URL
 Runner copies + scrubs the env value before business Definition import

@@ -23,10 +23,10 @@ The package projects frozen/shared runtime semantics into narrow business capabi
 - input listeners and input mutation gating;
 - authoritative `RenderDomain` authoring, including complete replacement and existing-node update;
 - readonly `ContentClient` access;
-- session-scoped Realm State client access where composed by the host;
+- session-scoped Shared State client access where composed by the host;
 - readonly current viewport facts where the current Renderer Data profile provides them.
 
-These capabilities do not create service locators, EventBus/Store frameworks, public RenderManager internals, retry/replay systems, generic Entity systems or second copies of Main/Realm State/Render authority.
+These capabilities do not create service locators, EventBus/Store frameworks, public RenderManager internals, retry/replay systems, generic Entity systems or second copies of Main/Shared State/Render authority.
 
 ## Construction / bootstrap realization
 
@@ -38,7 +38,7 @@ validate Definition Module ABI
    - Input manager
    - Render manager
    - Content client binding
-   - Realm State client binding when available
+   - Shared State client binding when available
    - Viewport/current Data projection
 → create one SubsystemScope backed by those managers
 → invoke the Definition factory
@@ -105,11 +105,11 @@ Durable rules:
 
 Package-private validation/serialization optimizations are permitted only when they remain behaviorally equivalent to the formal/bounded data model and keep failure atomicity/current snapshot immutability.
 
-## Content / Realm State / Viewport
+## Content / Shared State / Viewport
 
 `ContentClient` is readonly logical installation access. It does not expose filesystem paths, installation mutators or platform credentials to business code.
 
-Realm State is a separate session-shared mutable business authority. The Subsystem client consumes that authority; it must not silently mirror shared records into a competing local store or treat Render state as Realm State.
+Shared State is a separate session-shared mutable business authority. The Subsystem client consumes that authority; it must not silently mirror shared records into a competing local store or treat Render state as Shared State.
 
 Viewport is a readonly current presentation/environment fact delivered through the current Data identity. It can influence business projection/layout where the game library chooses, but it does not create a second Input/Render/Data connection or become Main authority.
 
@@ -129,12 +129,12 @@ The package must not depend on concrete game examples, `apps/*`, Hostra/PWA phys
 
 - Subsystem owns domain execution, local business state and authoritative Render Domains;
 - Main Session/Frame/InputTarget/DataAuthority are not duplicated here;
-- Realm State shared records remain a sibling authority;
+- Shared State shared records remain a sibling authority;
 - protocol envelopes/carriers stay host/internal and do not leak into the author root;
 - public author APIs express business intent, not physical transport mechanics;
 - stale callbacks/completions cannot mutate a newer Runtime/Data/render identity;
 - platform-specific composition remains outside this package.
 
-Normative references: [Runtime Control](../../doc/15-contracts/runtime-control-profile-v1.md), [Frame / Call](../../doc/15-contracts/frame-call-protocol-v1.md), [Renderer Data Profile](../../doc/15-contracts/renderer-data-profile-v1.md), [User Input](../../doc/15-contracts/user-input-v1.md), [Render Update](../../doc/15-contracts/render-update-v1.md), [Content API](../../doc/15-contracts/content-api-v1.md), and [Realm State v1](../../doc/15-contracts/realm-state-v1.md).
+Normative references: [Runtime Control](../../doc/15-contracts/runtime-control-profile-v1.md), [Frame / Call](../../doc/15-contracts/frame-call-protocol-v1.md), [Renderer Data Profile](../../doc/15-contracts/renderer-data-profile-v1.md), [User Input](../../doc/15-contracts/user-input-v1.md), [Render Update](../../doc/15-contracts/render-update-v1.md), [Content API](../../doc/15-contracts/content-api-v1.md), and [Shared State v1](../../doc/15-contracts/shared-state-v1.md).
 
 Implementation/qualification history is recoverable from Git and legacy ledgers; this package document does not maintain milestone status.

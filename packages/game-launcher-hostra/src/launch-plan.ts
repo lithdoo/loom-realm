@@ -1,9 +1,9 @@
 import type { ValidatedGameEntryV1 } from "@loomrealm/game-package";
 import type { JsonValue } from "@loomrealm/wire";
 import {
-  prepareRealmStateDefinition,
-  type PreparedRealmStateDefinition,
-} from "@loomrealm/realm-state";
+  prepareSharedStateDefinition,
+  type PreparedSharedStateDefinition,
+} from "@loomrealm/shared-state";
 import { launcherError } from "./errors.js";
 import type { HostraLaunchManifestV1 } from "./manifest.js";
 
@@ -36,7 +36,7 @@ export interface PreparedHostraGame {
       readonly input: JsonValue;
     };
   };
-  readonly state: PreparedRealmStateDefinition;
+  readonly state: PreparedSharedStateDefinition;
   readonly launchPlan: HostraLaunchPlan;
 }
 
@@ -132,7 +132,7 @@ export function createPreparedHostraGame(options: {
       input: options.game.initial.input,
     }),
   });
-  const state = prepareRealmStateDefinition(
+  const state = prepareSharedStateDefinition(
     options.game.state?.records ?? [],
   );
   const launchPlan = Object.freeze({

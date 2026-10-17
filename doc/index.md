@@ -18,7 +18,7 @@ hero:
       link: /30-development/README
 features:
   - title: 单一 Authority
-    details: Main、Realm State、Subsystem、Renderer、Content 各自拥有明确且不重叠的 authoritative state；物理平台差异不改变逻辑语义。
+    details: Main、Shared State、Subsystem、Renderer、Content 各自拥有明确且不重叠的 authoritative state；物理平台差异不改变逻辑语义。
   - title: Contract-first
     details: Architecture 定义责任与 topology，Contracts 定义可互操作边界，Modules 投影当前实现；Frozen、Implemented、Qualified 明确区分。
   - title: Capability-based maintenance

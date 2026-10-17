@@ -1,6 +1,6 @@
 # 人物
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义持久 Character、NPC / Map Instance、Relationship / Contract、Card 与 Battle 数据边界。Realm State 物理结构见 [67-realm-state-records.md](./67-realm-state-records.md)，Content FSDB 编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义持久 Character、NPC / Map Instance、Relationship / Contract、Card 与 Battle 数据边界。Shared State 物理结构见 [67-shared-state-records.md](./67-shared-state-records.md)，Content FSDB 编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 归宿总表见 [数据落点](./60-data-placement.md)。
 
@@ -80,7 +80,7 @@ Character
 - `interaction.dialogue` 是 `struct.Dialogue` key；
 - default scene source 不保存 Runtime `instanceId`。
 
-固定 AI 人物描述回答“这个人本来是什么样的人”。需要被规则读取的长期变化不回写 Character Content，而进入 Realm State Relationship 等结构化事实。
+固定 AI 人物描述回答“这个人本来是什么样的人”。需要被规则读取的长期变化不回写 Character Content，而进入 Shared State Relationship 等结构化事实。
 
 所有持久 Character 都应准备好形成 Card / Battle 表现所需的静态素材与数据。这是 **Content 完备性规则**，不表示存在 `canContract = true`，也不表示当前一定能建立契约。
 
@@ -262,7 +262,7 @@ character = X
 
 # Relationship
 
-Relationship 是 Realm State 中两个 Character 之间的有向长期关系。
+Relationship 是 Shared State 中两个 Character 之间的有向长期关系。
 
 物理 identity 已冻结：
 
@@ -285,7 +285,7 @@ pokeman.Relationship / player:rival
 [a-z0-9][a-z0-9._-]{0,119}
 ```
 
-`:` 不属于 Character id，因此 `A:B` 可无歧义拆回两个 Character identity；最大复合 key 为 241 bytes，满足 Realm State v1 的 256-byte key 上限。
+`:` 不属于 Character id，因此 `A:B` 可无歧义拆回两个 Character identity；最大复合 key 为 241 bytes，满足 Shared State v1 的 256-byte key 上限。
 
 Relationship key 中的 from / to 都必须对应存在的 `struct.Character`。
 
@@ -322,7 +322,7 @@ value.contract
 
 > A 已作为主公与 B 这个从者建立正式契约。
 
-Contract 不建立独立 Realm State Record，而是 Relationship value 内的可选对象。
+Contract 不建立独立 Shared State Record，而是 Relationship value 内的可选对象。
 
 MVP Contract：
 
@@ -374,7 +374,7 @@ baseSkills + learnedSkills merge
 
 # Card / CarriedCards
 
-Card 是 Realm State 当前随身事实，但没有独立 `cardId`。
+Card 是 Shared State 当前随身事实，但没有独立 `cardId`。
 
 物理 Record 已冻结为按 holder 聚合：
 
@@ -490,7 +490,7 @@ Relationship A → B
 LLM
 ```
 
-LLM 一次生成的台词默认只是输出，不自动修改 Character Content、Relationship 或其他 Realm State。长期关系变化必须由游戏业务明确提交。
+LLM 一次生成的台词默认只是输出，不自动修改 Character Content、Relationship 或其他 Shared State。长期关系变化必须由游戏业务明确提交。
 
 当前不建立独立 Conversation Memory。
 
@@ -549,4 +549,4 @@ Character / Battle Content binding / Relationship / Contract / CarriedCards 的 
 
 当前没有 BattleSkill identity / Contract.skills physical gap：`Contract.skills[]` 直接复用 battle 模块既有的 `skillId: string`；PokeMan Game Package 的 Battle Content table 绑定也已经固定为 `struct.BattleActor` / `struct.BattleSkill`。
 
-剩余 `instanceId` 具体生成算法属于 Runtime，不是 Content / Realm State data physical-schema gap。
+剩余 `instanceId` 具体生成算法属于 Runtime，不是 Content / Shared State data physical-schema gap。

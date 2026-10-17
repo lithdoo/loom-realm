@@ -3,9 +3,9 @@
 > 层级：正式契约  
 > 状态：Active / Normative **(Pre-release)**  
 > 契约版本：1  
-> 稳定程度：**Stabilizing / Not Formally Released / Breaking Schema Changes Allowed Until v1 Freeze**；Realm State slice pre-implementation / not qualified  
-> 主要定义：Game Entry platform-neutral document shape、Subsystem logical topology、Realm State initial document definition、初始 Frame target、集合级校验、validated snapshot 与 Platform Launcher consumption boundary  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[Realm State v1](./realm-state-v1.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
+> 稳定程度：**Stabilizing / Not Formally Released / Breaking Schema Changes Allowed Until v1 Freeze**；Shared State slice pre-implementation / not qualified  
+> 主要定义：Game Entry platform-neutral document shape、Subsystem logical topology、Shared State initial document definition、初始 Frame target、集合级校验、validated snapshot 与 Platform Launcher consumption boundary  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[Shared State v1](./shared-state-v1.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
 > Hostra realization：[Hostra Game Launcher / Node Subsystem Runner Profile v1](./nodejs-launcher-profile-v1.md)  
 > PWA realization：[PWA Game Launcher / Worker Subsystem Runner Profile v1](./pwa-launcher-profile-v1.md)  
 > 最近复核：2026-10-05
@@ -21,7 +21,7 @@
 
 核心原则：
 
-> **Game Package 回答“这个 common Game Entry document 是否成立、游戏有哪些 logical Subsystems、共享业务初始定义是什么、从哪里开始”；matching Platform Launcher 回答“当前平台如何把这些 document facts 投影成 Main / Realm State 的 prepared logical inputs，并如何实现这些 subsystem keys”；Main 与 RealmStateAuthority 都不直接解析 Game Entry document。**
+> **Game Package 回答“这个 common Game Entry document 是否成立、游戏有哪些 logical Subsystems、共享业务初始定义是什么、从哪里开始”；matching Platform Launcher 回答“当前平台如何把这些 document facts 投影成 Main / Shared State 的 prepared logical inputs，并如何实现这些 subsystem keys”；Main 与 SharedStateAuthority 都不直接解析 Game Entry document。**
 
 ---
 
@@ -34,16 +34,16 @@ Normative model：
 ```ts
 interface GameEntryV1 {
   readonly formatVersion: 1;
-  readonly state?: RealmStateGameDefinitionV1;
+  readonly state?: SharedStateGameDefinitionV1;
   readonly initial: InitialFrameTargetV1;
   readonly subsystems: readonly SubsystemDescriptorV1[];
 }
 
-interface RealmStateGameDefinitionV1 {
-  readonly records: readonly RealmStateInitialRecordV1[];
+interface SharedStateGameDefinitionV1 {
+  readonly records: readonly SharedStateInitialRecordV1[];
 }
 
-interface RealmStateInitialRecordV1 {
+interface SharedStateInitialRecordV1 {
   readonly namespace: string;
   readonly key: string;
   readonly value: JsonValue;
@@ -83,10 +83,10 @@ interface SubsystemDescriptorV1 {
 缺少 `state` MUST 等价于：
 
 ```text
-Realm State initial document definition = empty
+Shared State initial document definition = empty
 ```
 
-Game Entry MUST NOT 包含 executable/platform binding，也 MUST NOT 指定 Realm State Record version、global revision、transaction ID、Save/Load seed 或 persistence policy。
+Game Entry MUST NOT 包含 executable/platform binding，也 MUST NOT 指定 Shared State Record version、global revision、transaction ID、Save/Load seed 或 persistence policy。
 
 ---
 
@@ -164,7 +164,7 @@ Current v1 只冻结 `1..256` UTF-8 bytes 的 representation bound，不额外�
 
 ---
 
-## 4. Realm State Initial Document Definition
+## 4. Shared State Initial Document Definition
 
 `state.records[]` 声明 **Game-level shared business baseline document**。它与 `initial.input` 不同：
 
@@ -178,7 +178,7 @@ initial.input
 
 Game Entry 声明 Records，而不是独立 Namespace objects。Namespace/Collection 由 `records[].namespace` 自然派生。
 
-每个 initial Record identity 是 `(namespace,key)`，其 grammar MUST 与 Realm State v1 一致：
+每个 initial Record identity 是 `(namespace,key)`，其 grammar MUST 与 Shared State v1 一致：
 
 ```text
 namespace
@@ -200,7 +200,7 @@ identity
 
 同一 `state.records[]` 内完整 Record identity MUST 唯一。
 
-Realm State initial document hard bounds：
+Shared State initial document hard bounds：
 
 ```text
 initial record count        <= 4096
@@ -209,23 +209,23 @@ JsonValue nesting depth     <= 64
 whole initial State payload <= 8 MiB
 ```
 
-精确 encoded-size / nesting-depth accounting algorithm 由 [Realm State v1](./realm-state-v1.md) formal freeze 统一定义。该算法未冻结前，Realm State feature 不得宣称 implementation-qualified；各平台不得私自采用不一致的更宽松算法。
+精确 encoded-size / nesting-depth accounting algorithm 由 [Shared State v1](./shared-state-v1.md) formal freeze 统一定义。该算法未冻结前，Shared State feature 不得宣称 implementation-qualified；各平台不得私自采用不一致的更宽松算法。
 
 `state.records[].value` MUST 是合法 `JsonValue`。Game Package 不解释其业务 schema。
 
 重要边界：
 
 ```text
-RealmStateGameDefinitionV1
+SharedStateGameDefinitionV1
     = Game Package document-layer representation
 
-PreparedRealmStateDefinition
-    = Realm State runtime/bootstrap representation
+PreparedSharedStateDefinition
+    = Shared State runtime/bootstrap representation
 ```
 
-二者语义相关但 owner 不同；RealmStateAuthority MUST NOT 直接依赖本 Game Package document type。
+二者语义相关但 owner 不同；SharedStateAuthority MUST NOT 直接依赖本 Game Package document type。
 
-Game Entry `state` 只定义 prepared Game initial baseline。Save/Load/restore data 不进入 Game Entry State，也不成为 RealmStateAuthority 第二套 bootstrap input；持久化恢复属于运行中业务通过 `RealmStateClient` 执行的普通 mutation。
+Game Entry `state` 只定义 prepared Game initial baseline。Save/Load/restore data 不进入 Game Entry State，也不成为 SharedStateAuthority 第二套 bootstrap input；持久化恢复属于运行中业务通过 `SharedStateClient` 执行的普通 mutation。
 
 ---
 
@@ -259,16 +259,16 @@ recursive reserved business JSON names
 
 ## 6. Closed Schema
 
-Game Entry、RealmStateGameDefinition、RealmStateInitialRecord、InitialFrameTarget、SubsystemDescriptor 都是 closed schema：
+Game Entry、SharedStateGameDefinition、SharedStateInitialRecord、InitialFrameTarget、SubsystemDescriptor 都是 closed schema：
 
 ```text
 GameEntry
     exactly formatVersion / optional state / initial / subsystems
 
-RealmStateGameDefinition
+SharedStateGameDefinition
     exactly records
 
-RealmStateInitialRecord
+SharedStateInitialRecord
     exactly namespace / key / value
 
 InitialFrameTarget
@@ -362,8 +362,8 @@ read Platform Launch Manifest
 resolve executable module
 import Definition Module
 create Process/Worker
-open Control/Data/Realm State carrier
-create RealmStateAuthority
+open Control/Data/Shared State carrier
+create SharedStateAuthority
 select Hostra/PWA
 interpret Save/Load persistence data
 ```
@@ -397,7 +397,7 @@ invoke user getter/toJSON as part of snapshot construction
 
 因此 caller 后续 mutation MUST NOT alter the validated snapshot。
 
-Snapshot construction SHOULD be deep-input safe。Realm State value validation/size/depth/detach MAY 使用一个 bounded traversal，不要求分层重复遍历同一可信值。
+Snapshot construction SHOULD be deep-input safe。Shared State value validation/size/depth/detach MAY 使用一个 bounded traversal，不要求分层重复遍历同一可信值。
 
 Object member names such as `__proto__` MUST remain ordinary JSON data, not prototype authority。
 
@@ -416,7 +416,7 @@ Game source
     → own Platform manifest validation
     → exact join / executable preflight
     → project Main bootstrap
-    → project Realm State prepared bootstrap definition
+    → project Shared State prepared bootstrap definition
 ```
 
 Projection ownership：
@@ -426,10 +426,10 @@ ValidatedGameEntryV1.initial/subsystems
     → LogicalGameBootstrap
 
 ValidatedGameEntryV1.state
-    → PreparedRealmStateDefinition
+    → PreparedSharedStateDefinition
 ```
 
-`PreparedRealmStateDefinition` 的 runtime semantics/type ownership 属 [Realm State v1](./realm-state-v1.md)，不是本 Game Package document contract。
+`PreparedSharedStateDefinition` 的 runtime semantics/type ownership 属 [Shared State v1](./shared-state-v1.md)，不是本 Game Package document contract。
 
 Product application/composition MUST NOT be required to call Game Package manually before invoking the matching launcher。
 
@@ -446,7 +446,7 @@ parse game.json
 validate GameEntryV1
 import @loomrealm/game-package as a Runtime role dependency
 receive formatVersion / validated document brand
-receive Realm State initial Records
+receive Shared State initial Records
 receive Platform executable fields
 ```
 
@@ -462,18 +462,18 @@ interface LogicalGameBootstrap {
 }
 ```
 
-Realm State bootstrap remains a **sibling projection**, not a Main field：
+Shared State bootstrap remains a **sibling projection**, not a Main field：
 
 ```ts
 interface PreparedLogicalGame {
   readonly main: LogicalGameBootstrap;
-  readonly state: PreparedRealmStateDefinition;
+  readonly state: PreparedSharedStateDefinition;
 }
 ```
 
-其中 `PreparedRealmStateDefinition` 由 Realm State contract拥有，概念上是 detached/immutable、platform-neutral 的 prepared Game Record baseline。Launcher MUST explicitly project `ValidatedGameEntryV1.state` into that representation，而不是把 `RealmStateGameDefinitionV1` document object直接当作 Authority bootstrap object。
+其中 `PreparedSharedStateDefinition` 由 Shared State contract拥有，概念上是 detached/immutable、platform-neutral 的 prepared Game Record baseline。Launcher MUST explicitly project `ValidatedGameEntryV1.state` into that representation，而不是把 `SharedStateGameDefinitionV1` document object直接当作 Authority bootstrap object。
 
-`LogicalGameBootstrap` MUST be immutable and MUST NOT contain executable/Platform/Realm State material。
+`LogicalGameBootstrap` MUST be immutable and MUST NOT contain executable/Platform/Shared State material。
 
 Prepared `state` MUST be detached/immutable and MUST NOT contain Game Package `formatVersion`、Runtime version/revision、transaction ID、Save/Load material 或 Platform executable material。
 
@@ -494,7 +494,7 @@ immutable PlatformLaunchPlan
 +
 PreparedLogicalGame {
     main: LogicalGameBootstrap,
-    state: PreparedRealmStateDefinition
+    state: PreparedSharedStateDefinition
 }
 ```
 
@@ -506,7 +506,7 @@ keys(GameEntry.subsystems)
 keys(CurrentPlatformLaunchManifest.subsystems)
 ```
 
-Realm State Records 不参与 executable key-set join。
+Shared State Records 不参与 executable key-set join。
 
 Missing/extra executable binding MUST fail before Runtime side effects。
 
@@ -527,7 +527,7 @@ read/obtain Game Entry
 → hosting/security capability preflight
 → freeze PlatformLaunchPlan
 → project/freeze LogicalGameBootstrap
-→ project/freeze PreparedRealmStateDefinition
+→ project/freeze PreparedSharedStateDefinition
 ────────────────────────────────────────
 PREPARE complete
 ```
@@ -541,9 +541,9 @@ MUST NOT establish Runtime Control
 MUST NOT permit business Runtime side effect
 ```
 
-RealmStateAuthority 的 physical creation MAY 位于 PREPARE 之后的 Session bootstrap，但 MUST consume the prepared State projection and MUST be READY before first business Runtime side effect。
+SharedStateAuthority 的 physical creation MAY 位于 PREPARE 之后的 Session bootstrap，但 MUST consume the prepared State projection and MUST be READY before first business Runtime side effect。
 
-Session bootstrap MUST NOT consume Save/Load seed as a privileged Realm State input。Persistence restoration, if any, happens later as ordinary business activity。
+Session bootstrap MUST NOT consume Save/Load seed as a privileged Shared State input。Persistence restoration, if any, happens later as ordinary business activity。
 
 Definition Module actual ESM import/default-export ABI validation MAY 发生在 Host-owned Runner；此类 launch-time failure使 all-required bootstrap失败并 cleanup，但不改变 PREPARE owner。
 
@@ -565,13 +565,13 @@ A/B MUST 遵守相同 author/host contract，并在同一 logical scenario 下�
 
 Same artifact/path/bytes 不是 Game Package compatibility invariant。
 
-Definition Module MUST NOT receive Game Package document State or infer that `RealmStateGameDefinitionV1` is a Runtime capability；it consumes only author-facing `RealmStateClient` provided by the Runtime host。
+Definition Module MUST NOT receive Game Package document State or infer that `SharedStateGameDefinitionV1` is a Runtime capability；it consumes only author-facing `SharedStateClient` provided by the Runtime host。
 
 ---
 
-## 15. Main / Realm State Runtime Boundary
+## 15. Main / Shared State Runtime Boundary
 
-Main 拥有 logical Subsystem Registry / Runtime/Frame control authority，但不拥有 Game document/executable binding，也不拥有 Realm State business data。
+Main 拥有 logical Subsystem Registry / Runtime/Frame control authority，但不拥有 Game document/executable binding，也不拥有 Shared State business data。
 
 Prepared RuntimeHosting 的 Main-facing request：
 
@@ -583,9 +583,9 @@ Main MUST NOT 传入：
 
 ```text
 GameEntryV1
-RealmStateGameDefinitionV1
-PreparedRealmStateDefinition
-Realm State values/revision/version
+SharedStateGameDefinitionV1
+PreparedSharedStateDefinition
+Shared State values/revision/version
 module path / URL
 resolved filesystem path
 Node executable
@@ -593,9 +593,9 @@ Worker entry/options
 PlatformLaunchPlan
 ```
 
-RuntimeHosting 在封闭的 PlatformLaunchPlan 中 lookup binding。Runtime-scoped RealmStateClient capability 由 Session/Platform composition 独立注入对应 Runtime，而不是通过 Frame params、Main business fields 或 Runtime Control message传递。
+RuntimeHosting 在封闭的 PlatformLaunchPlan 中 lookup binding。Runtime-scoped SharedStateClient capability 由 Session/Platform composition 独立注入对应 Runtime，而不是通过 Frame params、Main business fields 或 Runtime Control message传递。
 
-RealmStateAuthority MUST consume the Realm State-owned prepared representation, not Game Package document types。
+SharedStateAuthority MUST consume the Shared State-owned prepared representation, not Game Package document types。
 
 ---
 
@@ -610,9 +610,9 @@ SUBSYSTEM_KEY_INVALID
 SUBSYSTEM_KEY_DUPLICATE
 INITIAL_TARGET_UNDECLARED
 INITIAL_INPUT_INVALID
-REALM_STATE_INITIAL_INVALID
-REALM_STATE_INITIAL_DUPLICATE
-REALM_STATE_INITIAL_LIMIT_EXCEEDED
+SHARED_STATE_INITIAL_INVALID
+SHARED_STATE_INITIAL_DUPLICATE
+SHARED_STATE_INITIAL_LIMIT_EXCEEDED
 ```
 
 Implementation-facing public error SHOULD expose stable category + structural path；human message 不形成 compatibility contract。
@@ -631,7 +631,7 @@ SUBSYSTEM_MODULE_ABI_INVALID
 PLATFORM_RUNTIME_UNSUPPORTED
 ```
 
-Realm State Runtime read/commit/subscription/binding errors归 Realm State contract，不属于 Game Package validation error namespace。
+Shared State Runtime read/commit/subscription/binding errors归 Shared State contract，不属于 Game Package validation error namespace。
 
 ---
 
@@ -640,14 +640,14 @@ Realm State Runtime read/commit/subscription/binding errors归 Realm State contr
 Game Entry 是 declarative logical topology + initial business definition，不授予 executable capability：
 
 ```text
-Game declares Subsystem key / Realm State initial value
+Game declares Subsystem key / Shared State initial value
 !=
 Game may execute arbitrary path/URL
 ```
 
 Executable trust、module containment、Runner ownership、Node/Worker policy由 Platform Launcher/Profile承担。
 
-Realm State runtime authority同样不来自 Game document object identity；它来自 Session bootstrap建立的 RealmStateAuthority。Document validation/projection只提供 immutable initial business baseline。
+Shared State runtime authority同样不来自 Game document object identity；它来自 Session bootstrap建立的 SharedStateAuthority。Document validation/projection只提供 immutable initial business baseline。
 
 Publisher Trust / signing / untrusted executable sandbox仍是后续能力。
 
@@ -660,12 +660,12 @@ Publisher Trust / signing / untrusted executable sandbox仍是后续能力。
 ```text
 valid minimal Game Entry without state
 valid optional state.records
-omitted state = empty Realm State document definition
+omitted state = empty Shared State document definition
 closed top-level/state/initial/descriptor schemas
 unsupported formatVersion
 empty/oversized/ill-formed-Unicode/duplicate Subsystem key
-Realm State namespace/key grammar + duplicate full Record identity
-Realm State initial count/value/payload hard limits
+Shared State namespace/key grammar + duplicate full Record identity
+Shared State initial count/value/payload hard limits
 case-sensitive no-normalization identity semantics
 undeclared initial target
 invalid initial JsonValue
@@ -675,10 +675,10 @@ validated snapshot detached + immutable
 source mutation cannot change validated result
 common validation performs no I/O/module import/Runtime side effect
 Hostra/PWA launcher prepare consume the same common Game Entry
-Launcher projects document State → PreparedRealmStateDefinition
+Launcher projects document State → PreparedSharedStateDefinition
 Prepared State is detached/immutable and does not expose Game Package formatVersion
-RealmStateAuthority does not require GameEntryV1 / RealmStateGameDefinitionV1
-Main projection excludes Realm State state.records
+SharedStateAuthority does not require GameEntryV1 / SharedStateGameDefinitionV1
+Main projection excludes Shared State state.records
 missing/extra Platform Subsystem key rejected by Platform join
 all PREPARE failures before business Runtime side effects
 no privileged Save/Load bootstrap input is projected from Game Package
@@ -686,31 +686,31 @@ no privileged Save/Load bootstrap input is projected from Game Package
 
 Pre-release versioning qualification SHOULD additionally lock：historical draft v1 compatibility is not promised；current validator implements only the current pre-release v1 schema。After formal v1 release, versioning qualification MUST prevent silent structural schema drift under `formatVersion: 1`。
 
-Realm State exact encoded-size/depth accounting 已由 Realm State v1 implementation/qualification 关闭；Game Package State document vectors复用相同逻辑规则。
+Shared State exact encoded-size/depth accounting 已由 Shared State v1 implementation/qualification 关闭；Game Package State document vectors复用相同逻辑规则。
 
 ---
 
 ## 19. Core Invariants
 
-1. Game Package v1 拥有 platform-neutral Game Entry **document**、logical topology、optional Realm State initial document definition 与 initial business input；
+1. Game Package v1 拥有 platform-neutral Game Entry **document**、logical topology、optional Shared State initial document definition 与 initial business input；
 2. Game Package v1 当前是 pre-release normative contract，尚无历史 draft compatibility commitment；
 3. Descriptor v1 精确 `{key}`；
 4. current pre-release v1 直接包含 optional `state`，继续使用 `formatVersion: 1`；
 5. v1 正式 release 后，closed-schema breaking structural evolution原则上必须使用新的 `formatVersion`；
 6. State document声明 Records，不声明独立 Namespace objects；完整 identity `(namespace,key)` 必须唯一；
-7. Subsystem key 与 Realm State identity 均使用 exact/no-normalization semantics；
+7. Subsystem key 与 Shared State identity 均使用 exact/no-normalization semantics；
 8. initial.input 与 state Record values 都是 opaque JsonValue；
 9. successful validation产出 detached immutable document snapshot；
-10. Game Package不是 Runtime role，也不创建/拥有 RealmStateAuthority；
+10. Game Package不是 Runtime role，也不创建/拥有 SharedStateAuthority；
 11. matching Platform Launcher是 Runtime-product Game Entry consumer；
-12. Launcher owns projection from validated Game document to `LogicalGameBootstrap` + Realm State-owned `PreparedRealmStateDefinition`；
-13. Main不依赖/解析 Game Package document model，也不接收 Realm State prepared State；
-14. RealmStateAuthority不依赖 `GameEntryV1` / `RealmStateGameDefinitionV1` / `formatVersion` / `game.json`；
-15. Main只接收 immutable LogicalGameBootstrap；PreparedRealmStateDefinition是 sibling prepared projection；
+12. Launcher owns projection from validated Game document to `LogicalGameBootstrap` + Shared State-owned `PreparedSharedStateDefinition`；
+13. Main不依赖/解析 Game Package document model，也不接收 Shared State prepared State；
+14. SharedStateAuthority不依赖 `GameEntryV1` / `SharedStateGameDefinitionV1` / `formatVersion` / `game.json`；
+15. Main只接收 immutable LogicalGameBootstrap；PreparedSharedStateDefinition是 sibling prepared projection；
 16. Game Entry State只定义 immutable prepared Game baseline，不承载 Save/Load seed或 persistence workflow；
 17. Platform Launch Manifest独立绑定 Subsystem key → current-platform implementation；
 18. Phase 1 Game Subsystem key set与 current Platform key set严格相等；
-19. complete PlatformLaunchPlan + Main projection + Realm State prepared projection 在 business Runtime side effect前闭合；
+19. complete PlatformLaunchPlan + Main projection + Shared State prepared projection 在 business Runtime side effect前闭合；
 20. Definition Module ABI统一，artifact可按平台不同；
 21. Host policy/credential/resource options不得由 Game common manifest注入；
 22. current implementation path只支持该 current pre-release v1 document model，不提供历史 draft dual-parser compatibility path。

@@ -37,33 +37,33 @@ future multiplex optimization
 Hostra Desktop
     LoomRealm Desktop process
         Main
-        RealmStateAuthority
+        SharedStateAuthority
         SessionEventHub
         RuntimeHosting
 
     Node Runner × N
-        Runtime-scoped RealmStateClient
+        Runtime-scoped SharedStateClient
         Runtime-scoped SessionEventClient
 
 PWA
     Session Worker
         Main
-        RealmStateAuthority
+        SharedStateAuthority
         SessionEventHub
         RuntimeHosting
 
     Dedicated Subsystem Worker × N
-        Runtime-scoped RealmStateClient
+        Runtime-scoped SharedStateClient
         Runtime-scoped SessionEventClient
 ```
 
 这是 current product profile，不是 universal architecture requirement。SessionEventHub 未来 MAY 拆到独立 Process/Worker，或者 State/Events MAY multiplex 同一 carrier；只要 Session Events v1 logical observables 不变即可。
 
-Main、Realm State、SessionEventHub 即使物理共置，也保持三个不同 logical roles：
+Main、Shared State、SessionEventHub 即使物理共置，也保持三个不同 logical roles：
 
 ```text
 Main              = Control Authority
-Realm State       = Shared Business State Authority
+Shared State       = Shared Business State Authority
 SessionEventHub   = transient routing/delivery mechanics only
 ```
 
@@ -80,7 +80,7 @@ export interface MainSessionEventsFatalSource {
 
 export interface MainPlatform {
   // existing capabilities...
-  readonly realmStateFatal?: MainRealmStateFatalSource;
+  readonly sharedStateFatal?: MainSharedStateFatalSource;
   readonly sessionEventsFatal?: MainSessionEventsFatalSource;
 }
 ```
@@ -131,7 +131,7 @@ Canonical order：
 
 ```text
 Platform PREPARE complete
-→ Realm State READY
+→ Shared State READY
 → SessionEventHub READY
 → create Runtime physical container
 → establish required Runtime Event binding
@@ -152,7 +152,7 @@ It MUST NOT multiplex Events onto：
 
 ```text
 Runtime Control WebSocket
-Realm State WebSocket
+Shared State WebSocket
 Renderer Data
 Content bearer
 Hostra application RPC
@@ -196,7 +196,7 @@ path        = '/' + 43 base64url characters
 
 RuntimeHosting MUST create/listen the Events WebSocket endpoint before spawning the Runner。
 
-The path capability MUST be generated from at least 256 bits of host-owned unpredictable material and MUST be independent from bootstrapToken、Runtime Control capability、Realm State capability and Content credentials。
+The path capability MUST be generated from at least 256 bits of host-owned unpredictable material and MUST be independent from bootstrapToken、Runtime Control capability、Shared State capability and Content credentials。
 
 ### 4.2 Runtime identity / source
 
@@ -306,7 +306,7 @@ PWA Session Worker ↔ Subsystem Worker current planes become：
 
 ```text
 Runtime Control application carrier
-Realm State private binding
+Shared State private binding
 Session Events private binding
 Runner provisioning control
 Renderer Data application carrier(s)
