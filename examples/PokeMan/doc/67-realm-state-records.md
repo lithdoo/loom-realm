@@ -114,7 +114,7 @@ PlayerWorldValue
 └─ direction: 2 | 4 | 6 | 8
 ```
 
-`mapId` 与 `@loomrealm-game/map` 使用同一业务 identity：正 safe integer。Content 中 Event / Character defaultScenes / Encounter 等因为 JSON object key 或 FSDB key 必须是字符串，会使用其十进制字符串形式；Realm State value 直接保存整数。
+`mapId` 与 `@loomrealm-game/map` 使用同一业务 identity：正 safe integer，并且必须对应存在的 `struct.Map` record。Content 中 Event / Character defaultScenes / Encounter 等因为 JSON object key 或 FSDB key 必须是字符串，会使用其十进制字符串形式；Realm State value 直接保存整数。
 
 该 Record 不保存：
 
@@ -126,6 +126,8 @@ motion
 scene epoch
 Character name / sprite / static data
 ```
+
+MVP 玩家 Character identity 固定为 `struct.Character/player`，因此不需要在 `PlayerWorld` 内重复保存 `playerCharacterId`。
 
 ## Runtime 关系
 
@@ -222,6 +224,14 @@ pokeman.Relationship / lord-b:rival
 ```
 
 因为 from / to 已经属于 Record key，value 不重复保存它们。
+
+固定 referential invariant：
+
+```text
+pokeman.Relationship / A:B exists
+→ struct.Character / A exists
+→ struct.Character / B exists
+```
 
 ## Value
 
@@ -336,8 +346,10 @@ integrity: integer >= 0
 最大值与新 Contract 初始值来自稳定基础 BattleActor：
 
 ```text
-Character
+Relationship A:B
+→ struct.Character / B
 → Character.battleActor
+→ struct.BattleActor / <battleActorId>
 → BattleActor.max_hp
 ```
 
@@ -346,6 +358,7 @@ Character
 ```text
 new contract.integrity = BattleActor.max_hp
 max contract.integrity = BattleActor.max_hp
+0 <= contract.integrity <= BattleActor.max_hp
 ```
 
 ## skills
@@ -354,11 +367,12 @@ max contract.integrity = BattleActor.max_hp
 skills: string[]
 ```
 
-这里的字符串直接使用现有 `@loomrealm-game/battle` 的 BattleSkill identity：BattleActor authored shape 使用 `skills: string[]`，Simulation / Decision contract 使用 `skillId: string`。因此 PokeMan 不再设计额外的 `BattleSkillRef` 或另一套 skill reference encoding。
+这里的字符串直接使用现有 `@loomrealm-game/battle` 的 BattleSkill identity：BattleActor authored shape 使用 `skills: string[]`，Simulation / Decision contract 使用 `skillId: string`。PokeMan Game Package 将这些 id 绑定到 `struct.BattleSkill/<skillId>`。
 
 结构约束：
 
 - 每个元素是 BattleSkill id；
+- 每个 id 必须对应存在的 `struct.BattleSkill` record；
 - 不允许重复；
 - 保留数组顺序；
 - 空技能集使用 `[]`。
@@ -398,6 +412,13 @@ key       = <holderCharacterId>
 
 ```text
 pokeman.CarriedCards / player
+```
+
+固定 referential invariant：
+
+```text
+pokeman.CarriedCards / A exists
+→ struct.Character / A exists
 ```
 
 ## Value
@@ -457,6 +478,7 @@ slot
 - `slot` 是 `integer >= 0`；
 - 同一 Record 内 `slot` 唯一；
 - 同一 Record 内 `servantCharacterId` 唯一；
+- 每个 `servantCharacterId` 必须对应存在的 `struct.Character`；
 - 数组按 `slot` 升序保存；
 - 空编队使用 `[]`；
 - `null` 不作为空编队第二种编码。
@@ -465,6 +487,7 @@ slot
 
 ```text
 CarriedCards(A) 中存在 servant B
+→ struct.Character / B exists
 → Relationship(A → B).contract 必须存在
 ```
 
@@ -663,9 +686,15 @@ pokeman.CarriedCards / <holder>
 同时冻结：
 
 ```text
+MVP player Character = struct.Character/player
 Character business id = [a-z0-9][a-z0-9._-]{0,119}
 Relationship key = <from>:<to>
 Relationship key max length = 241 bytes
+PlayerWorld.mapId → existing struct.Map
+Relationship from/to → existing struct.Character
+Contract integrity <= servant base BattleActor.max_hp
+Contract skills[] → existing struct.BattleSkill ids
+CarriedCards holder/servant → existing struct.Character
 empty list = []
 optional Contract = field absence
 business value shape does not use null
@@ -687,7 +716,7 @@ CarriedCards absence = business []
 
 # 当前仍未解决的数据结构问题
 
-Realm State 核心四类 Record 的粒度、namespace/key、value shape 与 Record-level absence 业务语义已经冻结。
+Realm State 核心四类 Record 的粒度、namespace/key、value shape、Record-level absence 与跨 Content referential invariants 已经冻结。
 
 当前 Realm State 侧没有剩余的 MVP 核心 physical-schema gap。Content / Encounter 的 authored 数据结构见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
