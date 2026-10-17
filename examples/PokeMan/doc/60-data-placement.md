@@ -39,12 +39,14 @@ Content
 │  └─ default scene definitions
 ├─ struct.NPC                         # @loomrealm-game/map contract
 │  └─ name + resource.Graphics sprite
+├─ struct.BattleActor                 # @loomrealm-game/battle contract
+├─ struct.BattleSkill                 # @loomrealm-game/battle contract
+├─ struct.BattleEffect                # @loomrealm-game/battle presentation contract
 ├─ struct.Dialogue
 ├─ struct.Event
 ├─ struct.EventStateMutation
 ├─ struct.Encounter
 ├─ struct.StoryIndex                  # Builder generated
-├─ @loomrealm-game/battle BattleActor / BattleSkill Content
 ├─ Map Content
 └─ resource.*
 ```
@@ -52,10 +54,20 @@ Content
 PokeMan 自有 Content 直接按 FSDB 组织。详细规则见 [68-content-fsdb.md](./68-content-fsdb.md)：
 
 - `struct` record 的 FSDB key 就是 identity；PokeMan 自有 source 不重复保存 `id`；
-- 固定目标 table 的引用只保存 key；
-- `battleActor` 是跨 table / package 的基础 BattleActor ContentRef；BattleSkill identity 直接复用 battle 模块既有的 `id / skillId: string`；
+- 固定目标 PokeMan table 的引用只保存 key；
+- battle 模块现有 contract 在 PokeMan Game Package 中具体绑定为 `struct.BattleActor / struct.BattleSkill / struct.BattleEffect`，不复制第二套 Battle schema；
+- `battleActor` 继续使用 ContentRef shape，但 MVP `namespace` 固定为 `struct.BattleActor`；
+- BattleSkill identity 直接复用 battle 模块既有的 `id / skillId: string`；
 - `resource` key 可以有 `Characters/Mage` 这样的层级路径，`struct` key 不靠子目录形成层级；
-- `mapId` 业务值统一是正 safe integer；JSON object / FSDB key 中使用其十进制字符串形式。
+- `mapId` 业务值统一是正 safe integer；JSON object / FSDB key 中使用其十进制字符串形式；所有 authored map references 必须对应存在的 `struct.Map`。
+
+MVP 玩家身份固定为：
+
+```text
+struct.Character / player
+```
+
+不另建 `playerCharacterId` State authority。
 
 ## Character / NPC / BattleActor
 
@@ -78,6 +90,7 @@ BattleActor
 ```text
 Persistent Character
 → Character.battleActor
+→ struct.BattleActor
 → base BattleActor
 ```
 
@@ -88,10 +101,21 @@ transient Encounter / Story NPC 没有持久 Character 时，可以由 Encounter
 ```text
 Transient NPC Instance
 → Encounter / Story static source
+→ struct.BattleActor
 → base BattleActor
 ```
 
 PokeMan 不建立 NPC Instance 专属 Battle profile / variant / resolved battle data authority。
+
+Battle 静态引用链固定为：
+
+```text
+struct.BattleActor
+→ skills[]
+→ struct.BattleSkill
+→ effect
+→ struct.BattleEffect
+```
 
 建立 Contract 时：
 
@@ -198,7 +222,7 @@ struct.Encounter/<decimal-mapId>
       ├─ npc → struct.NPC
       ├─ engagement
       ├─ dialogue? → struct.Dialogue
-      └─ battleActor → ContentRef
+      └─ battleActor → struct.BattleActor ContentRef
 ```
 
 固定：
@@ -207,20 +231,28 @@ struct.Encounter/<decimal-mapId>
 count
 → positive safe integer
 → count <= spawnPoints.length
+→ count <= number of templates
 
 weight
 → positive safe integer
 
 spawnPoints
 → (x,y) 在同一 Encounter record 内不重复
+
+templates
+→ template.npc 在同一 Encounter record 内唯一
+→ 每次 generation 对 template 做加权、不放回选择
 ```
 
-`count` 表示每次生成几个 Encounter NPC；`weight` 表示 template 之间的相对选择权重。数据不规定具体随机算法。
+`count` 表示每次生成几个 Encounter NPC；`weight` 表示 template 之间的相对选择权重。数据只固定“不放回”的合法结果语义，不规定具体 weighted sampling 实现。
+
+这样单个 Encounter record 自身不会因为重复抽到同一 template 产生重复 `npcId`；与其他 Character / Event / Story source 合并后的最终同 Map `npcId` 冲突仍 deterministic reject。
 
 以下不作为当前 Content 数据字段预先设计：
 
 ```text
 seed
+weighted-sampling concrete algorithm
 spawn selection algorithm
 re-entry reroll
 respawn
@@ -274,7 +306,7 @@ explicit durable resume/checkpoint
 → Realm State
 ```
 
-`PlayerWorld.mapId` 是正 safe integer。
+`PlayerWorld.mapId` 是正 safe integer，并且必须对应存在的 `struct.Map`。
 
 ## EventStateList
 
@@ -306,6 +338,20 @@ Relationship 可以存在而 Contract 不存在。存在 `contract` 才表示正
 
 Contract 不建立独立 Realm State authority。
 
+跨 Content 固定：
+
+```text
+Relationship A:B exists
+→ struct.Character/A exists
+→ struct.Character/B exists
+
+contract.integrity
+→ 0..B base BattleActor.max_hp
+
+contract.skills[]
+→ existing struct.BattleSkill ids
+```
+
 ## CarriedCards
 
 ```text
@@ -321,6 +367,8 @@ MVP 不建立 `cardId`。
 
 ```text
 CarriedCards(A) contains B
+→ struct.Character/A exists
+→ struct.Character/B exists
 → Relationship(A → B).contract exists
 ```
 
@@ -424,7 +472,7 @@ decisionGeneration
 Card Battle 开始时由：
 
 ```text
-Character → base BattleActor
+Character → struct.BattleActor
 +
 Relationship.contract.integrity / skills[]
 ```
@@ -443,7 +491,7 @@ Relationship.contract.integrity / skills[]
 | --- | --- |
 | Character definition | Content |
 | NPC definition / sprite | Content |
-| BattleActor / BattleSkill | Content |
+| BattleActor / BattleSkill / BattleEffect | Content |
 | Dialogue / Event / Mutation | Content |
 | Encounter definition | Content |
 | StoryIndex | generated Content |
@@ -467,23 +515,25 @@ Runtime Memory = 当前系统正在执行什么
 
 # 当前数据结构状态
 
-经过当前一致性复核，Realm State 核心四类 Record 与 MVP Content 核心业务 shape 已经收口；当前没有剩余的 MVP 核心业务 data physical-schema gap。
+经过最终闭环复核，Realm State 核心四类 Record、MVP Content 核心业务 shape、Battle Content FSDB binding 与跨 record referential invariants 都已经收口；当前没有剩余的 MVP 核心业务 data physical-schema gap。
 
 把冻结 shape 写成各 FSDB table 的 exact `.info.meta` / schema、Builder validator，以及 Runtime 随机/加载/保存逻辑，属于实现工作，不重新算作业务数据模型未决项。
 
 以下不是当前 data physical-schema gap：
 
 ```text
+Battle Content table / namespace binding
 BattleSkill identity / Contract.skills[] encoding
 Relationship / Contract Record layout
 CarriedCards Record layout / uniqueness constraints
 Realm State Record-level absence
 EventStateList namespace / key
 PlayerWorld mapId type
+player Character identity
 Dialogue choices / mutation runtime behavior
 Event absent 的第二套数据结构
 EventStateMutation semantic no-op proof
-Encounter count / template weight
+Encounter count / template weight / duplicate-template semantics
 StoryIndex 最终派生字段
 本地化 / richer presentation metadata
 Encounter seed / re-entry / respawn / defeated persistence
