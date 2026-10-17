@@ -154,6 +154,7 @@ BattleActor 经 Character 稳定解析：
 Event directive
 → Character
 → Character.battleActor
+→ struct.BattleActor/<battleActorId>
 → base BattleActor
 ```
 
@@ -176,7 +177,7 @@ character 存在
     "direction": 2
   },
   "battleActor": {
-    "namespace": "<battle content namespace>",
+    "namespace": "struct.BattleActor",
     "key": "road-bandit"
   },
   "interaction": {
@@ -190,7 +191,7 @@ character 不存在
 → battleActor 可选
 ```
 
-它可选是因为 scene-only NPC 不一定能进入 Battle。
+它可选是因为 scene-only NPC 不一定能进入 Battle。存在时，MVP `battleActor.namespace` 固定为 `struct.BattleActor`，key 必须对应存在的 BattleActor record。
 
 # EventStateList
 
@@ -522,7 +523,7 @@ Builder 应检查：
 - Event / Mutation FSDB record key 合法；
 - source record 不重复保存 `id`；
 - state key 非空；
-- Event map key 可解析为正 safe integer；
+- Event map key 可解析为正 safe integer，并且对应存在的 `struct.Map`；
 - `npcId` 指向存在的 `struct.NPC`；
 - `character` 指向存在的 `struct.Character`；
 - `interaction.dialogue` 指向存在的 `struct.Dialogue`；
@@ -530,7 +531,7 @@ Builder 应检查：
 - `absent:true` 时必须有 `character`，且不得同时出现 `placement / battleActor / interaction`；
 - placement 坐标为非负 safe integer，direction / pattern 合法；
 - directive 有 `character` 时禁止 `battleActor`；
-- transient directive 的 `battleActor` ContentRef 可解析；
+- transient directive 的 `battleActor.namespace === "struct.BattleActor"`，且 key 指向存在的 BattleActor；
 - Dialogue Choice target / mutation 引用存在；
 - EventStateMutation `to` 非空；
 - Mutation 非空 stateId 属于对应 Event；
