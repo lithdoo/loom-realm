@@ -1,0 +1,10 @@
+{
+    "to":  {
+               "prologue":  null,
+               "first-route":  "active"
+           },
+    "from":  {
+                 "prologue":  "lab-complete",
+                 "first-route":  null
+             }
+}

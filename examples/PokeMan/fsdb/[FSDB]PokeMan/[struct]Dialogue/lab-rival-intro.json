@@ -1,0 +1,18 @@
+{
+    "lines":  [
+                  {
+                      "text":  "总算来了。",
+                      "speaker":  "rival"
+                  }
+              ],
+    "choices":  [
+                    {
+                        "text":  "接受挑战",
+                        "target":  "lab-rival-intro"
+                    },
+                    {
+                        "text":  "再等等",
+                        "target":  "lab-rival-intro"
+                    }
+                ]
+}

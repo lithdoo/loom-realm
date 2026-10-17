@@ -1,0 +1,35 @@
+{
+    "states":  {
+                   "lab":  {
+                               "maps":  {
+                                            "1":  {
+                                                      "npcs":  {
+                                                                   "rival-lab":  {
+                                                                                     "placement":  {
+                                                                                                       "y":  5,
+                                                                                                       "direction":  2,
+                                                                                                       "x":  8
+                                                                                                   },
+                                                                                     "interaction":  {
+                                                                                                         "dialogue":  "lab-rival-intro"
+                                                                                                     },
+                                                                                     "character":  "rival"
+                                                                                 }
+                                                               }
+                                                  }
+                                        }
+                           },
+                   "after-lab":  {
+                                     "maps":  {
+                                                  "1":  {
+                                                            "npcs":  {
+                                                                         "rival-lab":  {
+                                                                                           "character":  "rival",
+                                                                                           "absent":  true
+                                                                                       }
+                                                                     }
+                                                        }
+                                              }
+                                 }
+               }
+}

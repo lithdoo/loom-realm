@@ -1,0 +1,1 @@
+{"additionalProperties":false,"properties":{"graphics":{"type":"object"},"name":{"type":"string"},"id":{"minLength":1,"type":"string"}},"type":"object","required":["id"]}

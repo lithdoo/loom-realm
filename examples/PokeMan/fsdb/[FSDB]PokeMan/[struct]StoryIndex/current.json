@@ -1,0 +1,33 @@
+{
+    "byCharacter":  {
+                        "rival":  {
+                                      "events":  [
+                                                     "prologue"
+                                                 ],
+                                      "defaultMaps":  [
+                                                          1
+                                                      ]
+                                  }
+                    },
+    "byEvent":  {
+                    "prologue":  {
+                                     "characters":  [
+                                                        "rival"
+                                                    ],
+                                     "maps":  [
+                                                  1
+                                              ]
+                                 }
+                },
+    "byMap":  {
+                  "1":  {
+                            "events":  [
+                                           "prologue"
+                                       ],
+                            "characters":  [
+                                               "professor",
+                                               "rival"
+                                           ]
+                        }
+              }
+}
