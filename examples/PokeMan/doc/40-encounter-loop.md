@@ -46,7 +46,37 @@ Map Enter
 
 例如同一条道路可以在不同进入实例中出现不同组合：混混、普通挑战者、旅行者、空位等。
 
-具体生成数量、概率、Spawn Point、随机 seed、重新进入地图是否完全重新 roll 等属于后续内容与技术设计；当前只固定“**地图进入时生成，生成后可见**”这一产品规则。
+当前 MVP authored Encounter 数据已经固定：`count` 定义每次生成数量，`spawnPoints[]` 定义合法出生点，`templates.<templateId>.weight` 定义候选 template 的相对选择权重。具体 weighted selection 实现、随机 seed、重进地图是否重新 roll 等仍属于 Runtime / gameplay policy；产品层只固定“**地图进入时生成，生成后可见**”。
+
+### Re-entry / persistence 属于 Runtime policy
+
+“离开地图再回来是否重新 roll”“已经击败的 Encounter 是否继续消失”“生成结果何时清理”“是否跨 Session 保留”等，不在当前数据物理结构阶段提前决定。
+
+这些首先属于 **Runtime / gameplay behavior policy**：
+
+```text
+离开 / 重进 Map
+↓
+Runtime policy 决定
+├─ 重新生成
+├─ 复用本次结果
+├─ 保留已击败事实
+└─ 其他业务行为
+```
+
+只有未来这套行为规则真的要求跨 Frame / Map / Session 持续某些事实时，才根据最小需求决定是否需要 Realm State，以及具体保存什么。
+
+因此当前数据设计**不预设**：
+
+```text
+EncounterGeneratedState
+generatedInstances[]
+defeatedIds[]
+spawn snapshot
+random seed record
+```
+
+这些都不是当前数据物理结构的未决阻塞项。
 
 Persistent Character 和剧情人物不要求通过随机生成产生，它们可以由世界状态和剧情决定位置与是否出现。
 
@@ -58,18 +88,29 @@ Persistent Character 和剧情人物不要求通过随机生成产生，它们�
 Visible Encounter Entity
 ├─ ordinary / transient
 │    → 本次或本区域使用
-│    → 有本次 Dialogue / Battle identity
-│    → 不要求永久 affinity / contract / story
+│    → 有本次 Dialogue / Battle 表现
+│    → 不要求永久 Relationship / Contract / story
 │
 └─ persistent character
      → stable characterId
-     → affinity / hostile
-     → contract / card relationship
+     → Relationship: affinity / hostile / dynamic text
+     → optional Contract
+     → current Card if carried
      → story progress
      → 可以反复相遇、发展关系甚至收服
 ```
 
 普通混混、一般帮派成员、普通挑战者可以是 transient；宿敌、重要从者、功能 NPC、剧情人物和重要主公更适合作为 persistent character。
+
+Transient Encounter NPC 不需要为了固定 Dialogue 创建一个“通用 Character”。如果一段固定 Dialogue 只需要显示这类临时 NPC 的说话者名字，可以直接使用 Dialogue Content 的默认 `speakerName`：
+
+```text
+Dialogue.speakerName = "路霸"
+```
+
+这只是说话者显示名，不是 Character identity，也不建立 Relationship / Contract / Event Character 等长期关联。同一段 Dialogue 可以被多个不同 transient NPC Instance 复用，而不会把它们解释成同一个人。
+
+Transient Encounter NPC 需要进入 Battle 时，由 Encounter / Story 静态来源指定一个基础 `BattleActor`；NPC Instance 使用这个基础模板，不生成独立 BattleActor variant。
 
 ## Battle 对手不等于从者
 
@@ -115,13 +156,17 @@ Hostile 成立
 
 Battle 对关系的影响由情境决定，不使用统一“胜利 = affinity +N”规则。敌对也是动态关系状态，而不是永久人物类别。
 
-MVP 关系模型先保持最小：
+MVP 的长期人物关系统一使用当前 Relationship 模型：
 
 ```text
-relation / affinity
-+
-hostile
+Relationship(A → B)
+├─ affinity
+├─ hostile
+├─ dynamic relationship text
+└─ contract?
 ```
+
+Transient Encounter Entity 不要求为了本次遭遇创建这套长期 Relationship。
 
 # 核心游戏循环
 
@@ -130,7 +175,7 @@ System Menu #root
       ↓
 进入 / 读取游戏
       ↓
-中心管理角色卡 / 修复卡片 / 选择随身从者
+中心查看已契约 Relationship / Contract、修复 Integrity、选择随身 Card
       ↓
 探索世界（Map）
       ↓
@@ -142,13 +187,13 @@ Dialogue / Interaction
       ↓
 Battle（可选或强制）
       ↓
-卡片 Battle 状态 + Relationship / World State 返回世界
+Contract Integrity / Relationship / World State 返回世界
       ↓
 满足人物自己的收服条件
       ↓
-建立角色卡关系并进入中心管理体系
+建立 Relationship.contract
       ↓
-编入有限随身位
+按需要编入有限随身 Card slot
       ↓
 Pocket Dialogue / Event / Battle
       ↓
