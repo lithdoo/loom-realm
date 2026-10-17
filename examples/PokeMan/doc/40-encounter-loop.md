@@ -46,7 +46,7 @@ Map Enter
 
 例如同一条道路可以在不同进入实例中出现不同组合：混混、普通挑战者、旅行者、空位等。
 
-具体生成数量、概率、Spawn Point、随机 seed 等属于后续内容与技术设计；当前只固定“**地图进入时生成，生成后可见**”这一产品规则。
+当前 MVP authored Encounter 数据已经固定：`count` 定义每次生成数量，`spawnPoints[]` 定义合法出生点，`templates.<templateId>.weight` 定义候选 template 的相对选择权重。具体 weighted selection 实现、随机 seed、重进地图是否重新 roll 等仍属于 Runtime / gameplay policy；产品层只固定“**地图进入时生成，生成后可见**”。
 
 ### Re-entry / persistence 属于 Runtime policy
 
