@@ -45,8 +45,14 @@ struct.Character / <characterId>
 ├─ name
 ├─ description?
 ├─ aiCharacterText?
-├─ battleActor: ContentRef
+├─ battleActor: ContentRef             # namespace = struct.BattleActor
 └─ defaultScenes?
+```
+
+MVP 玩家 identity 固定为：
+
+```text
+struct.Character / player
 ```
 
 Character identity 由 FSDB record key 提供；PokeMan source 不重复保存 `id`。
@@ -65,18 +71,34 @@ NPC Definition 表示地图表现模板，不是 Character identity，也不是�
 
 当前不建立独立 `struct.Visual`；地图人物视觉直接通过 `resource.Graphics` 表达。
 
-## BattleActor / BattleSkill
+## BattleActor / BattleSkill / BattleEffect
 
-PokeMan 直接复用 `@loomrealm-game/battle` Content contract，不定义第二套 Battle profile / skill schema。
+PokeMan 直接复用 `@loomrealm-game/battle` Content contract，不定义第二套 Battle profile / skill / effect schema。
+
+PokeMan Game Package 只冻结物理绑定：
+
+```text
+BattleActor  → struct.BattleActor / <id>
+BattleSkill  → struct.BattleSkill / <id>
+BattleEffect → struct.BattleEffect / <id>
+```
+
+其中 FSDB record key 必须与 package contract value 内 definition `id` 相等。
 
 ```text
 Persistent Character
 → Character.battleActor
-→ base BattleActor
+→ struct.BattleActor
 
 Transient Encounter / Story source
 → battleActor ContentRef
-→ base BattleActor
+→ struct.BattleActor
+
+BattleActor.skills[]
+→ struct.BattleSkill keys
+
+BattleSkill.effect
+→ struct.BattleEffect key
 ```
 
 新 Contract 初始化：
@@ -114,6 +136,8 @@ struct.Event / <eventId>
    └─ interaction.dialogue?
 ```
 
+Event mapId 必须对应存在的 `struct.Map`。transient `battleActor` 存在时必须指向 `struct.BattleActor`。
+
 `absent:true` 必须有 `character`，且不得同时出现 `placement / battleActor / interaction`。
 
 ```text
@@ -136,10 +160,24 @@ struct.Encounter / <decimal-mapId>
       ├─ npc
       ├─ engagement
       ├─ dialogue?
-      └─ battleActor
+      └─ battleActor → struct.BattleActor ContentRef
 ```
 
-`count` 和 `weight` 是 authored Content：前者定义每次生成数量，后者定义 template 之间的相对选择权重。当前某次 Map Enter 实际抽到哪些 template、使用哪些 spawn point，属于 Runtime。
+Encounter record key 必须对应存在的 `struct.Map`。
+
+`count` 和 `weight` 是 authored Content：前者定义每次生成数量，后者定义 template 之间的相对选择权重。
+
+固定数据语义：
+
+```text
+count <= spawnPoints.length
+count <= number of templates
+spawnPoints (x,y) unique
+one Encounter record: template.npc unique
+generation: weighted selection without replacement by template
+```
+
+因此单个 Encounter record 自身不会因为重复抽取同一 template 产生重复 `npcId`。当前某次 Map Enter 实际抽到哪些 template、使用哪些 spawn point，以及 concrete weighted sampling 算法属于 Runtime。
 
 ## StoryIndex
 
@@ -173,7 +211,7 @@ explicit saved/checkpoint location
 → pokeman.PlayerWorld/current
 ```
 
-`mapId` 是正 safe integer，与 Map package identity 一致。
+`mapId` 是正 safe integer，与 Map package identity 一致，并且必须对应存在的 `struct.Map`。
 
 ## EventStateList
 
@@ -212,6 +250,20 @@ Relationship Record 可以存在而 `contract` 缺失。存在 `contract` 才表
 
 Contract 嵌在 Relationship 中，不建立独立 Record。
 
+固定跨 Content invariant：
+
+```text
+Relationship A:B
+→ struct.Character/A exists
+→ struct.Character/B exists
+
+contract.integrity
+→ 0 <= integrity <= B base BattleActor.max_hp
+
+contract.skills[]
+→ existing struct.BattleSkill ids
+```
+
 ## CarriedCards
 
 ```text
@@ -222,6 +274,15 @@ pokeman.CarriedCards / <holder>
 Card 只表示当前随身编队，不保存 Integrity、skills、BattleActor 或 Character 静态资料。
 
 MVP 不建立 `cardId`。
+
+固定跨 Content invariant：
+
+```text
+CarriedCards(A) contains B
+→ struct.Character/A exists
+→ struct.Character/B exists
+→ Relationship(A:B).contract exists
+```
 
 ## Record-level absence
 
@@ -350,7 +411,7 @@ resolved Map scene projection
 | --- | --- |
 | Character definition | Content |
 | NPC definition / sprite | Content |
-| BattleActor / BattleSkill | Content |
+| BattleActor / BattleSkill / BattleEffect | Content |
 | Dialogue / Event / Mutation | Content |
 | Encounter definition | Content |
 | StoryIndex | generated Content / read model |
@@ -369,11 +430,11 @@ resolved Map scene projection
 ```text
 Content
 = immutable installation definitions
-= PokeMan FSDB shape in 68-content-fsdb.md
+= PokeMan FSDB shape / battle binding / reference graph in 68-content-fsdb.md
 
 Realm State
 = cross-Subsystem mutable business facts
-= physical records in 67-realm-state-records.md
+= physical records / referential invariants in 67-realm-state-records.md
 
 Runtime Memory
 = current live execution authority
@@ -382,20 +443,24 @@ Runtime Memory
 特别固定：
 
 ```text
+MVP player identity → struct.Character/player
+
 live player pose → Map Runtime
 PlayerWorld Realm State → durable resume/checkpoint only
 
 NPC Instance → Runtime
 Event / Character scene source → Content
 
+BattleActor / BattleSkill / BattleEffect → Content
 Battle live state → Battle Runtime
 Contract integrity / skills → Realm State
 
 Dialogue cursor → Runtime
 Dialogue definition / Mutation definition → Content
 
-Encounter count / template weight → Content
+Encounter count / template weight / unique template.npc → Content
+weighted selection without replacement → generation semantic
 actual generated Encounter set → Runtime
 ```
 
-当前 MVP 核心业务数据 physical schema 已经收口。`.info.meta`、Builder validator、随机算法、Save / Load、Encounter persistence、future progression 等属于实现或后续产品设计，不建立额外通用 State bag。
+当前 MVP 核心业务数据 physical schema 与跨 record reference graph 已经收口。`.info.meta`、Builder validator、concrete random algorithm、Save / Load、Encounter persistence、future progression 等属于实现或后续产品设计，不建立额外通用 State bag。
