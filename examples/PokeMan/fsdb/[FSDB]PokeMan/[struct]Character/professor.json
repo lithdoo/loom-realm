@@ -1,8 +1,8 @@
 {
-    "battleActor":  {
-                        "namespace":  "struct.BattleActor",
-                        "key":  "player"
-                    },
-    "description":  "指导主公踏上旅途。",
-    "name":  "博士"
+  "battleActor": {
+    "namespace": "struct.BattleActor",
+    "key": "professor"
+  },
+  "description": "指导主公踏上旅途。",
+  "name": "博士"
 }
