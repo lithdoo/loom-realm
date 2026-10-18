@@ -36,6 +36,42 @@
 19. **Encounter re-entry / defeated persistence 是 Runtime policy。** 当前不预设 Encounter persistence State。
 20. **live player position 属于 Map Runtime。** `pokeman.PlayerWorld/current` 只保存 durable resume/checkpoint location。
 
+# MVP 序章地图绑定
+
+当前 MVP 把已导入 Map 固定到以下产品场景：
+
+```text
+struct.Map/2 → 初始城镇
+struct.Map/3 → 玩家家
+struct.Map/4 → 博士研究所
+struct.Map/5 → 第一条道路
+struct.Map/7 → 第一个城镇
+struct.Map/8 → 宿敌家
+```
+
+这不是第二套 Map identity；业务文档中的“玩家家 / 研究所 / 第一条道路”等场景名直接解释为上述现有 `struct.Map/<mapId>`。
+
+数据引用随之固定：
+
+```text
+玩家家 scene / home-family
+→ mapId 3
+
+博士、宿敌的研究所序章 scene
+→ mapId 4
+
+普通 hostile Visible Encounter
+→ mapId 5
+
+route-trainee Challenge
+→ mapId 5
+
+第一城镇普通居民 / center-servant
+→ mapId 7
+```
+
+因此出生镇 Map 2 不承载第一条道路的普通 hostile Encounter；序章 Event 里的研究所场景也不再使用早期占位 mapId 1。
+
 # FSDB Content 总体结构
 
 ```text

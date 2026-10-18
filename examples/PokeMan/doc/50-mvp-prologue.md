@@ -70,6 +70,36 @@ System Menu #root
 
 **MVP 边界停在第一个城镇。**
 
+## 序章地图绑定
+
+当前 MVP 序章直接复用已导入的 Essentials Map，并固定以下业务职责：
+
+```text
+Map 2 = 初始城镇
+Map 3 = 玩家家
+Map 4 = 博士研究所
+Map 5 = 第一条道路
+Map 7 = 第一个城镇
+Map 8 = 宿敌家
+```
+
+这组绑定与现有 `MapTransfer` 拓扑一致：Map 2 直接连接玩家家、博士研究所和宿敌家，并向 Map 5 离开出生镇；Map 5 继续连接 Map 7，形成序章的主旅行路径。
+
+因此序章主空间链固定为：
+
+```text
+Map 3 玩家家
+↓
+Map 2 初始城镇
+├─ Map 8 宿敌家
+├─ Map 4 博士研究所
+└─ Map 5 第一条道路
+   ↓
+   Map 7 第一个城镇
+```
+
+Map 编号在当前 MVP 中作为 Content 业务绑定使用；后续 NPC placement、Event scene 与 Encounter 配置都应引用这组 mapId。
+
 ## 第一阶段：出生镇
 
 ### 1. 家中醒来
