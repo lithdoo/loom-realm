@@ -147,43 +147,7 @@ StoryIndex
 
 BattleActor / BattleSkill / BattleEffect 是 **package-owned contract 的 PokeMan FSDB binding**，不是 PokeMan 自有 schema。其 value 是否包含 `id` 由 battle contract 决定；PokeMan 只额外要求 record key 与 package contract 的 definition `id` 一致。
 
-## MVP 序章 Map binding
-
-当前 MVP 对已导入 `struct.Map` 固定以下业务用途：
-
-```text
-struct.Map/2 → 初始城镇
-struct.Map/3 → 玩家家
-struct.Map/4 → 博士研究所
-struct.Map/5 → 第一条道路
-struct.Map/7 → 第一个城镇
-struct.Map/8 → 宿敌家
-```
-
-这些 mapId 是现有 Map Content identity，不新增 `Scene` / `Location` table，也不在 Character / Event / Encounter 中重复保存场景名称。
-
-对应 authored Content 约束：
-
-```text
-home-family placement
-→ mapId 3
-
-prologue 中博士 / 宿敌研究所 scene
-→ mapId 4
-
-第一条道路普通 Encounter
-→ struct.Encounter/5
-
-route-trainee placement / Challenge
-→ mapId 5
-
-town-resident / center-servant
-→ mapId 7
-```
-
-当前 FSDB 中早期样例 `struct.Encounter/2` 与 `struct.Event/prologue` 中使用 mapId 1 的研究所 scene 属于待同步的 Content 数据，不改变本文 schema；同步后应分别使用 mapId 5 与 mapId 4。
-
-# Character key 的额外业务约束
+## Character key 的额外业务约束
 
 `struct.Character` key 还会进入 `pokeman.Relationship` 与 `pokeman.CarriedCards` 的 Shared State Record key，因此额外固定为：
 
@@ -340,6 +304,42 @@ Relationship.contract.skills[]
 PokeMan 不建立 `BattleSkillRef`、`ContentRef[]` 或第二套 Skill identity。
 
 作者 source 不手写 `contentVersion`；版本由 Content API / resolved reference 处理。
+
+# MVP 序章 Map binding
+
+当前 MVP 对已导入 `struct.Map` 固定以下业务用途：
+
+```text
+struct.Map/2 → 初始城镇
+struct.Map/3 → 玩家家
+struct.Map/4 → 博士研究所
+struct.Map/5 → 第一条道路
+struct.Map/7 → 第一个城镇
+struct.Map/8 → 宿敌家
+```
+
+这些 mapId 是现有 Map Content identity，不新增 `Scene` / `Location` table，也不在 Character / Event / Encounter 中重复保存场景名称。
+
+对应 authored Content 约束：
+
+```text
+home-family placement
+→ mapId 3
+
+prologue 中博士 / 宿敌研究所 scene
+→ mapId 4
+
+第一条道路普通 Encounter
+→ struct.Encounter/5
+
+route-trainee placement / Challenge
+→ mapId 5
+
+town-resident / center-servant
+→ mapId 7
+```
+
+当前 FSDB 中早期样例 `struct.Encounter/2` 与 `struct.Event/prologue` 中使用 mapId 1 的研究所 scene 属于待同步的 Content 数据，不改变本文 schema；同步后应分别使用 mapId 5 与 mapId 4。
 
 # Character
 
