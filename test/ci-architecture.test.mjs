@@ -8,7 +8,7 @@ const read = (relative) => readFile(new URL(relative, root), "utf8");
 
 test("active workflow surface is compact and milestone-free", async () => {
   const files = (await readdir(new URL(".github/workflows/", root))).sort();
-  assert.deepEqual(files, ["ci.yml", "deploy-pages.yml", "full-qualification.yml"]);
+  assert.deepEqual(files, ["ci.yml", "deploy-pages.yml", "deploy-pokeman-staging.yml", "full-qualification.yml"]);
   assert.ok(files.every((name) => !/^m\d+/i.test(name)));
 });
 
@@ -89,4 +89,16 @@ test("full qualification preserves compatibility, Windows, frozen Hostra, full p
   assert.match(workflow, /run-capability\.mjs map-build/);
   assert.doesNotMatch(workflow, /npm run (?:test|build):m\d+/);
   assert.doesNotMatch(workflow, /--no-sandbox|ELECTRON_DISABLE_SANDBOX/);
+});
+
+test("PokeMan staging deploy runs only after a successful main CI push", async () => {
+  const workflow = await read(".github/workflows/deploy-pokeman-staging.yml");
+  assert.match(workflow, /workflows: \["CI"\]/);
+  assert.match(workflow, /branches: \[main\]/);
+  assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/);
+  assert.match(workflow, /runs-on: \[self-hosted, pwa\]/);
+  assert.match(workflow, /actions\/setup-node@v6/);
+  assert.match(workflow, /node-version: 24/);
+  assert.match(workflow, /github\.event\.workflow_run\.head_sha/);
+  assert.doesNotMatch(workflow, /pull_request/);
 });

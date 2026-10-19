@@ -70,6 +70,10 @@ test("first installation waits until eligible and requests exactly one normal re
   installing.setState("activated");
   await assert.rejects(gate, (cause) => cause === reloaded);
   assert.equal(storage.values.get("loomrealm-sw-controller-reload-v1"), "1");
+  assert.deepEqual(fixture.calls[0], {
+    url: "/service-worker.js",
+    options: { scope: "/", type: "module", updateViaCache: "none" },
+  });
 });
 
 test("an uncontrolled document reloads onto the active generation instead of waiting for a concurrent update", async () => {

@@ -15,6 +15,7 @@ import {
   createBrowserRendererInputSource,
   createBrowserRendererViewportSource,
 } from "@loomrealm/renderer/browser-window";
+import { pwaPath } from "./base-path.js";
 import { createMessagePortCarrier } from "./message-port-carrier.js";
 
 // Bootstrap scripts/styles are document capabilities, not Session
@@ -129,7 +130,7 @@ export async function createPwaRendererHost(installationId: string, presentation
     const cached = bootstrapResourceCache.get(cacheKey);
     if (cached !== undefined) return cached;
     const path = ref.key.split("/").map(encodeURIComponent).join("/");
-    const response = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/resources/${encodeURIComponent(`resource.${ref.namespace}`)}/${path}`, { signal });
+    const response = await fetch(pwaPath(`/_lr/v1/games/${encodeURIComponent(installationId)}/resources/${encodeURIComponent(`resource.${ref.namespace}`)}/${path}`), { signal });
     if (!response.ok) throw new Error("PWA presentation bootstrap resource unavailable");
     const contentVersion = response.headers.get("x-loom-content-version");
     const mime = response.headers.get("content-type");
@@ -174,7 +175,7 @@ export async function createPwaRendererHost(installationId: string, presentation
     async resource(namespace: string, key: string, expectedContentVersion: string, localSignal?: AbortSignal) {
       const path = key.split("/").map(encodeURIComponent).join("/");
       const fetchSignal = localSignal === undefined ? signal : AbortSignal.any([signal, localSignal]);
-      const response = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/resources/${encodeURIComponent(namespace)}/${path}`, { signal: fetchSignal });
+      const response = await fetch(pwaPath(`/_lr/v1/games/${encodeURIComponent(installationId)}/resources/${encodeURIComponent(namespace)}/${path}`), { signal: fetchSignal });
       if (!response.ok) throw new Error("PWA presentation resource unavailable");
       const contentVersion = response.headers.get("x-loom-content-version");
       const mime = response.headers.get("content-type");

@@ -1,3 +1,4 @@
+import { pwaPath } from "./base-path.js";
 import { parsePwaRuntimeInfoV1, type PwaServiceWorkerGenerationV1 } from "./bootstrap-protocol.js";
 
 const RELOAD_MARKER = "loomrealm-sw-controller-reload-v1";
@@ -135,8 +136,8 @@ export async function serviceWorkerGate(options: ServiceWorkerGateOptions = {}):
   // that controller even if controllerchange fires while the gate is running.
   const controller = serviceWorkers.controller;
   const existing = controller === null ? undefined : await serviceWorkers.getRegistration?.();
-  const registration = existing ?? await serviceWorkers.register("/service-worker.js", {
-    scope: "/",
+  const registration = existing ?? await serviceWorkers.register(pwaPath("/service-worker.js"), {
+    scope: pwaPath("/"),
     type: "module",
     updateViaCache: "none",
   });

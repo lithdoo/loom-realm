@@ -1,0 +1,45 @@
+name: Deploy PokeMan staging
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-pokeman-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: [self-hosted, pwa]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Build PokeMan staging bundle
+        run: npm run build:staging -w @loomrealm/pwa
+      - name: Publish the checked commit
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          PWA_DATA_ROOT: /run/desktop/mnt/host/f/lab-data/pwa
+          PWA_ENGINE_DATA_ROOT: /run/desktop/mnt/host/f/lab-data/pwa
+          PWA_SMOKE_HOST: http://host.docker.internal
+          PWA_HTTP_PORT: "8787"
+          PWA_CANDIDATE_PORT: "8790"
+        run: node apps/pwa/scripts/deploy-staging.mjs

@@ -151,13 +151,14 @@ export function createSameOriginContentClient(access: SameOriginContentAccess, l
     throw new TypeError("Invalid same-origin Content access");
   }
   segment(access.installationId);
-  if (typeof location !== "object" || (location.protocol !== "http:" && location.protocol !== "https:")) {
+  if (typeof location !== "object" || (location.protocol !== "http:" && location.protocol !== "https:") || location.search !== "" || location.hash !== "" || location.href.includes("@")) {
     throw new TypeError("Same-origin Content requires an HTTP(S) realm");
   }
-  const origin = contentOrigin(`${location.origin}/`);
+  const slash = location.pathname.lastIndexOf("/");
+  const directory = new URL(slash < 0 ? "/" : location.pathname.slice(0, slash + 1), location.origin);
   return createContentClient({
     installationId: access.installationId,
-    base: new URL(`_lr/v1/games/${encodeURIComponent(access.installationId)}/`, origin),
+    base: new URL(`_lr/v1/games/${encodeURIComponent(access.installationId)}/`, directory),
     headers: Object.freeze({}),
   }, lifetimeSignal);
 }

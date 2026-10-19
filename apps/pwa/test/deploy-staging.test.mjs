@@ -1,0 +1,77 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { activeId, deployRelease, readActiveId } from "../scripts/deploy-staging.mjs";
+
+test("active release file stores only the commit id", () => {
+  assert.equal(activeId("PWA_RELEASE_ID=0123456789abcdef\n"), "0123456789abcdef");
+  assert.equal(activeId("note\n"), null);
+});
+
+test("a failed candidate leaves the active release untouched", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loomrealm-deploy-"));
+  const source = join(root, "source");
+  await mkdir(join(source, "pwa", "pokeman"), { recursive: true });
+  await mkdir(join(root, "deploy-state"), { recursive: true });
+  await writeFile(join(source, "pwa", "pokeman", "index.html"), "new", "utf8");
+  await writeFile(join(root, "deploy-state", "active.env"), "PWA_RELEASE_ID=aaaaaaaaaaaaaaa\n");
+  const calls = [];
+  const result = await deployRelease({
+    sha: "bbbbbbbbbbbbbbb",
+    dataRoot: root,
+    sourceDir: source,
+    candidatePort: 8790,
+    officialPort: 8787,
+    candidateProject: "candidate",
+    officialProject: "official",
+    candidateUrl: "http://candidate/pwa/pokeman",
+    officialUrl: "http://official/pwa/pokeman",
+    releaseDir: (id) => `/engine/releases/${id}`,
+    portPublished: async () => false,
+    compose: async (...args) => { calls.push(args); throw new Error("candidate down"); },
+    smoke: async () => { throw new Error("smoke failed"); },
+  });
+  assert.equal(result.status, "candidate-failed");
+  assert.equal(await readActiveId(root), "aaaaaaaaaaaaaaa");
+  assert.deepEqual(calls[0][3], ["up", "-d", "--force-recreate", "--wait"]);
+  assert.deepEqual(calls[1][3], ["down"]);
+});
+
+test("a failed official check restores the previous release", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loomrealm-deploy-"));
+  const source = join(root, "source");
+  await mkdir(source, { recursive: true });
+  await writeFile(join(source, "marker.txt"), "new", "utf8");
+  await mkdir(join(root, "deploy-state"), { recursive: true });
+  await writeFile(join(root, "deploy-state", "active.env"), "PWA_RELEASE_ID=aaaaaaaaaaaaaaa\n");
+  const calls = [];
+  let smoked = 0;
+  const result = await deployRelease({
+    sha: "bbbbbbbbbbbbbbb",
+    dataRoot: root,
+    sourceDir: source,
+    candidatePort: 8790,
+    officialPort: 8787,
+    candidateProject: "candidate",
+    officialProject: "official",
+    candidateUrl: "http://candidate/pwa/pokeman",
+    officialUrl: "http://official/pwa/pokeman",
+    releaseDir: (id) => `/engine/releases/${id}`,
+    portPublished: async () => false,
+    compose: async (project, releaseDir, port, action) => {
+      calls.push({ project, releaseDir, port, action });
+    },
+    smoke: async (url) => {
+      smoked += 1;
+      if (url.startsWith("http://official") && smoked === 2) throw new Error("official smoke failed");
+    },
+  });
+  assert.equal(result.status, "rolled-back");
+  assert.equal(result.active, "aaaaaaaaaaaaaaa");
+  assert.equal(await readActiveId(root), "aaaaaaaaaaaaaaa");
+  assert.equal(calls.at(-1).project, "official");
+  assert.equal(calls.at(-1).releaseDir, "/engine/releases/aaaaaaaaaaaaaaa");
+  assert.equal(await readFile(join(root, "releases", "bbbbbbbbbbbbbbb", "marker.txt"), "utf8"), "new");
+});

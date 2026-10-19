@@ -1,0 +1,24 @@
+services:
+  web:
+    image: nginx:1.27.5-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PWA_HTTP_PORT:-8787}:80"
+    volumes:
+      - type: bind
+        source: ${PWA_RELEASE_DIR:?set PWA_RELEASE_DIR to the release directory}
+        target: /usr/share/nginx/html
+        read_only: true
+      - type: bind
+        source: ./nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/pwa/pokeman/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s

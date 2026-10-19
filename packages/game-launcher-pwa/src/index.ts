@@ -276,6 +276,7 @@ export interface PwaPrepareDependencies {
   readonly expectedServiceWorker: PwaServiceWorkerGenerationV1;
   readonly runnerPolicy: PwaRunnerPolicy;
   readonly resolveModuleUrl: (logicalModule: string) => string;
+  readonly executablePathPrefix?: string;
 }
 
 function freezeRunnerPolicy(value: PwaRunnerPolicy): PwaRunnerPolicy {
@@ -343,7 +344,9 @@ export async function preparePwaGame(request: PwaPrepareGameRequestV1, dependenc
     let moduleUrl: URL;
     try { moduleUrl = new URL(dependencies.resolveModuleUrl(logicalModule)); }
     catch (cause) { return fail("SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION", cause); }
-    const expectedPath = `/_lr/internal/executables/${encodeURIComponent(request.installationId)}/${logicalModule.split("/").map(encodeURIComponent).join("/")}`;
+    const prefix = dependencies.executablePathPrefix ?? "";
+    if (prefix !== "" && (!prefix.startsWith("/") || prefix.endsWith("/") || prefix.includes(".."))) return fail("SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION");
+    const expectedPath = `${prefix}/_lr/internal/executables/${encodeURIComponent(request.installationId)}/${logicalModule.split("/").map(encodeURIComponent).join("/")}`;
     if (
       (moduleUrl.protocol !== "http:" && moduleUrl.protocol !== "https:") ||
       currentOrigin === undefined || moduleUrl.origin !== currentOrigin || moduleUrl.pathname !== expectedPath ||
