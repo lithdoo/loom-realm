@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -30,7 +31,7 @@ export async function readActiveId(root) {
 export async function writeActiveId(root, id) {
   const file = join(root, stateName);
   await mkdir(dirname(file), { recursive: true });
-  const temporary = `${file}.tmp-${process.pid}-${crypto.randomUUID()}`;
+  const temporary = `${file}.tmp-${process.pid}-${randomUUID()}`;
   try {
     await writeFile(temporary, activeFile(id), { encoding: "utf8", flag: "wx" });
     await rename(temporary, file);
