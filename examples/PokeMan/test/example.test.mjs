@@ -47,7 +47,10 @@ test("presentation config resolves Map browser assets from the installed FSDB", 
 
   const sourceCss = await readFile(new URL("presentation.css", root), "utf8");
   const fsdbCss = await readFile(new URL("[FSDB]PokeMan/[resource]Presentation/page.css.css", root), "utf8");
+  const fsdbBrowserScript = await readFile(new URL("[FSDB]PokeMan/[resource]Presentation/map/map.browser.js.js", root), "utf8");
+  const mapBrowserSource = await readFile(new URL("../../../game-libs/map/browser/map.browser.js", import.meta.url), "utf8");
   assert.equal(sourceCss, fsdbCss);
+  assert.equal(fsdbBrowserScript, mapBrowserSource, "FSDB Map browser script must match the current Map package source");
   assert.match(sourceCss, /overflow:\s*hidden/);
   assert.match(sourceCss, /lr-map-view\s*\{[^}]*width:\s*100vw[^}]*height:\s*100vh/s);
   assert.doesNotMatch(sourceCss, /lr-map-view\s*\{[^}]*width:\s*640px/);
