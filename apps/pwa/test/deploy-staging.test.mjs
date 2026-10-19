@@ -65,6 +65,8 @@ test("a failed official check restores the previous release", async () => {
     },
     smoke: async (url) => {
       smoked += 1;
+      // Candidate/official checks run before the new identity is published.
+      assert.equal(await readActiveId(root), "aaaaaaaaaaaaaaa");
       if (url.startsWith("http://official") && smoked === 2) throw new Error("official smoke failed");
     },
   });
@@ -74,4 +76,38 @@ test("a failed official check restores the previous release", async () => {
   assert.equal(calls.at(-1).project, "official");
   assert.equal(calls.at(-1).releaseDir, "/engine/releases/aaaaaaaaaaaaaaa");
   assert.equal(await readFile(join(root, "releases", "bbbbbbbbbbbbbbb", "marker.txt"), "utf8"), "new");
+});
+
+test("successful deployment commits active SHA after official health and persists Nginx configuration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loomrealm-deploy-"));
+  const source = join(root, "source");
+  await mkdir(join(source, "pwa", "pokeman"), { recursive: true });
+  await writeFile(join(source, "pwa", "pokeman", "index.html"), "ready", "utf8");
+  const seen = [];
+  const result = await deployRelease({
+    sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    dataRoot: root,
+    sourceDir: source,
+    candidatePort: 8790,
+    officialPort: 8787,
+    candidateProject: "candidate",
+    officialProject: "official",
+    candidateUrl: "candidate",
+    officialUrl: "official",
+    releaseDir: (id) => `/engine/releases/${id}`,
+    portPublished: async () => false,
+    compose: async (project, releaseDir, port, action) => {
+      seen.push(`${project}:${action[0]}`);
+      if (action[0] === "up") {
+        assert.match(await readFile(join(root, "releases", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "nginx.conf"), "utf8"), /location \/pwa\/pokeman\//);
+      }
+    },
+    smoke: async (url) => {
+      seen.push(`smoke:${url}`);
+      assert.equal(await readActiveId(root), null, "active release must not be committed before official HTTP smoke");
+    },
+  });
+  assert.equal(result.status, "published");
+  assert.equal(await readActiveId(root), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+  assert.deepEqual(seen, ["candidate:up", "smoke:candidate", "candidate:down", "official:up", "smoke:official"]);
 });
