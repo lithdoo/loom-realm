@@ -1,0 +1,17 @@
+{
+  "name": "@loomrealm-example/pokeman",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@loomrealm-game/map": "0.1.0-alpha.0",
+    "@loomrealm/subsystem": "0.1.0-alpha.0"
+  },
+  "devDependencies": {
+    "@loomrealm/fsdb": "0.1.0-alpha.0",
+    "@loomrealm/game-package": "0.1.0-alpha.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
