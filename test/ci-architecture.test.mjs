@@ -93,6 +93,12 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   const ci = await read(".github/workflows/ci.yml");
   const runner = await read("scripts/ci/run-capability.mjs");
   assert.match(ci, /name: CI \/ summary/);
+  // A fresh deploy Runner cannot rely on artifacts built by earlier CI steps.
+  const coldBuild = ci.indexOf("- name: Clean PokeMan staging build");
+  const canonical = ci.indexOf("- name: Canonical package and contract regression");
+  assert.ok(coldBuild > 0 && coldBuild < canonical, "clean staging build must run before canonical workspace regression");
+  assert.match(ci, /name: Clean PokeMan staging build[\s\S]*?needs\.impact\.outputs\.pwa == 'true'[\s\S]*?npm run build:staging -w @loomrealm\/pwa/);
+
   assert.match(ci, /require_success "\$CODE" "\$LINUX_RESULT"/);
   assert.match(ci, /require_success "\$BROWSER_REQUIRED" "\$BROWSER_RESULT"/);
   assert.match(ci, /if: needs\.impact\.outputs\.browser == 'true'/);
