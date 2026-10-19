@@ -42,11 +42,11 @@ test("Map presentation is resolved from PokeMan Content resources", async () => 
   assert.deepEqual(await json("presentation.json"), {
     formatVersion: 1,
     styles: [
-      { namespace: "resource.Presentation", key: "map/map.css" },
-      { namespace: "resource.Presentation", key: "page.css" },
+      { namespace: "Presentation", key: "map/map.css" },
+      { namespace: "Presentation", key: "page.css" },
     ],
     scripts: [
-      { namespace: "resource.Presentation", key: "map/map.browser.js" },
+      { namespace: "Presentation", key: "map/map.browser.js" },
     ],
   });
 });
