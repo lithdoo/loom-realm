@@ -1,5 +1,10 @@
 {
   "formatVersion": 1,
-  "styles": [],
-  "scripts": []
+  "styles": [
+    { "namespace": "resource.Presentation", "key": "map/map.css" },
+    { "namespace": "resource.Presentation", "key": "page.css" }
+  ],
+  "scripts": [
+    { "namespace": "resource.Presentation", "key": "map/map.browser.js" }
+  ]
 }

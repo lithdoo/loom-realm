@@ -1,11 +1,29 @@
 # PokeMan / 口袋从者
 
-PokeMan 的空项目骨架已经初始化。
+PokeMan 当前先落一个 **Map-only vertical slice**，只接入 `@loomrealm-game/map`，用于验证 Game Package、FSDB Content、Map Runtime、Renderer/Input 与 Essentials 地图资源能够真实跑通。
 
 - 产品文档：[`doc/`](./doc/README.md)
 - 原单文件设计基线：[`DESIGN.md`](./DESIGN.md)（保留不变）
 - Game Package 入口：`game.json`
 - Hostra launch composition：`launch.hostra.json`
-- Subsystem placeholders：`subsystems/`
+- Map Subsystem：`subsystems/map.mjs`
+- Content FSDB：`[FSDB]PokeMan/`
+- 启动：Windows 下运行 `play.bat`
 
-当前 subsystem 文件仅保证项目结构和模块 ABI 占位，不包含实际玩法实现。
+当前启动点：
+
+```text
+Map 3 = 玩家家
+spawn = (3, 8)
+player sprite = resource.Graphics / Characters/Player
+```
+
+当前 Game Entry **只注册 `map` subsystem**。原来的 system-menu / message / world / dialogue / battle 占位文件仍保留在仓库中，但不参与当前运行拓扑。
+
+Map-only 阶段的 NPC placement 暂时由 `subsystems/map.mjs` 在 `onMapEntering` 中静态提供，只用于验证 Map NPC 渲染与碰撞链路；后续接入 Story Resolver 后，应由 Character / Event / Encounter Content 解析结果替代，不把这份临时 placement 作为业务 authority。
+
+最小检查：
+
+```bat
+node --test examples/PokeMan/test/map-smoke.test.mjs
+```

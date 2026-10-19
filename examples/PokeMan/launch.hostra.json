@@ -1,10 +1,9 @@
 {
   "formatVersion": 1,
   "subsystems": [
-    { "key": "system-menu", "module": "subsystems/system-menu.mjs" },
-    { "key": "message", "module": "subsystems/message.mjs" },
-    { "key": "world", "module": "subsystems/world.mjs" },
-    { "key": "dialogue", "module": "subsystems/dialogue.mjs" },
-    { "key": "battle", "module": "subsystems/battle.mjs" }
+    {
+      "key": "map",
+      "module": "subsystems/map.mjs"
+    }
   ]
 }
