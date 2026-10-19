@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { createPokeManPwaFixture } from "../../../examples/PokeMan/scripts/prepare-pwa-content.mjs";
 import { deriveProductGeneration, emitProductArtifacts } from "./build-identity.mjs";
+import { pokeManBundleId } from "./pokeman-bundle-id.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const sourceRoot = join(root, "src");
@@ -91,14 +92,17 @@ async function buildStaging() {
   await mkdir(stagingRoot, { recursive: true });
   await emitProductArtifacts(stagingEntries, stagingRoot, root, generation);
   const fixture = await createPokeManPwaFixture({ executablePath: executable });
-  await writeFile(join(stagingRoot, "pokeman-bundle.json"), `${JSON.stringify({
-    bundleId: generation,
+  const payload = {
     gameEntryText: fixture.gameEntryText,
     launchManifestText: fixture.launchManifestText,
     presentation: fixture.presentation,
     executable: fixture.executable,
     content: fixture.content,
-  })}\n`, "utf8");
+  };
+  // The shell generation does not cover Map/FSDB changes. A content-addressed
+  // bundle ID causes the browser to install new game content on next visit.
+  const bundleId = pokeManBundleId(generation, payload);
+  await writeFile(join(stagingRoot, "pokeman-bundle.json"), `${JSON.stringify({ bundleId, ...payload })}\n`, "utf8");
   await writeFile(join(stagingRoot, "index.html"), indexHtml("./window.js"), "utf8");
   await writeFile(join(stagingRoot, "generation.json"), `${JSON.stringify({ version: 1, generation, basePath: "/pwa/pokeman/" })}\n`, "utf8");
   await rm(executable, { force: true });
