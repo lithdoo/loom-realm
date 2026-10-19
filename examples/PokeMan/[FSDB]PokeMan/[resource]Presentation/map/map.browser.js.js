@@ -129,7 +129,7 @@
   }
 
   function validDuration(value) {
-    return value === 250 || value === 400;
+    return value === 250 || value === 500;
   }
 
   function validCameraMotion(value) {
@@ -146,7 +146,7 @@
     if (value.kind === "jump") {
       if (!exactObject(value, ["id", "durationMs", "fromY", "fromScreenX", "fromScreenY", "kind", "peakPx"])) return false;
       return Number.isSafeInteger(value.id) && value.id > 0
-        && value.durationMs === 400
+        && value.durationMs === 500
         && Number.isSafeInteger(value.fromY) && value.fromY >= 0
         && Number.isFinite(value.fromScreenX)
         && Number.isFinite(value.fromScreenY)
