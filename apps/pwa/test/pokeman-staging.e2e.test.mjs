@@ -51,7 +51,8 @@ test("staging PokeMan boots from /pwa/pokeman, moves, blocks NPC, transfers, and
       return { status: res.status, value: res.ok ? await res.json() : null };
     }, installationId);
     assert.equal(map.status, 200);
-    assert.equal(map.value.id, 3);
+    assert.equal(map.value.tileset_id, 3);
+    assert.equal(map.value.width, 31);
 
     const map2 = planner.planToMap(initial, 2);
     assert.equal(map2.length, 1);
