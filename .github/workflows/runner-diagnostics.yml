@@ -1,0 +1,112 @@
+name: Self-hosted Runner Diagnostics
+
+# Manual only: never schedule privileged self-hosted work for pull requests.
+on:
+  workflow_dispatch:
+
+# No repository/API access is required for this host-only read-only probe.
+permissions: {}
+
+concurrency:
+  group: self-hosted-runner-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Read-only Linux x64 deployment readiness
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 5
+    steps:
+      - name: Inspect local prerequisites without changing the host
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Do not print hostname, username, absolute home paths, IPs,
+          # environment variables, credentials, or open-listener addresses.
+          # This workflow never installs packages, starts a daemon, binds a
+          # socket, alters service state, or writes to deployment directories.
+          {
+            echo '## PWA staging Runner diagnostics'
+            echo ''
+            echo 'Read-only; only the GitHub Actions step summary is written.'
+            echo ''
+            echo '| Check | Result |'
+            echo '| --- | --- |'
+            printf '| Kernel | %s |\n' "$(uname -s)"
+            printf '| Architecture | %s |\n' "$(uname -m)"
+
+            for tool in node npm git python3 systemctl loginctl ss; do
+              if command -v "$tool" > /dev/null 2>&1; then
+                printf '| Command: %s | available |\n' "$tool"
+              else
+                printf '| Command: %s | missing |\n' "$tool"
+              fi
+            done
+
+            if command -v node > /dev/null 2>&1; then
+              version="$(node -p 'process.versions.node' 2>/dev/null || true)"
+              if [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+                printf '| Node.js version | %s |\n' "$version"
+              else
+                echo '| Node.js version | unknown |'
+              fi
+            fi
+
+            if command -v systemctl > /dev/null 2>&1 && systemctl --user show-environment > /dev/null 2>&1; then
+              echo '| User systemd manager | reachable |'
+            else
+              echo '| User systemd manager | unavailable (or user bus inaccessible) |'
+            fi
+
+            if command -v loginctl > /dev/null 2>&1; then
+              linger="$(loginctl show-user "$(id -un)" --property=Linger --value 2>/dev/null || true)"
+              case "$linger" in
+                yes) echo '| User linger | enabled |' ;;
+                no) echo '| User linger | disabled |' ;;
+                *) echo '| User linger | unknown |' ;;
+              esac
+            else
+              echo '| User linger | unknown |'
+            fi
+
+            if [ -d /srv/loomrealm-pwa ]; then
+              if [ -w /srv/loomrealm-pwa ]; then
+                echo '| /srv/loomrealm-pwa | exists; writable by Runner |'
+              else
+                echo '| /srv/loomrealm-pwa | exists; not writable by Runner |'
+              fi
+            else
+              echo '| /srv/loomrealm-pwa | not created (normal before setup) |'
+            fi
+            if [ -w /srv ]; then
+              echo '| /srv directory | writable by Runner |'
+            else
+              echo '| /srv directory | not writable by Runner |'
+            fi
+
+            if command -v ss > /dev/null 2>&1; then
+              if listeners="$(ss -H -ltn '( sport = :8787 )' 2>/dev/null)"; then
+                if [ -n "$listeners" ]; then
+                  echo '| TCP 8787 | listener detected |'
+                else
+                  echo '| TCP 8787 | no listener detected (not a bind-permission test) |'
+                fi
+              else
+                echo '| TCP 8787 | unable to inspect |'
+              fi
+            else
+              echo '| TCP 8787 | unable to inspect: ss missing |'
+            fi
+
+            if free_kib="$(df -Pk "$RUNNER_TEMP" 2>/dev/null | awk 'NR==2 { print $4 }')" && [[ "$free_kib" =~ ^[0-9]+$ ]]; then
+              printf '| Free space on Runner temp filesystem | %s GiB |\n' "$(awk -v k="$free_kib" 'BEGIN { printf "%.1f", k / 1048576 }')"
+            else
+              echo '| Free space on Runner temp filesystem | unknown |'
+            fi
+
+            echo ''
+            echo 'Next: confirm the actual Runner label and service-management rights before a separate deployment PR.'
+            echo 'This result does not prove that a public HTTP listener can be reached from another machine.'
+          } >> "$GITHUB_STEP_SUMMARY"
