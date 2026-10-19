@@ -17,8 +17,10 @@ test("self-hosted diagnostics are manual-only and use an unprivileged token", as
   assert.match(workflow, /^on:\n  workflow_dispatch:/m);
   assert.doesNotMatch(workflow, /^\s*(?:push|pull_request|pull_request_target):/m);
   assert.match(workflow, /^permissions: \{\}$/m);
-  assert.match(workflow, /runs-on: \[self-hosted, linux, x64\]/);
+  assert.match(workflow, /runs-on: \[self-hosted, pwa\]/);
   assert.match(workflow, /if: github.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /Scope: the \*\*Runner container\*\*/);
+  assert.doesNotMatch(workflow, /systemctl --user|loginctl show-user|ss -H -ltn/);
 });
 
 test("impact routing is selective for docs, routes Battle to Browser, and fails closed for unknown code", () => {
