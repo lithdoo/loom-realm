@@ -194,6 +194,10 @@ const capabilities = {
     buildPwaStack();
     npm("test", "-w", "@loomrealm/game-launcher-pwa");
     npm("test", "-w", "@loomrealm/pwa");
+    // Qualification alone does not exercise the real /pwa/pokeman/
+    // startup path; stage the product and boot it in Chromium as well.
+    npm("run", "build:staging", "-w", "@loomrealm/pwa");
+    node("apps/pwa/scripts/run-e2e.mjs", "staging");
   },
 
   "session-events"() {
