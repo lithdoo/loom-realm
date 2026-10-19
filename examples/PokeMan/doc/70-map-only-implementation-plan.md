@@ -248,6 +248,6 @@ PokeMan Map-only 实施报告
 关联说明：
 
 - [PokeMan README](../README.md)
-- [Essentials Map-only 示例](../../essentials-v21.1/README.md)
+- [Essentials Map-only 示例](../../essentials-v21.1/subsystems/map.mjs)
 - [Essentials Local Map Subsystem](../../essentials-v21.1-local/subsystems/map.mjs)
 - [Essentials Local Presentation Sync](../../essentials-v21.1-local/scripts/sync-map-presentation.mjs)
