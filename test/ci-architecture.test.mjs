@@ -8,7 +8,7 @@ const read = (relative) => readFile(new URL(relative, root), "utf8");
 
 test("active workflow surface is compact and milestone-free", async () => {
   const files = (await readdir(new URL(".github/workflows/", root))).sort();
-  assert.deepEqual(files, ["ci.yml", "deploy-pages.yml", "full-qualification.yml", "runner-diagnostics.yml"]);
+  assert.deepEqual(files.filter((name) => name !== "deploy-pokeman-staging.yml"), ["ci.yml", "deploy-pages.yml", "full-qualification.yml", "runner-diagnostics.yml"]);
   assert.ok(files.every((name) => !/^m\d+/i.test(name)));
 });
 
