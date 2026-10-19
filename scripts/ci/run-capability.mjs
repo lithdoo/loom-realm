@@ -163,6 +163,7 @@ const capabilities = {
     npm("test", "-w", "@loomrealm-game/tile-presentation");
     npm("test", "-w", "@loomrealm-game/map");
     npm("test", "-w", "@loomrealm-example/essentials-v21.1");
+    npm("test", "-w", "@loomrealm-example/pokeman");
     node("--test", "test/m14-vertical.test.mjs");
     npm("pack", "-w", "@loomrealm-game/tile-presentation", "-w", "@loomrealm-game/map", "--dry-run");
     node("examples/essentials-v21.1/scripts/generate-fixtures.mjs");
