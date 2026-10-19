@@ -10,7 +10,7 @@ services:
         target: /usr/share/nginx/html
         read_only: true
       - type: bind
-        source: ./nginx.conf
+        source: ${PWA_RELEASE_DIR:?set PWA_RELEASE_DIR to the release directory}/nginx.conf
         target: /etc/nginx/nginx.conf
         read_only: true
     tmpfs:
