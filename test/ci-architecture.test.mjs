@@ -50,6 +50,11 @@ test("impact routing is selective for docs, routes Battle to Browser, and fails 
   assert.equal(terrainContract.docs, true);
   assert.equal(terrainContract.map, true);
   assert.equal(terrainContract.presentation, true);
+
+  const pokeMan = classifyPaths(["examples/PokeMan/subsystems/map.mjs"]);
+  assert.equal(pokeMan.map, true);
+  assert.equal(pokeMan.pwa, true);
+  assert.equal(requiresBrowser(pokeMan), true);
 });
 
 test("daily CI has one fail-closed summary and Browser owns Battle browser qualification", async () => {

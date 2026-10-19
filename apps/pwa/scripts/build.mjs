@@ -39,6 +39,16 @@ if (qualification) {
     target: "chrome140",
     sourcemap: false,
   });
+  await build({
+    absWorkingDir: join(root, "..", ".."),
+    entryPoints: [join(root, "..", "..", "examples", "PokeMan", "subsystems", "map.mjs")],
+    outfile: join(output, "qualification", "pokeman-map-subsystem.mjs"),
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    target: "chrome140",
+    sourcemap: false,
+  });
 }
 await writeFile(join(output, "index.html"), `<!doctype html>
 <html lang="en">
