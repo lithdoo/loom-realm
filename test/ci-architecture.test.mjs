@@ -8,7 +8,11 @@ const read = (relative) => readFile(new URL(relative, root), "utf8");
 
 test("active workflow surface is compact and milestone-free", async () => {
   const files = (await readdir(new URL(".github/workflows/", root))).sort();
-  assert.deepEqual(files, ["ci.yml", "deploy-pages.yml", "deploy-pokeman-staging.yml", "full-qualification.yml"]);
+  // Runner diagnostics may be merged from PR #95 before or after this PR.
+  // Keep the mandatory workflow surface strict without making merge order a CI failure.
+  assert.deepEqual(files.filter((name) => name !== "runner-diagnostics.yml"), [
+    "ci.yml", "deploy-pages.yml", "deploy-pokeman-staging.yml", "full-qualification.yml",
+  ]);
   assert.ok(files.every((name) => !/^m\d+/i.test(name)));
 });
 
