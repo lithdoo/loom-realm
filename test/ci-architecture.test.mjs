@@ -102,11 +102,15 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   assert.match(capabilityRunner, /\[ci-command\] started=/);
   assert.match(capabilityRunner, /\[ci-command\] finished=/);
 
-  // A fresh deploy Runner cannot rely on artifacts built by earlier CI steps.
-  const coldBuild = ci.indexOf("- name: Clean PokeMan staging build");
-  const canonical = ci.indexOf("- name: Canonical package and contract regression");
-  assert.ok(coldBuild > 0 && coldBuild < canonical, "clean staging build must run before canonical workspace regression");
-  assert.match(ci, /name: Clean PokeMan staging build[\s\S]*?needs\.impact\.outputs\.pwa == 'true'[\s\S]*?npm run build:staging -w @loomrealm\/pwa/);
+  // Staging qualification uses an independent checkout: regression must not
+  // inherit build artifacts or processes from a cold PokeMan staging build.
+  const stagingJob = ci.match(/\n  pwa-staging:[\s\S]*?\n  node20:/)?.[0] ?? "";
+  assert.match(stagingJob, /if: needs\.impact\.outputs\.pwa == 'true'/);
+  assert.match(stagingJob, /timeout-minutes: 12/);
+  assert.match(stagingJob, /name: Clean PokeMan staging build[\s\S]*?npm run build:staging -w @loomrealm\/pwa/);
+  assert.doesNotMatch(linuxJob, /Clean PokeMan staging build/);
+  assert.match(ci, /needs: \[impact, linux, pwa-staging, node20, browser, desktop, windows, docs\]/);
+  assert.match(ci, /require_success "\$PWA_STAGING_REQUIRED" "\$PWA_STAGING_RESULT" pwa-staging/);
 
   assert.match(ci, /require_success "\$CODE" "\$LINUX_RESULT"/);
   assert.match(ci, /require_success "\$BROWSER_REQUIRED" "\$BROWSER_RESULT"/);
