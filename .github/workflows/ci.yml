@@ -60,6 +60,9 @@ jobs:
     needs: impact
     if: needs.impact.outputs.code == 'true'
     runs-on: ubuntu-latest
+    # A stalled hosted Linux job must fail rather than block the trusted
+    # main -> PWA deploy dependency indefinitely.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-workspace
@@ -77,7 +80,15 @@ jobs:
       - name: Canonical package and contract regression
         env:
           LOOMREALM_QUALIFICATION_REPORT: "1"
-        run: node scripts/ci/run-capability.mjs core
+        # GNU timeout forwards TERM to the entire child process group, then
+        # escalates to KILL. Keep the job-level deadline as an independent
+        # safety net for Runner or shell-level hangs.
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Canonical regression started at $(date -u +%FT%TZ)"
+          timeout --verbose --signal=TERM --kill-after=30s 12m node scripts/ci/run-capability.mjs core
+          echo "Canonical regression completed at $(date -u +%FT%TZ)"
       - name: Content/storage delta
         if: needs.impact.outputs.content == 'true'
         run: node scripts/ci/run-capability.mjs content
