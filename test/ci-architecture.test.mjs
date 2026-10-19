@@ -8,11 +8,18 @@ const read = (relative) => readFile(new URL(relative, root), "utf8");
 
 test("active workflow surface is compact and milestone-free", async () => {
   const files = (await readdir(new URL(".github/workflows/", root))).sort();
-  assert.deepEqual(files.filter((name) => name !== "deploy-pokeman-staging.yml"), ["ci.yml", "deploy-pages.yml", "full-qualification.yml", "runner-diagnostics.yml"]);
+  // A self-hosted diagnostic or staging deploy may land in either order.
+  // Reject all other workflows; inspect every recognized optional workflow.
+  const extensions = new Set(["runner-diagnostics.yml", "deploy-pokeman-staging.yml"]);
+  assert.deepEqual(files.filter((name) => !extensions.has(name)), [
+    "ci.yml", "deploy-pages.yml", "full-qualification.yml",
+  ]);
   assert.ok(files.every((name) => !/^m\d+/i.test(name)));
 });
 
-test("self-hosted diagnostics are manual-only and use an unprivileged token", async () => {
+test("self-hosted diagnostics remain manual, main-only and without repository token permissions", async () => {
+  const files = await readdir(new URL(".github/workflows/", root));
+  if (!files.includes("runner-diagnostics.yml")) return;
   const workflow = await read(".github/workflows/runner-diagnostics.yml");
   assert.match(workflow, /^on:\n  workflow_dispatch:/m);
   assert.doesNotMatch(workflow, /^\s*(?:push|pull_request|pull_request_target):/m);
@@ -21,6 +28,20 @@ test("self-hosted diagnostics are manual-only and use an unprivileged token", as
   assert.match(workflow, /if: github.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /Scope: the \*\*Runner container\*\*/);
   assert.doesNotMatch(workflow, /systemctl --user|loginctl show-user|ss -H -ltn/);
+});
+
+test("PokeMan staging deploy runs only after successful main CI push", async () => {
+  const files = await readdir(new URL(".github/workflows/", root));
+  if (!files.includes("deploy-pokeman-staging.yml")) return;
+  const workflow = await read(".github/workflows/deploy-pokeman-staging.yml");
+  assert.match(workflow, /workflows: \["CI"\]/);
+  assert.match(workflow, /branches: \[main\]/);
+  assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/);
+  assert.match(workflow, /runs-on: \[self-hosted, pwa\]/);
+  assert.match(workflow, /actions\/setup-node@v6/);
+  assert.match(workflow, /node-version: 24/);
+  assert.match(workflow, /github\.event\.workflow_run\.head_sha/);
+  assert.doesNotMatch(workflow, /pull_request/);
 });
 
 test("impact routing is selective for docs, routes Battle to Browser, and fails closed for unknown code", () => {
