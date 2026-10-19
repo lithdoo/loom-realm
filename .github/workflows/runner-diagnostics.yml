@@ -1,0 +1,110 @@
+name: Self-hosted Runner Diagnostics
+
+# Manual only. Do not schedule self-hosted work for untrusted PRs.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: self-hosted-runner-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Read-only Docker Runner readiness
+    if: github.ref == 'refs/heads/main'
+    # The verified repository-level Docker Desktop runner has these labels.
+    runs-on: [self-hosted, pwa]
+    timeout-minutes: 5
+    steps:
+      - name: Inspect the Runner container without changing it
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # No checkout, package install, Docker commands, service management,
+          # ports, volume changes, or credentials. No host paths, usernames,
+          # IP addresses, or environment variables are printed.
+          {
+            echo '## Docker-hosted PWA Runner diagnostics'
+            echo ''
+            echo 'Scope: the **Runner container**, not the Windows Docker Desktop host.'
+            echo 'Read-only: only this GitHub Actions step summary is written.'
+            echo ''
+            echo '| Check (inside Runner container) | Result |'
+            echo '| --- | --- |'
+            printf '| Kernel | %s |\n' "$(uname -s)"
+            printf '| Architecture | %s |\n' "$(uname -m)"
+            if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+              echo '| Container indicator | detected |'
+            else
+              echo '| Container indicator | not detected (not conclusive) |'
+            fi
+
+            for tool in node npm git python3 df stat findmnt; do
+              if command -v "$tool" > /dev/null 2>&1; then
+                printf '| Command: %s | available |\n' "$tool"
+              else
+                printf '| Command: %s | missing |\n' "$tool"
+              fi
+            done
+            if command -v node > /dev/null 2>&1; then
+              version="$(node -p 'process.versions.node' 2>/dev/null || true)"
+              if [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+                printf '| Container Node.js version | %s (build should use setup-node 24) |\n' "$version"
+              else
+                echo '| Container Node.js version | unknown |'
+              fi
+            fi
+
+            for item in RUNNER_TEMP GITHUB_WORKSPACE; do
+              target="${!item:-}"
+              if [ -n "$target" ] && [ -d "$target" ] && [ -w "$target" ]; then
+                printf '| %s working directory | writable |\n' "$item"
+              elif [ -n "$target" ] && [ -d "$target" ]; then
+                printf '| %s working directory | not writable |\n' "$item"
+              else
+                printf '| %s working directory | unavailable |\n' "$item"
+              fi
+            done
+
+            # Future release paths must be explicitly shared into both the
+            # Runner and the separate web container. A plain writable path
+            # in the Runner container is not evidence of host persistence.
+            if [ -d /srv/loomrealm-pwa ]; then
+              if [ -w /srv/loomrealm-pwa ]; then
+                echo '| Candidate release path | exists and writable inside Runner |'
+              else
+                echo '| Candidate release path | exists but not writable inside Runner |'
+              fi
+              if command -v findmnt > /dev/null 2>&1 && findmnt --mountpoint /srv/loomrealm-pwa > /dev/null 2>&1; then
+                echo '| Candidate release path | has its own mount (sharing still unverified) |'
+              else
+                echo '| Candidate release path | no direct mount detected |'
+              fi
+            else
+              echo '| Candidate release path | absent in Runner (setup required) |'
+            fi
+
+            if [ -S /var/run/docker.sock ]; then
+              echo '| Docker Engine socket | present; review elevated host risk |'
+            else
+              echo '| Docker Engine socket | absent (preferred for build-only Runner) |'
+            fi
+
+            if [ -n "${RUNNER_TEMP:-}" ] && [ -d "$RUNNER_TEMP" ]; then
+              free_kib="$(df -Pk "$RUNNER_TEMP" 2>/dev/null | awk 'NR==2 { print $4 }' || true)"
+              if [[ "$free_kib" =~ ^[0-9]+$ ]]; then
+                printf '| Free space on Runner temp filesystem | %s GiB |\n' "$(awk -v k="$free_kib" 'BEGIN { printf "%.1f", k / 1048576 }')"
+              else
+                echo '| Free space on Runner temp filesystem | unknown |'
+              fi
+            fi
+
+            echo ''
+            echo '**Not tested by this job:** Windows host TCP 8787, host bind mounts,'
+            echo 'Web container persistence or Docker Desktop startup behavior.'
+            echo 'Those require separate host-level evidence; do not infer them'
+            echo 'from systemd or socket checks inside this container.'
+          } >> "$GITHUB_STEP_SUMMARY"
