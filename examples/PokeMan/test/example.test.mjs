@@ -4,10 +4,15 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { openFsdb, listFsdbEntries } from "@loomrealm/fsdb";
 import { parseGameEntryV1 } from "@loomrealm/game-package";
+import mapSubsystem from "../subsystems/map.mjs";
 
 const root = new URL("../", import.meta.url);
 const rootPath = fileURLToPath(root);
 const fsdbRoot = new URL("[FSDB]PokeMan/", root);
+
+test("Map subsystem module imports from the existing Map package", () => {
+  assert.ok(mapSubsystem);
+});
 
 test("Game Entry starts only the Map subsystem in the player's home", async () => {
   const game = parseGameEntryV1(await readFile(new URL("game.json", root), "utf8"));
