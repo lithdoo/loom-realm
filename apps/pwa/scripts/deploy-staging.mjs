@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -30,7 +30,13 @@ export async function readActiveId(root) {
 export async function writeActiveId(root, id) {
   const file = join(root, stateName);
   await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, activeFile(id), "utf8");
+  const temporary = `${file}.tmp-${process.pid}-${crypto.randomUUID()}`;
+  try {
+    await writeFile(temporary, activeFile(id), { encoding: "utf8", flag: "wx" });
+    await rename(temporary, file);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 function run(command, args, env) {
@@ -51,22 +57,31 @@ async function portPublished(port) {
   return output.split(/\r?\n/).some((line) => line.includes(`:${port}->`));
 }
 
-async function smoke(baseUrl) {
-  const checks = [
-    ["/", "text/html"],
-    ["/window.js", "javascript"],
-    ["/service-worker.js", "javascript"],
-    ["/pokeman-bundle.json", "application/json"],
-  ];
-  for (const [path, mime] of checks) {
-    const response = await fetch(`${baseUrl}${path}`, { cache: "no-store" });
-    const type = response.headers.get("content-type") ?? "";
-    if (response.status !== 200 || !type.includes(mime)) {
-      throw new Error(`${path} returned ${response.status} ${type}`);
-    }
+/**
+ * Probe HTTP from within the actual Web container. Docker Desktop ports
+ * published only on Windows 127.0.0.1 need not be reachable from the Runner
+ * through host.docker.internal; the old host-origin probe could fail even
+ * when the Web container was healthy.
+ *
+ * A separate Windows-host check must still validate 127.0.0.1:8787 after
+ * deployment; this check deliberately does not claim external reachability.
+ */
+async function containerSmoke(project, releaseDir, port) {
+  const origin = "http://127.0.0.1";
+  for (const path of [
+    "/pwa/pokeman/",
+    "/pwa/pokeman/window.js",
+    "/pwa/pokeman/service-worker.js",
+    "/pwa/pokeman/pokeman-bundle.json",
+  ]) {
+    await compose(project, releaseDir, port, ["exec", "-T", "web", "wget", "-q", "-O", "/dev/null", `${origin}${path}`]);
   }
-  const rootWorker = await fetch(new URL("/service-worker.js", baseUrl), { cache: "no-store" });
-  if (rootWorker.status === 200) throw new Error("Service Worker is exposed at the site root");
+  const rootWorker = await run("docker", [
+    "compose", "-p", project, "-f", composeFile,
+    "exec", "-T", "web", "wget", "-q", "-O", "/dev/null",
+    `${origin}/service-worker.js`,
+  ], { PWA_RELEASE_DIR: releaseDir, PWA_HTTP_PORT: String(port) });
+  if (rootWorker === 0) throw new Error("Service Worker is exposed at the site root");
 }
 
 async function compose(project, releaseDir, port, action) {
@@ -82,20 +97,24 @@ export async function deployRelease(options) {
   const previous = await readActiveId(options.dataRoot);
   await mkdir(join(options.dataRoot, releaseRootName, options.sha), { recursive: true });
   await cp(options.sourceDir, join(options.dataRoot, releaseRootName, options.sha), { recursive: true });
+  // nginx.conf must remain available for the lifetime of the Web container.
+  // Binding ./nginx.conf from an ephemeral Actions checkout is not durable.
+  await cp(join(appRoot, "deploy", "nginx.conf"), join(options.dataRoot, releaseRootName, options.sha, "nginx.conf"));
   const releaseDir = options.releaseDir(options.sha);
   try {
     if (await options.portPublished(options.candidatePort)) throw new Error(`Candidate port ${options.candidatePort} is in use`);
     await options.compose(options.candidateProject, releaseDir, options.candidatePort, ["up", "-d", "--force-recreate", "--wait"]);
-    await options.smoke(options.candidateUrl);
+    await options.smoke(options.candidateUrl, options.candidateProject, releaseDir, options.candidatePort);
   } catch (cause) {
     await options.compose(options.candidateProject, releaseDir, options.candidatePort, ["down"]).catch(() => {});
     return Object.freeze({ status: "candidate-failed", active: previous, error: cause });
   }
   await options.compose(options.candidateProject, releaseDir, options.candidatePort, ["down"]);
-  await writeActiveId(options.dataRoot, options.sha);
   try {
     await options.compose(options.officialProject, releaseDir, options.officialPort, ["up", "-d", "--force-recreate", "--wait"]);
-    await options.smoke(options.officialUrl);
+    await options.smoke(options.officialUrl, options.officialProject, releaseDir, options.officialPort);
+    // Commit the new active identity only after the official endpoint passes.
+    await writeActiveId(options.dataRoot, options.sha);
   } catch (cause) {
     if (previous === null) {
       await options.compose(options.officialProject, releaseDir, options.officialPort, ["down"]).catch(() => {});
@@ -103,6 +122,7 @@ export async function deployRelease(options) {
     } else {
       await writeActiveId(options.dataRoot, previous);
       await options.compose(options.officialProject, options.releaseDir(previous), options.officialPort, ["up", "-d", "--force-recreate", "--wait"]);
+      await options.smoke(options.officialUrl, options.officialProject, options.releaseDir(previous), options.officialPort);
     }
     return Object.freeze({ status: "rolled-back", active: previous, error: cause });
   }
@@ -116,7 +136,6 @@ async function main() {
   if (dataRoot.length === 0) throw new Error("PWA_DATA_ROOT is required");
   const candidatePort = Number(process.env.PWA_CANDIDATE_PORT ?? "8790");
   const officialPort = Number(process.env.PWA_HTTP_PORT ?? "8787");
-  const host = process.env.PWA_SMOKE_HOST ?? "http://host.docker.internal";
   const engineRoot = process.env.PWA_ENGINE_DATA_ROOT ?? dataRoot;
   const result = await deployRelease({
     sha,
@@ -126,12 +145,12 @@ async function main() {
     officialPort,
     candidateProject: "loomrealm-pwa-candidate",
     officialProject: "loomrealm-pwa",
-    candidateUrl: `${host}:${candidatePort}/pwa/pokeman`,
-    officialUrl: `${host}:${officialPort}/pwa/pokeman`,
+    candidateUrl: "/pwa/pokeman",
+    officialUrl: "/pwa/pokeman",
     releaseDir: (id) => join(engineRoot, "releases", id).replaceAll("\\", "/"),
     portPublished,
     compose,
-    smoke,
+    smoke: (_url, project, releaseDir, port) => containerSmoke(project, releaseDir, port),
   });
   if (result.status !== "published") {
     console.error(result.status);
