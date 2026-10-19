@@ -40,20 +40,17 @@ test("PokeMan staging build is self-contained and dependency-ordered for fresh R
 
   // PokeMan staging also builds a Map executable from source and creates an
   // FSDB fixture, neither of which is a declared app/pwa runtime dependency.
-  const required = new Set(["@loomrealm/fsdb", "@loomrealm-game/map"]);
+  const required = new Set();
   const visit = (name) => {
-    if (required.has(name) && name !== "@loomrealm/fsdb" && name !== "@loomrealm-game/map") return;
+    if (required.has(name)) return;
     required.add(name);
     const pkg = packages.get(name);
     assert.ok(pkg, `Missing local workspace: ${name}`);
     for (const dependency of Object.keys(pkg.dependencies ?? {})) {
-      if (packages.has(dependency) && !required.has(dependency)) visit(dependency);
+      if (packages.has(dependency)) visit(dependency);
     }
   };
-  for (const rootName of ["@loomrealm/pwa", "@loomrealm-game/map", "@loomrealm/fsdb"]) {
-    required.delete(rootName);
-    visit(rootName);
-  }
+  for (const name of ["@loomrealm/pwa", "@loomrealm-game/map", "@loomrealm/fsdb"]) visit(name);
   required.delete("@loomrealm/pwa"); // Built by tsc after prerequisites.
   assert.deepEqual(new Set(order), required, "build:staging must compile every runtime/Map/FSDB workspace");
   for (const name of order) {
