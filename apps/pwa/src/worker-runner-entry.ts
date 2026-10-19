@@ -7,6 +7,7 @@ import {
 } from "@loomrealm/shared-state";
 import type { SubsystemDefinitionFactory } from "@loomrealm/subsystem";
 import { createSameOriginContentClient, runSubsystem } from "@loomrealm/subsystem/host";
+import { pwaPath } from "./base-path.js";
 import {
   parseInstallSubsystemData,
   parsePwaRunnerBootstrapV1,
@@ -125,7 +126,7 @@ async function run(raw: unknown): Promise<void> {
     if (value !== null && typeof value === "object" && Object.keys(value).length === 4 && value.type === "loomrealm.pwa.runner-shutdown" && value.version === 1 && value.sessionEpoch === bootstrap.sessionEpoch && value.bootstrapToken === bootstrap.bootstrapToken) lifetime.abort(new Error("Runtime termination requested"));
   };
   self.addEventListener("message", onShutdown);
-  const response = await fetch("/_lr/internal/runtime-info", { cache: "no-store", signal: lifetime.signal });
+  const response = await fetch(pwaPath("/_lr/internal/runtime-info"), { cache: "no-store", signal: lifetime.signal });
   if (!response.ok) throw new Error("Service Worker runtime-info unavailable");
   const runtimeInfo = parsePwaRuntimeInfoV1(await response.json());
   if (!sameServiceWorkerGeneration(runtimeInfo, bootstrap.expectedServiceWorker)) throw new Error("Service Worker generation mismatch");
@@ -144,7 +145,7 @@ async function run(raw: unknown): Promise<void> {
   });
   const scheduler: DeadlineScheduler = Object.freeze({ schedule(delayMs: number, callback: () => void) { const timer = setTimeout(callback, delayMs); return () => clearTimeout(timer); } });
   try {
-    const moduleUrl = new URL(`/_lr/internal/executables/${encodeURIComponent(bootstrap.installationId)}/${bootstrap.logicalModule.split("/").map(encodeURIComponent).join("/")}`, location.origin).href;
+    const moduleUrl = new URL(pwaPath(`/_lr/internal/executables/${encodeURIComponent(bootstrap.installationId)}/${bootstrap.logicalModule.split("/").map(encodeURIComponent).join("/")}`), location.origin).href;
     const imported = await import(moduleUrl) as { default?: unknown };
     if (typeof imported.default !== "function") throw new TypeError("Subsystem Definition Module default export is invalid");
     const content = createSameOriginContentClient({ installationId: bootstrap.installationId }, lifetime.signal);

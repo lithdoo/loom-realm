@@ -1,3 +1,4 @@
+import { moduleDirectoryPath } from "./base-path.js";
 import { internalFailure, realizeContentRequest } from "./service-worker-content.js";
 import { realizeExecutableRequest } from "./service-worker-executable.js";
 import type { PwaServiceWorkerGenerationV1 } from "./bootstrap-protocol.js";
@@ -29,17 +30,18 @@ worker.addEventListener("message", (event: ExtendableMessageEvent) => {
 worker.addEventListener("fetch", (event: FetchEvent) => {
   const url = new URL(event.request.url);
   if (url.origin !== worker.location.origin) return;
-  if (url.pathname === "/_lr/internal/runtime-info") {
+  const base = moduleDirectoryPath();
+  if (url.pathname === `${base}/_lr/internal/runtime-info`) {
     event.respondWith(Promise.resolve(new Response(JSON.stringify(runtimeInfo), { status: 200, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } })));
     return;
   }
-  const executablePrefix = "/_lr/internal/executables/";
+  const executablePrefix = `${base}/_lr/internal/executables/`;
   if (url.pathname.startsWith(executablePrefix)) {
     const parts = url.pathname.slice(executablePrefix.length).split("/");
     event.respondWith(realizeExecutableRequest(event.request, url, parts).catch(internalFailure));
     return;
   }
-  const contentPrefix = "/_lr/v1/games/";
+  const contentPrefix = `${base}/_lr/v1/games/`;
   if (url.pathname.startsWith(contentPrefix)) {
     const parts = url.pathname.slice(contentPrefix.length).split("/");
     event.respondWith(realizeContentRequest(event.request, url, parts).catch(internalFailure));

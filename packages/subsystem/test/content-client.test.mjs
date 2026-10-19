@@ -92,6 +92,10 @@ test("same-origin PWA Content client shares decoding semantics and never sends b
     const content = createSameOriginContentClient({ installationId: "installation" }, lifetime.signal);
     assert.deepEqual((await content.record("struct.hero", "hero")).value, { hero: { name: "Pika" } });
     assert.equal(observed[0].url, "https://game.test/_lr/v1/games/installation/records/struct.hero/hero");
+    Object.defineProperty(globalThis, "location", { configurable: true, value: new URL("https://game.test/pwa/pokeman/worker-runner.js") });
+    observed.length = 0;
+    await createSameOriginContentClient({ installationId: "installation" }, lifetime.signal).record("struct.hero", "hero");
+    assert.equal(observed[0].url, "https://game.test/pwa/pokeman/_lr/v1/games/installation/records/struct.hero/hero");
     assert.deepEqual(observed[0].headers, {});
     assert.throws(() => createSameOriginContentClient({ installationId: "installation", token: "forbidden" }, lifetime.signal), TypeError);
   } finally {

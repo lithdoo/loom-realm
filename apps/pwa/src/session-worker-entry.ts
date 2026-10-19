@@ -2,6 +2,7 @@ import { preparePwaGame } from "@loomrealm/game-launcher-pwa";
 import { runMain } from "@loomrealm/main";
 import { createSharedStateAuthority } from "@loomrealm/shared-state";
 import { createSessionEventFatalLatch, createSessionEventHub } from "@loomrealm/session-events";
+import { moduleDirectoryPath, pwaPath } from "./base-path.js";
 import { parsePwaRuntimeInfoV1, parsePwaSessionBootstrapV1, sameServiceWorkerGeneration } from "./bootstrap-protocol.js";
 import { getInstallation, readInstallationObject } from "./installation-store.js";
 import { PwaPlatform } from "./pwa-platform.js";
@@ -30,14 +31,15 @@ async function verifiedText(rootId: string, reference: { readonly contentVersion
 
 async function start(raw: unknown): Promise<void> {
   const bootstrap = parsePwaSessionBootstrapV1(raw);
-  const runtimeResponse = await fetch("/_lr/internal/runtime-info", { cache: "no-store" });
+  const runtimeResponse = await fetch(pwaPath("/_lr/internal/runtime-info"), { cache: "no-store" });
   if (!runtimeResponse.ok) throw new Error("Service Worker runtime-info unavailable");
   const runtimeInfo = parsePwaRuntimeInfoV1(await runtimeResponse.json());
   if (!sameServiceWorkerGeneration(runtimeInfo, bootstrap.expectedServiceWorker)) throw new Error("Service Worker generation mismatch before PREPARE");
   const prepared = await preparePwaGame({ installationId: bootstrap.installationId }, {
     expectedServiceWorker: bootstrap.expectedServiceWorker,
     runnerPolicy: { helloDeadlineMs: 10_000, frameDeadlineMs: 10_000, terminalCleanupDeadlineMs: 250 },
-    resolveModuleUrl: (logicalModule) => new URL(`/_lr/internal/executables/${encodeURIComponent(bootstrap.installationId)}/${logicalModule.split("/").map(encodeURIComponent).join("/")}`, location.origin).href,
+    executablePathPrefix: moduleDirectoryPath(),
+    resolveModuleUrl: (logicalModule) => new URL(pwaPath(`/_lr/internal/executables/${encodeURIComponent(bootstrap.installationId)}/${logicalModule.split("/").map(encodeURIComponent).join("/")}`), location.origin).href,
     async openPublishedInstallation(installationId) {
       const installation = await getInstallation(installationId);
       if (installation === null || installation.state !== "complete") throw new Error("INSTALLATION_NOT_COMPLETE");

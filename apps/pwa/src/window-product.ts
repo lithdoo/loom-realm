@@ -244,7 +244,7 @@ function fail(cause: unknown): void {
   document.documentElement.dataset.loomrealmProduct = "failed";
 }
 
-export function startPwaProduct(): PwaProductControl {
+export function startPwaProduct(prepare?: () => Promise<PwaProductLaunchSelection>): PwaProductControl {
   if (started) throw new Error("PWA product already started");
   started = true;
   window.__loomrealmPwa = state;
@@ -255,7 +255,13 @@ export function startPwaProduct(): PwaProductControl {
   window.addEventListener("pageshow", (event) => {
     if (event.persisted) void queueFreshSession(selectedLaunch).catch(fail);
   });
-  void queueFreshSession(selectedLaunch).catch(fail);
+  const boot = prepare === undefined
+    ? queueFreshSession(selectedLaunch)
+    : prepare().then((selection) => {
+      selectedLaunch = selection;
+      return queueFreshSession(selection);
+    });
+  void boot.catch(fail);
   return Object.freeze({
     state,
     async restart(selection?: PwaProductLaunchSelection) {
