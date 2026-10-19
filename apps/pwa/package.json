@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "npm run build -w @loomrealm/game-launcher-pwa && tsc -p tsconfig.json && node scripts/build.mjs",
-    "build:staging": "npm run build -w @loomrealm/fsdb -w @loomrealm-game/tile-presentation -w @loomrealm-game/map -w @loomrealm/game-launcher-pwa && tsc -p tsconfig.json && node scripts/build.mjs --staging",
+    "build:staging": "npm run build -w @loomrealm/fsdb -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/shared-state -w @loomrealm/session-events -w @loomrealm/game-package -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer -w @loomrealm/main -w @loomrealm-game/tile-presentation -w @loomrealm-game/map -w @loomrealm/game-launcher-pwa && tsc -p tsconfig.json && node scripts/build.mjs --staging",
     "build:qualification": "npm run build -w @loomrealm/fsdb -w @loomrealm-game/tile-presentation -w @loomrealm-game/map -w @loomrealm/game-launcher-pwa && tsc -p tsconfig.json && node scripts/build.mjs --qualification",
-    "test:unit": "node --test test/base-path.test.mjs test/build-generation.test.mjs test/content-manifest.test.mjs test/data-broker.test.mjs test/deploy-staging.test.mjs test/pokeman-bundle-id.test.mjs test/pokeman-bundle.test.mjs test/provisioning-bridges.test.mjs test/service-worker-gate.test.mjs",
+    "test:unit": "node --test test/base-path.test.mjs test/build-generation.test.mjs test/content-manifest.test.mjs test/data-broker.test.mjs test/deploy-staging.test.mjs test/pokeman-bundle-id.test.mjs test/pokeman-bundle.test.mjs test/provisioning-bridges.test.mjs test/service-worker-gate.test.mjs test/staging-build.test.mjs",
     "test": "npm run build:qualification && npm run test:unit && node scripts/run-e2e.mjs all",
     "test:m16": "npm run build:qualification && npm run test:unit && node scripts/run-e2e.mjs m16",
     "test:m17": "npm run build:qualification && npm run test:unit && node scripts/run-e2e.mjs m17"
