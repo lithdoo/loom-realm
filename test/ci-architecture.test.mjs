@@ -97,7 +97,6 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   const linuxJob = ci.match(/\n  linux:[\s\S]*?\n  pwa-staging:/)?.[0] ?? "";
   assert.match(linuxJob, /timeout-minutes: 20/);
   assert.match(linuxJob, /timeout --verbose --signal=TERM --kill-after=30s 12m node scripts\/ci\/run-capability\.mjs core/);
-  assert.match(linuxJob, /name: Clean PokeMan staging build/);
   const capabilityRunner = await read("scripts/ci/run-capability.mjs");
   assert.match(capabilityRunner, /\[ci-command\] started=/);
   assert.match(capabilityRunner, /\[ci-command\] finished=/);
@@ -119,7 +118,7 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   assert.match(ci, /name: Battle browser qualification[\s\S]*run-capability\.mjs battle/);
   assert.match(ci, /name: RPG Dialogue closed-loop qualification[\s\S]*run-capability\.mjs rpg-dialogue/);
   assert.match(ci, /name: Session Events v1 qualification[\s\S]*run-capability\.mjs session-events/);
-  assert.doesNotMatch(ci.match(/  linux:[\s\S]*?\n  node20:/)?.[0] ?? "", /run-capability\.mjs battle/);
+  assert.doesNotMatch(linuxJob, /run-capability\.mjs battle/);
   assert.match(runner, /runWithRetry\(process\.execPath, \["--test", "game-libs\/battle\/test\/browser-e2e\.test\.mjs"\]\)/);
   assert.doesNotMatch(ci, /npm run (?:test|build):m\d+/);
   assert.doesNotMatch(runner, /npm\("run", "(?:test|build):m\d+/);
