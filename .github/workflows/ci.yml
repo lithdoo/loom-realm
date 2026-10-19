@@ -65,6 +65,15 @@ jobs:
       - uses: ./.github/actions/setup-workspace
         with:
           node-version: 24
+      # This runs before any other workspace build in the hosted Linux job.
+      # The Docker self-hosted deploy starts from the same clean npm ci state.
+      - name: Clean PokeMan staging build
+        if: needs.impact.outputs.pwa == 'true'
+        run: |
+          npm run build:staging -w @loomrealm/pwa
+          test -s apps/pwa/dist/staging/pwa/pokeman/index.html
+          test -s apps/pwa/dist/staging/pwa/pokeman/pokeman-bundle.json
+          test -s apps/pwa/dist/staging/pwa/pokeman/service-worker.js
       - name: Canonical package and contract regression
         env:
           LOOMREALM_QUALIFICATION_REPORT: "1"
