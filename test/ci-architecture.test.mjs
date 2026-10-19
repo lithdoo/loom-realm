@@ -93,6 +93,15 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   const ci = await read(".github/workflows/ci.yml");
   const runner = await read("scripts/ci/run-capability.mjs");
   assert.match(ci, /name: CI \/ summary/);
+  // A hosted Linux regression stall must not block main -> staging forever.
+  const linuxJob = ci.match(/\n  linux:[\s\S]*?\n  node20:/)?.[0] ?? "";
+  assert.match(linuxJob, /timeout-minutes: 20/);
+  assert.match(linuxJob, /timeout --verbose --signal=TERM --kill-after=30s 12m node scripts\/ci\/run-capability\.mjs core/);
+  assert.match(linuxJob, /name: Clean PokeMan staging build/);
+  const capabilityRunner = await read("scripts/ci/run-capability.mjs");
+  assert.match(capabilityRunner, /\[ci-command\] started=/);
+  assert.match(capabilityRunner, /\[ci-command\] finished=/);
+
   // A fresh deploy Runner cannot rely on artifacts built by earlier CI steps.
   const coldBuild = ci.indexOf("- name: Clean PokeMan staging build");
   const canonical = ci.indexOf("- name: Canonical package and contract regression");
