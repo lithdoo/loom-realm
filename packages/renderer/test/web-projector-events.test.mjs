@@ -138,6 +138,7 @@ test("WebProjector provides stable per-node contexts with exact-live event prove
   projector.teardown();
   freshA.context.emitCustomEvent("after-teardown", { invalid: 1n });
   assert.equal(secondEvents.length, 1);
+  assert.equal(document.body.children.length, 0);
 });
 
 test("structural failure permanently makes existing node contexts inert", () => {

@@ -710,8 +710,10 @@
       for (const entry of spriteEntries) {
         if (entry.data.sceneEpoch !== view.data.sceneEpoch || entry.data.visualEpoch !== view.data.visualEpoch || entry.data.bridgeLevel !== view.data.bridgeLevel) return;
       }
+      // Nodes arrive one at a time. A shared epoch whose motion is not paired yet
+      // must wait for the sibling update instead of failing the presentation.
       if (player && ((view.data.cameraMotion === null) !== (player.data.motion === null) || view.data.motionId !== player.data.motionId || view.data.bridgeLevel !== player.data.bridgeLevel)) {
-        throw new TypeError("Invalid map motion identity");
+        return;
       }
       const geometry = presentationGeometry(view.data);
       this._state = "PREPARING";

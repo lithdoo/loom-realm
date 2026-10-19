@@ -146,6 +146,7 @@ export function classifyPaths(paths) {
       path.startsWith("game-libs/tile-presentation/") ||
       path.startsWith("examples/essentials-v21.1/") ||
       path.startsWith("examples/essentials-v21.1-local/") ||
+      path.startsWith("examples/PokeMan/") ||
       path.startsWith("tools/fixtures/essentials-v21.1/")
     ) {
       impact.code = true;

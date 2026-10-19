@@ -199,6 +199,8 @@ export class WebProjector implements RendererPresentationEffect {
     if (this.ended) return;
     this.ended = true;
     this.lifetime.abort();
+    for (const record of this.live.values()) record.element.remove();
+    this.live.clear();
   }
 
   structuralFailed(): boolean {

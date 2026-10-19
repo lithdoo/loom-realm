@@ -34,8 +34,8 @@ if (address === null || typeof address === "string") throw new Error("PWA test s
 const patterns = process.env.LOOMREALM_PWA_TEST_FILE ? [process.env.LOOMREALM_PWA_TEST_FILE] : mode === "m16"
   ? ["test/m16-runtime.e2e.test.mjs", "test/installation-content.e2e.test.mjs"]
   : mode === "m17"
-    ? ["test/m16-runtime.e2e.test.mjs", "test/installation-content.e2e.test.mjs", "test/lifecycle.e2e.test.mjs", "test/m17-product.e2e.test.mjs"]
-    : ["test/m16-runtime.e2e.test.mjs", "test/installation-content.e2e.test.mjs", "test/lifecycle.e2e.test.mjs", "test/m17-product.e2e.test.mjs"];
+    ? ["test/m16-runtime.e2e.test.mjs", "test/installation-content.e2e.test.mjs", "test/lifecycle.e2e.test.mjs", "test/m17-product.e2e.test.mjs", "test/pokeman-map.e2e.test.mjs"]
+    : ["test/m16-runtime.e2e.test.mjs", "test/installation-content.e2e.test.mjs", "test/lifecycle.e2e.test.mjs", "test/m17-product.e2e.test.mjs", "test/pokeman-map.e2e.test.mjs"];
 const child = spawn(process.execPath, ["--test", "--test-concurrency=1", ...patterns], {
   cwd: root,
   stdio: "inherit",
