@@ -14,7 +14,7 @@ test("active workflow surface is compact and milestone-free", async () => {
 
 test("self-hosted diagnostics are manual-only and use an unprivileged token", async () => {
   const workflow = await read(".github/workflows/runner-diagnostics.yml");
-  assert.match(workflow, /^on:\\n  workflow_dispatch:/m);
+  assert.match(workflow, /^on:\n  workflow_dispatch:/m);
   assert.doesNotMatch(workflow, /^\s*(?:push|pull_request|pull_request_target):/m);
   assert.match(workflow, /^permissions: \{\}$/m);
   assert.match(workflow, /runs-on: \[self-hosted, linux, x64\]/);
