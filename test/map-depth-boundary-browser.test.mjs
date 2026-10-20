@@ -157,10 +157,38 @@ async function serveMapBrowser(t) {
     response.end("<!doctype html><html><body style=\"margin:0\"></body></html>");
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  let browser;
+  // Close the browser before closing HTTP. Separate t.after hooks can await
+  // server.close() while Chromium still holds a connection, deadlocking cleanup.
+  // Register cleanup before launching Chromium so a failed launch also cleans up.
+  t.after(async () => {
+    console.log("[map-depth-browser] cleanup: close browser, then HTTP server");
+    try {
+      if (browser) {
+        let timer;
+        try {
+          await Promise.race([
+            browser.close(),
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(new Error("Chromium close exceeded 5s")), 5_000);
+            }),
+          ]);
+        } catch (cause) {
+          browser.process()?.kill("SIGKILL");
+          throw cause;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      console.log("[map-depth-browser] cleanup complete");
+    }
+  });
 
-  const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
-  t.after(() => browser.close());
+  console.log("[map-depth-browser] launching Chromium");
+  browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
   const page = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1 });
   const origin = `http://127.0.0.1:${server.address().port}`;
   await page.goto(origin);
