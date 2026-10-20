@@ -59,7 +59,7 @@ test("a failed official check restores the previous release", async () => {
     candidateUrl: "http://candidate/pwa/pokeman",
     officialUrl: "http://official/pwa/pokeman",
     releaseDir: (id) => `/engine/releases/${id}`,
-    portPublished: async () => false,
+    portPublished: async (port) => port === 8787,
     compose: async (project, releaseDir, port, action) => {
       calls.push({ project, releaseDir, port, action });
     },
@@ -95,7 +95,7 @@ test("successful deployment commits active SHA after official health and persist
     candidateUrl: "candidate",
     officialUrl: "official",
     releaseDir: (id) => `/engine/releases/${id}`,
-    portPublished: async () => false,
+    portPublished: async (port) => port === 8787,
     compose: async (project, releaseDir, port, action) => {
       seen.push(`${project}:${action[0]}`);
       if (action[0] === "up") {
