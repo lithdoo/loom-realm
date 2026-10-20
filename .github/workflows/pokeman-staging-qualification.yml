@@ -1,0 +1,54 @@
+name: PokeMan Staging Qualification
+
+# Hosted-only verification. PRs may run here, never on the Docker-hosted
+# runner. Only a successful push-to-main run can authorize deployment.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pokeman-staging-qualification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    name: PokeMan build, contracts and browser staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Install pinned Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx playwright install --with-deps chromium
+          chromium_path="$(node --input-type=module -e 'import { chromium } from "playwright"; process.stdout.write(chromium.executablePath())')"
+          test -x "$chromium_path"
+          printf 'LOOMREALM_CHROMIUM_PATH=%s\n' "$chromium_path" >> "$GITHUB_ENV"
+      - name: Build PokeMan staging from a clean workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --verbose --signal=TERM --kill-after=30s 8m npm run build:staging -w @loomrealm/pwa
+          test -s apps/pwa/dist/staging/pwa/pokeman/index.html
+          test -s apps/pwa/dist/staging/pwa/pokeman/pokeman-bundle.json
+          test -s apps/pwa/dist/staging/pwa/pokeman/service-worker.js
+      - name: Qualify PWA, Map and PokeMan contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --verbose --signal=TERM --kill-after=30s 4m npm run test:unit -w @loomrealm/pwa
+          timeout --verbose --signal=TERM --kill-after=30s 3m npm test -w @loomrealm-game/map
+          timeout --verbose --signal=TERM --kill-after=30s 3m npm test -w @loomrealm-example/pokeman
+      - name: Launch real PokeMan staging in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --verbose --signal=TERM --kill-after=30s 6m node apps/pwa/scripts/run-e2e.mjs staging
