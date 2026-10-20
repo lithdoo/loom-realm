@@ -192,7 +192,9 @@ const capabilities = {
       `--test-name-pattern=${MAP_LAYERING_WITHOUT_TIMING_RACES}`,
       "test/map-layering-browser.test.mjs",
     );
-    node("--test", "test/map-depth-boundary-browser.test.mjs");
+    // Node test timeouts do not guarantee teardown of Chromium child processes.
+    // Bound this individual browser test command as well as the hosted Map job.
+    run(process.execPath, ["--test", "test/map-depth-boundary-browser.test.mjs"], { timeout: 180_000, killSignal: "SIGTERM" });
   },
 
   "schema-form"() {
