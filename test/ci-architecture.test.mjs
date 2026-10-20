@@ -57,6 +57,7 @@ test("PokeMan deployment qualification runs on hosted workers for PRs and main, 
   assert.match(workflow, /node-version: 24/);
   assert.match(workflow, /playwright install --with-deps chromium/);
   assert.match(workflow, /npm run build:staging -w @loomrealm\/pwa/);
+  assert.match(workflow, /npm run build:qualification -w @loomrealm\/pwa/);
   assert.match(workflow, /npm run test:unit -w @loomrealm\/pwa/);
   assert.match(workflow, /npm test -w @loomrealm-game\/map/);
   assert.match(workflow, /npm test -w @loomrealm-example\/pokeman/);
