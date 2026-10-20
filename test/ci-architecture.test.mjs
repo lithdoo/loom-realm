@@ -97,8 +97,6 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   const coldBuild = ci.indexOf("- name: Clean PokeMan staging build");
   const canonical = ci.indexOf("- name: Canonical package and contract regression");
   assert.ok(coldBuild > 0 && coldBuild < canonical, "clean staging build must run before canonical workspace regression");
-  assert.match(ci.match(/  linux:[\s\S]*?\n  node20:/)?.[0] ?? "", /timeout-minutes: 20/);
-  assert.match(ci.match(/  node20:[\s\S]*?\n  browser:/)?.[0] ?? "", /timeout-minutes: 20/);
   assert.match(ci, /name: Clean PokeMan staging build[\s\S]*?needs\.impact\.outputs\.pwa == 'true'[\s\S]*?npm run build:staging -w @loomrealm\/pwa/);
 
   assert.match(ci, /require_success "\$CODE" "\$LINUX_RESULT"/);

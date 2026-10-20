@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ChildProcess } from "node:child_process";
 import WebSocket, { WebSocketServer } from "ws";
@@ -67,9 +67,6 @@ async function prepared(t) {
   return prepareHostraGame({ source: { installationRoot: root }, runnerPolicy: policy });
 }
 
-// Node 24 runs tests in a file concurrently. These cases patch ChildProcess.kill
-// and WebSocketServer.emit; overlapping patches leave a child alive forever.
-describe("Hostra runtime hosting mechanics", { concurrency: 1 }, () => {
 test("Runner environment uses the exact allowlist and reserved bootstrap", () => {
   const environment = buildRunnerEnvironment({
     PATH: "path",
@@ -454,5 +451,4 @@ test("a post-listening WS server error fails inside the attempt without crashing
     ),
     (error) => error?.code === "LAUNCH_RUNTIME_UNAVAILABLE",
   );
-});
 });

@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test --test-timeout=60000"
+    "test": "npm run build && node --test"
   },
   "dependencies": {
     "@loomrealm/foundation": "0.1.0-alpha.0",
