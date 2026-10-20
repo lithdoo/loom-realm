@@ -60,6 +60,7 @@ jobs:
     needs: impact
     if: needs.impact.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-workspace
@@ -91,6 +92,7 @@ jobs:
     needs: impact
     if: needs.impact.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-workspace
