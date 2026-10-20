@@ -144,7 +144,10 @@ jobs:
         run: node scripts/ci/run-capability.mjs presentation
       - name: Map and RPGMap
         if: needs.impact.outputs.map == 'true'
-        run: node scripts/ci/run-capability.mjs map
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --verbose --signal=TERM --kill-after=30s 8m node scripts/ci/run-capability.mjs map
       - name: Schema Form
         if: needs.impact.outputs.schema == 'true'
         run: node scripts/ci/run-capability.mjs schema-form
