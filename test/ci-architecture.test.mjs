@@ -30,20 +30,20 @@ test("self-hosted diagnostics remain manual, main-only and without repository to
   assert.doesNotMatch(workflow, /systemctl --user|loginctl show-user|ss -H -ltn/);
 });
 
-test("PokeMan staging deploy runs only after successful trusted main qualification push", async () => {
+test("PokeMan staging deploy runs directly on trusted main pushes with build and HTTP gates", async () => {
   const files = await readdir(new URL(".github/workflows/", root));
   if (!files.includes("deploy-pokeman-staging.yml")) return;
   const workflow = await read(".github/workflows/deploy-pokeman-staging.yml");
-  assert.match(workflow, /workflows: \["PokeMan Staging Qualification"\]/);
-  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /branches: \[main\]/);
-  assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/);
-  assert.match(workflow, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
+  assert.match(workflow, /^on:\n  push:\n    branches: \[main\]/m);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.repository == 'lithdoo\/loom-realm'/);
   assert.match(workflow, /runs-on: \[self-hosted, pwa\]/);
   assert.match(workflow, /actions\/setup-node@v6/);
   assert.match(workflow, /node-version: 24/);
-  assert.match(workflow, /github\.event\.workflow_run\.head_sha/);
-  assert.doesNotMatch(workflow, /pull_request/);
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /npm run build:staging -w @loomrealm\/pwa/);
+  assert.match(workflow, /node apps\/pwa\/scripts\/deploy-staging\.mjs/);
+  assert.doesNotMatch(workflow, /workflow_run|pull_request/);
 });
 
 test("PokeMan deployment qualification runs on hosted workers for PRs and main, never on the privileged Runner", async () => {
