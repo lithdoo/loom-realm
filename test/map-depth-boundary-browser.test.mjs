@@ -174,7 +174,7 @@ async function serveMapBrowser(t) {
             }),
           ]);
         } catch (cause) {
-          browser.process()?.kill("SIGKILL");
+          browser.process?.()?.kill("SIGKILL");
           throw cause;
         } finally {
           clearTimeout(timer);
