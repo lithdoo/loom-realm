@@ -44,6 +44,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The existing PWA unit suite also inspects the qualification-only
+          # Map executable. Build that fixture explicitly; do not skip its tests.
+          timeout --verbose --signal=TERM --kill-after=30s 4m npm run build:qualification -w @loomrealm/pwa
           timeout --verbose --signal=TERM --kill-after=30s 4m npm run test:unit -w @loomrealm/pwa
           timeout --verbose --signal=TERM --kill-after=30s 3m npm test -w @loomrealm-game/map
           timeout --verbose --signal=TERM --kill-after=30s 3m npm test -w @loomrealm-example/pokeman
