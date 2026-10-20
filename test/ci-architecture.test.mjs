@@ -10,7 +10,7 @@ test("active workflow surface is compact and milestone-free", async () => {
   const files = (await readdir(new URL(".github/workflows/", root))).sort();
   // A self-hosted diagnostic or staging deploy may land in either order.
   // Reject all other workflows; inspect every recognized optional workflow.
-  const extensions = new Set(["runner-diagnostics.yml", "deploy-pokeman-staging.yml"]);
+  const extensions = new Set(["runner-diagnostics.yml", "deploy-pokeman-staging.yml", "pokeman-staging-qualification.yml"]);
   assert.deepEqual(files.filter((name) => !extensions.has(name)), [
     "ci.yml", "deploy-pages.yml", "full-qualification.yml",
   ]);
@@ -30,18 +30,38 @@ test("self-hosted diagnostics remain manual, main-only and without repository to
   assert.doesNotMatch(workflow, /systemctl --user|loginctl show-user|ss -H -ltn/);
 });
 
-test("PokeMan staging deploy runs only after successful main CI push", async () => {
+test("PokeMan staging deploy runs only after successful trusted main qualification push", async () => {
   const files = await readdir(new URL(".github/workflows/", root));
   if (!files.includes("deploy-pokeman-staging.yml")) return;
   const workflow = await read(".github/workflows/deploy-pokeman-staging.yml");
-  assert.match(workflow, /workflows: \["CI"\]/);
+  assert.match(workflow, /workflows: \["PokeMan Staging Qualification"\]/);
+  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/);
+  assert.match(workflow, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
   assert.match(workflow, /runs-on: \[self-hosted, pwa\]/);
   assert.match(workflow, /actions\/setup-node@v6/);
   assert.match(workflow, /node-version: 24/);
   assert.match(workflow, /github\.event\.workflow_run\.head_sha/);
   assert.doesNotMatch(workflow, /pull_request/);
+});
+
+test("PokeMan deployment qualification runs on hosted workers for PRs and main, never on the privileged Runner", async () => {
+  const workflow = await read(".github/workflows/pokeman-staging-qualification.yml");
+  assert.match(workflow, /^name: PokeMan Staging Qualification$/m);
+  assert.match(workflow, /^on:\n  pull_request:\n  push:\n    branches: \[main\]/m);
+  assert.match(workflow, /^permissions:\n  contents: read$/m);
+  assert.match(workflow, /runs-on: ubuntu-latest/);
+  assert.doesNotMatch(workflow, /self-hosted|pull_request_target|secrets\./);
+  assert.match(workflow, /timeout-minutes: 20/);
+  assert.match(workflow, /node-version: 24/);
+  assert.match(workflow, /playwright install --with-deps chromium/);
+  assert.match(workflow, /npm run build:staging -w @loomrealm\/pwa/);
+  assert.match(workflow, /npm run test:unit -w @loomrealm\/pwa/);
+  assert.match(workflow, /npm test -w @loomrealm-game\/map/);
+  assert.match(workflow, /npm test -w @loomrealm-example\/pokeman/);
+  assert.match(workflow, /run-e2e\.mjs staging/);
+  assert.match(workflow, /--kill-after=30s 6m/);
 });
 
 test("impact routing is selective for docs, routes Battle to Browser, and fails closed for unknown code", () => {
@@ -115,6 +135,8 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   assert.match(ci, /require_success "\$BROWSER_REQUIRED" "\$BROWSER_RESULT"/);
   assert.match(ci, /if: needs\.impact\.outputs\.browser == 'true'/);
   assert.match(ci, /LOOMREALM_CHROMIUM_PATH/);
+  assert.match(ci, /name: Map and RPGMap[\s\S]*?timeout --verbose --signal=TERM --kill-after=30s 8m node scripts\/ci\/run-capability\.mjs map/);
+  assert.match(runner, /test\/map-depth-boundary-browser\.test\.mjs"\], \{ timeout: 180_000, killSignal: "SIGTERM" \}/);
   assert.match(ci, /name: Battle browser qualification[\s\S]*run-capability\.mjs battle/);
   assert.match(ci, /name: RPG Dialogue closed-loop qualification[\s\S]*run-capability\.mjs rpg-dialogue/);
   assert.match(ci, /name: Session Events v1 qualification[\s\S]*run-capability\.mjs session-events/);
