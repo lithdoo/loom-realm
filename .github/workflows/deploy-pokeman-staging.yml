@@ -1,8 +1,11 @@
 name: Deploy PokeMan staging
 
+# Only trusted main commits which passed the hosted, PokeMan-specific build,
+# contract and real Chromium staging checks may reach the privileged runner.
+
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["PokeMan Staging Qualification"]
     types: [completed]
     branches: [main]
 
@@ -18,7 +21,8 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.event == 'push'
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: [self-hosted, pwa]
     timeout-minutes: 45
     steps:
