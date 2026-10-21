@@ -59,51 +59,52 @@ Browser Window
                 |
                 v
      <game-common-controls>
-       game-libs business WC
        - physical capture
-       - canonical device state
        - business User Input protocol
        - state/event/reset lifecycle
-       - key mapping / dedup / throttling
                 |
                 v
  WebPresentationContext.emitCustomEvent(
-   name, data, { audience: "all-subsystems", channel: ... }
+   name, data, { broadcast: true }
  )
                 |
                 v
-  LM trusted Presentation Event Bridge
-       [generic only: currentness,
-        authenticated provenance,
-        channel capability, validation,
-        bounded delivery]
+ LM Web Presentation Event path
+   - currentness
+   - authenticated provenance
+   - validation / bounded delivery
                 |
                 v
-      Session Event routing
-         exact-channel subscriptions
-          /          |          \
-         v           v           v
-      Map         Battle       Menu/other
-       \            |            /
-        business-owned input consumers
-        (own focus/priority/handling policy)
+ fixed Web Presentation Event Channel
+ event type = custom-event name
+ payload = presentation envelope + business data
+                |
+                v
+ Session Event routing
+      /        |        \
+     v         v         v
+   Map       Battle    Menu/other
 ~~~
 
-**分界线**：
+分界原则：
 
 | 内容 | 归属 |
 | --- | --- |
-| Custom Element 注册、RenderNode 投影、Context 注入及失效 | LM Web Presentation |
-| 通用 Presentation → Session 事件桥接、身份和权限校验 | LM Framework 通用事件基础设施 |
-| 精确 Channel 路由、订阅、队列上界与投递生命周期 | LM Session Events |
+| Custom Element、RenderNode 投影、Context 生命周期 | LM Web Presentation |
+| 固定 Web Presentation Event Channel、可信来源、owner/broadcast audience | LM Framework 通用事件基础设施 |
+| Channel 路由、订阅、队列与投递生命周期 | LM Session Events |
+| custom-event name 的业务含义与 data schema | 业务层 |
 | Keyboard / Pointer / Gamepad 采集与标准化 | game-common-controls |
-| User Input 消息定义、状态快照、Event、Reset、重连/恢复规则 | game-common-controls 业务协议 |
-| 输入映射、长按、轴过滤、重复输入抑制 | game-common-controls |
-| 多消费者输入意图、焦点、优先级、动作消费策略 | 游戏业务层（可由 common-controls 提供可选模块） |
-| Frame / Activation / Session 控制及运行故障收束 | LM Main（与输入协议独立） |
-| 业务长期事实或需要恢复的持久状态 | 相应业务 authority；必要时复用通用 Shared State |
+| User Input state/event/reset、恢复与设备映射 | game-common-controls |
+| 游戏输入焦点、优先级、消费策略 | 游戏业务层 |
+| Frame / Activation / Session / Runtime authority | LM Main |
 
-**特别禁止**：LM Bridge 不得硬编码 game-common-controls 包名、固定 controls Channel、语义动作白名单、特定设备事件格式，也不得自行维护 pressed 集合。
+特别禁止：
+
+- 不得把 custom-event name 重新解释成 Session Events channel。
+- 不得在 emitCustomEvent options 中让业务选择 Framework 路由 Channel。
+- 不得由 LM Bridge 理解 keyboard/gamepad/pointer 或 controls 动作。
+- broadcast 只改变接收范围，不改变 Channel、type、payload schema 或 source identity。
 
 ## 3. 包交付、组件挂载和依赖
 
@@ -236,41 +237,49 @@ type ControlsMessage = ControlsEvent | ControlsState | ControlsReset;
 
 ## 5. 通用 emitCustomEvent 跨 Subsystem 广播扩展
 
-### 5.1 为什么必须扩展现有 API
+### 5.1 目标签名
 
-[Web Presentation API v1 §8](../../doc/15-contracts/web-presentation-api-v1.md) 当前定义：
-
-~~~ts
-emitCustomEvent(
-  name: string,
-  data?: InputEventV1["payload"],
-): void;
-~~~
-
-该接口目前是 owner-targeted User Input reverse capability：最终经 InputGate 投递到所属 Subsystem；不能单靠 WC 调用就实现广播。
-
-**目标**是在保留原两参数行为的前提下，给这个 WC Context 能力增加显式的跨 Subsystem 通用事件发布模式。新增部分不是“User Input 的特例”，而是任何被授权 business WC 可使用的通用事件能力。
-
-### 5.2 候选兼容 API（未冻结）
+现行 Web Presentation API v1 的 emitCustomEvent(name, data) 是 owner-targeted User Input reverse capability。目标是把它演进为 Web Presentation 自身的通用 custom-event capability，并只在可扩展 options object 中增加一个布尔字段：
 
 ~~~ts
-type CustomEventAudience = "owner" | "all-subsystems";
-
 interface CustomEventOptions {
-  readonly audience?: CustomEventAudience;
-  // 仅 broadcast 模式使用，业务自定义的 opaque exact channel
-  readonly channel?: string;
+  readonly broadcast?: boolean;
 }
 
 interface WebPresentationContext {
   readonly resources: PresentationResourceClient;
+
   emitCustomEvent(
     name: string,
-    data?: InputEventV1["payload"],
+    data?: JsonObject,
     options?: CustomEventOptions,
   ): void;
 }
 ~~~
+
+options 必须保持对象形态。broadcast 是当前第一个扩展项，未来新增与 custom-event 正交的行为时仍可继续扩展 options，而无需再次改变函数参数结构。
+
+### 5.2 broadcast 的唯一职责
+
+~~~text
+options omitted
+    => broadcast = false
+
+{ broadcast: false }
+    => owner-only
+
+{ broadcast: true }
+    => cross-Subsystem broadcast
+~~~
+
+broadcast 只改变 audience。它不得改变：
+
+- Web Presentation Event Channel；
+- custom-event name；
+- payload 格式；
+- source identity；
+- Frame / Activation authority；
+- Session Events Channel 的职责。
 
 示例：
 
@@ -279,72 +288,149 @@ context.emitCustomEvent(
   "controls.event",
   {
     protocol: "@loomrealm-game/common-controls/1",
-    epoch: "local-controls-epoch",
-    revision: 23,
-    kind: "event",
     action: "confirm",
-    phase: "impulse",
-    device: "keyboard",
-    control: "Enter",
+    phase: "pressed",
   },
-  { audience: "all-subsystems", channel: "game.controls/1" },
+  { broadcast: true },
 );
 ~~~
 
-候选语义：
+controls.event 是 custom-event 的业务 name/type，不是 Channel。
 
-- 省略 options 时仍是 **owner**，不改变历史双参数调用的含义。
-- all-subsystems 指进入跨 Subsystem 分发范围，**并非强迫每个 Runtime 无订阅收到回调**；同 Session Events v1，实际接收者是订阅对应 exact channel 的 Runtime。
-- Channel 由业务选择，不能由 LM 把 common-controls 名称写死到 Bridge 中。
-- options 不是新权威身份载体，组件不能自行指定 Session、owner subsystemKey、generation、Frame、Activation 或 Source provenance。
-- 成功调用只代表通过同步检查并被本地异步投递路径接受，不代表所有目标成功处理；无业务 ACK、无自动重放、无默认重试。
-- owner 模式使用既有 currentness/InputGate 语义；broadcast 模式**不得通过 InputGate 或借用 InputTarget 来控制收件人**。
+### 5.3 固定 Web Presentation Event Channel
 
-版本策略尚待决定：由于 v1 Context 为 frozen closed shape，必须通过正式的 Web Presentation 新版本/可选扩展契约、适配兼容期与 conformance fixtures 发布，不得先改接口并声称仍符合原 v1。
+现行实现已经存在保留标识：
+
+~~~ts
+const WEB_PRESENTATION_EVENT_CHANNEL_V1 =
+  "x.loomrealm.web-presentation.event";
+~~~
+
+目标架构保留这一“Web Presentation Event Channel”职能，但将其从 User Input v1 的 custom-input ownership 中迁出，改由 Web Presentation / generic event infrastructure 拥有。
+
+逻辑映射：
+
+~~~text
+SessionEvent.channel
+    = x.loomrealm.web-presentation.event
+      // Framework-owned routing domain
+
+SessionEvent.type
+    = emitCustomEvent 的 name
+      // business event discriminator
+
+SessionEvent.payload
+    = {
+        domainId,
+        targetKey,
+        data
+      }
+
+SessionEvent.source
+    = trusted RenderNode owner
+
+publication audience
+    = broadcast ? session : owner
+~~~
+
+职责必须保持分离：
+
+- Channel：这是 Web Presentation custom event；
+- name/type：这条业务事件是什么；
+- data：业务协议数据；
+- broadcast：谁可以收到。
+
+### 5.4 owner-only 与 broadcast
+
+| 调用 | 接收范围 |
+| --- | --- |
+| emitCustomEvent(name, data) | owner Subsystem 的匹配消费者 |
+| emitCustomEvent(name, data, { broadcast: false }) | 同上 |
+| emitCustomEvent(name, data, { broadcast: true }) | 当前 Session 中匹配 Web Presentation Event Channel 的消费者 |
+
+两种模式使用同一个固定 Channel、同一种 event envelope、同一种 source provenance。
+
+最终 owner-only 也不应依赖 InputGate/InputTarget。迁移期间，为兼容 Frozen v1，旧双参数调用可以暂时保持原 InputGate 行为；完成版本切换后，默认 false 也进入通用 Web Presentation Event path。
+
+### 5.5 校验和版本边界
+
+- options 省略合法；提供时 broadcast 只能是 boolean 或 undefined，不做 truthy coercion。
+- stale/detached/currentness 仍先于业务参数校验。
+- name 按 Web Presentation event name / Session Event type 职责验证，不按 Channel 解释。
+- data 使用 Web Presentation 通用 JSON payload 约束，长期从 InputEventV1 payload 类型所有权中迁出。
+- Framework 自己绑定固定 Channel、RenderNode provenance 和 source，business code 不能覆盖。
+- void 只表示同步验证和本地接受，不承诺所有消费者完成处理；无 ACK、replay 或 exactly-once。
+
+现行 WebPresentationContext v1 是 Frozen closed shape，所以 options 和 owner-only 新交付语义必须通过正式版本化 Contract / compatibility profile / conformance 发布，不得静默重定义 v1。
 
 ## 6. Trusted Presentation Event Bridge：必须是通用机制
 
 候选路径：
 
 ~~~text
-business WC -- emitCustomEvent(... all-subsystems)
-         |
-   Web Projector context/currentness check
-         |
-   trusted Renderer/Host presentation ingress
-         |  validate + authorize opaque channel
-         |  attach authoritative provenance
-         v
-    Session event routing
-         |
-    exact channel subscribers
-         v
-    Subsystem SessionEventClient
+business WC
+  |
+  | emitCustomEvent(name, data, { broadcast? })
+  v
+WebProjector / Renderer currentness
+  |
+  | Framework binds:
+  | fixed Web Presentation Channel
+  | RenderNode owner provenance
+  | event type = name
+  | audience = owner | session
+  v
+trusted Renderer/Host presentation ingress
+  |
+  v
+Session Events routing
+  |
+  +-- owner audience   -> owner Subsystem only
+  |
+  +-- session audience -> matching subscribers across current Session
 ~~~
 
-### 6.1 能力与权限边界
+Bridge 必须满足：
 
-Bridge MUST/SHOULD 满足：
+1. 只有当前 live RenderNode Context 可以发布。
+2. Framework 使用固定 Web Presentation Event Channel；业务不能选择或覆盖该 Channel。
+3. name 作为 event type，data 作为业务 payload；两者不得与 Channel 职责混用。
+4. source、Session、subsystemKey、generation、domainId、targetKey 均由可信 Framework 绑定。
+5. broadcast 只控制 audience，不推导 InputTarget，也不改变 Frame/Activation。
+6. Renderer 不获得任意 SessionEventClient、Hub binding、subscribe 或 arbitrary-channel publish 能力。
+7. Desktop/PWA 可有不同物理 Carrier，但逻辑 Contract 相同。
+8. 慢订阅者、overflow、listener failure 复用 Session Events 有界/隔离语义。
 
-1. 只有**当前、已挂载且受信任的 Context** 可发起广播；detached/expired RenderNode、旧 Session/generation、窗口 teardown 等不得产生新事件。
-2. name/channel/payload 按通用 Contract 同步验证，拒绝非 JSON、循环引用、不可表示的数字、超大数据与非法标识。
-3. 宿主注入经过验证的 provenance；业务字段不能覆盖 Source、Session、subsystemKey、generation、domain/key 等身份。
-4. Channel 发布权限由通用 capability/Host 配置授予，可选 opaque allow-list、配额及流控；**Renderer 不获得无限制的 SessionEventClient 或 Hub 内部引用**。
-5. Bridge 不推导 Frame/Activation/InputTarget，也不擅自让接收者变成 active；不解析 controls 业务字段。
-6. 跨平台只要求同一套逻辑广播 Contract，Desktop/PWA 可以有不同物理 Carrier，但不改协议。
-7. 对慢订阅者使用 Session Events 的有界消费语义，不让一个失败消费者拖住其他消费者；不建立历史队列或无限重试。
-8. 与现有 WC reverse input 一样，明确同步参数失败、异步投递失败、回调重入和 FIFO 的区别，并用专门 conformance 验证。
+### 6.1 owner recipient filter
 
-### 6.2 一个必须先关闭的身份问题
+Session Events v1 当前按 exact Channel 选择订阅者。Web Presentation custom event 还需要可信 audience metadata：
 
-现有 Session Events v1 把业务可见 **source.subsystemKey** 绑定到真实的 Runtime publisher identity。新广播的发起执行点却是 Renderer 中的 WC。
+~~~ts
+type PresentationEventAudience =
+  | { readonly kind: "owner"; readonly subsystemKey: string }
+  | { readonly kind: "session" };
+~~~
 
-建议优先评估以下**通用**身份方案，并在正式 Contract 中二选一：
+该 metadata 是 Framework 内部路由事实，不属于 payload，也不是新的业务 Channel。
 
-- **候选 A：按 RenderNode 业务 owner 归属发布。** Trusted Host 验证当前 RenderNode 所属的真实 Subsystem，并以该逻辑 owner 绑定受限发布端口；source.subsystemKey 表示发布行为的业务归属，而非代码实际运行进程。须明确这一语义是否仍满足 Session Events v1 已冻结的 publisher 真实性约束。
-- **候选 B：扩展 Session Events 的来源模型。** 使用经过认证的 presentation producer 身份（例如 source.kind = presentation），需要单独的协议版本和订阅者兼容方案。
+- broadcast=false：固定 Channel 匹配后，只投递给 owner Subsystem 的 subscription。
+- broadcast=true：固定 Channel 匹配后，可投递给当前 Session 的所有 matching subscriptions。
+- owner-only 不能先泄漏给其他 Runtime 再要求业务自行过滤。
 
-**禁止**为求方便伪造一个“input-subsystem”、用客户端 payload 填 source 或让 WC 直接调用任意 Hub Binding。身份方案及其跨平台落地在冻结之前，Bridge 仍属于未闭合设计。
+recipient filter 可放在 SessionEventHub trusted ingress 或独立 Presentation Event Router；这是实现选择，不应修改 author-facing Session Events Channel 的职能。
+
+### 6.2 source identity
+
+推荐使用 RenderNode owner delegated publication：
+
+- Renderer 从 current RenderNode 取得 owner subsystemKey/generation；
+- Session Host 再以可信 authority 验证；
+- 消费者看到真实业务 owner；
+- WC 不能自行声明 source；
+- 不创建虚假的 input subsystem；
+- 不向 Renderer 暴露可任意伪造 source 的 SessionEventClient。
+
+该能力会扩展 Frozen Session Events v1 的 publisher-origin integration semantics，因此需要单独 Integration Profile / ADR / conformance，但不要求重定义 Channel。
 
 ## 7. 消费方输入处理属于业务策略，而非 LM
 
@@ -428,29 +514,84 @@ Bridge 必须用平台通用接口表达所需能力，并由 Desktop/PWA compos
 - 单个订阅者 throw、断开或 overflow 不应阻断其他订阅者，不应未经正式契约直接升级为 Main Session fatal。
 - 不保存输入历史，不因新订阅者加入而回放已经完成的按键 impulse。
 
-## 11. 从 LM User Input v1 迁移：显式退出路径
+## 11. 从 LR User Input v1 迁移并删除 Framework 输入层
 
-本设计不是让两套 User Input 机制永久并行。建议的迁移阶段：
+最终目标不是长期双轨，而是从 LR Framework 删除 User Input 领域能力。
 
-| 阶段 | 交付 | 旧 User Input 状态 |
+### 11.1 最终删除范围
+
+~~~text
+Renderer
+  browser-input-source.ts
+  renderer/input.ts
+  RendererInputSource
+  InputGate
+  startInputSource / stopInputSource
+  Desktop/PWA Renderer input-source wiring
+
+@loomrealm/data
+  StandardInputChannelV1
+  InputInterestV1 / FrameInputInterestV1
+  InputStateV1 / InputEventV1 / InputResetV1
+  UserInputMessageV1
+  keyboard/pointer/gamepad input payload types
+  input-codec
+  input.* Data Profile family
+  RendererInputDataPeer / SubsystemInputDataPeer
+
+@loomrealm/subsystem
+  createInputListener()
+  InputListener / InputHandler / InputPayload
+  InputManager
+  Input Interest
+  retained input state
+  Frame activation 与 InputManager 的输入耦合
+
+Renderer Control / Main
+  RendererInputTargetV1
+  snapshot.inputTarget
+  Main currentInputTarget()
+  InputTarget publication / validation
+
+Contracts / Qualification
+  User Input v1
+  Renderer Data Profile 的 input.* slice
+  Renderer Control 的 InputTarget slice
+  对应 User Input qualification
+~~~
+
+这里描述最终目标，不要求在单个 PR 中直接删除全部内容。
+
+### 11.2 不应误删的 input
+
+Main/Frame 中 bootstrap.initial.input、frame.initialize({ input }) 等字段表示 Frame 初始化/调用参数，作者侧表现为 frame.params，和 Keyboard/Gamepad User Input 不是一个领域。
+
+这部分不因 User Input 删除。未来若要从 input 重命名为 params，应作为独立 Frame/Call 命名清理。
+
+Frame、Activation、Session、Runtime authority 本身继续存在；只删除它们与用户输入路由之间的 InputTarget 耦合。
+
+### 11.3 迁移阶段
+
+| 阶段 | 交付 | 旧 User Input |
 | --- | --- | --- |
-| M0 语义与边界 | 冻结业务输入协议目标、LM 广播能力界面及身份方案 | 保持不变 |
-| M1 LM 通用广播 | 新版本的 Web Presentation Broadcast、可信 Bridge、跨平台 Route、Conformance | 保持不变；旧双参数兼容 |
-| M2 WC Producer | common-controls：键盘/手柄、状态/Event/Reset、生命周期、Consumer helpers | 新游戏可选择 WC-only |
-| M3 业务接入 | Map + 至少另一 Subsystem 真实跨进程订阅；Desktop/PWA E2E | 对迁移游戏禁用旧输入业务处理路径 |
-| M4 范围收敛 | Pointer 与全部需保留的旧输入能力，焦点策略、故障恢复、性能 Qualification | 确认无必需业务依赖 |
-| M5 Framework 清理 | 经独立 ADR/Contract governance 废止 LM 输入专属 Producer、InputGate、Interest/State/Event/Reset 等 | 才能正式退役或移除 |
+| M0 | 冻结 options.broadcast、固定 Channel、name/type、owner/session audience | 原样保留 |
+| M1 | 实现 trusted Presentation Event path，Desktop/PWA E2E | 双参数旧行为兼容 |
+| M2 | common-controls 实现 Keyboard/Gamepad/Pointer 与业务 state/event/reset | 新游戏切 WC 输入 |
+| M3 | Subsystem 业务消费者切到 common-controls + Session Events | createInputListener 不再用于新游戏 |
+| M4 | owner-only custom event 也切到通用 Presentation Event path | WC custom event 脱离 InputGate |
+| M5 | 删除 Renderer Input Source / InputGate / Data input.* / Subsystem InputManager | Framework Input Plane 退出 |
+| M6 | Renderer Control/Main 删除 InputTarget，更新 Data/Control Profiles 与 Qualification | User Input v1 正式退役 |
 
-迁移前**不能擅自声称** LM 已完全解耦，因为当前 RendererInputSource、InputGate、Main InputTarget 和相关 Data/Control Contract 仍存在。必须逐项审计这些能力是否仅为旧输入协议服务；对 Main 控制流仍有其他用途的通用概念不得仅因同名而删除。
+最终验收：
 
-迁移验收的核心不是“两个 Subsystem 能收到键盘事件”，而是：
-
-1. 新游戏只引用业务 User Input Contract，业务输入行为不需要 LM 输入专属 API。
-2. LM Bridge 与 Session Events 不出现任何 common-controls、device、pressed、interest 等协议硬编码。
-3. Keyboard/Gamepad/Pointer 以及被保留的 User Input v1 行为完成已声明的范围覆盖。
-4. 新游戏无需经过旧 InputGate，也不出现两条输入路径造成重复业务动作。
-5. 断连、恢复和跨 Subsystem 输入状态不会卡死；广播失败不会改变 Main 既有 authority。
-6. Desktop/PWA 使用同一业务协议，通过正式 qualification。
+1. LR public API 不再暴露 Keyboard/Pointer/Gamepad User Input 类型。
+2. Renderer 不再主动采集物理用户输入。
+3. Renderer Data 不再包含 input.* family。
+4. SubsystemScope 不再有 createInputListener。
+5. Main / Renderer Control 不再发布 inputTarget。
+6. emitCustomEvent 不依赖 InputGate。
+7. game-common-controls 只依赖 browser API、Web Presentation Context 和通用事件消费能力。
+8. Frame/Activation/Render/Viewport/Shared State/Session Events 在删除 User Input 后仍独立通过 Qualification。
 
 ## 12. 测试和 Qualification 清单
 
@@ -479,27 +620,26 @@ Bridge 必须用平台通用接口表达所需能力，并由 Desktop/PWA compos
 
 ## 13. 实施顺序
 
-1. **先关闭架构决策**：正式冻结 LM 通用 Broadcast Capability 的边界、Context 版本、Channel 授权、Publisher identity、跨平台桥接、会话/过期语义。
-2. **建立独立通用资格测试**：不出现 controls 专用业务数据，也能够从任意被授权的业务 WC 向精确 Channel 发布。
-3. **创建业务包**：定义独立 Controls Protocol v1、WC 生命周期、Keyboard/Gamepad 的完整状态/Event/Reset 行为。
-4. **接入 Consumer**：使用 SessionEventClient 订阅，业务自行判断焦点、优先级及实际可执行范围。
-5. **实现恢复验证**：epoch/revision、完整状态再同步、consumer TTL、blur/disconnect/断线。
-6. **完成跨平台垂直切片**：至少两个真实 Subsystem，Desktop/PWA 及 Browser E2E。
-7. **进行旧协议迁移与清理**：补齐 Pointer 和全部被声明保留的能力，通过 ADR/Conformance 后再移除旧 Framework User Input。
+1. Contract / ADR：冻结 CustomEventOptions.broadcast、固定 Web Presentation Channel、name -> event type、owner/session audience、delegated owner source。
+2. Renderer seam：WebProjector 传递 options；ControlHolder currentness 后进入新 Presentation Event publisher；broadcast 路径不碰 InputGate。
+3. Host/Hub audience：实现固定 Channel 的 trusted publication ingress 和 owner/session recipient filter，不改变 business Channel 职责。
+4. PWA realization：Window -> Session Worker 受限发布链路和 E2E。
+5. Desktop realization：BrowserWindow -> Desktop Host 受限发布链路和 E2E。
+6. common-controls：实现业务 Input protocol 与设备 Producer。
+7. owner-only 切换：默认 broadcast=false 也走通用 Presentation Event path。
+8. Framework User Input 删除：清理 Subsystem InputManager、Data input family、Renderer sources/InputGate、Main/Renderer Control InputTarget，并同步更新 Contract/Qualification。
 
 ## 14. 待冻结事项
 
-必须在实施之前明确：
-
-- Context 广播 API 采用 Web Presentation v2、可选 extension，还是其他明确版本化契约？
-- Broadcast Channel 由 Context options 传入、RenderNode 配置绑定，还是通用 Capability 预先授权？allow-list/额度如何表达？
-- Renderer WC 的认证 publisher 身份选择“RenderNode 真实 owner”还是新版 presentation-origin 身份？如何保持 Session Events 来源契约真实？
-- “all-subsystems”是否严格定义为订阅该 exact Channel 的 Subsystem（推荐），还是需要一种另立契约的无订阅强制投递？
-- Controls 业务 schema、动作命名、epoch/revision、state refresh/TTL、reset、设备映射、数值范围的正式版本。
-- game-common-controls 的 Window 唯一实例和 RenderNode 宿主 Subsystem 所有权。
-- Pointer/IME/文本输入等功能边界，以及旧 User Input v1 的功能迁移矩阵。
-- 游戏层 input focus/priority/消费仲裁机制是否由包附带 coordinator，还是由游戏独立实现。
-- 旧 LM User Input 退出的兼容窗口、废止/删除顺序及 Qualification 证据。
+- 新 Context shape 采用 Web Presentation v2 还是 additive extension profile。
+- 固定 Web Presentation Event Channel 是否沿用 x.loomrealm.web-presentation.event，以及常量迁移到哪个非 User Input ownership 的 package。
+- name 映射到 Session Event type 的最终验证规则和 payload envelope。
+- owner recipient filter 位于 SessionEventHub trusted ingress 还是独立 Presentation Event Router。
+- delegated RenderNode owner publication 如何与现行 Session Events source.subsystemKey 契约衔接。
+- Presentation Event publisher 的 queue/backpressure/异步失败诊断边界。
+- owner-only 从旧 InputGate 切到通用 Event path 的版本切换点。
+- User Input v1、Data Profile input slice、Renderer Control InputTarget 的废止版本与迁移窗口。
+- Controls 业务 schema、epoch/revision、state refresh/TTL、reset、设备映射和游戏层 focus/priority。
 
 ## 15. 设计结论
 
