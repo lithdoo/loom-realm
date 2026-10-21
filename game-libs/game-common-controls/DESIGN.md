@@ -5,6 +5,7 @@
 > 目标包：**@loomrealm-game/common-controls**  
 > 目标组件：**`<game-common-controls>`**  
 > 设计核心：**用户输入属于 game-libs 业务协议，而非 LoomRealm Framework 协议。**  
+> Framework 细化方案：[Web Presentation Custom Event Routing](../../doc/10-architecture/web-presentation-custom-event-routing.md)  
 > 相关现行契约：[Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md)、[User Input v1](../../doc/15-contracts/user-input-v1.md)、[Session Events v1](../../doc/15-contracts/session-events-v1.md)、[Render Update v1](../../doc/15-contracts/render-update-v1.md)、[ADR 0031](../../doc/decisions/0031-business-owned-web-component-projection.md)
 
 > **定位说明**：本文描述未来目标和迁移方案，不修改上述已冻结正式契约的现行事实。当前的 Web Presentation 仍只有 owner-targeted 双参数 emitCustomEvent，Renderer 仍有 User Input v1/InputGate；本文要求先实现、验证新的通用广播基础设施，再有序迁移和移除旧输入专属能力。本文中的接口和消息结构均为候选设计，不得视作已发布 ABI。
@@ -216,7 +217,7 @@ type ControlsMessage = ControlsEvent | ControlsState | ControlsReset;
 
 这份示例用于说明 **User Input 协议由业务包拥有**，不代表最终必须保留全部字段或原样继承 User Input v1 wire。消息仍须满足通用 JSON 安全边界、长度、深度、字节上限，数值均为有限数；明确 action/value 的合法范围和协议版本策略。
 
-可把 Web Presentation 的 name 映射为 Session Event type（如 controls.event、controls.state、controls.reset），data 携带上述业务消息。Channel 由**业务配置**给出，例如 game.controls/1；LM 只将它视作不透明精确匹配字符串，不创建或保留 controls 专用的基础设施 Channel。
+Web Presentation 的 name 映射为 Session Event type（如 controls.event、controls.state、controls.reset），data 携带上述业务消息。底层始终使用 Framework 固定的 Web Presentation Event Channel；业务协议不拥有、不选择、也不重定义该 Channel。
 
 ### 4.3 状态与事件的区别不可抹平
 
@@ -434,33 +435,33 @@ recipient filter 可放在 SessionEventHub trusted ingress 或独立 Presentatio
 
 ## 7. 消费方输入处理属于业务策略，而非 LM
 
-跨 Subsystem 广播的目的，是让多个独立的业务模块都**有机会观察**到相同输入，而不是自动赋予每个模块操作权。
+跨 Subsystem 广播的目的，是让多个独立业务模块有机会观察相同的 Web Presentation custom event，而不是让 LR Framework 决定哪个模块应该响应游戏动作。
+
+消费侧订阅 Framework 固定的 Web Presentation Event Channel，并通过 event.type/name 与业务 payload 识别具体事件：
 
 ~~~ts
 const subscription = await scope.events.subscribe(
-  ["game.controls/1"],
+  [WEB_PRESENTATION_EVENT_CHANNEL],
   async (event) => {
     if (event.type !== "controls.event") return;
-    // validate business controls protocol/version/epoch/revision
-    // test game-owned interaction/focus/priority policy
-    // execute only if this Subsystem is the proper business consumer
+
+    // validate common-controls protocol
+    // apply game-owned focus / priority / handling policy
   },
 );
 ~~~
 
-上述仅示意订阅模型；接口名字和具体消费 API 以现有 author-facing SessionEventClient 和最终业务包导出为准。
+WEB_PRESENTATION_EVENT_CHANNEL 表示未来应正式导出的 Framework 常量；当前字符串实现仍为 x.loomrealm.web-presentation.event。业务代码不应自行构造 controls 专用 Channel 来替代该路由域。
 
-应在 **game-libs / game application** 侧决定：
+应在 game-libs / game application 决定：
 
-- 当前 gameplay、对话、菜单、战斗等谁拥有动作优先权；
-- 某些控制是全局观察事件还是独占消费动作；
+- gameplay、对话、菜单、战斗等谁拥有动作优先权；
+- 某些控制是全局观察还是业务上的独占动作；
 - 多个订阅者可否同时响应，如何避免重复业务副作用；
-- 模态窗口、焦点切换、暂停、角色切换时的输入重置和状态继承；
-- 是否提供独立的 business input-focus/controller coordinator。
+- 模态窗口、暂停、角色切换时如何处理输入状态；
+- 是否提供 business input-focus/controller coordinator。
 
-可以利用 LM 通用 Shared State 保存必要的业务焦点事实，但不得将其伪装成 LM InputTarget 或要求 LM 为 controls 维护输入兴趣表。
-
-**安全边界**：即使某个订阅者收到了 confirm，也不能因此绕过 Main 的 Frame/Activation/Session 生命周期。若目标业务操作需要运行许可，必须由本来的 Subsystem/Frame 业务执行边界校验。这里保留 LM 通用控制权，不等于保留 LM 输入协议。
+这些规则不得重新下沉成 LR InputTarget / Input Interest。Frame/Activation 仍是 LR Main 的运行生命周期与调用 authority，但不再承担用户输入路由资格。
 
 ## 8. 浏览器设备支持与状态机
 
@@ -595,28 +596,39 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 
 ## 12. 测试和 Qualification 清单
 
-### Framework 通用广播 Conformance
+### Framework Web Presentation custom-event
 
-1. 既有双参数 owner-targeted 行为不变。
-2. 显式 all-subsystems 能通过通用通道到其他 Runtime 的匹配订阅者；未订阅不保证收到。
-3. Business payload 无法伪造 publisher 身份或覆写 host provenance。
-4. detached、stale、old Session/generation/RenderNode 不会成功广播。
-5. channel、name、JSON/payload、大小/深度违规同步拒绝，无部分投递。
-6. Channel 权限、绑定关闭、订阅失败、慢订阅者、overflow、FIFO 和回调重入有确定边界。
-7. 广播不绕过 Main Frame/Activation，也不通过 InputGate/InputTarget 改写业务收件人。
-8. Desktop/PWA 物理 realization 均符合相同广播逻辑 Contract。
+1. options 省略与 { broadcast: false } 的目标语义一致。
+2. broadcast 只接受 boolean/undefined，不做 truthy coercion。
+3. broadcast=false 只对 owner Subsystem 可见。
+4. broadcast=true 可被当前 Session 中多个匹配 Web Presentation Event Channel 的 Subsystem 接收。
+5. 两种模式使用相同固定 Channel。
+6. 两种模式都以 custom-event name 作为 event type，而不是 Channel。
+7. business code 无法覆盖 Channel、source、Session、owner generation、domainId、targetKey。
+8. detached/stale/old Session/generation/RenderNode 不会成功产生事件。
+9. invalid options/name/JSON/payload/limit 不产生部分投递。
+10. InputTarget 不参与新 Event path；改变 InputTarget 不改变 owner/broadcast recipient selection。
+11. Session restart / generation replacement 不串发旧消息。
+12. Desktop/PWA 的物理 realization 符合同一 logical Contract。
 
-### common-controls 业务协议测试
+### common-controls 业务协议
 
 1. 键盘/手柄等价输入映射到相同 action，设备来源可按需区分。
 2. 两个物理键绑定同一动作，释放其中之一不提前结束动作。
-3. auto-repeat、deadzone、微小轴抖动、并发手柄、长按频率都被有界处理。
+3. auto-repeat、deadzone、微小轴抖动、并发手柄、长按频率有界处理。
 4. blur、hidden、disconnect、component detach、source epoch replacement 不残留 stuck input。
-5. 慢/迟加入订阅者从完整当前状态或中立状态正确收敛，绝不误信历史 pressed。
-6. 丢 release/reset、Runtime reconnect、发布失败时，Consumer 超时恢复中立态。
-7. Map、Battle/另一个 Runtime 可同时观察广播，但只有游戏策略允许的模块执行独占动作。
+5. 慢/迟加入订阅者从完整当前状态或中立状态正确收敛。
+6. 丢 release/reset、Runtime reconnect、发布失败时 Consumer 能恢复中立态。
+7. 多个 Subsystem 可观察 broadcast，但游戏业务自己决定谁执行动作。
 8. PWA/Hostra 实际浏览器输入 E2E 和 Pointer 范围闭合。
-9. 迁移模式下无旧 LM Input 路径重复触发；WC-only 游戏无需 LM input interest。
+9. 新输入链路不存在与旧 Renderer Input Source 的重复业务触发。
+
+### User Input 删除回归
+
+- Data Profile 移除 input family 后 Render/Viewport 行为保持不变。
+- Subsystem 移除 InputManager 后 Frame lifecycle 行为保持不变。
+- Renderer Control 移除 InputTarget 后 Runtime/Frame/Activation/DataAuthority publication 保持一致。
+- 旧 User Input Contract 的退役必须有独立 migration evidence，不用 common-controls 测试替代 Framework conformance。
 
 ## 13. 实施顺序
 
