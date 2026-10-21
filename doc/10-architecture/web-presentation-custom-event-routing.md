@@ -544,8 +544,23 @@ keyboard + gamepad
 keyboard + pointer + gamepad
 ~~~
 
-Each device WC owns its own browser listeners/polling, epoch/revision, current state and reset lifecycle. A reset or disconnection of one device must not implicitly invalidate another device producer.
+Each device WC owns its own browser listeners/polling and current physical state. The initial migration deliberately does not require new epoch/revision wire fields. Device loss converges through that device's neutral State, plus the game-lib State refresh/stale-timeout policy; one device becoming unavailable must not invalidate another device producer.
 
 Cross-device gameplay actions such as move/confirm/cancel are not Framework concerns and are not owned by the routing layer. They may be derived by an optional game-lib Mapper/Aggregator after device events are delivered.
+
+For the User Input v1 compatibility migration, the intended business envelope is:
+
+~~~text
+event.type = input.state | input.event
+
+event.payload.data = {
+  channel: keyboard.state | keyboard.event
+         | pointer.state  | pointer.event
+         | gamepad.state  | gamepad.event,
+  payload: <User Input v1-compatible device payload>
+}
+~~~
+
+The Framework does not validate those six device channels or their payload schema. They remain game-lib protocol data inside the generic Web Presentation event. frameId, activationId, Input Interest, InputTarget, InputResetV1 and RendererInputSource availability are not added to this generic routing contract.
 
 Therefore the Framework contract must remain valid even when no input WC exists at all. Web Presentation Event routing is a generic capability; input is only one business use of it.
