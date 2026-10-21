@@ -1,6 +1,11 @@
 import type { MessageCarrier } from "@loomrealm/foundation";
 import type { RendererDataBinding } from "@loomrealm/platform-ports";
-import { createRendererControlHolder } from "@loomrealm/renderer";
+import {
+  createRendererControlHolder,
+  createRendererPresentationEventBinding,
+  type PresentationEventPublication,
+  type RendererPresentationEventBinding,
+} from "@loomrealm/renderer";
 import type { RendererResourceClient } from "@loomrealm/renderer/resource-client";
 import {
   attachRendererPresentation,
@@ -36,6 +41,48 @@ function preparedBootstrapKey(installationId: string, kind: "script" | "style", 
 
 function observeCarrierClose(carrier: MessageCarrier): void {
   void carrier.close().catch((cause) => console.error("PWA Renderer Data carrier close failed", cause));
+}
+
+interface PendingPresentationEvent {
+  readonly event: PresentationEventPublication;
+  resolve(): void;
+  reject(cause: unknown): void;
+}
+
+class PwaPresentationEventBinding implements RendererPresentationEventBinding {
+  private current: { readonly carrier: MessageCarrier; readonly binding: RendererPresentationEventBinding } | null = null;
+  private readonly pending: PendingPresentationEvent[] = [];
+  private closed = false;
+
+  publish(event: PresentationEventPublication): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("PWA Presentation Events binding closed"));
+    if (this.current !== null) return this.current.binding.publish(event);
+    if (this.pending.length >= 256) return Promise.reject(new Error("PWA Presentation Events binding queue overflow"));
+    return new Promise((resolve, reject) => { this.pending.push({ event, resolve, reject }); });
+  }
+
+  install(port: MessagePort): void {
+    if (this.closed || this.current !== null) throw new Error("PWA Presentation Events already installed");
+    const carrier = createMessagePortCarrier(port);
+    this.current = Object.freeze({ carrier, binding: createRendererPresentationEventBinding(carrier) });
+    const pending = this.pending.splice(0);
+    void (async () => {
+      for (const item of pending) {
+        if (this.closed) { item.reject(new Error("PWA Presentation Events binding closed")); continue; }
+        try { await this.current!.binding.publish(item.event); item.resolve(); }
+        catch (cause) { item.reject(cause); }
+      }
+    })();
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    const failure = new Error("PWA Presentation Events binding closed");
+    for (const item of this.pending.splice(0)) item.reject(failure);
+    if (this.current !== null) observeCarrierClose(this.current.carrier);
+    this.current = null;
+  }
 }
 
 interface DataTuple { readonly subsystemKey: string; readonly generation: number; readonly dataProfile: string }
@@ -103,6 +150,7 @@ export class PwaRendererDataBinding {
 export interface PwaRendererHost {
   readonly data: PwaRendererDataBinding;
   installControl(token: string, port: MessagePort): void;
+  installPresentationEvents(port: MessagePort): void;
   close(): void;
 }
 
@@ -118,10 +166,12 @@ export async function createPwaRendererHost(installationId: string, presentation
     });
   }
   const data = new PwaRendererDataBinding();
+  const presentationEvents = new PwaPresentationEventBinding();
   const holder = createRendererControlHolder(
     data.binding,
     createBrowserRendererInputSource(window),
     createBrowserRendererViewportSource(window),
+    presentationEvents,
   );
   const createdBootstrapResources = new Set<string>();
   let bootstrapBegan = false;
@@ -199,10 +249,13 @@ export async function createPwaRendererHost(installationId: string, presentation
         (cause) => { console.error("PWA Renderer Control failed", cause); document.documentElement.dataset.loomrealmRenderer = "failed"; },
       );
     },
+    installPresentationEvents(port: MessagePort) {
+      presentationEvents.install(port);
+    },
     close() {
       if (closed) return;
       closed = true;
-      data.close(); detach(); projector.teardown();
+      data.close(); presentationEvents.close(); detach(); projector.teardown();
     },
   });
 }

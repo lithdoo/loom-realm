@@ -1,6 +1,7 @@
 import type {
   PwaInstallRendererControlV1,
   PwaInstallRendererDataV1,
+  PwaInstallPresentationEventsV1,
   PwaRevokeRendererDataV1,
   PwaWindowBridgeResultV1,
 } from "./bootstrap-protocol.js";
@@ -28,7 +29,7 @@ export class SessionWindowBridge {
     port.start();
   }
 
-  request(message: PwaInstallRendererControlV1 | PwaInstallRendererDataV1 | PwaRevokeRendererDataV1, transfer: Transferable[] = [], signal?: AbortSignal): Promise<void> {
+  request(message: PwaInstallRendererControlV1 | PwaInstallRendererDataV1 | PwaRevokeRendererDataV1 | PwaInstallPresentationEventsV1, transfer: Transferable[] = [], signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) return Promise.reject(signal.reason);
     if (this.closed || message.sessionEpoch !== this.sessionEpoch || this.pending.has(message.requestId)) return Promise.reject(new Error("Invalid Window bridge request"));
     return new Promise((resolve, reject) => {
