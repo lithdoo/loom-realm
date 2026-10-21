@@ -137,7 +137,7 @@ context.emitCustomEvent(
 
 特别禁止：
 
-- keyboard.state 等不是 Session Events Channel；它们作为 data.channel 保留 User Input 设备 channel identity。
+- 迁移后 keyboard.state 等直接作为真实的 SessionEvent.channel，继续承担精确路由与订阅过滤；不再降级为 data.channel 元数据。
 - 不得为了 WC 化顺便改变 v1 payload shape、数值范围或按钮命名。
 - 不得把 frameId/activationId 搬进业务协议。
 - 不得把 Input Interest/InputTarget 换名字搬进 common-controls。
@@ -306,31 +306,25 @@ input.state
 input.event
 ~~~
 
-统一 data shape：
-
-~~~ts
-interface MigratedInputStateData {
-  readonly channel: "keyboard.state" | "pointer.state" | "gamepad.state";
-  readonly payload: JsonObject;
-}
-
-interface MigratedInputEventData {
-  readonly channel: "keyboard.event" | "pointer.event" | "gamepad.event";
-  readonly payload: JsonObject;
-}
-~~~
-
-因此迁移关系是：
+迁移后的路由映射：
 
 ~~~text
 User Input v1:
   type + frameId + activationId + channel + payload
 
 WC:
-  emitCustomEvent(type, { channel, payload }, { broadcast:true })
+  emitCustomEvent(type, payload, {
+    broadcast: true,
+    channel
+  })
+
+SessionEvent:
+  channel = 原设备 channel（真实路由身份）
+  type    = input.state | input.event
+  payload = { domainId, targetKey, data: payload }
 ~~~
 
-只移除旧 authority envelope 的 frameId / activationId。
+只移除旧 authority envelope 的 frameId / activationId；设备 channel 从旧消息字段迁移到 CustomEventOptions.channel，而不是放进 payload。
 
 ### 4.2 Keyboard：完全复用 v1 payload
 
@@ -355,14 +349,14 @@ Event 继续使用 KeyboardEventPayloadV1：
 ~~~ts
 context.emitCustomEvent(
   "input.state",
-  { channel: "keyboard.state", payload: { down: [...held].sort() } },
-  { broadcast: true },
+  { down: [...held].sort() },
+  { broadcast: true, channel: "keyboard.state" },
 );
 
 context.emitCustomEvent(
   "input.event",
-  { channel: "keyboard.event", payload: { action, code, repeat } },
-  { broadcast: true },
+  { action, code, repeat },
+  { broadcast: true, channel: "keyboard.event" },
 );
 ~~~
 
@@ -374,16 +368,16 @@ context.emitCustomEvent(
 
 第一阶段保留：canonical pointerId、mouse/touch/pen、viewport-relative x/y normalization、1_000_000 scale、pointer limit 32、canonical button order、pointercancel、State 先于对应 button Event、resize/surface validity、event.isTrusted。
 
-发送仍是：
+发送时 Channel 直接参与 Session Events 路由：
 
 ~~~text
-name = input.state
-data.channel = pointer.state
-data.payload = PointerStatePayloadV1
+SessionEvent.channel = pointer.state
+SessionEvent.type    = input.state
+SessionEvent.payload.data = PointerStatePayloadV1
 
-name = input.event
-data.channel = pointer.event
-data.payload = PointerEventPayloadV1
+SessionEvent.channel = pointer.event
+SessionEvent.type    = input.event
+SessionEvent.payload.data = PointerEventPayloadV1
 ~~~
 
 ### 4.4 Gamepad：完全复用 v1 payload
@@ -500,7 +494,7 @@ input.on("gamepad.state", handler);
 input.on("gamepad.event", handler);
 ~~~
 
-内部只订阅固定 Web Presentation Event Channel，过滤 event.type == input.state | input.event，读取 event.payload.data.channel，校验 v1-compatible payload 后 dispatch(channel, payload)。
+内部订阅六个标准输入 Channel（精确匹配），按 event.type 区分 input.state / input.event，并将 event.payload.data 作为设备 Payload 分发：dispatch(event.channel, event.payload.data)。不从 payload 中读取 channel，也不通过客户端本地过滤公共输入总线来模拟 Channel 路由。
 
 这样大部分原业务 handler 不需要理解新的 transport，也不再依赖 createInputListener / InputManager / Frame-scoped Interest。
 
@@ -512,10 +506,15 @@ input.on("gamepad.event", handler);
 
 ### 5.1 目标签名
 
-现行 Web Presentation API v1 的 emitCustomEvent(name, data) 是 owner-targeted User Input reverse capability。目标是把它演进为 Web Presentation 自身的通用 custom-event capability，并只在可扩展 options object 中增加一个布尔字段：
+现行 Web Presentation API v1 的 emitCustomEvent(name, data) 是 owner-targeted User Input reverse capability。目标是把它演进为 Web Presentation 自身的通用 custom-event capability，在可扩展 options object 中增加实际路由 Channel 与广播路径选择：
 
 ~~~ts
 interface CustomEventOptions {
+  /**
+   * 实际的 Session Events 路由 Channel；仅用于 broadcast=true。
+   * 省略时使用 WEB_PRESENTATION_EVENT_CHANNEL_V1 默认 Channel。
+   */
+  readonly channel?: string;
   readonly broadcast?: boolean;
 }
 
@@ -530,7 +529,7 @@ interface WebPresentationContext {
 }
 ~~~
 
-options 必须保持对象形态。broadcast 是当前第一个扩展项，未来新增与 custom-event 正交的行为时仍可继续扩展 options，而无需再次改变函数参数结构。
+options 必须保持对象形态。channel 决定实际的 Session Events 路由身份，broadcast 决定是否进入跨 Subsystem 发布路径；两者职责正交。未来新增与 custom-event 正交的行为时仍可继续扩展 options，而无需再次改变函数参数结构。
 
 ### 5.2 broadcast 的唯一职责
 
@@ -545,14 +544,13 @@ options omitted
     => cross-Subsystem broadcast
 ~~~
 
-broadcast 只选择 recipient scope / publication path。它不得改变：
+broadcast 只选择 recipient scope / publication path。对于 broadcast=true，options.channel（若提供）决定真实的 SessionEvent.channel；省略时使用默认 WEB_PRESENTATION_EVENT_CHANNEL_V1。它不得改变：
 
-- Web Presentation Event Channel；
-- custom-event name；
-- payload 格式；
+- custom-event name（仍映射到 SessionEvent.type）；
+- data 的业务 Payload 语义；
 - source identity；
 - Frame / Activation authority；
-- Session Events Channel 的职责。
+- Session Events Channel 的精确匹配职责。
 
 示例：
 
@@ -570,7 +568,7 @@ context.emitCustomEvent(
 
 controls.event 是 custom-event 的业务 name/type，不是 Channel。
 
-### 5.3 固定 Web Presentation Event Channel
+### 5.3 默认 Channel 与显式路由 Channel
 
 现行实现已经存在保留标识：
 
@@ -629,17 +627,19 @@ broadcast=false
 
 因此本项目**不通过修改 SessionEventHub 来实现 owner-only filtering**。
 
-broadcast=true 才进入固定 Web Presentation Event Channel，并由现有 Session Events exact-Channel 规则投递给该 Channel 的全部 matching subscriptions。
+broadcast=true 进入 Session Events 路径：options.channel 存在时投递到该精确 Channel，省略时投递到默认 Web Presentation Event Channel；Hub 只向匹配该实际 Channel 的 subscriptions 投递。
 
 broadcast=false / options omitted 在迁移阶段继续走现有 owner-only 路径。将 owner-only custom event 最终从 InputGate 脱离，是后续独立设计/版本化工作；在该工作完成前，不得为了统一实现而改变 Frozen Session Events v1 的 routing semantics。
 
 ### 5.5 校验和版本边界
 
-- options 省略合法；提供时 broadcast 只能是 boolean 或 undefined，不做 truthy coercion。
+- options 省略合法；broadcast 只能是 boolean 或 undefined，不做 truthy coercion。
+- channel 若提供，必须满足 Session Events v1 的 Channel 字符串约束；采用精确匹配，不支持 wildcard/prefix。
+- channel 仅在 broadcast=true 时合法；若 broadcast=false 或 options 省略但提供 channel，必须同步抛出 TypeError。
 - stale/detached/currentness 仍先于业务参数校验。
 - name 按 Web Presentation event name / Session Event type 职责验证，不按 Channel 解释。
 - data 使用 Web Presentation 通用 JSON payload 约束，长期从 InputEventV1 payload 类型所有权中迁出。
-- Framework 自己绑定固定 Channel、RenderNode provenance 和 source，business code 不能覆盖。
+- Framework 绑定 RenderNode provenance 与 source；显式 channel 只选择路由，不可伪造 source/session/owner/domain/target。
 - void 只表示同步验证和本地接受，不承诺所有消费者完成处理；无 ACK、replay 或 exactly-once。
 
 现行 WebPresentationContext v1 是 Frozen closed shape，所以 options 和 owner-only 新交付语义必须通过正式版本化 Contract / compatibility profile / conformance 发布，不得静默重定义 v1。
@@ -672,11 +672,11 @@ Session Events routing
 Bridge 必须满足：
 
 1. 只有当前 live RenderNode Context 可以发起 broadcast publication。
-2. Framework 使用固定 Web Presentation Event Channel；业务不能选择或覆盖该 Channel。
-3. name 作为 event type，data 作为业务 payload；两者不得与 Channel 职责混用。
+2. broadcast=true 时，Framework 使用 options.channel 指定的真实路由 Channel；未指定时使用默认 Web Presentation Event Channel。
+3. channel 按 Session Events v1 规则校验并精确匹配；name 作为 event type，data 作为业务 payload。
 4. source、Session、subsystemKey、generation、domainId、targetKey 均由可信 Framework 绑定。
 5. SessionEventHub 仍按现有 exact Channel 规则路由，不增加 owner/session recipient filter。
-6. Renderer 不获得任意 SessionEventClient、Hub binding、subscribe 或 arbitrary-channel publish 能力。
+6. Renderer 不获得任意 SessionEventClient、Hub binding 或 subscribe；只能通过当前 Context 发布带可信来源的单条事件。显式 channel 不得伪造 source/session/owner。
 7. Desktop/PWA 可有不同物理 Carrier，但 logical publication semantics 相同。
 8. 慢订阅者、overflow、listener failure 复用现有 Session Events 有界/隔离语义。
 
@@ -705,7 +705,7 @@ false
     -> 迁移期继续 legacy owner-only path
 
 true
-    -> trusted publication into fixed Web Presentation Event Channel
+    -> trusted publication into options.channel or default Web Presentation Event Channel
        -> existing Session Events routing
 ~~~
 
@@ -742,9 +742,9 @@ input.on("gamepad.event", (event) => {
 });
 ~~~
 
-compatibility client 内部订阅固定 WEB_PRESENTATION_EVENT_CHANNEL，接受 event.type 为 input.state / input.event 的消息，再按 event.payload.data.channel 分发。
+compatibility client 对六个标准设备 Channel 分别进行精确订阅，接受 event.type 为 input.state / input.event 的消息，再以 event.channel 作为设备 Channel、以 event.payload.data 作为设备 Payload 进行分发。
 
-因此业务侧继续使用六个标准设备 channel 作为输入分类，而不需要直接理解 Web Presentation transport。
+因此业务侧继续使用六个标准设备 Channel 作为输入分类，同时保留 Hub 侧的 Channel 过滤，不需要读取 payload 内的 channel 字段。
 
 更上层的 gameplay、对话、菜单、战斗焦点以及 move/confirm/cancel 聚合仍由 game-libs / game application 决定。InputTarget / Input Interest 不重新引入。
 
@@ -930,7 +930,7 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 
 | 阶段 | 交付 | 旧 User Input |
 | --- | --- | --- |
-| M0 | 冻结 options.broadcast、固定 Channel、input.state/input.event + { channel,payload } 映射 | 原样保留 |
+| M0 | 冻结 CustomEventOptions.channel / broadcast、默认 Channel 与显式精确路由映射 | 原样保留 |
 | M1 | 实现 trusted Presentation Event path，Desktop/PWA E2E | 双参数旧行为兼容 |
 | M2 | WC 临时直接复用 @loomrealm/data 的 v1 设备 types/constants/validators；不建立 Framework -> game-lib 反向依赖 | 旧实现继续编译 |
 | M3 | 机械拆分 BrowserRendererInputSource 为 Keyboard/Pointer/Gamepad source，再包三个 WC | 新游戏可按需挂载 WC |
@@ -956,11 +956,11 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 ### Framework Web Presentation custom-event
 
 1. options 省略与 { broadcast:false } 的目标语义一致。
-2. broadcast 只接受 boolean/undefined。
-3. broadcast=true 进入新的跨 Subsystem path；broadcast=false/options omitted 在迁移期保持现有 owner-only 行为。
-4. 只有 broadcast=true 使用新的固定 Web Presentation Event Channel broadcast path；不得为 owner-only 修改 SessionEventHub routing。
-5. input.state / input.event 是 event.type，keyboard.state 等仍只在 data.channel。
-6. business code 无法覆盖 Channel/source/session/owner/domain/target。
+2. broadcast 只接受 boolean/undefined；channel 必须符合 Session Events v1 Channel 字符串约束。
+3. channel 仅在 broadcast=true 时合法；否则同步抛出 TypeError。
+4. broadcast=true 且 channel 省略时使用默认 Web Presentation Event Channel；显式 channel 则成为真实的 SessionEvent.channel。
+5. input.state / input.event 是 event.type，keyboard.state 等是实际 event.channel，不放在 data.channel。
+6. business code 不能伪造 source/session/owner/domain/target；channel 只决定精确路由身份。
 7. stale RenderNode/Context 不产生事件。
 8. InputTarget 不参与 broadcast=true 新 Event path；legacy owner-only path 的现行依赖不在本阶段重写。
 9. Desktop/PWA logical observables 一致。
@@ -991,7 +991,7 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 
 ## 13. 实施顺序
 
-1. Contract / ADR：冻结 CustomEventOptions.broadcast、固定 Web Presentation Channel、input.state/input.event + { channel,payload } envelope。
+1. Contract / ADR：冻结 CustomEventOptions.channel / broadcast、默认 Web Presentation Channel、input.state/input.event 与真实 SessionEvent.channel 的映射。
 2. Framework Event path：实现 trusted Presentation Event publication，broadcast 路径不经过 InputGate。
 3. 类型复用：迁移期由 game-common-controls 直接复用 @loomrealm/data 的 v1 device definitions；LR User Input 退役时再原子迁 ownership。
 4. Source mechanical split：把 createBrowserRendererInputSource 拆成 keyboard/pointer/gamepad 三个 source，保持现有测试和行为。
@@ -1007,11 +1007,11 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 
 - 新 WebPresentationContext shape 的正式版本号。
 - 固定 Web Presentation Event Channel 常量的新 ownership。
-- migrated data envelope 是否正式冻结为 { channel,payload }。
+- 显式 options.channel 是否需要 Host-side capability allowlist；Session Events v1 本身不定义 Channel registry。
 - LR User Input 退役时，v1 设备 types/constants/validators 从 @loomrealm/data 原子迁往 game-common-controls 的版本切换点。
 - non-neutral State refresh 与 stale timeout 的 Qualification 数值。
 - component disconnect 时若 Context 仍 current，是否要求 best-effort neutral State。
-- compatibility consumer 是否只覆盖六个标准 channel，还是暂时支持旧 x.* custom input channel。
+- compatibility consumer 是否只覆盖六个标准 Channel，还是暂时支持旧 x.* custom input Channel。
 - InputResetV1 在旧 Framework 退役后的 deprecated/removed 说明。
 - User Input v1、Renderer Data Profile、Renderer Control InputTarget 的版本升级与废止节奏。
 - Controls Mapper/Aggregator 的 action schema 属于后续业务层，不阻塞设备等价迁移。
