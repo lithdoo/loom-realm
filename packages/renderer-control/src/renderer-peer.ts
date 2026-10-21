@@ -1,7 +1,7 @@
 import type { MessageCarrier } from "@loomrealm/foundation";
 import type { JsonValue } from "@loomrealm/wire";
 import type {
-  RendererAuthoritySnapshotV1,
+  RendererAuthoritySnapshotV2,
   RendererControlPeer,
   RendererControlTerminal,
   RendererPeerConnectOptions,
@@ -11,8 +11,8 @@ import {
   decodeRendererControlMessage,
   encodeRendererControlMessage,
   RendererControlProfileError,
-  validateRendererAuthoritySnapshotV1,
-  validateRendererHelloParamsV1,
+  validateRendererAuthoritySnapshotV2,
+  validateRendererHelloParamsV2,
 } from "./validation.js";
 
 function deferred<T>() {
@@ -41,7 +41,7 @@ class RendererPeer implements RendererControlPeer {
     ), (cause) => this.commit({ kind: "carrier-lost", cause }, false));
   }
 
-  states(): AsyncIterable<RendererAuthoritySnapshotV1> {
+  states(): AsyncIterable<RendererAuthoritySnapshotV2> {
     if (this.statesClaimed) throw new TypeError("Renderer Control state stream already claimed");
     this.statesClaimed = true;
     return { [Symbol.asyncIterator]: () => this.stateIterator() };
@@ -54,7 +54,7 @@ class RendererPeer implements RendererControlPeer {
     await this.terminal;
   }
 
-  private async *stateIterator(): AsyncGenerator<RendererAuthoritySnapshotV1> {
+  private async *stateIterator(): AsyncGenerator<RendererAuthoritySnapshotV2> {
     try {
       while (this.terminalValue === undefined) {
         const next = await this.iterator.next();
@@ -73,7 +73,7 @@ class RendererPeer implements RendererControlPeer {
         const params = message.params;
         if (params === undefined || params === null || typeof params !== "object" || Array.isArray(params) || Object.keys(params).length !== 1 || !("snapshot" in params))
           throw new RendererControlProfileError("Invalid renderer.state params");
-        const snapshot = validateRendererAuthoritySnapshotV1((params as { snapshot: unknown }).snapshot);
+        const snapshot = validateRendererAuthoritySnapshotV2((params as { snapshot: unknown }).snapshot);
         if (snapshot.sessionId !== this.sessionId || snapshot.revision <= this.lastRevision)
           throw new RendererControlProfileError("Renderer Control revision/session regression");
         this.lastRevision = snapshot.revision;
@@ -97,10 +97,10 @@ class RendererPeer implements RendererControlPeer {
 export async function connectRendererControlPeer(options: RendererPeerConnectOptions): Promise<RendererPeerConnectOutcome> {
   if (options === null || typeof options !== "object" || options.carrier === null || typeof options.carrier !== "object")
     throw new TypeError("Invalid Renderer Control connect options");
-  const versions = options.protocolVersions ?? [1];
+  const versions = options.protocolVersions ?? [2];
   let params;
   try {
-    params = validateRendererHelloParamsV1({ rendererControlToken: options.rendererControlToken, protocolVersions: versions });
+    params = validateRendererHelloParamsV2({ rendererControlToken: options.rendererControlToken, protocolVersions: versions });
   } catch (cause) {
     return frozen({ kind: "terminal", terminal: frozen({ kind: "local-fatal", cause }) });
   }
@@ -131,9 +131,9 @@ export async function connectRendererControlPeer(options: RendererPeerConnectOpt
       throw new RendererControlProfileError("Invalid renderer.hello error");
     }
     const result = message.result;
-    if (result === null || typeof result !== "object" || Array.isArray(result) || Object.keys(result).length !== 2 || (result as { protocolVersion?: unknown }).protocolVersion !== 1 || !("snapshot" in result))
+    if (result === null || typeof result !== "object" || Array.isArray(result) || Object.keys(result).length !== 2 || (result as { protocolVersion?: unknown }).protocolVersion !== 2 || !("snapshot" in result))
       throw new RendererControlProfileError("Invalid renderer.hello result");
-    const snapshot = validateRendererAuthoritySnapshotV1((result as { snapshot: unknown }).snapshot);
+    const snapshot = validateRendererAuthoritySnapshotV2((result as { snapshot: unknown }).snapshot);
     const peer = new RendererPeer(options.carrier, iterator, snapshot.sessionId, snapshot.revision);
     return frozen({ kind: "connected", peer, snapshot });
   } catch (cause) {

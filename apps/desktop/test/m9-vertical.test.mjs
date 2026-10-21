@@ -158,7 +158,7 @@ test("real M9 Main → Desktop Broker → Hostra Runner vertical installs and re
   assert.deepEqual(before.dataAuthorities, [{
     subsystemKey: "root",
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/1",
+    dataProfile: "loomrealm.renderer-data/2",
   }]);
 
   await acquiredCarriers[0].send(JSON.stringify({ type: "not-a-data-message" }));

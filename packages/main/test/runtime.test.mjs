@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createRendererControlHolder } from "@loomrealm/renderer";
-import { prepareRendererHelloResultV1 } from "@loomrealm/renderer-control";
+import { prepareRendererHelloResultV2 } from "@loomrealm/renderer-control";
 import { createSharedStateClient } from "@loomrealm/shared-state";
 import { createSessionEventClient } from "@loomrealm/session-events";
 import {
@@ -326,13 +326,12 @@ function rendererLimitBootstrapKeys(sessionId) {
   const keys = Array.from({ length: 3553 }, (_, index) =>
     `${String(index).padStart(6, "0")}:${"x".repeat(249)}`,
   );
-  keys.push(`${String(keys.length).padStart(6, "0")}:${"x".repeat(174)}`);
-  const bytes = Buffer.byteLength(prepareRendererHelloResultV1({
+  keys.push(`${String(keys.length).padStart(6, "0")}:${"x".repeat(193)}`);
+  const bytes = Buffer.byteLength(prepareRendererHelloResultV2({
     sessionId,
     revision: 1,
     runtimes: keys.map((subsystemKey) => ({ subsystemKey, state: "starting" })),
     stack: [],
-    inputTarget: null,
     dataAuthorities: [],
   }));
   assert.equal(bytes, 1_048_576, "fixture must sit at the exact hello byte limit");
@@ -944,7 +943,7 @@ test("optional Renderer Binding drives a real candidate hello and committed proj
   assert.deepEqual(holder.current().snapshot.dataAuthorities, [{
     subsystemKey: "root",
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/1",
+    dataProfile: "loomrealm.renderer-data/2",
   }]);
   assert.ok(holder.current().snapshot.revision >= 1);
   assert.deepEqual(holder.current().snapshot.runtimes.map(({ subsystemKey }) => subsystemKey), ["root"]);
@@ -1013,7 +1012,7 @@ test("M9 projects immutable full Data authority views with exact Runtime identit
   assert.deepEqual(published.entries.map(({ subsystemKey, generation, dataProfile }) => ({ subsystemKey, generation, dataProfile })), [{
     subsystemKey: "root",
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/1",
+    dataProfile: "loomrealm.renderer-data/2",
   }]);
   assert.equal(published.entries[0].runtime, fake.runtimes.get("root").hosted);
 
@@ -1106,7 +1105,7 @@ test("M8 deterministic vertical installs real paired Data peers and recovers und
   assert.deepEqual(authorityBefore, {
     subsystemKey: "root",
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/1",
+    dataProfile: "loomrealm.renderer-data/2",
   });
 
   data.pairs[0].lose(new Error("test Data loss"));
@@ -1216,8 +1215,8 @@ test("connected Renderer mirrors committed frame.call and frame.return through f
   assert.deepEqual(
     holder.current().snapshot.dataAuthorities.map(({ subsystemKey, generation, dataProfile }) => ({ subsystemKey, generation, dataProfile })),
     [
-      { subsystemKey: "root", generation: 1, dataProfile: "loomrealm.renderer-data/1" },
-      { subsystemKey: "child", generation: 1, dataProfile: "loomrealm.renderer-data/1" },
+      { subsystemKey: "root", generation: 1, dataProfile: "loomrealm.renderer-data/2" },
+      { subsystemKey: "child", generation: 1, dataProfile: "loomrealm.renderer-data/2" },
     ],
   );
   const firstActivation = holder.current().snapshot.stack[0].activationId;
@@ -1225,123 +1224,16 @@ test("connected Renderer mirrors committed frame.call and frame.return through f
   await childEntered.promise;
   await waitFor(() => holder.current()?.snapshot.stack.length === 2 && holder.current().snapshot.stack[1].lifecycle === "active", "child active projection");
   assert.deepEqual(holder.current().snapshot.stack.map(({ lifecycle }) => lifecycle), ["suspended", "active"]);
-  assert.equal(holder.current().snapshot.inputTarget.frameId, holder.current().snapshot.stack[1].frameId);
+  assert.equal(holder.current().snapshot.stack.at(-1).subsystemKey, "child");
 
   finishChild.resolve();
   await rootResumed.promise;
   await waitFor(() => holder.current()?.snapshot.stack.length === 1 && holder.current().snapshot.stack[0].lifecycle === "active", "fresh caller resume projection");
   assert.notEqual(holder.current().snapshot.stack[0].activationId, firstActivation);
-  assert.equal(holder.current().snapshot.inputTarget.frameId, holder.current().snapshot.stack[0].frameId);
+  assert.equal(holder.current().snapshot.stack.at(-1).subsystemKey, "root");
 
   finishRoot.resolve();
   assert.deepEqual(await result, { kind: "root-outcome", outcome: { type: "completed", value: "done" } });
-});
-
-test("M10 input follows real Main nested InputTarget replacement and fresh caller Activation", async () => {
-  const allowCall = deferred();
-  const rootInitialState = deferred();
-  const childState = deferred();
-  const finishChild = deferred();
-  const finishRoot = deferred();
-  const rootStates = [];
-  const childStates = [];
-  const slots = [];
-  const data = {
-    root: createPairedDataFixture("root"),
-    child: createPairedDataFixture("child"),
-  };
-  const fake = createFakePlatform(
-    {
-      root: defineSubsystem((scope) => ({
-        async frame(frame) {
-          const listener = scope.createInputListener({
-            frame,
-            channels: ["keyboard.state", "keyboard.event"],
-          });
-          listener.on("keyboard.state", (value) => {
-            rootStates.push(value.down.join(","));
-            if (rootStates.length === 1) rootInitialState.resolve();
-          });
-          await allowCall.promise;
-          await frame.call("child", null);
-          await waitFor(() => rootStates.length === 2, "fresh root input baseline");
-          await finishRoot.promise;
-          listener.close();
-          return completed("done");
-        },
-      })),
-      child: defineSubsystem((scope) => ({
-        async frame(frame) {
-          const listener = scope.createInputListener({
-            frame,
-            channels: ["keyboard.state", "keyboard.event"],
-          });
-          listener.on("keyboard.state", (value) => {
-            childStates.push(value.down.join(","));
-            childState.resolve();
-          });
-          await finishChild.promise;
-          listener.close();
-          return completed("child");
-        },
-      })),
-    },
-    {
-      subsystemDataBinding: (key) => data[key].subsystem,
-      rendererControl: {
-        acquire(token, signal) {
-          const slot = deferred();
-          slots.push({ token, signal, slot });
-          return slot.promise;
-        },
-      },
-    },
-  );
-  const result = runMain({
-    bootstrap: bootstrap(["root", "child"], "root"),
-    platform: fake.platform,
-    policy,
-  });
-  await waitFor(() => slots.length > 0, "M10 Renderer slot");
-  const control = createMemoryCarrierPair();
-  slots[0].slot.resolve(control.left);
-  let sourceStarts = 0;
-  const source = {
-    start(emit) {
-      sourceStarts += 1;
-      emit({ kind: "state", channel: "keyboard.state", payload: { down: ["KeyA"] } });
-      emit({ kind: "availability", channel: "keyboard.state", available: true });
-      emit({ kind: "availability", channel: "keyboard.event", available: true });
-      return () => {};
-    },
-  };
-  const holder = createRendererControlHolder({
-    acquire(key, generation, dataProfile, signal) {
-      return data[key].renderer.acquire(key, generation, dataProfile, signal);
-    },
-  }, source);
-  assert.equal((await holder.connect({
-    carrier: control.right,
-    rendererControlToken: slots[0].token,
-  })).kind, "installed");
-
-  await rootInitialState.promise;
-  const firstActivation = holder.current().snapshot.inputTarget.activationId;
-  allowCall.resolve();
-  await childState.promise;
-  assert.equal(holder.current().snapshot.inputTarget.subsystemKey, "child");
-  finishChild.resolve();
-  await waitFor(() => rootStates.length === 2, "root A2 baseline");
-  assert.equal(holder.current().snapshot.inputTarget.subsystemKey, "root");
-  assert.notEqual(holder.current().snapshot.inputTarget.activationId, firstActivation);
-  finishRoot.resolve();
-  assert.deepEqual(await result, {
-    kind: "root-outcome",
-    outcome: { type: "completed", value: "done" },
-  });
-  assert.deepEqual(rootStates, ["KeyA", "KeyA"]);
-  assert.deepEqual(childStates, ["KeyA"]);
-  assert.equal(sourceStarts, 1);
 });
 
 test("connected Renderer mirrors fixed-point failure unwind without changing Main outcome", async () => {
@@ -1396,7 +1288,7 @@ test("connected Renderer mirrors fixed-point failure unwind without changing Mai
   assert.deepEqual(holder.current().snapshot.dataAuthorities.find(({ subsystemKey }) => subsystemKey === "root"), {
     subsystemKey: "root",
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/1",
+    dataProfile: "loomrealm.renderer-data/2",
   });
   assert.notEqual(holder.current().snapshot.stack[0].activationId, oldRootActivation);
 
@@ -1463,7 +1355,7 @@ test("unrepresentable candidate and current publication fail closed without repl
   const installedA = await holder.connect({ carrier: a.right, rendererControlToken: slots[0].token });
   assert.equal(installedA.kind, "installed");
   const authorityBefore = holder.current().snapshot;
-  assert.equal(Buffer.byteLength(prepareRendererHelloResultV1(authorityBefore)), 1_048_576);
+  assert.equal(Buffer.byteLength(prepareRendererHelloResultV2(authorityBefore)), 1_048_576);
 
   launchGate.resolve();
   await stateSendSeen.promise;

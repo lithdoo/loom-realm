@@ -64,28 +64,6 @@ test("trusted host keeps the exact M8 protocol and port dependency direction", a
   assert.match(model, /readonly events: SessionEventClient/);
 });
 
-test("M10 author declarations expose the exact minimal Input surface", async () => {
-  const index = await readFile(new URL("../dist/index.d.ts", import.meta.url), "utf8");
-  const input = await readFile(new URL("../dist/input.d.ts", import.meta.url), "utf8");
-  const model = await readFile(new URL("../dist/model.d.ts", import.meta.url), "utf8");
-  for (const name of [
-    "InputStateChannel", "InputEventChannel", "InputChannel",
-    "KeyboardStateInput", "KeyboardEventInput",
-    "PointerStateInput", "PointerEventInput",
-    "GamepadStateInput", "GamepadEventInput",
-    "InputPayload", "InputHandler", "Unsubscribe",
-    "CreateInputListenerOptions", "InputListener",
-  ]) assert.match(index, new RegExp(`\\b${name}\\b`));
-  for (const supporting of [
-    "KeyboardCode", "PointerSample", "PointerButton", "PointerKind",
-    "GamepadSample", "GamepadAxes", "GamepadButtons", "GamepadButton",
-    "CustomInputObject",
-  ]) assert.doesNotMatch(index, new RegExp(`\\b${supporting}\\b`));
-  assert.match(input, /type KeyboardStateInput = KeyboardStatePayloadV1/);
-  assert.match(input, /type InputPayload<C extends InputChannel>/);
-  assert.match(model, /createInputListener\(options: CreateInputListenerOptions\): InputListener/);
-});
-
 test("author declarations expose Runtime-scoped readonly Viewport", async () => {
   const index = await readFile(new URL("../dist/index.d.ts", import.meta.url), "utf8");
   const model = await readFile(new URL("../dist/model.d.ts", import.meta.url), "utf8");

@@ -4,7 +4,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import {
   createRendererDataPeer,
   createSubsystemDataPeer,
-  RENDERER_DATA_PROFILE_V1,
+  RENDERER_DATA_PROFILE_V2,
 } from "../dist/index.js";
 
 const accepted = () => ({ kind: "accepted" });
@@ -12,16 +12,12 @@ const binding = (carrier) => ({
   carrier,
   subsystemKey: "map",
   generation: 1,
-  dataProfile: RENDERER_DATA_PROFILE_V1,
+  dataProfile: RENDERER_DATA_PROFILE_V2,
 });
 const subsystemHandlers = {
-  onInputState: accepted,
-  onInputEvent: accepted,
-  onInputReset: accepted,
   onViewportState: accepted,
 };
 const rendererHandlers = {
-  onInputInterest: accepted,
   onRenderDomains: accepted,
   onRenderSnapshot: accepted,
   onRenderPatch: accepted,

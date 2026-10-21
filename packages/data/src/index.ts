@@ -1,21 +1,13 @@
 export { createSubsystemDataPeer, createRendererDataPeer } from "./peers.js";
 export {
-  KEYBOARD_CODES_V1,
-  RENDERER_DATA_PROFILE_V1,
-  WEB_PRESENTATION_EVENT_CHANNEL_V1,
+  RENDERER_DATA_PROFILE_V2,
 } from "./model.js";
-export { validateInputPayloadV1 } from "./input-codec.js";
 export type {
-  RendererDataProfileV1, DataCurrentBindingV1, DataBindingViewV1,
-  InputChannelV1, InputStateChannelV1, InputEventChannelV1, CustomInputStateChannelV1, CustomInputEventChannelV1, FrameInputInterestV1,
-  InputInterestV1, InputStateV1, InputEventV1, InputResetV1, UserInputMessageV1,
-  KeyboardCodeV1, KeyboardStatePayloadV1, KeyboardEventPayloadV1,
-  PointerKindV1, PointerButtonV1, PointerSampleV1, PointerStatePayloadV1, PointerEventPayloadV1,
-  GamepadAxesV1, GamepadButtonsV1, GamepadSampleV1, GamepadStatePayloadV1, GamepadButtonNameV1, GamepadEventPayloadV1,
+  RendererDataProfileV2, DataCurrentBindingV2, DataBindingViewV2,
   RenderDomainsV1, RenderNodeV1, RenderSnapshotV1, RenderNodeInsertV1, RenderNodeRemoveV1,
   RenderNodeMoveV1, StringMapDeltaV1, JsonObjectDeltaV1, RenderNodeUpdateV1, RenderPatchOpV1,
-  RenderPatchV1, RenderEventV1, RenderUpdateMessageV1, ViewportStateV1, RendererDataMessageV1,
+  RenderPatchV1, RenderEventV1, RenderUpdateMessageV1, ViewportStateV1, RendererDataMessageV2,
   DataProtocolFamily, DataTerminal, DataSendOutcome, DataInboundDisposition,
-  SubsystemDataHandlers, SubsystemDataPeerOptions, SubsystemInputDataPeer, SubsystemRenderDataPeer, SubsystemDataPeer,
-  RendererDataHandlers, RendererDataPeerOptions, RendererInputDataPeer, RendererViewportDataPeer, RendererDataPeer,
+  SubsystemDataHandlers, SubsystemDataPeerOptions, SubsystemRenderDataPeer, SubsystemDataPeer,
+  RendererDataHandlers, RendererDataPeerOptions, RendererViewportDataPeer, RendererDataPeer,
 } from "./model.js";
