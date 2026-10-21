@@ -86,7 +86,7 @@ channel without broadcast=true
     => invalid options; synchronously throw TypeError
 ~~~
 
-CustomEventOptions 保留对象形态。broadcast 是当前唯一字段，但不是把整个第三参数设计成 boolean；未来可以在 options 中增加新的正交能力。
+CustomEventOptions 保留对象形态。channel 指定 broadcast publication 的实际路由身份，broadcast 选择发布路径 / recipient scope；两者职责正交。未来仍可在 options 中增加新的正交能力，而无需再次改变函数参数结构。
 
 broadcast 选择 Web Presentation publication path / recipient scope。对于 broadcast=true，options.channel（若提供）决定真实的 SessionEvent.channel；省略时使用默认 WEB_PRESENTATION_EVENT_CHANNEL_V1。name 仍然是 SessionEvent.type，channel 不会被塞进 payload。
 
@@ -129,7 +129,7 @@ WEB_PRESENTATION_EVENT_CHANNEL_V1 =
 
 为保持既有通用 custom-event 广播调用的默认行为，broadcast=true 且未提供 options.channel 时仍使用该默认 Channel。调用方也可以通过 options.channel 指定实际的 Session Events 路由 Channel，例如 User Input 迁移所需的 \`keyboard.state\` 或 \`keyboard.event\`。
 
-显式 channel 必须满足 Session Events v1 的 Channel 字符串约束，并使用精确匹配语义。它只选择路由 Channel，不授予额外的 Session、Runtime、Frame 或状态写入权限。channel 仅可与 \`broadcast: true\` 一起使用；owner-only 旧路径若收到 channel 字段，必须同步抛出 TypeError。
+显式 channel 必须满足 Session Events v1 的 Channel 字符串约束，并使用精确匹配语义。它决定该事件会被哪些匹配订阅者接收，但不授予额外的 Session、Runtime、Frame 或状态写入权限。channel 仅可与 \`broadcast: true\` 一起使用；owner-only 旧路径若收到 channel 字段，必须同步抛出 TypeError。
 
 固定 Channel 仍由 Framework 提供为默认值，但不再是所有 broadcast publication 的强制 Channel。
 
