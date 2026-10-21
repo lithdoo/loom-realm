@@ -2,11 +2,11 @@
 
 > 状态：**Proposed / 尚未实现、尚未冻结、尚未 Qualification**  
 > 位置：`game-libs/game-common-controls/emit-custom-event.md`  
-> 所属设计：[Game Common Controls](./DESIGN.md)  
+> 所属计划：[设备输入迁移落地顺序](./landing.md)  
 > 投递路径仍见：[Web Presentation Custom Event Routing](../../doc/10-architecture/web-presentation-custom-event-routing.md)  
 > 现行契约：[Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md)、[User Input v1](../../doc/15-contracts/user-input-v1.md)、[Session Events v1](../../doc/15-contracts/session-events-v1.md)
 
-本文只抽出 `WebPresentationContext.emitCustomEvent` 的调用形状变动。设备协议、采样规则和 User Input 迁移仍以 [DESIGN.md](./DESIGN.md) 为准。本文不修改任何已冻结契约；现行实现仍是 owner-targeted 双参数调用，并且固定发到 `x.loomrealm.web-presentation.event`。
+本文只定义 `WebPresentationContext.emitCustomEvent` 的调用形状变动。设备协议与采样规则见 [设备输入 Web Components](./device-input-components.md)，旧 Framework 输入层的删除顺序见 [从 LoomRealm 框架移除 User Input](./remove-framework-user-input.md)。本文不修改任何已冻结契约；现行实现仍是 owner-targeted 双参数调用，并且固定发到 `x.loomrealm.web-presentation.event`。
 
 ## 1. 现行调用
 
@@ -173,7 +173,7 @@ broadcast   是否进入跨 Subsystem 路径
 
 `domainId`、`targetKey`、Session、subsystemKey、generation 与 source 由 Framework 按当前 live RenderNode 绑定。`broadcast=true` 按 Session Events 现有的精确 Channel 规则投递，不新增 owner 或 session 接收者过滤。
 
-设备 Web Component 把原来的标准通道放进 `options.channel`，用来替代架构层的推送侧过滤。载荷仍是对应设备的 v1 payload，见 [DESIGN.md](./DESIGN.md)。
+设备 Web Component 把原来的标准通道放进 `options.channel`，用来替代架构层的推送侧过滤。载荷仍是对应设备的 v1 payload，见 [设备输入 Web Components](./device-input-components.md)。
 
 ~~~ts
 context.emitCustomEvent(
