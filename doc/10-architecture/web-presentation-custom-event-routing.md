@@ -38,7 +38,7 @@ InputManager
 physical input producer
 ~~~
 
-User Input 成为 game-libs / game application 的业务协议。
+User Input 成为 game-libs / game application 的业务协议。Presentation 可以按需挂载多个彼此独立的设备 Web Components，例如 game-keyboard-input、game-pointer-input、game-gamepad-input；Framework 不创建默认全局输入组件，也不要求这些设备能力同时存在。
 
 ## 2. API
 
@@ -470,7 +470,7 @@ Main 当前命名中的 initial.input / frame initialize input 是 Frame 参数�
 3. Implement trusted Host/Session ingress + audience
 4. PWA E2E
 5. Desktop E2E
-6. Implement game-common-controls
+6. Implement per-device game WCs: keyboard / pointer / gamepad
 7. Migrate business consumers away from createInputListener
 8. Move owner-only custom event off InputGate
 9. Remove Data input family / Subsystem InputManager
@@ -518,13 +518,34 @@ LR Framework
     Session Events
 
 game-libs
-    User Input protocol
-    device capture
-    input state
-    mapping
-    recovery
+    per-device User Input protocols
+    keyboard / pointer / gamepad WCs
+    independent device state / recovery
+    optional controls mapper / aggregator
 ~~~
 
 emitCustomEvent 的 options.broadcast 只控制 audience；固定 Channel 继续履行 Web Presentation routing-domain 职责；name 继续履行业务 event-type 职责。
 
 迁移完成后，LR Framework 不再拥有 User Input 领域协议。
+
+
+## 15. Per-device composition boundary
+
+Web Presentation custom-event routing does not assume one global input producer.
+
+A game may mount:
+
+~~~text
+keyboard only
+pointer only
+gamepad only
+keyboard + pointer
+keyboard + gamepad
+keyboard + pointer + gamepad
+~~~
+
+Each device WC owns its own browser listeners/polling, epoch/revision, current state and reset lifecycle. A reset or disconnection of one device must not implicitly invalidate another device producer.
+
+Cross-device gameplay actions such as move/confirm/cancel are not Framework concerns and are not owned by the routing layer. They may be derived by an optional game-lib Mapper/Aggregator after device events are delivered.
+
+Therefore the Framework contract must remain valid even when no input WC exists at all. Web Presentation Event routing is a generic capability; input is only one business use of it.
