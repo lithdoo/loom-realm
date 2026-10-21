@@ -126,7 +126,7 @@ context.emitCustomEvent(
 | 内容 | 归属 |
 | --- | --- |
 | Web Component / RenderNode / Context | LM Web Presentation |
-| 固定 Web Presentation Event Channel 与 broadcast audience | LM Framework |
+| 固定 Web Presentation Event Channel 与 broadcast=true trusted publication | LM Framework |
 | keyboard.state/event payload | game-keyboard-input |
 | pointer.state/event payload | game-pointer-input |
 | gamepad.state/event payload | game-gamepad-input |
@@ -449,16 +449,42 @@ Consumer stale timeout
 
 具体 refresh/timeout 数值由 Qualification 决定，不在设计阶段提前冻结。
 
+
 ### 4.8 类型与 validator ownership 迁移
 
-为减少重复，User Input v1 的设备 types/constants/validators 应移动 ownership，而不是复制两份：
+迁移期间不得为了提前移动 ownership，让 Framework package 反向依赖 game-lib。
+
+因此采用单向依赖的两阶段方案：
 
 ~~~text
-Step 1  move Keyboard/Pointer/Gamepad payload types/constants/validators to game-common-controls
-Step 2  @loomrealm/data temporarily re-export / alias for old User Input v1
-Step 3  new WCs and consumers import only game-common-controls
-Step 4  remove @loomrealm/data compatibility exports after LR User Input removal
+迁移期
+  @loomrealm/data
+      继续作为旧 User Input v1
+      device types/constants/validators 的 canonical source
+
+  game-common-controls
+      可以临时 import @loomrealm/data
+      以复用已经 Qualification 的定义和 validator
+
+退役切换
+  当 LR User Input / Data input family 正式删除时：
+      将仍需保留的 Keyboard/Pointer/Gamepad
+      types/constants/validators
+      在同一个版本化变更中迁到 game-common-controls
+
+      同时从 @loomrealm/data 删除对应 User Input ownership
 ~~~
+
+禁止形成：
+
+~~~text
+@loomrealm/data
+    -> @loomrealm-game/common-controls
+~~~
+
+这种 Framework -> game-lib 反向依赖。
+
+迁移完成后，新业务代码只从 game-common-controls 获取设备协议定义；迁移期间允许 game-common-controls 暂时依赖 @loomrealm/data，直到旧 Framework User Input 被正式退役。
 
 ### 4.9 可选 Consumer compatibility layer
 
@@ -576,8 +602,11 @@ SessionEvent.payload
 SessionEvent.source
     = trusted RenderNode owner
 
-publication audience
-    = broadcast ? session : owner
+broadcast=true
+    = publish into the fixed Web Presentation Event Channel
+
+broadcast=false
+    = does not enter this Session Events broadcast path during migration
 ~~~
 
 职责必须保持分离：
@@ -587,17 +616,22 @@ publication audience
 - data：业务协议数据；
 - broadcast：谁可以收到。
 
-### 5.4 owner-only 与 broadcast
 
-| 调用 | 接收范围 |
+### 5.4 owner-only 与 broadcast 的迁移边界
+
+当前迁移只新增 broadcast=true 的跨 Subsystem 路径：
+
+| 调用 | 迁移期行为 |
 | --- | --- |
-| emitCustomEvent(name, data) | owner Subsystem 的匹配消费者 |
-| emitCustomEvent(name, data, { broadcast: false }) | 同上 |
-| emitCustomEvent(name, data, { broadcast: true }) | 当前 Session 中匹配 Web Presentation Event Channel 的消费者 |
+| emitCustomEvent(name, data) | 保持现行 owner-only v1 行为 |
+| emitCustomEvent(name, data, { broadcast: false }) | 与现行 owner-only 行为一致 |
+| emitCustomEvent(name, data, { broadcast: true }) | 进入新的 trusted cross-Subsystem Presentation Event path |
 
-两种模式使用同一个固定 Channel、同一种 event envelope、同一种 source provenance。
+因此本项目**不通过修改 SessionEventHub 来实现 owner-only filtering**。
 
-最终 owner-only 也不应依赖 InputGate/InputTarget。迁移期间，为兼容 Frozen v1，旧双参数调用可以暂时保持原 InputGate 行为；完成版本切换后，默认 false 也进入通用 Web Presentation Event path。
+broadcast=true 才进入固定 Web Presentation Event Channel，并由现有 Session Events exact-Channel 规则投递给该 Channel 的全部 matching subscriptions。
+
+broadcast=false / options omitted 在迁移阶段继续走现有 owner-only 路径。将 owner-only custom event 最终从 InputGate 脱离，是后续独立设计/版本化工作；在该工作完成前，不得为了统一实现而改变 Frozen Session Events v1 的 routing semantics。
 
 ### 5.5 校验和版本边界
 
@@ -610,14 +644,15 @@ publication audience
 
 现行 WebPresentationContext v1 是 Frozen closed shape，所以 options 和 owner-only 新交付语义必须通过正式版本化 Contract / compatibility profile / conformance 发布，不得静默重定义 v1。
 
-## 6. Trusted Presentation Event Bridge：必须是通用机制
 
-候选路径：
+## 6. Trusted Presentation Event Bridge：broadcast=true 专用通用机制
+
+当前迁移中的新 Bridge 只处理显式 broadcast=true：
 
 ~~~text
 business WC
   |
-  | emitCustomEvent(name, data, { broadcast? })
+  | emitCustomEvent(name, data, { broadcast: true })
   v
 WebProjector / Renderer currentness
   |
@@ -625,46 +660,56 @@ WebProjector / Renderer currentness
   | fixed Web Presentation Channel
   | RenderNode owner provenance
   | event type = name
-  | audience = owner | session
   v
 trusted Renderer/Host presentation ingress
   |
   v
 Session Events routing
   |
-  +-- owner audience   -> owner Subsystem only
-  |
-  +-- session audience -> matching subscribers across current Session
+  +-> every matching subscription of the fixed Channel
 ~~~
 
 Bridge 必须满足：
 
-1. 只有当前 live RenderNode Context 可以发布。
+1. 只有当前 live RenderNode Context 可以发起 broadcast publication。
 2. Framework 使用固定 Web Presentation Event Channel；业务不能选择或覆盖该 Channel。
 3. name 作为 event type，data 作为业务 payload；两者不得与 Channel 职责混用。
 4. source、Session、subsystemKey、generation、domainId、targetKey 均由可信 Framework 绑定。
-5. broadcast 只控制 audience，不推导 InputTarget，也不改变 Frame/Activation。
+5. SessionEventHub 仍按现有 exact Channel 规则路由，不增加 owner/session recipient filter。
 6. Renderer 不获得任意 SessionEventClient、Hub binding、subscribe 或 arbitrary-channel publish 能力。
-7. Desktop/PWA 可有不同物理 Carrier，但逻辑 Contract 相同。
-8. 慢订阅者、overflow、listener failure 复用 Session Events 有界/隔离语义。
+7. Desktop/PWA 可有不同物理 Carrier，但 logical publication semantics 相同。
+8. 慢订阅者、overflow、listener failure 复用现有 Session Events 有界/隔离语义。
 
-### 6.1 owner recipient filter
+### 6.1 不修改 Session Events v1 recipient semantics
 
-Session Events v1 当前按 exact Channel 选择订阅者。Web Presentation custom event 还需要可信 audience metadata：
+Frozen Session Events v1 的规则继续成立：
 
-~~~ts
-type PresentationEventAudience =
-  | { readonly kind: "owner"; readonly subsystemKey: string }
-  | { readonly kind: "session" };
+~~~text
+publish accepted on Channel C
+    -> every live subscription matching exact Channel C
 ~~~
 
-该 metadata 是 Framework 内部路由事实，不属于 payload，也不是新的业务 Channel。
+本设计不增加：
 
-- broadcast=false：固定 Channel 匹配后，只投递给 owner Subsystem 的 subscription。
-- broadcast=true：固定 Channel 匹配后，可投递给当前 Session 的所有 matching subscriptions。
-- owner-only 不能先泄漏给其他 Runtime 再要求业务自行过滤。
+~~~text
+PresentationEventAudience
+owner recipient filter
+session recipient filter
+subscription-owner filtering
+~~~
 
-recipient filter 可放在 SessionEventHub trusted ingress 或独立 Presentation Event Router；这是实现选择，不应修改 author-facing Session Events Channel 的职能。
+broadcast 不是交给 Hub 的新 routing metadata。它只在 Web Presentation 边界决定：
+
+~~~text
+false
+    -> 迁移期继续 legacy owner-only path
+
+true
+    -> trusted publication into fixed Web Presentation Event Channel
+       -> existing Session Events routing
+~~~
+
+这样 Channel 仍然独立承担 Session Events routing scope，不被第二套 audience 规则覆盖。
 
 ### 6.2 source identity
 
@@ -677,7 +722,7 @@ recipient filter 可放在 SessionEventHub trusted ingress 或独立 Presentatio
 - 不创建虚假的 input subsystem；
 - 不向 Renderer 暴露可任意伪造 source 的 SessionEventClient。
 
-该能力会扩展 Frozen Session Events v1 的 publisher-origin integration semantics，因此需要单独 Integration Profile / ADR / conformance，但不要求重定义 Channel。
+该能力会扩展 Frozen Session Events v1 的 publisher-origin integration semantics，因此需要单独 Integration Profile / ADR / conformance；它不通过修改 Hub recipient routing 来实现。
 
 ## 7. 消费方输入处理属于业务策略，而非 LM
 
@@ -845,8 +890,8 @@ Renderer
   InputInterestV1 / FrameInputInterestV1
   InputStateV1 / InputEventV1 / InputResetV1
   UserInputMessageV1
-  keyboard/pointer/gamepad input payload types（ownership 先迁到 game-common-controls，LR 兼容导出后再删）
-  input-codec（设备 validator 迁出后删除 LR ownership）
+  keyboard/pointer/gamepad input payload types（迁移期继续由 @loomrealm/data canonical 持有；LR User Input 退役时再原子迁到 game-common-controls）
+  input-codec（迁移期继续复用；LR User Input 退役时将仍需设备 validator 与 ownership 一并迁出）
   input.* Data Profile family
   RendererInputDataPeer / SubsystemInputDataPeer
 
@@ -887,7 +932,7 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 | --- | --- | --- |
 | M0 | 冻结 options.broadcast、固定 Channel、input.state/input.event + { channel,payload } 映射 | 原样保留 |
 | M1 | 实现 trusted Presentation Event path，Desktop/PWA E2E | 双参数旧行为兼容 |
-| M2 | 把 v1 设备 types/constants/validators ownership 迁到 game-common-controls，@loomrealm/data 临时 re-export | 旧实现继续编译 |
+| M2 | WC 临时直接复用 @loomrealm/data 的 v1 设备 types/constants/validators；不建立 Framework -> game-lib 反向依赖 | 旧实现继续编译 |
 | M3 | 机械拆分 BrowserRendererInputSource 为 Keyboard/Pointer/Gamepad source，再包三个 WC | 新游戏可按需挂载 WC |
 | M4 | 加 compatibility consumer、State refresh/stale timeout，业务迁离 createInputListener | 不再依赖 InputManager author API |
 | M5 | 停止 Renderer 物理输入路径，删除 InputGate / Data input.* / Subsystem InputManager | Framework Input Plane 退出 |
@@ -897,7 +942,7 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 
 1. 六个标准 channel 与 payload 的可观察行为和 User Input v1 一致。
 2. Keyboard/Pointer/Gamepad 的采样、归一化、排序、限制和事件顺序通过 migrated conformance。
-3. LR public API 不再拥有设备协议定义；game-common-controls 成为 canonical ownership。
+3. LR User Input 退役版本中，设备协议定义从 @loomrealm/data 原子迁到 game-common-controls；迁移期不做反向 re-export。
 4. Renderer 不再主动采集物理用户输入。
 5. Renderer Data 不再包含 input.* family。
 6. SubsystemScope 不再有 createInputListener。
@@ -912,12 +957,12 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 
 1. options 省略与 { broadcast:false } 的目标语义一致。
 2. broadcast 只接受 boolean/undefined。
-3. broadcast=false 只对 owner Subsystem 可见；broadcast=true 可跨当前 Session 投递。
-4. 两种模式使用相同固定 Web Presentation Event Channel。
+3. broadcast=true 进入新的跨 Subsystem path；broadcast=false/options omitted 在迁移期保持现有 owner-only 行为。
+4. 只有 broadcast=true 使用新的固定 Web Presentation Event Channel broadcast path；不得为 owner-only 修改 SessionEventHub routing。
 5. input.state / input.event 是 event.type，keyboard.state 等仍只在 data.channel。
 6. business code 无法覆盖 Channel/source/session/owner/domain/target。
 7. stale RenderNode/Context 不产生事件。
-8. InputTarget 不参与新 Event path。
+8. InputTarget 不参与 broadcast=true 新 Event path；legacy owner-only path 的现行依赖不在本阶段重写。
 9. Desktop/PWA logical observables 一致。
 
 ### User Input v1-compatible device migration
@@ -948,13 +993,13 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 
 1. Contract / ADR：冻结 CustomEventOptions.broadcast、固定 Web Presentation Channel、input.state/input.event + { channel,payload } envelope。
 2. Framework Event path：实现 trusted Presentation Event publication，broadcast 路径不经过 InputGate。
-3. 类型 ownership：把 Keyboard/Pointer/Gamepad v1 payload constants/types/validators 移到 game-common-controls，并由 @loomrealm/data 临时兼容导出。
+3. 类型复用：迁移期由 game-common-controls 直接复用 @loomrealm/data 的 v1 device definitions；LR User Input 退役时再原子迁 ownership。
 4. Source mechanical split：把 createBrowserRendererInputSource 拆成 keyboard/pointer/gamepad 三个 source，保持现有测试和行为。
 5. WC thin wrappers：三个 WC 通过共享 emitDeviceInput adapter 发布 v1-compatible state/event。
 6. 收敛补偿：实现 non-neutral State bounded refresh 和 consumer stale timeout。
 7. Compatibility consumer：基于 Session Events 提供 keyboard.state 等原 channel 风格 handler。
 8. 业务迁移：离开 createInputListener；需要时再接 Controls Mapper/Aggregator。
-9. 删除旧 Producer/gate：停止 Renderer BrowserInputSource，删除 InputGate/Data input family/Subsystem InputManager。
+9. 删除旧 Producer/Data/Subsystem input：停止 Renderer BrowserInputSource，删除 Data input family/Subsystem InputManager；InputGate 仅在独立 owner-only replacement 完成后删除。
 10. 删除 InputTarget：最后更新 Main/Renderer Control 和 frozen profile/version。
 11. 退役 User Input v1 Framework Contract/Qualification；设备 payload protocol 的 canonical ownership 保留在 game-common-controls。
 
@@ -963,7 +1008,7 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 - 新 WebPresentationContext shape 的正式版本号。
 - 固定 Web Presentation Event Channel 常量的新 ownership。
 - migrated data envelope 是否正式冻结为 { channel,payload }。
-- v1 设备 types/constants/validators 从 @loomrealm/data 迁往 game-common-controls 的兼容导出周期。
+- LR User Input 退役时，v1 设备 types/constants/validators 从 @loomrealm/data 原子迁往 game-common-controls 的版本切换点。
 - non-neutral State refresh 与 stale timeout 的 Qualification 数值。
 - component disconnect 时若 Context 仍 current，是否要求 best-effort neutral State。
 - compatibility consumer 是否只覆盖六个标准 channel，还是暂时支持旧 x.* custom input channel。
