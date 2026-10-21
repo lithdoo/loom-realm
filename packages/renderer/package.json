@@ -30,13 +30,13 @@
     "test": "npm run build && node --test"
   },
   "dependencies": {
+    "@loomrealm/foundation": "0.1.0-alpha.0",
     "@loomrealm/data": "0.1.0-alpha.0",
     "@loomrealm/platform-ports": "0.1.0-alpha.0",
     "@loomrealm/renderer-control": "0.1.0-alpha.0",
     "@loomrealm/wire": "0.1.0-alpha.0"
   },
   "devDependencies": {
-    "@loomrealm/foundation": "0.1.0-alpha.0",
     "typescript": "^5.5.0"
   },
   "engines": { "node": ">=20" },

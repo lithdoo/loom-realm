@@ -4,10 +4,11 @@ import test from "node:test";
 
 const read = (relative) => readFile(new URL(relative, import.meta.url), "utf8");
 
-test("Desktop product wires one document-layout viewport source and Main only selects /1", async () => {
+test("Desktop product wires viewport and trusted Presentation Events while Main only selects /1", async () => {
   const entry = await read("../src/renderer-entry.ts");
   assert.match(entry, /createDesktopRendererViewportSource\(window\)/);
-  assert.match(entry, /createRendererControlHolder\(dataBinding, inputSource, viewportSource\)/);
+  assert.match(entry, /createRendererControlHolder\([\s\S]*dataBinding,[\s\S]*inputSource,[\s\S]*viewportSource,[\s\S]*createRendererPresentationEventBinding\(presentationEventCarrier\)/);
+  assert.match(entry, /presentationEventsEndpoint/);
   assert.doesNotMatch(entry, /viewport\.state/);
 
   const adapter = await read("../src/renderer-viewport-source.ts");

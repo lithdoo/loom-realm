@@ -7,7 +7,14 @@ import type {
 import type { RendererControlBinding } from "@loomrealm/platform-ports";
 import type { SharedStateAuthority } from "@loomrealm/shared-state";
 import type { SessionEventHub } from "@loomrealm/session-events";
-import type { PwaInstallRendererControlV1 } from "./bootstrap-protocol.js";
+import {
+  serveRendererPresentationEventCarrier,
+  type PresentationEventCarrierServer,
+} from "@loomrealm/renderer";
+import type {
+  PwaInstallPresentationEventsV1,
+  PwaInstallRendererControlV1,
+} from "./bootstrap-protocol.js";
 import { PwaDataBroker } from "./data-broker.js";
 import { createMessagePortCarrier } from "./message-port-carrier.js";
 import { createPwaRuntimeHosting } from "./runtime-hosting.js";
@@ -24,6 +31,8 @@ export class PwaPlatform {
   readonly main: MainPlatform;
   private readonly bridge: SessionWindowBridge;
   private readonly broker: PwaDataBroker;
+  private readonly presentationEvents: PresentationEventCarrierServer;
+  private readonly presentationInstall: Promise<void>;
   private closed = false;
 
   constructor(options: {
@@ -38,6 +47,36 @@ export class PwaPlatform {
   }) {
     this.bridge = new SessionWindowBridge(options.bridgePort, options.sessionEpoch);
     this.broker = new PwaDataBroker(this.bridge, options.sessionEpoch, options.observe);
+    const presentationPair = new MessageChannel();
+    this.presentationEvents = serveRendererPresentationEventCarrier(
+      createMessagePortCarrier(presentationPair.port1),
+      async (event) => {
+        if (!this.broker.authorizesPresentationEvent(event.ownerSubsystemKey, event.generation)) return false;
+        const publisher = options.sessionEventHub.createDelegatedPublisher(event.ownerSubsystemKey);
+        await publisher.publish(
+          event.channel,
+          event.type,
+          event.payload,
+          event.broadcast ? undefined : event.ownerSubsystemKey,
+        );
+        return true;
+      },
+    );
+    const presentationRequest: PwaInstallPresentationEventsV1 = Object.freeze({
+      formatVersion: 1,
+      type: "presentation-events/install",
+      requestId: crypto.randomUUID(),
+      sessionEpoch: options.sessionEpoch,
+      port: presentationPair.port2,
+    });
+    this.presentationInstall = this.bridge.request(
+      presentationRequest,
+      [presentationPair.port2],
+    ).catch(async (cause) => {
+      await this.presentationEvents.close();
+      throw cause;
+    });
+    void this.presentationInstall.catch(() => undefined);
     const rendererControl: RendererControlBinding = Object.freeze({
       acquire: async (rendererControlToken: string, signal: AbortSignal) => {
         if (this.closed || signal.aborted) throw signal.reason ?? new Error("PWA Platform closed");
@@ -73,6 +112,7 @@ export class PwaPlatform {
     if (this.closed) return;
     this.closed = true;
     try {
+      await this.presentationEvents.close();
       await this.broker.close();
     } finally {
       this.bridge.close();

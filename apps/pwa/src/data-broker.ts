@@ -127,6 +127,12 @@ export class PwaDataBroker {
     };
   }
 
+  authorizesPresentationEvent(subsystemKey: string, generation: number): boolean {
+    if (this.closed || this.authority === null) return false;
+    const entry = this.authority.entries.find((candidate) => candidate.subsystemKey === subsystemKey);
+    return entry !== undefined && !this.terminated.has(entry.runtime) && entry.generation === generation;
+  }
+
   /** Resolves after all work already scheduled on the broker has settled. */
   async whenIdle(): Promise<void> {
     let observed: Promise<void>;

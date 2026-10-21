@@ -10,6 +10,7 @@ test("Renderer exposes the presentation publication construction seam and exact 
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), [
     "@loomrealm/data",
+    "@loomrealm/foundation",
     "@loomrealm/platform-ports",
     "@loomrealm/renderer-control",
     "@loomrealm/wire",

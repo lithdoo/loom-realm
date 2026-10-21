@@ -105,6 +105,21 @@ function setup(options = {}) {
   return { broker, hosted, provisioner, binding };
 }
 
+test("presentation-event authority follows the live Renderer Control tuple", () => {
+  const broker = new DesktopDataConnectionBroker();
+  const hosted = runtime();
+  broker.sink.replace(authority("renderer-a", hosted, 3));
+
+  assert.equal(broker.authorizesPresentationEvent("renderer-a", "root", 3), true);
+  assert.equal(broker.authorizesPresentationEvent("renderer-b", "root", 3), false);
+  assert.equal(broker.authorizesPresentationEvent("renderer-a", "other", 3), false);
+  assert.equal(broker.authorizesPresentationEvent("renderer-a", "root", 2), false);
+
+  broker.sink.replace(null);
+  assert.equal(broker.authorizesPresentationEvent("renderer-a", "root", 3), false);
+  broker.close();
+});
+
 test("paired candidate installs once and relays opaque text in both directions", async (t) => {
   const { broker, hosted, provisioner, binding } = setup();
   t.after(() => broker.close());

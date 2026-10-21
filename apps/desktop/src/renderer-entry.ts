@@ -1,4 +1,7 @@
-import { createRendererControlHolder } from "@loomrealm/renderer";
+import {
+  createRendererControlHolder,
+  createRendererPresentationEventBinding,
+} from "@loomrealm/renderer";
 import { createRendererResourceClient } from "@loomrealm/renderer/resource-client";
 import {
   attachRendererPresentation,
@@ -28,6 +31,7 @@ function validEnvelope(value: unknown): value is DesktopRendererBootstrapEnvelop
     typeof envelope.rendererIdentity === "string" && envelope.rendererIdentity.length > 0 &&
     typeof envelope.controlEndpoint === "string" && envelope.controlEndpoint.startsWith("ws://127.0.0.1:") &&
     typeof envelope.dataSettlementEndpoint === "string" && envelope.dataSettlementEndpoint.startsWith("ws://127.0.0.1:") &&
+    typeof envelope.presentationEventsEndpoint === "string" && envelope.presentationEventsEndpoint.startsWith("ws://127.0.0.1:") &&
     content !== null && typeof content === "object" && typeof content.origin === "string" &&
     typeof content.installationId === "string" && typeof content.token === "string";
 }
@@ -66,13 +70,19 @@ void (async () => {
   const envelope = bootstrap();
   const objectUrls: string[] = [];
   const resourceClient = createRendererResourceClient(envelope.content, lifetime.signal);
-  const [controlCarrier, dataBinding] = await Promise.all([
+  const [controlCarrier, dataBinding, presentationEventCarrier] = await Promise.all([
     connectBrowserControlCarrier(envelope.controlEndpoint, lifetime.signal, NativeWebSocket),
     connectLoopbackRendererDataBinding(envelope.dataSettlementEndpoint, NativeWebSocket),
+    connectBrowserControlCarrier(envelope.presentationEventsEndpoint, lifetime.signal, NativeWebSocket),
   ]);
   const inputSource = createDesktopRendererInputSource(window);
   const viewportSource = createDesktopRendererViewportSource(window);
-  const holder = createRendererControlHolder(dataBinding, inputSource, viewportSource);
+  const holder = createRendererControlHolder(
+    dataBinding,
+    inputSource,
+    viewportSource,
+    createRendererPresentationEventBinding(presentationEventCarrier),
+  );
   const prepared = await prepareWebPresentationV1(
     envelope.presentation,
     (ref) => resolveBootstrapResource(envelope, ref, objectUrls),

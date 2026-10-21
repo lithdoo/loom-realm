@@ -12,6 +12,10 @@ import { DESKTOP_BOOTSTRAP_CHANNEL, type DesktopRendererBootstrapEnvelope } from
 import { connectHostraRpc, type HostraRpc } from "./hostra-rpc.js";
 import { createLoopbackDataSettlement, type LoopbackDataSettlement } from "./loopback-data-settlement.js";
 import { LoopbackRendererControlBinding, type LoopbackRendererDocument } from "./loopback-renderer-control.js";
+import {
+  createDesktopPresentationEventEndpoint,
+  type DesktopPresentationEventEndpoint,
+} from "./presentation-events-websocket.js";
 
 const runnerPolicy = Object.freeze({
   helloDeadlineMs: 10_000,
@@ -48,6 +52,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
   let documentGrant: DesktopContentGrant | null = null;
   let documentControl: LoopbackRendererDocument | null = null;
   let documentData: LoopbackDataSettlement | null = null;
+  let documentPresentationEvents: DesktopPresentationEventEndpoint | null = null;
   let broker: DesktopDataConnectionBroker | null = null;
   let rendererControl: LoopbackRendererControlBinding | null = null;
   let main: Promise<MainSessionResult> | null = null;
@@ -66,6 +71,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
     if (documentControl !== null || documentData !== null || documentGrant !== null) observe({ type: "document-retired" });
     documentControl?.retire(cause); documentControl = null;
     documentData?.close(); documentData = null;
+    void documentPresentationEvents?.close(); documentPresentationEvents = null;
     if (documentGrant !== null) content?.revokeGrant(documentGrant);
     documentGrant = null;
   };
@@ -166,15 +172,33 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
         retireDocument(new Error("Fresh top-level document navigation"));
         const control = await rendererControl!.beginDocument(signal);
         let settlement: LoopbackDataSettlement | null = null;
+        let presentationEvents: DesktopPresentationEventEndpoint | null = null;
         let grant: DesktopContentGrant | null = null;
         try {
           settlement = await createLoopbackDataSettlement();
           if (signal.aborted) throw signal.reason;
           broker!.attachWindowRenderer(control.rendererControlToken, settlement);
+          presentationEvents = await createDesktopPresentationEventEndpoint(async (event) => {
+            if (!broker!.authorizesPresentationEvent(
+              control.rendererControlToken,
+              event.ownerSubsystemKey,
+              event.generation,
+            )) return false;
+            const publisher = sessionEvents!.createDelegatedPublisher(event.ownerSubsystemKey);
+            await publisher.publish(
+              event.channel,
+              event.type,
+              event.payload,
+              event.broadcast ? undefined : event.ownerSubsystemKey,
+            );
+            return true;
+          });
+          if (signal.aborted) throw signal.reason;
           grant = content!.createGrant({ permissions: ["resources"], expiresAtUnixMs: Date.now() + 86_400_000 });
           const access = content!.access(grant);
           documentControl = control;
           documentData = settlement;
+          documentPresentationEvents = presentationEvents;
           documentGrant = grant;
           observe({ type: "document-bootstrap", rendererIdentity: createHash("sha256").update(control.rendererIdentity).digest("hex") });
           return Object.freeze({
@@ -183,11 +207,12 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
             rendererIdentity: control.rendererIdentity,
             controlEndpoint: control.controlEndpoint,
             dataSettlementEndpoint: settlement.endpoint,
+            presentationEventsEndpoint: presentationEvents.endpoint,
             content: Object.freeze({ origin: access.origin.href, installationId: access.installationId, token: access.token }),
             presentation,
           });
         } catch (cause) {
-          control.retire(cause); settlement?.close(); if (grant !== null) content!.revokeGrant(grant);
+          control.retire(cause); settlement?.close(); void presentationEvents?.close(); if (grant !== null) content!.revokeGrant(grant);
           throw cause;
         }
       },

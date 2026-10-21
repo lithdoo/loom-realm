@@ -22,6 +22,37 @@ function windowRevoke(requestId, connectionId) {
   });
 }
 
+test("Window bridge installs a dedicated Presentation Events port for the current Session", async () => {
+  const bridgeChannel = new MessageChannel();
+  const bridge = new SessionWindowBridge(bridgeChannel.port1, "epoch-1", 1_000);
+  const events = new MessageChannel();
+  let received;
+  bridgeChannel.port2.addEventListener("message", (event) => {
+    received = event.data;
+    bridgeChannel.port2.postMessage(Object.freeze({
+      formatVersion: 1,
+      type: "install/result",
+      requestId: event.data.requestId,
+      sessionEpoch: "epoch-1",
+      ok: true,
+    }));
+  });
+  bridgeChannel.port2.start();
+  await bridge.request(Object.freeze({
+    formatVersion: 1,
+    type: "presentation-events/install",
+    requestId: "presentation-1",
+    sessionEpoch: "epoch-1",
+    port: events.port2,
+  }), [events.port2]);
+  assert.equal(received.type, "presentation-events/install");
+  assert.ok(received.port instanceof MessagePort);
+  bridge.close();
+  bridgeChannel.port2.close();
+  events.port1.close();
+  received.port.close();
+});
+
 test("Window bridge ignores a timed-out late result and remains usable", async (t) => {
   const channel = new MessageChannel();
   const bridge = new SessionWindowBridge(channel.port1, "epoch-1", 5);
