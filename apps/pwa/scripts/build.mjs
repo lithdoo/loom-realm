@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -27,19 +27,24 @@ function indexHtml(script) {
 }
 
 async function buildRoot() {
-  const generation = await deriveProductGeneration(entries, root);
+  const commonControlsSource = await readFile(join(root, "..", "..", "game-libs", "game-common-controls", "dist", "browser", "device-input.browser.js"), "utf8");
+  const definitions = Object.freeze({
+    __LOOMREALM_GAME_COMMON_CONTROLS_SOURCE__: JSON.stringify(commonControlsSource),
+  });
+  const generation = await deriveProductGeneration(entries, root, definitions);
   await mkdir(output, { recursive: true });
   for (const file of [...entries.map(({ output: name }) => name), "service-worker-update.js", "index.html", "generation.json", "blank.html"]) {
     await rm(join(output, file), { force: true });
   }
   await rm(join(output, "qualification"), { recursive: true, force: true });
-  await emitProductArtifacts(entries, output, root, generation);
+  await emitProductArtifacts(entries, output, root, generation, definitions);
   if (qualification) {
     await emitProductArtifacts(
       [{ input: join(sourceRoot, "service-worker.ts"), output: "service-worker-update.js" }],
       output,
       root,
       `${generation}-qualification-update`,
+      definitions,
     );
     await build({
       absWorkingDir: join(root, "..", ".."),

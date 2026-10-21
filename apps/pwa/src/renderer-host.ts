@@ -34,8 +34,8 @@ function bootstrapCacheKey(installationId: string, ref: WebPresentationResourceR
   return JSON.stringify([installationId, ref.namespace, ref.key]);
 }
 
-function preparedBootstrapKey(installationId: string, kind: "script" | "style", resource: PreparedBootstrapResource): string {
-  return JSON.stringify([installationId, kind, resource.namespace, resource.key, resource.contentVersion]);
+function preparedBootstrapKey(kind: "script" | "style", resource: PreparedBootstrapResource): string {
+  return JSON.stringify([kind, resource.namespace, resource.key, resource.contentVersion]);
 }
 
 function observeCarrierClose(carrier: MessageCarrier): void {
@@ -191,8 +191,8 @@ export async function createPwaRendererHost(installationId: string, presentation
   };
   try {
     const prepared = await prepareWebPresentationV1(presentation, resolveBootstrapResource);
-    const styles = Object.freeze(prepared.styles.filter((resource) => !loadedBootstrapResources.has(preparedBootstrapKey(installationId, "style", resource))));
-    const scripts = Object.freeze(prepared.scripts.filter((resource) => !loadedBootstrapResources.has(preparedBootstrapKey(installationId, "script", resource))));
+    const styles = Object.freeze(prepared.styles.filter((resource) => !loadedBootstrapResources.has(preparedBootstrapKey("style", resource))));
+    const scripts = Object.freeze(prepared.scripts.filter((resource) => !loadedBootstrapResources.has(preparedBootstrapKey("script", resource))));
     const previousHeadChildren = new Set(document.head.children);
     try {
       bootstrapBegan = true;
@@ -201,8 +201,8 @@ export async function createPwaRendererHost(installationId: string, presentation
       for (const child of [...document.head.children]) if (!previousHeadChildren.has(child)) child.remove();
       throw cause;
     }
-    for (const resource of styles) loadedBootstrapResources.add(preparedBootstrapKey(installationId, "style", resource));
-    for (const resource of scripts) loadedBootstrapResources.add(preparedBootstrapKey(installationId, "script", resource));
+    for (const resource of styles) loadedBootstrapResources.add(preparedBootstrapKey("style", resource));
+    for (const resource of scripts) loadedBootstrapResources.add(preparedBootstrapKey("script", resource));
     // The browser has loaded/evaluated these document capabilities. Their
     // blob bytes need not stay addressable for the lifetime of later Sessions.
     for (const cacheKey of createdBootstrapResources) {
