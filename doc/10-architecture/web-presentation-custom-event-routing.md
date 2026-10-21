@@ -513,11 +513,12 @@ Main 当前命名中的 initial.input / frame initialize input 是 Frame 参数�
 6. broadcast=true 的 type 来自 name。
 7. name 永远不被解释成 Channel。
 8. business code 可通过 options.channel 选择实际路由 Channel；source/session/owner/domain/target 始终由可信 Framework 绑定，不能由业务 Payload 伪造。
-9. stale Context 仍满足 currentness-first。
-10. InputTarget 不参与 broadcast=true 新路由；legacy owner-only path 的现行依赖不在本阶段重写。
-11. Session restart / generation replacement 不串发旧消息。
-12. PWA/Desktop 实现具有相同 logical observables。
-13. 删除 User Input 后 Render/Viewport/Frame/Activation/Session Events 仍独立通过各自 Qualification。
+9. 订阅 keyboard.state 只收到 keyboard.state；订阅 pointer.state 不收到 keyboard.state；event.type 不参与 Hub 路由过滤。
+10. stale Context 仍满足 currentness-first。
+11. InputTarget 不参与 broadcast=true 新路由；legacy owner-only path 的现行依赖不在本阶段重写。
+12. Session restart / generation replacement 不串发旧消息。
+13. PWA/Desktop 实现具有相同 logical observables。
+14. 删除 User Input 后 Render/Viewport/Frame/Activation/Session Events 仍独立通过各自 Qualification。
 
 ## 13. 未决事项
 
