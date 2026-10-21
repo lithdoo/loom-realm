@@ -21,7 +21,7 @@ function peer(generation = 1, hooks = {}) {
     return result ?? { kind: "sent" };
   };
   return {
-    binding: { subsystemKey: "demo", generation, dataProfile: "loomrealm.renderer-data/1" },
+    binding: { subsystemKey: "demo", generation, dataProfile: "loomrealm.renderer-data/2" },
     render: {
       sendDomains: send,
       sendSnapshot: send,

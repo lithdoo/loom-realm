@@ -103,6 +103,9 @@ async function setup(page, origin) {
     const runtimePair = foundation.createMemoryCarrierPair();
     const dataPair = foundation.createMemoryCarrierPair();
     const rendererPair = foundation.createMemoryCarrierPair();
+    const eventHub = sessionEvents.createSessionEventHub();
+    const eventsClient = sessionEvents.createSessionEventClient(eventHub.createBinding("dialogue"));
+    const presentationPublisher = eventHub.createDelegatedPublisher("web-presentation");
     const statuses = [];
     const returns = [];
     const observations = [];
@@ -160,7 +163,7 @@ async function setup(page, origin) {
       launch: { subsystemKey: "dialogue", bootstrapToken: "secret", controlProtocolVersions: [1] },
       data: {
         async acquire() {
-          return { carrier: dataPair.left, generation: 1, dataProfile: "loomrealm.renderer-data/1" };
+          return { carrier: dataPair.left, generation: 1, dataProfile: "loomrealm.renderer-data/2" };
         },
       },
       state: (() => {
@@ -168,29 +171,23 @@ async function setup(page, origin) {
         return Object.freeze({ client, terminate: () => client.terminate() });
       })(),
       events: (() => {
-        const client = sessionEvents.createSessionEventClient();
-        return Object.freeze({ client, terminate: () => client.terminate() });
+        return Object.freeze({ client: eventsClient, terminate: () => { eventsClient.terminate(); eventHub.terminate(); } });
       })(),
     });
     runtime.catch(() => {});
 
-    let inputEmit;
-    const inputSource = {
-      start(emit) {
-        inputEmit = emit;
-        emit({ kind: "availability", channel: "keyboard.event", available: true });
-        emit({ kind: "availability", channel: "gamepad.event", available: true });
-        return () => {};
-      },
-    };
     const holder = renderer.createRendererControlHolder({
       async acquire(subsystemKey, generation, dataProfile) {
-        if (subsystemKey !== "dialogue" || generation !== 1 || dataProfile !== "loomrealm.renderer-data/1") {
+        if (subsystemKey !== "dialogue" || generation !== 1 || dataProfile !== "loomrealm.renderer-data/2") {
           throw new Error("Unexpected Data authority");
         }
         return dataPair.right;
       },
-    }, inputSource);
+    }, undefined, {
+      publish(event) {
+        return presentationPublisher.publish(event.channel, event.type, event.payload, event.ownerSubsystemKey);
+      },
+    });
     const projectorFailures = [];
     const projector = new presentation.WebProjector({
       document,
@@ -214,13 +211,12 @@ async function setup(page, origin) {
       revision: 1,
       runtimes: [{ subsystemKey: "dialogue", state: "ready" }],
       stack: [{ frameId: "dialogue-frame", subsystemKey: "dialogue", lifecycle: "active", activationId: "dialogue-activation" }],
-      inputTarget: { subsystemKey: "dialogue", frameId: "dialogue-frame", activationId: "dialogue-activation" },
-      dataAuthorities: [{ subsystemKey: "dialogue", generation: 1, dataProfile: "loomrealm.renderer-data/1" }],
+      dataAuthorities: [{ subsystemKey: "dialogue", generation: 1, dataProfile: "loomrealm.renderer-data/2" }],
     };
     const publisher = rendererControl.createMainRendererControlPeer({
       carrier: rendererPair.left,
       acceptHello() {
-        return { kind: "accepted", snapshot, preparedHelloText: rendererControl.prepareRendererHelloResultV1(snapshot) };
+        return { kind: "accepted", snapshot, preparedHelloText: rendererControl.prepareRendererHelloResultV2(snapshot) };
       },
     });
     await holder.connect({ carrier: rendererPair.right, rendererControlToken: "renderer-token" });
@@ -233,7 +229,10 @@ async function setup(page, origin) {
       mainRuntime, runtime, returns, observations, renderEvents, nodeEvents, statuses, publisher, projector, detach,
       projectorFailures, waitFor,
       press(code) {
-        inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code, repeat: false } });
+        return presentationPublisher.publish("keyboard.event", "input.event", {
+          domainId: "keyboard-device", targetKey: "keyboard-device",
+          data: { action: "down", code, repeat: false },
+        });
       },
       async finish() {
         await waitFor(() => returns.length === 1, "Frame return");
@@ -254,7 +253,7 @@ async function press(page, code) {
   await page.evaluate((value) => globalThis.dialogueQualification.press(value), code);
 }
 
-test("real Chromium closes Input → Render Event → WC → reverse InputGate → Promise loop", { timeout: TIMEOUT }, async (t) => {
+test("real Chromium closes Session Event → WC → Presentation Event → Promise loop", { timeout: TIMEOUT }, async (t) => {
   const server = await fixture(t);
   const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
   t.after(() => browser.close());

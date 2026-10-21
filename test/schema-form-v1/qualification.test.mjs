@@ -114,6 +114,9 @@ async function setup(page, origin, { cancelable = true } = {}) {
     const runtimePair = foundation.createMemoryCarrierPair();
     const dataPair = foundation.createMemoryCarrierPair();
     const rendererPair = foundation.createMemoryCarrierPair();
+    const eventHub = sessionEvents.createSessionEventHub();
+    const eventsClient = sessionEvents.createSessionEventClient(eventHub.createBinding("forms"));
+    const presentationPublisher = eventHub.createDelegatedPublisher("web-presentation");
     const statuses = [];
     const returns = [];
     const observations = [];
@@ -165,7 +168,7 @@ async function setup(page, origin, { cancelable = true } = {}) {
       launch: { subsystemKey: "forms", bootstrapToken: "secret", controlProtocolVersions: [1] },
       data: {
         async acquire() {
-          return { carrier: dataPair.left, generation: 1, dataProfile: "loomrealm.renderer-data/1" };
+          return { carrier: dataPair.left, generation: 1, dataProfile: "loomrealm.renderer-data/2" };
         },
       },
       state: (() => {
@@ -173,16 +176,19 @@ async function setup(page, origin, { cancelable = true } = {}) {
         return Object.freeze({ client, terminate: () => client.terminate() });
       })(),
       events: (() => {
-        const client = sessionEvents.createSessionEventClient();
-        return Object.freeze({ client, terminate: () => client.terminate() });
+        return Object.freeze({ client: eventsClient, terminate: () => { eventsClient.terminate(); eventHub.terminate(); } });
       })(),
     });
     runtime.catch(() => {});
 
     const holder = renderer.createRendererControlHolder({
       async acquire(subsystemKey, generation, dataProfile) {
-        if (subsystemKey !== "forms" || generation !== 1 || dataProfile !== "loomrealm.renderer-data/1") throw new Error("Unexpected Data authority");
+        if (subsystemKey !== "forms" || generation !== 1 || dataProfile !== "loomrealm.renderer-data/2") throw new Error("Unexpected Data authority");
         return dataPair.right;
+      },
+    }, undefined, {
+      publish(event) {
+        return presentationPublisher.publish(event.channel, event.type, event.payload, event.ownerSubsystemKey);
       },
     });
     const projectorFailures = [];
@@ -205,13 +211,12 @@ async function setup(page, origin, { cancelable = true } = {}) {
       revision: 1,
       runtimes: [{ subsystemKey: "forms", state: "ready" }],
       stack: [{ frameId: "form-frame", subsystemKey: "forms", lifecycle: "active", activationId: "form-activation" }],
-      inputTarget: { subsystemKey: "forms", frameId: "form-frame", activationId: "form-activation" },
-      dataAuthorities: [{ subsystemKey: "forms", generation: 1, dataProfile: "loomrealm.renderer-data/1" }],
+      dataAuthorities: [{ subsystemKey: "forms", generation: 1, dataProfile: "loomrealm.renderer-data/2" }],
     };
     const publisher = rendererControl.createMainRendererControlPeer({
       carrier: rendererPair.left,
       acceptHello() {
-        return { kind: "accepted", snapshot, preparedHelloText: rendererControl.prepareRendererHelloResultV1(snapshot) };
+        return { kind: "accepted", snapshot, preparedHelloText: rendererControl.prepareRendererHelloResultV2(snapshot) };
       },
     });
     await holder.connect({ carrier: rendererPair.right, rendererControlToken: "renderer-token" });
@@ -285,7 +290,7 @@ test("real Chromium submits through the complete Schema Form authority path", { 
   assert.ok(server.requests.includes("/game-libs/schema-form/dist/browser/schema-form.browser.css"));
 });
 
-test("real Chromium user Cancel resolves cancelled through the existing input channel", { timeout: TIMEOUT }, async (t) => {
+test("real Chromium user Cancel resolves cancelled through the Session Event channel", { timeout: TIMEOUT }, async (t) => {
   const server = await fixture(t);
   const page = await browserPage(t);
   await setup(page, server.origin, { cancelable: true });
