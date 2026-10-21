@@ -19,7 +19,7 @@ Web Presentation Context
         +
 trusted custom-event publication
         +
-owner/session audience routing
+trusted broadcast=true Session publication
         +
 Session Events delivery
 ~~~
@@ -77,13 +77,15 @@ CustomEventOptions 保留对象形态。broadcast 是当前唯一字段，但不
 
 broadcast 只改变 recipient audience，不改变事件其他组成部分。
 
-## 3. Channel、type、payload、audience 职责
 
-这四个概念严格分离：
+## 3. Channel、type、payload、broadcast 职责
+
+概念必须分离：
 
 ~~~text
 Channel
     = Web Presentation event routing domain
+      （仅 broadcast=true 新路径进入 Session Events）
 
 type
     = emitCustomEvent(name, ...) 的 name
@@ -95,14 +97,15 @@ payload
         data
       }
 
-audience
-    = owner | session
-      由 options.broadcast 决定
+broadcast
+    = Web Presentation 边界上的路径选择
+      false -> 迁移期 legacy owner-only path
+      true  -> trusted Session broadcast path
 ~~~
 
 ### 3.1 固定 Channel
 
-Web Presentation custom event 使用 Framework 固定 Channel。
+broadcast=true 的 Web Presentation custom event 使用 Framework 固定 Channel。
 
 现行代码已有：
 
@@ -117,7 +120,7 @@ WEB_PRESENTATION_EVENT_CHANNEL_V1 =
 
 ### 3.2 name 不是 Channel
 
-custom-event name 是事件业务类型。
+custom-event name 是事件业务类型。对于 broadcast=true：
 
 ~~~ts
 context.emitCustomEvent(
@@ -141,34 +144,23 @@ payload = {
 
 不得把 controls.event 作为 Session Events channel。
 
-### 3.3 broadcast 不是权限标识
+### 3.3 broadcast 不成为 Session Events routing metadata
 
-broadcast=true 的含义仅为：
+broadcast=true 的含义是：进入 trusted Session broadcast path，并按现有 Session Events exact-Channel 规则投递给固定 Channel 的 matching subscriptions。
 
-~~~text
-允许当前 custom event 在当前 Session 范围内
-投递给匹配 Web Presentation Event Channel 的订阅者
-~~~
+broadcast=false / options omitted 在迁移阶段保持现行 owner-only v1 行为，不进入新的 Session Events broadcast path。
 
-它不代表：
+因此本设计不向 SessionEventHub 增加 owner/session audience，不改变 Channel-only recipient selection。
 
-- Frame activation；
-- InputTarget；
-- Runtime ownership；
-- State write permission；
-- Main control permission；
-- durable broadcast；
-- replay；
-- acknowledgement。
 
 ## 4. 逻辑路由
 
-目标路径：
+本设计新增的是 broadcast=true 路径：
 
 ~~~text
 Business Web Component
         |
-        | emitCustomEvent(name, data, options)
+        | emitCustomEvent(name, data, { broadcast:true })
         v
 WebProjector
         |
@@ -190,14 +182,13 @@ Trusted Session Host ingress
         |
         | fixed Channel
         | source = authenticated RenderNode owner
-        | audience = owner/session
         v
 Session Event routing
         |
-        +-- owner   -> owner Runtime subscriptions only
-        |
-        +-- session -> all matching Runtime subscriptions
+        +-> all matching subscriptions of that exact Channel
 ~~~
+
+broadcast=false / options omitted 的 owner-only 路径在迁移期继续使用现行实现。本设计不通过修改 SessionEventHub 来统一这两条路径。
 
 ## 5. Renderer 改动
 
@@ -266,8 +257,8 @@ emitPresentationNodeEvent
     +-- validate options/name/data
     +-- bind fixed Channel
     +-- bind source provenance
-    +-- map broadcast -> audience
-    +-- enqueue PresentationEventPublisher
+    +-- if broadcast=true: enqueue PresentationEventPublisher
+    +-- otherwise: keep current owner-only compatibility path
 ~~~
 
 最终不再：
@@ -293,7 +284,6 @@ interface PresentationEventPublication {
   readonly targetKey: string;
   readonly name: string;
   readonly data: JsonObject;
-  readonly broadcast: boolean;
 }
 
 interface RendererPresentationEventBinding {
@@ -305,39 +295,44 @@ interface RendererPresentationEventBinding {
 
 服务端必须二次验证 session / document / owner / generation，不因为 Renderer request 中带有字段就自动信任。
 
-## 7. Host / Session Events 改动
 
-### 7.1 不改变 Session Events Channel 职责
+## 7. Host / Session Events 边界
 
-Session Events 继续以 Channel 做路由域，以 type 做事件 discriminator。
+### 7.1 Session Events v1 routing 保持不变
 
-Web Presentation 增加的是 trusted publication ingress 和 audience 过滤，而不是改变 Channel 的定义。
-
-### 7.2 audience
-
-内部 audience：
-
-~~~ts
-type PresentationEventAudience =
-  | { readonly kind: "owner"; readonly subsystemKey: string }
-  | { readonly kind: "session" };
-~~~
-
-处理规则：
+Session Events 继续：
 
 ~~~text
-first:
-  select subscriptions by fixed Web Presentation Channel
-
-then:
-  owner
-    -> retain subscriptions whose binding belongs to owner subsystem
-
-  session
-    -> retain all matching subscriptions
+Channel = exact routing scope
+type    = business discriminator
+payload = business data
 ~~~
 
-audience metadata 不进入业务 payload，也不允许 WC 提供 subsystemKey。
+对于 trusted broadcast=true publication：
+
+~~~text
+Host accepts trusted Presentation publication
+    -> materialize one Session Event on fixed Channel
+    -> existing SessionEventHub exact-Channel routing
+    -> every matching subscription receives it
+~~~
+
+本设计不增加：
+
+~~~text
+PresentationEventAudience
+owner/session recipient filter
+subscription-owner filtering
+Hub-side presentation-specific routing branch
+~~~
+
+因此不会改变 Frozen Session Events v1 的 recipient semantics。
+
+### 7.2 owner-only 不在本阶段统一
+
+broadcast=false / options omitted 的 owner-only custom event 仍保持现行 Web Presentation v1/InputGate 路径，直到后续独立设计替代它。
+
+如果未来要让 owner-only 也脱离 InputGate，必须单独定义一个不破坏 Session Events v1 routing 的机制或新版本；不能通过给当前 Hub 增加 owner filter 来实现。
 
 ### 7.3 source
 
@@ -359,6 +354,8 @@ Live RenderNode
 - Renderer 获取 arbitrary SessionEventClient；
 - Renderer 创建任意 Runtime binding；
 - WC publish 到任意 Session Event Channel。
+
+这仍然扩展了现行 Session Events v1 的 publisher-origin integration semantics，因此需要单独 Integration Profile / ADR / conformance；但不修改 Hub recipient routing。
 
 ## 8. PWA
 
@@ -467,12 +464,12 @@ Main 当前命名中的 initial.input / frame initialize input 是 Frame 参数�
 ~~~text
 1. Freeze new Web Presentation custom-event Contract
 2. Implement Renderer Presentation Event publisher
-3. Implement trusted Host/Session ingress + audience
+3. Implement trusted Host/Session broadcast ingress without changing Hub routing
 4. PWA E2E
 5. Desktop E2E
 6. Implement per-device game WCs: keyboard / pointer / gamepad
 7. Migrate business consumers away from createInputListener
-8. Move owner-only custom event off InputGate
+8. Independently design owner-only replacement before removing InputGate
 9. Remove Data input family / Subsystem InputManager
 10. Remove Renderer input producer / InputGate
 11. Remove Main / Renderer Control InputTarget
@@ -485,14 +482,14 @@ Main 当前命名中的 initial.input / frame initialize input 是 Frame 参数�
 
 1. options omitted == broadcast=false。
 2. broadcast 仅接受 boolean/undefined。
-3. broadcast=false 不泄漏给其他 Subsystem。
-4. broadcast=true 可被多个匹配订阅者接收。
-5. 两种模式 Channel 相同。
-6. 两种模式 type 都来自 name。
+3. broadcast=false/options omitted 保持现行 owner-only compatibility behavior。
+4. broadcast=true 可被固定 Channel 的多个匹配订阅者接收。
+5. SessionEventHub 不增加 owner/session audience filter。
+6. broadcast=true 的 type 来自 name。
 7. name 永远不被解释成 Channel。
 8. business code 无法覆盖 Channel/source/session/owner/domain/target。
 9. stale Context 仍满足 currentness-first。
-10. InputTarget 不参与新路由。
+10. InputTarget 不参与 broadcast=true 新路由；legacy owner-only path 的现行依赖不在本阶段重写。
 11. Session restart / generation replacement 不串发旧消息。
 12. PWA/Desktop 实现具有相同 logical observables。
 13. 删除 User Input 后 Render/Viewport/Frame/Activation/Session Events 仍独立通过各自 Qualification。
@@ -503,7 +500,6 @@ Main 当前命名中的 initial.input / frame initialize input 是 Frame 参数�
 - 固定 Channel 常量迁移到哪个 package/contract ownership。
 - event payload envelope 是否继续保持 domainId/targetKey/name/data 结构，或在 SessionEvent.type=name 后从 payload 移除 name。
 - delegated owner publication 对 Session Events v1 source 语义如何版本化描述。
-- owner audience filter 放在 Hub trusted ingress 还是独立 Router。
 - publication queue/backpressure/diagnostic 的正式限制。
 - User Input v1、Renderer Data Profile、Renderer Control 的版本升级与废止节奏。
 
@@ -524,7 +520,7 @@ game-libs
     optional controls mapper / aggregator
 ~~~
 
-emitCustomEvent 的 options.broadcast 只控制 audience；固定 Channel 继续履行 Web Presentation routing-domain 职责；name 继续履行业务 event-type 职责。
+emitCustomEvent 的 options.broadcast 在迁移期选择 legacy owner-only path 或新的 trusted Session broadcast path；固定 Channel 只服务 broadcast=true 的 Web Presentation routing domain，name 继续履行业务 event-type 职责。
 
 迁移完成后，LR Framework 不再拥有 User Input 领域协议。
 
