@@ -129,7 +129,7 @@
   }
 
   function validDuration(value) {
-    return value === 250 || value === 400;
+    return value === 250 || value === 500;
   }
 
   function validCameraMotion(value) {
@@ -146,7 +146,7 @@
     if (value.kind === "jump") {
       if (!exactObject(value, ["id", "durationMs", "fromY", "fromScreenX", "fromScreenY", "kind", "peakPx"])) return false;
       return Number.isSafeInteger(value.id) && value.id > 0
-        && value.durationMs === 400
+        && value.durationMs === 500
         && Number.isSafeInteger(value.fromY) && value.fromY >= 0
         && Number.isFinite(value.fromScreenX)
         && Number.isFinite(value.fromScreenY)
@@ -710,8 +710,10 @@
       for (const entry of spriteEntries) {
         if (entry.data.sceneEpoch !== view.data.sceneEpoch || entry.data.visualEpoch !== view.data.visualEpoch || entry.data.bridgeLevel !== view.data.bridgeLevel) return;
       }
+      // Nodes arrive one at a time. A shared epoch whose motion is not paired yet
+      // must wait for the sibling update instead of failing the presentation.
       if (player && ((view.data.cameraMotion === null) !== (player.data.motion === null) || view.data.motionId !== player.data.motionId || view.data.bridgeLevel !== player.data.bridgeLevel)) {
-        throw new TypeError("Invalid map motion identity");
+        return;
       }
       const geometry = presentationGeometry(view.data);
       this._state = "PREPARING";

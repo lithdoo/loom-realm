@@ -117,17 +117,14 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
           return { bytes: new Uint8Array([1]), mime: "image/png", contentVersion: "v-image" };
         },
       },
-      createInputListener({ channels }) {
+      events: { async subscribe(channels, listener) {
         assert.deepEqual([...channels], ["keyboard.event", "keyboard.state"]);
-        return {
-          on(channel, handler) {
-            handlers.set(channel, handler);
-            return () => {};
-          },
-          setChannels() {},
-          close() {},
-        };
-      },
+        for (const channel of channels) handlers.set(channel, (data) => listener({
+          channel, type: channel.endsWith(".state") ? "input.state" : "input.event",
+          payload: { domainId: "map", targetKey: "map-input-keyboard", data }, source: { subsystemKey: "map" },
+        }));
+        return { closed: new Promise(() => {}), close() { handlers.clear(); } };
+      } },
       createRenderDomain(initial) {
         states.push(structuredClone(initial));
         return {

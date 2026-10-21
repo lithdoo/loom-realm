@@ -1,4 +1,5 @@
-import { cancelled, failed, type Frame, type FrameOutcome, type InputListener, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SubsystemScope } from "@loomrealm/subsystem";
+import { cancelled, failed, type Frame, type FrameOutcome, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SessionEvent, type SessionEventSubscription, type SubsystemScope } from "@loomrealm/subsystem";
+import { createFreshDeviceStateTracker, type FreshDeviceStateTracker, type JsonObject } from "@loomrealm-game/common-controls";
 import {
   assertProjectable,
   boundsContain,
@@ -367,12 +368,18 @@ function renderState(facts: RenderFacts): RenderDomainState {
         data: npcPayload(npc, facts, camera.cameraX, camera.cameraY),
         children: [],
       }))],
+    }, {
+      key: "map-input-keyboard", tag: "game-keyboard-input", attrs: {}, data: {}, children: [],
+    }, {
+      key: "map-input-pointer", tag: "game-pointer-input", attrs: {}, data: {}, children: [],
+    }, {
+      key: "map-input-gamepad", tag: "game-gamepad-input", attrs: {}, data: {}, children: [],
     }],
   };
 }
 
 function assertRenderCapacity(state: RenderDomainState, npcOwned: boolean): void {
-  const nodeCount = 2 + (state.roots[0]?.children.length ?? 0) - 1;
+  const nodeCount = 4 + (state.roots[0]?.children.length ?? 0);
   if (nodeCount > 16_384) throw new RPGMapError(npcOwned ? "MAP_NPC_INVALID" : "MAP_CONTENT_FAILED", "Render node limit exceeded");
   const bytes = new TextEncoder().encode(JSON.stringify(state)).byteLength;
   if (bytes > 1_000_000) throw new RPGMapError(npcOwned ? "MAP_NPC_INVALID" : "MAP_CONTENT_FAILED", "Render message limit exceeded");
@@ -476,7 +483,8 @@ export class RPGMapBuilder {
 }
 
 async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBridge): Promise<FrameOutcome> {
-    let listener: InputListener | undefined;
+    let inputSubscription: SessionEventSubscription | undefined;
+    let keyboardState: FreshDeviceStateTracker | undefined;
     let domain: RenderDomain | undefined;
     let stepTimer: ReturnType<typeof setTimeout> | null = null;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -493,7 +501,8 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         clearTimeout(resizeTimer);
         resizeTimer = null;
       }
-      listener?.close();
+      inputSubscription?.close();
+      keyboardState?.close();
       if (stepTimer !== null) {
         clearTimeout(stepTimer);
         stepTimer = null;
@@ -1186,8 +1195,8 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       lastStarted = null;
       eventBusy = false;
       publishSnapshot(null);
-      listener = scope.createInputListener({ frame, channels: ["keyboard.event", "keyboard.state"] });
-      listener.on("keyboard.event", (event) => {
+      const receiveKeyboardEvent = (event: Record<string, unknown>) => {
+        if (typeof event.code !== "string") return;
         const movement = directionForCode(event.code);
         if (!movement) return;
         if (event.action === "down") {
@@ -1200,8 +1209,8 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         if (event.action !== "up") return;
         heldDirections = heldDirections.filter((item) => item !== movement.direction);
         if (!operationBusy() && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
-      });
-      listener.on("keyboard.state", (state) => {
+      };
+      const receiveKeyboardState = (state: Record<string, unknown>) => {
         const down = new Set(Array.isArray(state?.down) ? state.down : []);
         heldDirections = heldDirections.filter((item) => down.has(codeByDirection[item]));
         for (const code of fallbackCodes) {
@@ -1211,6 +1220,19 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
           heldDirections.push(movement.direction);
         }
         if (!operationBusy() && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
+      };
+      keyboardState = createFreshDeviceStateTracker("keyboard.state", (payload) => receiveKeyboardState(payload));
+      inputSubscription = await scope.events.subscribe(["keyboard.event", "keyboard.state"], (event: SessionEvent) => {
+        if (event.type !== (event.channel === "keyboard.state" ? "input.state" : "input.event")) return;
+        const envelope = event.payload;
+        if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope)) return;
+        const record = envelope as Readonly<Record<string, unknown>>;
+        const targetKey = record.targetKey;
+        const data = record.data;
+        if (targetKey !== "map-input-keyboard" || data === null || typeof data !== "object" || Array.isArray(data)) return;
+        const deviceData = data as JsonObject;
+        if (event.channel === "keyboard.state") keyboardState?.accept(deviceData);
+        else receiveKeyboardEvent(deviceData);
       });
       const outcome = await Promise.race([
         terminal,

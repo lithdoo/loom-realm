@@ -82,6 +82,7 @@ const directories = [
   "[struct]Tileset/",
   "[resource]Graphics/Tilesets/",
   "[resource]Graphics/Characters/",
+  "[resource]Presentation/controls/",
   "[resource]Presentation/map/",
   "[resource]Presentation/essentials/",
 ];
@@ -100,6 +101,7 @@ await Promise.all([
   writeFile(new URL("[resource]Graphics/Characters/m14_player.png", fsdb), await readFile(new URL("resources/m14_player.png", output))),
   writeFile(new URL("[resource]Graphics/Characters/m14_npc.png", fsdb), await readFile(new URL("resources/m14_npc.png", output))),
   writeFile(new URL("[resource]Presentation/.desc.meta", fsdb), "M15 trusted presentation resources.\n"),
+  writeFile(new URL("[resource]Presentation/controls/device-input.browser.js.js", fsdb), await readFile(new URL("../../game-libs/game-common-controls/dist/browser/device-input.browser.js", installation))),
   writeFile(new URL("[resource]Presentation/map/map.css.css", fsdb), await readFile(new URL("../../game-libs/map/browser/map.css", installation))),
   writeFile(new URL("[resource]Presentation/map/map.browser.js.js", fsdb), await readFile(new URL("../../game-libs/map/browser/map.browser.js", installation))),
   writeFile(new URL("[resource]Presentation/essentials/page.css.css", fsdb), await readFile(new URL("presentation.css", installation))),

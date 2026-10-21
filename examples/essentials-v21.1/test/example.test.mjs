@@ -22,6 +22,7 @@ test("checked-in presentation config resolves map artifacts only through package
     { namespace: "Presentation", key: "essentials/page.css", mime: "text/css" },
   ]);
   assert.deepEqual(result.prepared.scripts.map(({ namespace, key, mime }) => ({ namespace, key, mime })), [
+    { namespace: "Presentation", key: "controls/device-input.browser.js", mime: "text/javascript" },
     { namespace: "Presentation", key: "map/map.browser.js", mime: "text/javascript" },
   ]);
 });

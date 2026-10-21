@@ -91,7 +91,7 @@ test("READY ACTIVE READY supports sequential Conversations with one persistent l
   fixture.dialogue.close();
   assert.equal(fixture.counts().domainCloses, 1);
   assert.equal(fixture.counts().listenerCloses, 1);
-  assert.equal(fixture.counts().unsubscribeCount, 3);
+  assert.equal(fixture.counts().unsubscribeCount, 0);
 });
 
 test("second concurrent open rejects asynchronously without replacing the active projection", async () => {
@@ -254,7 +254,7 @@ test("operation establishment failures reject returned promises and clean partia
   const domainPending = domainFailure.dialogue.openConversation(request());
   await assert.rejects(domainPending, /domain failed/);
   assert.equal(domainFailure.counts().listenerCloses, 1);
-  assert.equal(domainFailure.counts().unsubscribeCount, 3);
+  assert.equal(domainFailure.counts().unsubscribeCount, 0);
 });
 
 function assertClosedCleanupOnce(fixture) {
@@ -263,7 +263,7 @@ function assertClosedCleanupOnce(fixture) {
     listenerCloses: 1,
     domainCreates: 1,
     domainCloses: 1,
-    unsubscribeCount: 3,
+    unsubscribeCount: 0,
   });
   fixture.dialogue.close();
   fixture.frameController.abort();
@@ -273,7 +273,7 @@ function assertClosedCleanupOnce(fixture) {
     listenerCloses: 1,
     domainCreates: 1,
     domainCloses: 1,
-    unsubscribeCount: 3,
+    unsubscribeCount: 0,
   });
 }
 

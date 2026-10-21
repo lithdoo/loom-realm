@@ -16,10 +16,12 @@
     "dist/"
   ],
   "scripts": {
+    "prebuild": "npm run build -w @loomrealm-game/common-controls",
     "build": "tsc -p tsconfig.json && node scripts/copy-browser.mjs",
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@loomrealm-game/common-controls": "0.1.0-alpha.0",
     "@loomrealm/subsystem": "0.1.0-alpha.0",
     "@loomrealm-game/tile-presentation": "0.1.0-alpha.0"
   },
