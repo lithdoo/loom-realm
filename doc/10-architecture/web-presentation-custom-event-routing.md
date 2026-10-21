@@ -127,9 +127,9 @@ WEB_PRESENTATION_EVENT_CHANNEL_V1 =
   "x.loomrealm.web-presentation.event";
 ~~~
 
-为保持既有通用 custom-event 广播调用的默认行为，broadcast=true 且未提供 options.channel 时仍使用该默认 Channel。调用方也可以通过 options.channel 指定实际的 Session Events 路由 Channel，例如 User Input 迁移所需的 \`keyboard.state\` 或 \`keyboard.event\`。
+为保持既有通用 custom-event 广播调用的默认行为，broadcast=true 且未提供 options.channel 时仍使用该默认 Channel。调用方也可以通过 options.channel 指定实际的 Session Events 路由 Channel，例如 User Input 迁移所需的 keyboard.state 或 keyboard.event。
 
-显式 channel 必须满足 Session Events v1 的 Channel 字符串约束，并使用精确匹配语义。它决定该事件会被哪些匹配订阅者接收，但不授予额外的 Session、Runtime、Frame 或状态写入权限。channel 仅可与 \`broadcast: true\` 一起使用；owner-only 旧路径若收到 channel 字段，必须同步抛出 TypeError。
+显式 channel 必须满足 Session Events v1 的 Channel 字符串约束，并使用精确匹配语义。它决定该事件会被哪些匹配订阅者接收，但不授予额外的 Session、Runtime、Frame 或状态写入权限。channel 仅可与 broadcast: true 一起使用；owner-only 旧路径若收到 channel 字段，必须同步抛出 TypeError。
 
 固定 Channel 仍由 Framework 提供为默认值，但不再是所有 broadcast publication 的强制 Channel。
 
@@ -167,7 +167,7 @@ payload = {
 }
 ~~~
 
-不得把 controls.event 作为 Session Events channel。
+在此示例中，controls.event 是 SessionEvent.type；SessionEvent.channel 只能来自 options.channel，或在省略时使用默认 Channel，不能从 name 推导。
 
 ### 3.3 broadcast 不成为 Session Events routing metadata
 
