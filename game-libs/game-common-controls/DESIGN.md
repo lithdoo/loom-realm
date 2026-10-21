@@ -977,7 +977,7 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 
 ### User Input v1-compatible device migration
 
-1. 六个标准 channel 名完全一致。
+1. 六个标准 channel 名完全一致，并作为实际 SessionEvent.channel 精确路由。
 2. KeyboardCodeV1 集合一致。
 3. Keyboard State/Event payload shape 与 repeat/排序语义一致。
 4. Pointer kind/button/sample、坐标缩放、32 pointer limit、cancel 和事件顺序一致。
@@ -989,7 +989,7 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 10. unusable/disconnect 时产生对应 neutral State。
 11. non-neutral bounded State refresh 可让 late subscriber 收敛。
 12. stale timeout 可在最终 neutral packet 丢失时退回 neutral。
-13. compatibility consumer 可按 keyboard.state 等六个 channel 分发到原风格 handler。
+13. 订阅 keyboard.state 的消费者只收到 keyboard.state；其他五个标准 Channel 同理，兼容层将 event.channel 与 event.payload.data 分发到原风格 handler。
 14. 新旧路径并行迁移期不得让同一物理输入重复触发业务。
 
 ### User Input 删除回归
@@ -1016,7 +1016,7 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 ## 14. 待冻结事项
 
 - 新 WebPresentationContext shape 的正式版本号。
-- 固定 Web Presentation Event Channel 常量的新 ownership。
+- 默认 Web Presentation Event Channel 常量的新 ownership。
 - 显式 options.channel 是否需要 Host-side capability allowlist；Session Events v1 本身不定义 Channel registry。
 - LR User Input 退役时，v1 设备 types/constants/validators 从 @loomrealm/data 原子迁往 game-common-controls 的版本切换点。
 - non-neutral State refresh 与 stale timeout 的 Qualification 数值。
@@ -1051,8 +1051,17 @@ InputStateV1 / InputEventV1
 新：
 Web Presentation custom event
   name = input.state | input.event
-  data = { channel, payload }
-  options.broadcast = true
+  data = device payload
+  options = {
+    broadcast: true,
+    channel: keyboard.state | keyboard.event
+             | pointer.state  | pointer.event
+             | gamepad.state  | gamepad.event
+  }
+
+SessionEvent.channel = options.channel
+SessionEvent.type    = name
+SessionEvent.payload = { domainId, targetKey, data }
 ~~~
 
 设备采集实现优先从现有 browser-input-source.ts 机械拆分，而不是重写。Input Interest、InputTarget、InputGate、Frame/Activation input lease 不迁移；input.reset 与 availability 也不机械变成新的业务事件。
