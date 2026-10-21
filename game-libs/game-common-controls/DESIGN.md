@@ -3,7 +3,7 @@
 > 状态：**Proposed / 设计方案，尚未实现、尚未冻结、尚未 Qualification**  
 > 位置：game-libs/game-common-controls/  
 > 目标包：**@loomrealm-game/common-controls**  
-> 目标组件：**<game-common-controls>**  
+> 目标组件：**`<game-common-controls>`**  
 > 设计核心：**用户输入属于 game-libs 业务协议，而非 LoomRealm Framework 协议。**  
 > 相关现行契约：[Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md)、[User Input v1](../../doc/15-contracts/user-input-v1.md)、[Session Events v1](../../doc/15-contracts/session-events-v1.md)、[Render Update v1](../../doc/15-contracts/render-update-v1.md)、[ADR 0031](../../doc/decisions/0031-business-owned-web-component-projection.md)
 
@@ -19,7 +19,7 @@
 
 1. **输入协议归业务层所有**：输入设备采集、设备标准化、状态快照、瞬时事件、重置、订阅消费规则、映射与焦点/优先级策略，在 common-controls 或其业务协作模块定义和演进。
 2. **LM 不理解输入语义**：跨 Subsystem 路由只校验通用事件、来源、授权、大小、生命周期和流控；不得解析或特判 keyboard/gamepad/pointer、pressed、confirm、deadzone、Input Interest 等字段。
-3. **Web Component 是实际生产者**：通过 Web Projector 挂载的 <game-common-controls> 直接采集浏览器设备事件，在组件内运行输入协议状态机，再调用注入的 WebPresentationContext.emitCustomEvent(...) 发布。
+3. **Web Component 是实际生产者**：通过 Web Projector 挂载的 `<game-common-controls>` 直接采集浏览器设备事件，在组件内运行输入协议状态机，再调用注入的 WebPresentationContext.emitCustomEvent(...) 发布。
 4. **广播是通用基础能力**：为 emitCustomEvent 增加显式的跨 Subsystem 广播模式；复用现有 Session Events 通路/语义，不另造 LM 输入专属 IPC 或第二个事件总线。
 5. **广播不授予执行权**：观察者可能不止一个，但事件可见性不等于 Frame、Activation、Main 控制权或写状态权限；具体业务谁消费、谁执行由业务层决定。
 6. **兼容地迁移，而不是永久双轨**：旧 User Input v1 作为迁移来源及兼容对象，不是新组件长期必须依赖的底层。达到覆盖和 Qualification 后，再独立决策废止其专属 Framework 协议/生产者。
@@ -505,6 +505,6 @@ Bridge 必须用平台通用接口表达所需能力，并由 Desktop/PWA compos
 
 **最终目标是“LM 通用事件承载 + 业务 WC 完整输入协议”，而不是“LM User Input v1 + 额外广播适配器”。**
 
-LM 负责保真地承载/鉴权/路由 Web Presentation 事件，不关心它们是不是游戏输入；game-common-controls 才拥有完整用户输入领域逻辑和协议；Subystem 消费方只依赖该业务协议及 LM 已有的通用 Session Events 能力。待新链路功能和跨平台 Qualification 完成后，旧 LM 内建 User Input 专属设施才进入有治理的退役阶段。
+LM 负责保真地承载/鉴权/路由 Web Presentation 事件，不关心它们是不是游戏输入；game-common-controls 才拥有完整用户输入领域逻辑和协议；Subsystem 消费方只依赖该业务协议及 LM 已有的通用 Session Events 能力。待新链路功能和跨平台 Qualification 完成后，旧 LM 内建 User Input 专属设施才进入有治理的退役阶段。
 
 本文仍为 Proposed；任何尚未更新的 frozen Contract、尚未实现的 Bridge、尚未执行的 Qualification 都不得被写作已完成事实。
