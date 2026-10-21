@@ -46,6 +46,11 @@ User Input 成为 game-libs / game application 的业务协议。Presentation �
 
 ~~~ts
 interface CustomEventOptions {
+  /**
+   * Exact Session Events routing channel for broadcast publication.
+   * Omitted means WEB_PRESENTATION_EVENT_CHANNEL_V1.
+   */
+  readonly channel?: string;
   readonly broadcast?: boolean;
 }
 
@@ -64,18 +69,26 @@ interface WebPresentationContext {
 
 ~~~text
 options omitted
-    => broadcast=false
+    => broadcast=false; legacy owner-only path
 
-broadcast=false
+{ broadcast: false }
     => owner-only
 
-broadcast=true
-    => Session-scope broadcast
+{ broadcast: true }
+    => Session-scope broadcast on the default
+       WEB_PRESENTATION_EVENT_CHANNEL_V1
+
+{ broadcast: true, channel: "keyboard.state" }
+    => Session-scope broadcast on exact channel
+       "keyboard.state"
+
+channel without broadcast=true
+    => invalid options; synchronously throw TypeError
 ~~~
 
-CustomEventOptions 保留对象形态。broadcast 是当前唯一字段，但不是把整个第三参数设计成 boolean；未来可以在 options 中增加新的正交能力。
+CustomEventOptions 保留对象形态。channel 指定 broadcast publication 的实际路由身份，broadcast 选择发布路径 / recipient scope；两者职责正交。未来仍可在 options 中增加新的正交能力，而无需再次改变函数参数结构。
 
-broadcast 只选择 Web Presentation publication path / recipient scope，不改变事件其他组成部分。
+broadcast 选择 Web Presentation publication path / recipient scope。对于 broadcast=true，options.channel（若提供）决定真实的 SessionEvent.channel；省略时使用默认 WEB_PRESENTATION_EVENT_CHANNEL_V1。name 仍然是 SessionEvent.type，channel 不会被塞进 payload。
 
 
 ## 3. Channel、type、payload、broadcast 职责
@@ -84,8 +97,8 @@ broadcast 只选择 Web Presentation publication path / recipient scope，不改
 
 ~~~text
 Channel
-    = Web Presentation event routing domain
-      （仅 broadcast=true 新路径进入 Session Events）
+    = options.channel（仅 broadcast=true 时有效）
+      若省略，则使用 WEB_PRESENTATION_EVENT_CHANNEL_V1
 
 type
     = emitCustomEvent(name, ...) 的 name
@@ -103,20 +116,22 @@ broadcast
       true  -> trusted Session broadcast path
 ~~~
 
-### 3.1 固定 Channel
+显式 Channel 是真实的 Session Events 路由身份，而不是 payload 元数据。Session Events v1 仍按 Channel 精确匹配；不支持 wildcard、prefix 或隐式父子匹配。
 
-broadcast=true 的 Web Presentation custom event 使用 Framework 固定 Channel。
+### 3.1 默认 Channel 与显式路由 Channel
 
-现行代码已有：
+现行代码已有默认 Channel：
 
 ~~~ts
 WEB_PRESENTATION_EVENT_CHANNEL_V1 =
   "x.loomrealm.web-presentation.event";
 ~~~
 
-目标设计保留该 Channel 的职能，但把其 ownership 从 User Input custom event 迁移到 Web Presentation / generic event infrastructure。
+为保持既有通用 custom-event 广播调用的默认行为，broadcast=true 且未提供 options.channel 时仍使用该默认 Channel。调用方也可以通过 options.channel 指定实际的 Session Events 路由 Channel，例如 User Input 迁移所需的 keyboard.state 或 keyboard.event。
 
-业务代码不得通过 emitCustomEvent options 设置或修改 Channel。
+显式 channel 必须满足 Session Events v1 的 Channel 字符串约束，并使用精确匹配语义。它决定该事件会被哪些匹配订阅者接收，但不授予额外的 Session、Runtime、Frame 或状态写入权限。channel 仅可与 broadcast: true 一起使用；owner-only 旧路径若收到 channel 字段，必须同步抛出 TypeError。
+
+固定 Channel 仍由 Framework 提供为默认值，但不再是所有 broadcast publication 的强制 Channel。
 
 ### 3.2 name 不是 Channel
 
@@ -134,19 +149,29 @@ context.emitCustomEvent(
 
 ~~~text
 channel = x.loomrealm.web-presentation.event
+          // options.channel omitted: default route
 type    = controls.event
 payload = {
   domainId,
   targetKey,
   data: { action: confirm }
 }
+
+For device input:
+channel = keyboard.state
+type    = input.state
+payload = {
+  domainId,
+  targetKey,
+  data: { down: ["KeyW"] }
+}
 ~~~
 
-不得把 controls.event 作为 Session Events channel。
+在此示例中，controls.event 是 SessionEvent.type；SessionEvent.channel 只能来自 options.channel，或在省略时使用默认 Channel，不能从 name 推导。
 
 ### 3.3 broadcast 不成为 Session Events routing metadata
 
-broadcast=true 的含义是：进入 trusted Session broadcast path，并按现有 Session Events exact-Channel 规则投递给固定 Channel 的 matching subscriptions。
+broadcast=true 的含义是：进入 trusted Session broadcast path，并按现有 Session Events exact-Channel 规则投递给 options.channel 指定的 Channel；若未指定，则投递到默认固定 Channel 的 matching subscriptions。
 
 broadcast=false / options omitted 在迁移阶段保持现行 owner-only v1 行为，不进入新的 Session Events broadcast path。
 
@@ -180,7 +205,7 @@ Platform Presentation Event Binding
         v
 Trusted Session Host ingress
         |
-        | fixed Channel
+        | resolved Channel (options.channel or default)
         | source = authenticated RenderNode owner
         v
 Session Event routing
@@ -255,7 +280,7 @@ emitPresentationNodeEvent
     |
     +-- validate current RenderNode
     +-- validate options/name/data
-    +-- bind fixed Channel
+    +-- resolve options.channel or default Channel
     +-- bind source provenance
     +-- if broadcast=true: enqueue PresentationEventPublisher
     +-- otherwise: keep current owner-only compatibility path
@@ -312,7 +337,7 @@ payload = business data
 
 ~~~text
 Host accepts trusted Presentation publication
-    -> materialize one Session Event on fixed Channel
+    -> materialize one Session Event on the resolved exact Channel
     -> existing SessionEventHub exact-Channel routing
     -> every matching subscription receives it
 ~~~
@@ -483,21 +508,22 @@ Main 当前命名中的 initial.input / frame initialize input 是 Frame 参数�
 1. options omitted == broadcast=false。
 2. broadcast 仅接受 boolean/undefined。
 3. broadcast=false/options omitted 保持现行 owner-only compatibility behavior。
-4. broadcast=true 可被固定 Channel 的多个匹配订阅者接收。
+4. broadcast=true 在 options.channel 指定的精确 Channel（或默认 Channel）上投递给匹配订阅者。
 5. SessionEventHub 不增加 owner/session audience filter。
 6. broadcast=true 的 type 来自 name。
 7. name 永远不被解释成 Channel。
-8. business code 无法覆盖 Channel/source/session/owner/domain/target。
-9. stale Context 仍满足 currentness-first。
-10. InputTarget 不参与 broadcast=true 新路由；legacy owner-only path 的现行依赖不在本阶段重写。
-11. Session restart / generation replacement 不串发旧消息。
-12. PWA/Desktop 实现具有相同 logical observables。
-13. 删除 User Input 后 Render/Viewport/Frame/Activation/Session Events 仍独立通过各自 Qualification。
+8. business code 可通过 options.channel 选择实际路由 Channel；source/session/owner/domain/target 始终由可信 Framework 绑定，不能由业务 Payload 伪造。
+9. 订阅 keyboard.state 只收到 keyboard.state；订阅 pointer.state 不收到 keyboard.state；event.type 不参与 Hub 路由过滤。
+10. stale Context 仍满足 currentness-first。
+11. InputTarget 不参与 broadcast=true 新路由；legacy owner-only path 的现行依赖不在本阶段重写。
+12. Session restart / generation replacement 不串发旧消息。
+13. PWA/Desktop 实现具有相同 logical observables。
+14. 删除 User Input 后 Render/Viewport/Frame/Activation/Session Events 仍独立通过各自 Qualification。
 
 ## 13. 未决事项
 
 - 新 Context shape 的正式版本号。
-- 固定 Channel 常量迁移到哪个 package/contract ownership。
+- 默认 Web Presentation Channel 常量迁移到哪个 package/contract ownership；显式 channel 的允许范围是否需要更窄的 Host-side capability policy。
 - event payload envelope 是否继续保持 domainId/targetKey/name/data 结构，或在 SessionEvent.type=name 后从 payload 移除 name。
 - delegated owner publication 对 Session Events v1 source 语义如何版本化描述。
 - publication queue/backpressure/diagnostic 的正式限制。
@@ -520,7 +546,7 @@ game-libs
     optional controls mapper / aggregator
 ~~~
 
-emitCustomEvent 的 options.broadcast 在迁移期选择 legacy owner-only path 或新的 trusted Session broadcast path；固定 Channel 只服务 broadcast=true 的 Web Presentation routing domain，name 继续履行业务 event-type 职责。
+emitCustomEvent 的 options.broadcast 在迁移期选择 legacy owner-only path 或新的 trusted Session broadcast path；broadcast=true 时 options.channel 指定真实的 SessionEvent.channel，省略则使用默认 Web Presentation Channel，name 继续履行业务 event-type 职责。
 
 迁移完成后，LR Framework 不再拥有 User Input 领域协议。
 
