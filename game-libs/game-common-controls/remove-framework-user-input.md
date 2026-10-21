@@ -1,6 +1,6 @@
 # 从 LoomRealm 框架移除 User Input
 
-> 状态：**Proposed / 尚未实现、尚未冻结、尚未 Qualification**  
+> 状态：**Implemented / Qualified（2026-10-21）**
 > 位置：`game-libs/game-common-controls/remove-framework-user-input.md`  
 > 前置：[设备输入 Web Components](./device-input-components.md)、[emitCustomEvent 扩展](./emit-custom-event.md)  
 > 现行落点：`packages/renderer`、`packages/data`、`packages/subsystem`、`packages/main`、`packages/renderer-control`、`apps/desktop`、`apps/pwa`
