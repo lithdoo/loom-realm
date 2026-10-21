@@ -36,6 +36,16 @@ export interface SessionEventClient {
   ): Promise<SessionEventSubscription>;
 }
 
+/** Host-only delegated publisher used for trusted non-Runtime integrations. */
+export interface SessionEventDelegatedPublisher {
+  publish(
+    channel: string,
+    type: string,
+    payload: JsonValue,
+    targetSubsystemKey?: string,
+  ): Promise<void>;
+}
+
 export interface SessionEventBindingPublishDispatch {
   readonly dispatched: Promise<void>;
   readonly result: Promise<void>;

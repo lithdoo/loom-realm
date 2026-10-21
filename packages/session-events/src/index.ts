@@ -9,6 +9,7 @@ export type {
   SessionEventBindingPublishDispatch,
   SessionEventBindingTerminalReason,
   SessionEventClient,
+  SessionEventDelegatedPublisher,
   SessionEventListener,
   SessionEventPhysicalBinding,
   SessionEventSubscription,

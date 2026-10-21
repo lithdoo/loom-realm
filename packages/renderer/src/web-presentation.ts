@@ -22,7 +22,9 @@ export {
   type RenderContextReceiver,
   type RenderDataReceiver,
   type RenderEventReceiver,
+  type CustomEventOptions,
   type WebPresentationRenderEvent,
   type WebPresentationContext,
   type WebProjectorOptions,
 } from "./internal/web-projector.js";
+export { WEB_PRESENTATION_EVENT_CHANNEL_V2 } from "./presentation-event.js";

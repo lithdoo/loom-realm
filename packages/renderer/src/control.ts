@@ -4,6 +4,7 @@ import {
   validateInputPayloadV1,
   WEB_PRESENTATION_EVENT_CHANNEL_V1,
   type RendererDataPeer,
+  type InputEventChannelV1,
   type InputEventV1,
   type RenderEventV1,
 } from "@loomrealm/data";
@@ -15,6 +16,7 @@ import {
   type RendererPeerConnectOptions,
   type RendererPeerConnectOutcome,
 } from "@loomrealm/renderer-control";
+import { utf8ByteLength, type JsonValue } from "@loomrealm/wire";
 import { RendererInputGate } from "./internal/input-gate.js";
 import { RendererRenderStore } from "./internal/render-store.js";
 import { renderQualification } from "./internal/render-qualification.js";
@@ -29,6 +31,11 @@ import {
 import type { RendererInputSource, RendererInputSourceChange } from "./input.js";
 import type { RendererViewportLogicalSample, RendererViewportSource } from "./viewport.js";
 import { RendererViewportPublisher } from "./internal/viewport-publisher.js";
+import {
+  WEB_PRESENTATION_EVENT_CHANNEL_V2,
+  type PresentationEventPublication,
+  type RendererPresentationEventBinding,
+} from "./presentation-event.js";
 
 export interface RendererControlCurrent {
   readonly peer: RendererControlPeer;
@@ -70,13 +77,25 @@ interface RendererDataSlot {
   render: RendererRenderStore;
 }
 
-interface StagedPresentationInput {
-  readonly subsystemKey: string;
-  readonly payload: InputEventV1["payload"];
+type JsonObject = Readonly<Record<string, JsonValue>>;
+
+type AcceptedPresentationEvent =
+  | { readonly kind: "publication"; readonly publication: PresentationEventPublication }
+  | {
+      readonly kind: "legacy-owner";
+      readonly subsystemKey: string;
+      readonly channel: InputEventChannelV1;
+      readonly payload: InputEventV1["payload"];
+    };
+
+interface QueuedPresentationEvent {
+  readonly epoch: number;
+  readonly event: AcceptedPresentationEvent;
 }
 
 const acceptedDataMessage = Object.freeze({ kind: "accepted" } as const);
 const MAX_STAGED_PRESENTATION_INPUTS = 256;
+const MAX_PRESENTATION_PUBLICATIONS = 256;
 
 function sameIdentity(
   left: DesiredDataIdentity | null,
@@ -101,10 +120,21 @@ function bestEffortCloseCarrier(value: unknown): void {
 }
 
 function validatePresentationEventName(value: unknown): string {
-  if (typeof value !== "string") throw new TypeError("Invalid Web Presentation custom event name");
+  return validatePresentationText(value, 128, "name");
+}
+
+function validatePresentationChannel(value: unknown): string {
+  return validatePresentationText(value, 256, "channel");
+}
+
+function validatePresentationText(value: unknown, limit: number, label: string): string {
+  if (typeof value !== "string") throw new TypeError(`Invalid Web Presentation custom event ${label}`);
   let bytes = 0;
   for (let index = 0; index < value.length; index += 1) {
     const codeUnit = value.charCodeAt(index);
+    if (codeUnit <= 0x1f || codeUnit === 0x7f) {
+      throw new TypeError(`Invalid Web Presentation custom event ${label}`);
+    }
     if (codeUnit <= 0x7f) {
       bytes += 1;
     } else if (codeUnit <= 0x7ff) {
@@ -112,18 +142,98 @@ function validatePresentationEventName(value: unknown): string {
     } else if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
       if (!(next >= 0xdc00 && next <= 0xdfff)) {
-        throw new TypeError("Invalid Web Presentation custom event name");
+        throw new TypeError(`Invalid Web Presentation custom event ${label}`);
       }
       bytes += 4;
       index += 1;
     } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
-      throw new TypeError("Invalid Web Presentation custom event name");
+      throw new TypeError(`Invalid Web Presentation custom event ${label}`);
     } else {
       bytes += 3;
     }
   }
-  if (bytes < 1 || bytes > 128) throw new TypeError("Invalid Web Presentation custom event name");
+  if (bytes < 1 || bytes > limit) throw new TypeError(`Invalid Web Presentation custom event ${label}`);
   return value;
+}
+
+function validatePresentationOptions(value: unknown): { readonly broadcast: boolean; readonly channel: string } {
+  if (value === undefined) {
+    return Object.freeze({ broadcast: false, channel: WEB_PRESENTATION_EVENT_CHANNEL_V2 });
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Invalid Web Presentation custom event options");
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError("Invalid Web Presentation custom event options");
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.some((key) => typeof key !== "string" || (key !== "broadcast" && key !== "channel"))) {
+    throw new TypeError("Invalid Web Presentation custom event options");
+  }
+  for (const key of keys as string[]) {
+    const descriptor = descriptors[key];
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+      throw new TypeError("Invalid Web Presentation custom event options");
+    }
+  }
+  const broadcastValue = descriptors.broadcast?.value;
+  const channelValue = descriptors.channel?.value;
+  const broadcast = broadcastValue === undefined ? false : broadcastValue;
+  if (typeof broadcast !== "boolean") {
+    throw new TypeError("Invalid Web Presentation custom event broadcast option");
+  }
+  const channel = channelValue === undefined
+    ? WEB_PRESENTATION_EVENT_CHANNEL_V2
+    : validatePresentationChannel(channelValue);
+  return Object.freeze({ broadcast, channel });
+}
+
+function validatePresentationData(value: unknown): JsonObject {
+  let members = 0;
+  const visit = (candidate: unknown, depth: number): JsonValue => {
+    if (depth > 64) throw new TypeError("Invalid Web Presentation custom event data");
+    if (candidate === null || typeof candidate === "boolean" || typeof candidate === "string") return candidate;
+    if (typeof candidate === "number") {
+      if (!Number.isFinite(candidate)) throw new TypeError("Invalid Web Presentation custom event data");
+      return candidate;
+    }
+    if (typeof candidate !== "object") throw new TypeError("Invalid Web Presentation custom event data");
+    if (Array.isArray(candidate)) {
+      members += candidate.length;
+      if (members > 16_384) throw new TypeError("Invalid Web Presentation custom event data");
+      return Object.freeze(candidate.map((child) => visit(child, depth + 1)));
+    }
+    const prototype = Object.getPrototypeOf(candidate);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError("Invalid Web Presentation custom event data");
+    }
+    const keys = Reflect.ownKeys(candidate);
+    if (keys.some((key) => typeof key !== "string")) {
+      throw new TypeError("Invalid Web Presentation custom event data");
+    }
+    members += keys.length;
+    if (members > 16_384) throw new TypeError("Invalid Web Presentation custom event data");
+    const output: Record<string, JsonValue> = {};
+    for (const key of keys as string[]) {
+      const descriptor = Object.getOwnPropertyDescriptor(candidate, key);
+      if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+        throw new TypeError("Invalid Web Presentation custom event data");
+      }
+      output[key] = visit(descriptor.value, depth + 1);
+    }
+    return Object.freeze(output);
+  };
+  const snapshot = visit(value, 1);
+  if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    throw new TypeError("Invalid Web Presentation custom event data");
+  }
+  const encoded = JSON.stringify(snapshot);
+  if (utf8ByteLength(encoded) > 262_144) {
+    throw new TypeError("Invalid Web Presentation custom event data");
+  }
+  return snapshot as JsonObject;
 }
 
 function detachedFrozenJson<T>(value: T): T {
@@ -185,6 +295,20 @@ function validateRendererViewportSource(
   if (!valid) throw new TypeError("Invalid RendererViewportSource");
 }
 
+function validateRendererPresentationEventBinding(
+  binding: RendererPresentationEventBinding | undefined,
+): void {
+  if (binding === undefined) return;
+  let valid = false;
+  try {
+    valid = binding !== null && typeof binding === "object" &&
+      typeof binding.publish === "function";
+  } catch {
+    // Accessor-backed integration objects are not valid capability bindings.
+  }
+  if (!valid) throw new TypeError("Invalid RendererPresentationEventBinding");
+}
+
 interface ViewportSourceSubscription {
   readonly peer: RendererControlPeer;
   phase: "starting" | "current" | "invalid";
@@ -212,7 +336,10 @@ class ControlHolder implements RendererControlHolder {
   private presentationAttachmentToken: object | null = null;
   private presentationEmitNodeEvent: ((event: RendererPresentationNodeEvent) => void) | null = null;
   private presentationForwardDepth = 0;
-  private readonly stagedPresentationInputs: StagedPresentationInput[] = [];
+  private readonly stagedPresentationInputs: AcceptedPresentationEvent[] = [];
+  private readonly presentationPublications: QueuedPresentationEvent[] = [];
+  private presentationPublicationEpoch = 1;
+  private presentationPublicationPumping = false;
   private readonly presentationSource: RendererPresentationSource = Object.freeze({
     read: () => this.readPresentation(),
   });
@@ -221,6 +348,7 @@ class ControlHolder implements RendererControlHolder {
     private readonly data?: RendererDataBinding,
     private readonly input?: RendererInputSource,
     private readonly viewport?: RendererViewportSource,
+    private readonly presentationEvents?: RendererPresentationEventBinding,
   ) {}
 
   current(): RendererControlCurrent | null {
@@ -271,6 +399,7 @@ class ControlHolder implements RendererControlHolder {
       this.stopInputSource();
       this.stopViewportSource();
       this.inputGate.setControl(null);
+      this.retirePresentationPublications();
     }
     this.prepareRenderSession(outcome.snapshot.sessionId);
     const installed = Object.freeze({ peer, snapshot: outcome.snapshot });
@@ -288,6 +417,7 @@ class ControlHolder implements RendererControlHolder {
       this.stopInputSource();
       this.stopViewportSource();
       this.inputGate.setControl(null);
+      this.retirePresentationPublications();
     });
     return Object.freeze({ kind: "installed", current: installed });
   }
@@ -607,46 +737,114 @@ class ControlHolder implements RendererControlHolder {
       !slot.render.isPresentationTargetCurrent(event.domainId, event.targetKey)
     ) return;
 
-    const name = validatePresentationEventName(event.name);
-    let payload: InputEventV1["payload"];
+    let options: ReturnType<typeof validatePresentationOptions>;
+    let name: string;
     try {
-      const data = validateInputPayloadV1(event.data);
-      payload = validateInputPayloadV1({
-        domainId: event.domainId,
-        targetKey: event.targetKey,
-        name,
-        data,
-      });
+      options = validatePresentationOptions(event.options);
+      name = validatePresentationEventName(event.name);
+    } catch {
+      throw new TypeError("Invalid Web Presentation custom event arguments");
+    }
+    let data: JsonObject;
+    try {
+      data = validatePresentationData(event.data);
     } catch {
       throw new TypeError("Invalid Web Presentation custom event payload");
     }
+    let accepted: AcceptedPresentationEvent;
+    if (this.presentationEvents === undefined && !options.broadcast) {
+      let legacyPayload: InputEventV1["payload"];
+      try {
+        legacyPayload = validateInputPayloadV1({
+          domainId: event.domainId,
+          targetKey: event.targetKey,
+          name,
+          data,
+        });
+      } catch {
+        throw new TypeError("Invalid Web Presentation custom event payload");
+      }
+      accepted = Object.freeze({
+        kind: "legacy-owner" as const,
+        subsystemKey: event.subsystemKey,
+        channel: options.channel as InputEventChannelV1,
+        payload: detachedFrozenJson(legacyPayload),
+      });
+    } else {
+      accepted = Object.freeze({
+        kind: "publication" as const,
+        publication: Object.freeze({
+        sessionId: event.sessionId,
+        ownerSubsystemKey: event.subsystemKey,
+        generation: event.generation,
+        domainId: event.domainId,
+        targetKey: event.targetKey,
+        channel: options.channel,
+        type: name,
+        broadcast: options.broadcast,
+        payload: Object.freeze({
+          domainId: event.domainId,
+          targetKey: event.targetKey,
+          data,
+        }),
+        }),
+      });
+    }
     if (this.presentationForwardDepth > 0) {
       if (this.stagedPresentationInputs.length >= MAX_STAGED_PRESENTATION_INPUTS) return;
-      this.stagedPresentationInputs.push(Object.freeze({
-        subsystemKey: event.subsystemKey,
-        payload: detachedFrozenJson(payload),
-      }));
+      this.stagedPresentationInputs.push(accepted);
       return;
     }
-    this.publishPresentationInput(event.subsystemKey, payload);
+    this.enqueuePresentationEvent(accepted);
   }
 
   private flushStagedPresentationInputs(): void {
     while (this.stagedPresentationInputs.length > 0) {
       const staged = this.stagedPresentationInputs.shift();
-      if (staged !== undefined) this.publishPresentationInput(staged.subsystemKey, staged.payload);
+      if (staged !== undefined) this.enqueuePresentationEvent(staged);
     }
   }
 
-  private publishPresentationInput(
-    subsystemKey: string,
-    payload: InputEventV1["payload"],
-  ): void {
-    this.inputGate.emitEventForSubsystem(
-      subsystemKey,
-      WEB_PRESENTATION_EVENT_CHANNEL_V1,
-      payload,
-    );
+  private enqueuePresentationEvent(event: AcceptedPresentationEvent): void {
+    if (this.presentationPublications.length >= MAX_PRESENTATION_PUBLICATIONS) return;
+    this.presentationPublications.push(Object.freeze({
+      epoch: this.presentationPublicationEpoch,
+      event,
+    }));
+    void this.pumpPresentationEvents();
+  }
+
+  private async pumpPresentationEvents(): Promise<void> {
+    if (this.presentationPublicationPumping) return;
+    this.presentationPublicationPumping = true;
+    try {
+      while (this.presentationPublications.length > 0) {
+        const queued = this.presentationPublications.shift();
+        if (queued === undefined || queued.epoch !== this.presentationPublicationEpoch) continue;
+        if (queued.event.kind === "legacy-owner") {
+          this.inputGate.emitEventForSubsystem(
+            queued.event.subsystemKey,
+            queued.event.channel,
+            queued.event.payload,
+          );
+          continue;
+        }
+        try {
+          await this.presentationEvents?.publish(queued.event.publication);
+        } catch {
+          // Publication failure is presentation-local and does not alter authority.
+        }
+      }
+    } finally {
+      this.presentationPublicationPumping = false;
+      if (this.presentationPublications.length > 0) void this.pumpPresentationEvents();
+    }
+  }
+
+  private retirePresentationPublications(): void {
+    this.presentationPublicationEpoch += 1;
+    this.presentationPublications.length = 0;
+    this.stagedPresentationInputs.length = 0;
   }
 
   private readPresentation(): RendererPresentationView | null {
@@ -879,9 +1077,11 @@ export function createRendererControlHolder(
   data?: RendererDataBinding,
   input?: RendererInputSource,
   viewport?: RendererViewportSource,
+  presentationEvents?: RendererPresentationEventBinding,
 ): RendererControlHolder {
   validateRendererDataBinding(data);
   validateRendererInputSource(input);
   validateRendererViewportSource(viewport);
-  return new ControlHolder(data, input, viewport);
+  validateRendererPresentationEventBinding(presentationEvents);
+  return new ControlHolder(data, input, viewport, presentationEvents);
 }

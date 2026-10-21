@@ -30,6 +30,27 @@ test("exact-channel routing, type non-filtering, multiplicity, self delivery, an
   hub.terminate();
 });
 
+test("trusted delegated publication preserves exact channels and optional owner targeting", async () => {
+  const hub = createSessionEventHub();
+  const owner = createSessionEventClient(createInMemorySessionEventBinding(hub, "owner"));
+  const other = createSessionEventClient(createInMemorySessionEventBinding(hub, "other"));
+  const publisher = hub.createDelegatedPublisher("owner");
+  const ownerSeen = [];
+  const otherSeen = [];
+  await owner.subscribe(["keyboard.state"], (event) => ownerSeen.push(event));
+  await other.subscribe(["keyboard.state"], (event) => otherSeen.push(event));
+  await other.subscribe(["keyboard.event"], (event) => otherSeen.push(event));
+
+  await publisher.publish("keyboard.state", "input.state", { down: ["KeyW"] });
+  await publisher.publish("keyboard.state", "owner-only", { down: [] }, "owner");
+  await turn();
+
+  assert.deepEqual(ownerSeen.map(({ type }) => type), ["input.state", "owner-only"]);
+  assert.deepEqual(otherSeen.map(({ type }) => type), ["input.state"]);
+  assert.ok([...ownerSeen, ...otherSeen].every(({ channel }) => channel === "keyboard.state"));
+  assert.ok([...ownerSeen, ...otherSeen].every(({ source }) => source.subsystemKey === "owner"));
+});
+
 test("payload is detached from publisher and isolated between subscriptions", async () => {
   const hub = createSessionEventHub();
   const client = createSessionEventClient(createInMemorySessionEventBinding(hub, "source"));
