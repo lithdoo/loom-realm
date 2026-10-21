@@ -1,248 +1,510 @@
-# Game Common Controls 设计方案
+# Game Common Controls：业务层 User Input 协议与跨 Subsystem 广播设计
 
-> 状态：Proposed / 设计文档，尚未实现  
-> 位置：`game-libs/game-common-controls/`  
-> 目标组件：`<game-common-controls>`  
-> 相关契约：[Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md)、[User Input v1](../../doc/15-contracts/user-input-v1.md)、[Session Events v1](../../doc/15-contracts/session-events-v1.md)、[ADR 0031](../../doc/decisions/0031-business-owned-web-component-projection.md)
+> 状态：**Proposed / 设计方案，尚未实现、尚未冻结、尚未 Qualification**  
+> 位置：game-libs/game-common-controls/  
+> 目标包：**@loomrealm-game/common-controls**  
+> 目标组件：**<game-common-controls>**  
+> 设计核心：**用户输入属于 game-libs 业务协议，而非 LoomRealm Framework 协议。**  
+> 相关现行契约：[Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md)、[User Input v1](../../doc/15-contracts/user-input-v1.md)、[Session Events v1](../../doc/15-contracts/session-events-v1.md)、[Render Update v1](../../doc/15-contracts/render-update-v1.md)、[ADR 0031](../../doc/decisions/0031-business-owned-web-component-projection.md)
 
-## 1. 目标
+> **定位说明**：本文描述未来目标和迁移方案，不修改上述已冻结正式契约的现行事实。当前的 Web Presentation 仍只有 owner-targeted 双参数 emitCustomEvent，Renderer 仍有 User Input v1/InputGate；本文要求先实现、验证新的通用广播基础设施，再有序迁移和移除旧输入专属能力。本文中的接口和消息结构均为候选设计，不得视作已发布 ABI。
 
-提供一个独立、可复用的业务 Web Component，将键盘和标准手柄输入转换为平台无关的游戏控制事件，并通过 Web Presentation Context 的 `context.emitCustomEvent()` 将事件广播到其他 Subsystem。
+## 1. 核心目标与架构原则
 
-核心原则：
+本项目不只是把键盘或手柄映射为 confirm/move 等动作，也不是 LM User Input v1 的附属适配器。
 
-- 输入设备采集和映射由 `<game-common-controls>` 负责。
-- 组件输出游戏语义，不要求消费者理解 DOM KeyboardEvent 或 Gamepad API。
-- 跨 Subsystem 传播复用 LoomRealm 现有事件基础设施，不另建一套通用事件总线。
-- 广播是事件分发能力，不授予接收方 Frame、Activation、InputTarget 或 Shared State 写入权限。
-- 现有 Web Presentation API 的 owner-targeted custom event 行为必须保持兼容；广播应是显式选择。
+**目标是以 Render 层的业务 Web Component 为输入实现主体，将完整的 User Input 领域协议从 LoomRealm（下称 LM）架构层迁移到 game-libs；LM 仅提供 Web Component 承载、通用跨 Subsystem 事件分发及已有的通用 Session/Runtime 能力。**
 
-## 2. 包与组件边界
+具体要求：
 
-建议目录结构：
+1. **输入协议归业务层所有**：输入设备采集、设备标准化、状态快照、瞬时事件、重置、订阅消费规则、映射与焦点/优先级策略，在 common-controls 或其业务协作模块定义和演进。
+2. **LM 不理解输入语义**：跨 Subsystem 路由只校验通用事件、来源、授权、大小、生命周期和流控；不得解析或特判 keyboard/gamepad/pointer、pressed、confirm、deadzone、Input Interest 等字段。
+3. **Web Component 是实际生产者**：通过 Web Projector 挂载的 <game-common-controls> 直接采集浏览器设备事件，在组件内运行输入协议状态机，再调用注入的 WebPresentationContext.emitCustomEvent(...) 发布。
+4. **广播是通用基础能力**：为 emitCustomEvent 增加显式的跨 Subsystem 广播模式；复用现有 Session Events 通路/语义，不另造 LM 输入专属 IPC 或第二个事件总线。
+5. **广播不授予执行权**：观察者可能不止一个，但事件可见性不等于 Frame、Activation、Main 控制权或写状态权限；具体业务谁消费、谁执行由业务层决定。
+6. **兼容地迁移，而不是永久双轨**：旧 User Input v1 作为迁移来源及兼容对象，不是新组件长期必须依赖的底层。达到覆盖和 Qualification 后，再独立决策废止其专属 Framework 协议/生产者。
+7. **设备与宿主可替换**：同一个业务输入协议及 WC 面向 Desktop/PWA；LM 的物理 MessagePort/WebSocket、Worker/进程拓扑不能进入游戏输入包。
 
-```text
+这里的“与 LM 架构层完全解耦”特指**LM 不拥有任何 User Input 领域契约、状态机、设备采集或专属路由策略**，并不是说业务组件不依赖 LM 通用的 Web Presentation 和事件承载接口。
+
+## 2. 现状与目标边界
+
+### 2.1 当前实现（现行事实）
+
+~~~text
+Browser Renderer Input Source
+  (Keyboard / Pointer / Gamepad)
+          |
+          v
+Renderer User Input / InputGate
+  [InputTarget x Frame/Activation x Interest x Data currentness]
+          |
+          v
+   owning Subsystem Runtime
+    input.state / input.event / input.reset
+
+Web Component -- context.emitCustomEvent(name, data)
+                        |
+                        v
+                owner-targeted InputGate
+~~~
+
+现行 Web Presentation API v1 的 emitCustomEvent(name, data) 只向所属 Subsystem 发送 User Input custom event，且受现有 InputGate/currentness 约束；它**没有跨 Subsystem 广播能力**。Session Events v1 的发布者身份当前绑定到 Subsystem Runtime，Renderer 不能直接持有一个任意发布权限的 SessionEventClient。
+
+### 2.2 目标结构
+
+~~~text
+Browser Window
+  Keyboard / Pointer / Standard Gamepad
+                |
+                v
+     <game-common-controls>
+       game-libs business WC
+       - physical capture
+       - canonical device state
+       - business User Input protocol
+       - state/event/reset lifecycle
+       - key mapping / dedup / throttling
+                |
+                v
+ WebPresentationContext.emitCustomEvent(
+   name, data, { audience: "all-subsystems", channel: ... }
+ )
+                |
+                v
+  LM trusted Presentation Event Bridge
+       [generic only: currentness,
+        authenticated provenance,
+        channel capability, validation,
+        bounded delivery]
+                |
+                v
+      Session Event routing
+         exact-channel subscriptions
+          /          |          \
+         v           v           v
+      Map         Battle       Menu/other
+       \            |            /
+        business-owned input consumers
+        (own focus/priority/handling policy)
+~~~
+
+**分界线**：
+
+| 内容 | 归属 |
+| --- | --- |
+| Custom Element 注册、RenderNode 投影、Context 注入及失效 | LM Web Presentation |
+| 通用 Presentation → Session 事件桥接、身份和权限校验 | LM Framework 通用事件基础设施 |
+| 精确 Channel 路由、订阅、队列上界与投递生命周期 | LM Session Events |
+| Keyboard / Pointer / Gamepad 采集与标准化 | game-common-controls |
+| User Input 消息定义、状态快照、Event、Reset、重连/恢复规则 | game-common-controls 业务协议 |
+| 输入映射、长按、轴过滤、重复输入抑制 | game-common-controls |
+| 多消费者输入意图、焦点、优先级、动作消费策略 | 游戏业务层（可由 common-controls 提供可选模块） |
+| Frame / Activation / Session 控制及运行故障收束 | LM Main（与输入协议独立） |
+| 业务长期事实或需要恢复的持久状态 | 相应业务 authority；必要时复用通用 Shared State |
+
+**特别禁止**：LM Bridge 不得硬编码 game-common-controls 包名、固定 controls Channel、语义动作白名单、特定设备事件格式，也不得自行维护 pressed 集合。
+
+## 3. 包交付、组件挂载和依赖
+
+建议目录：
+
+~~~text
 game-libs/game-common-controls/
-├── DESIGN.md
-├── README.md
-├── package.json
-└── src/
-    └── game-common-controls.ts
-```
+  DESIGN.md
+  README.md
+  package.json
+  src/
+    game-common-controls.ts   # WC / lifecycle
+    device/                   # keyboard, pointer, gamepad producers
+    protocol/                 # message, validation, epoch/sequence
+    state/                    # held controls, reset, snapshots
+    mapping/                  # bindings, axes, chords
+    consumer/                 # optional author-facing helpers
+  test/
+    unit/
+    browser/
+    integration/
+~~~
 
-建议包名为 `@loomrealm-game/common-controls`，自定义元素名为 `game-common-controls`。
+目录只表示职责拆分建议，不要求提前引入所有文件。
 
-该库以独立 Web Component 为主要交付物，不依赖具体游戏 Subsystem，也不依赖 Desktop、PWA 或某一种 Runtime hosting 实现。
+组件是业务拥有的 Custom Element，不是新的 Renderer，也不直接管理 Render Store。它必须由某个普通业务 Subsystem 的 RenderDomain 创建 RenderNode，再经 Web Projector 挂载并获得 WebPresentationContext。可以由游戏入口或 presentation-shell/controls-owner Subsystem 持有这个节点，但 LM 不得为它建立输入专属的特殊 Host。
 
-### 组件职责
+建议每个 Renderer Window 在同一输入所有权范围内最多有一个启用中的全局实例。重复实例应有可测试的拒绝、禁用或明确多实例隔离规则，绝不能默默双份采集和广播。WC 应在 disconnectedCallback/过期 Context 及时停止事件源；重新挂载应产生新输入 epoch。
 
-1. 采集键盘按键和标准 Gamepad 输入。
-2. 将设备输入映射为稳定的控制语义。
-3. 在本地对高频状态变化进行去抖、合并或节流，避免无意义的事件风暴。
-4. 使用注入的 `WebPresentationContext` 发布控制事件。
-5. 在组件断开、Window 失焦或输入设备不可用时释放监听器，并按契约发送必要的释放/重置语义。
+推荐依赖方向：
 
-组件不负责：
+~~~text
+examples / game Subsystems
+         |
+         v
+@loomrealm-game/common-controls
+         |
+         +--> browser standard APIs (physical capture)
+         +--> public Web Presentation Context (generic event publish)
+         +--> public Session Events author interface (consumers)
+~~~
 
-- 创建、切换或关闭 Frame。
-- 判定哪个 Subsystem 拥有 InputTarget。
-- 写入 Shared State。
-- 保存或重放历史输入。
-- 管理游戏存档、键位设置 UI 或厂商专有手柄 API。
-- 自行建立 IPC、MessagePort、Worker 或 SessionEventHub 连接。
+common-controls 不应导入 LM 内部 InputGate、RendererInputSource、Input Interest Registry、InputTarget wire schema、SessionEventHub 内部类型，也不得按 Desktop/PWA 定制业务协议。
 
-## 3. 组件使用模型
+## 4. 业务 User Input 协议的完整职责
 
-组件作为业务拥有的 Custom Element，由现有 Web Projector 插入 DOM 并注入 Context。组件不应自行创建第二个 Renderer 或绕开 Web Projector。
+### 4.1 从设备到业务协议
 
-示意：
+WC 自身拥有完整处理流水线：
 
-```html
-<game-common-controls></game-common-controls>
-```
+~~~text
+DOM / Gamepad physical samples
+   -> normalize (key, pointer, axis, device identity)
+   -> aggregate current held/axis state
+   -> map to game control semantics
+   -> derive state / event / reset
+   -> validate + bounded rate/size
+   -> emitCustomEvent broadcast
+~~~
 
-初版建议一个 Renderer Window 只存在一个启用的全局 controls 实例，避免重复采集同一物理输入并重复广播。重复实例的行为必须确定：开发环境给出诊断，不能静默地产生重复事件。
+例如 Enter/手柄 South 映射为 confirm，Escape/手柄 East 为 cancel，方向键/WASD/左摇杆为 move，Start 为 menu。这只是**业务默认映射**，不得冻结进 LM Contract。
 
-该组件可以不渲染可见 UI；它是输入适配组件，而不是输入配置面板。
+业务库需要同时支持：
+- **状态类输入**：当前按键集合、连续摇杆值、指针位置等，以自包含的当前状态表示，并具有恢复/失效机制。
+- **瞬时类输入**：点击、确认、取消或其他 impulse，只表示某次发生，不承诺重放。
+- **重置类输入**：设备断开、焦点丢失、WC 失活、Source epoch 更换时，使下游停止相信旧状态。
+- **业务订阅意图**：业务 Consumer 可根据 Channel、动作或游戏上下文选择处理；若需要类似旧 Input Interest 的能力，应由业务协议定义，不复用 LM InputGate。
 
-## 4. 输入到语义事件
+### 4.2 候选消息格式（未冻结）
 
-组件把物理输入转换成语义事件。例如：
+建议将整个业务协议版本放进 payload，并按逻辑消息类型区分：
 
-| 物理输入 | 语义动作 |
-|---|---|
-| Enter、手柄 South | `confirm` |
-| Escape、手柄 East | `cancel` |
-| 方向键、WASD、手柄左摇杆 | `move` |
-| 手柄 Start、配置的菜单键 | `menu` |
+~~~ts
+type ControlsProtocol = "@loomrealm-game/common-controls/1";
 
-语义名称必须稳定、可扩展，并且不依赖具体设备。键位绑定与动作名称应可配置；默认映射不得成为 Runtime 协议的一部分。
+interface ControlsBase {
+  readonly protocol: ControlsProtocol;
+  readonly epoch: string;       // WC 输入生产者生命周期；非 LM Session/Activation
+  readonly revision: number;    // 本 epoch 内单调递增的业务序号
+}
 
-建议的事件形状：
-
-```ts
-interface GameControlEvent {
+interface ControlsEvent extends ControlsBase {
+  readonly kind: "event";
   readonly action: string;
-  readonly phase: "pressed" | "released" | "changed" | "reset";
-  readonly device: "keyboard" | "gamepad";
+  readonly phase: "pressed" | "released" | "impulse";
+  readonly device: "keyboard" | "pointer" | "gamepad";
   readonly control: string;
   readonly value?: number;
 }
-```
 
-以上是业务 payload 的设计示例，不是已冻结的公共 TypeScript ABI。实际发布时仍须遵循 Web Presentation API 对 JSON payload 的校验、深度、大小和所有权隔离要求。
+interface ControlsState extends ControlsBase {
+  readonly kind: "state";
+  // 有界、自包含的当前 held/axis 状态，不是局部增量 patch
+  readonly values: Readonly<Record<string, number>>;
+}
 
-### 状态与事件的区别
+interface ControlsReset extends ControlsBase {
+  readonly kind: "reset";
+  readonly reason:
+    | "blur"
+    | "hidden"
+    | "disconnected"
+    | "device-lost"
+    | "source-replaced";
+}
 
-- 按下、释放等离散动作适合转换为瞬时事件。
-- 摇杆、方向轴等高频输入应只在值发生有意义变化时发布，并在组件端合并高频更新。
-- 接收方不能假设所有瞬时事件都可重放，也不能仅依靠一条旧的 `pressed` 事件永久保持按下状态。
-- Window 失焦、页面隐藏、组件断开、手柄断开时，应清理本地 pressed 集合，并按最终确定的契约发送释放或 reset 语义。
-- 不得将每帧的完整摇杆值无节制地广播给所有 Subsystem。
+type ControlsMessage = ControlsEvent | ControlsState | ControlsReset;
+~~~
 
-## 5. `context.emitCustomEvent()` 的广播扩展
+这份示例用于说明 **User Input 协议由业务包拥有**，不代表最终必须保留全部字段或原样继承 User Input v1 wire。消息仍须满足通用 JSON 安全边界、长度、深度、字节上限，数值均为有限数；明确 action/value 的合法范围和协议版本策略。
 
-### 5.1 当前契约的限制
+可把 Web Presentation 的 name 映射为 Session Event type（如 controls.event、controls.state、controls.reset），data 携带上述业务消息。Channel 由**业务配置**给出，例如 game.controls/1；LM 只将它视作不透明精确匹配字符串，不创建或保留 controls 专用的基础设施 Channel。
 
-当前 [Web Presentation API v1 §8](../../doc/15-contracts/web-presentation-api-v1.md) 将 `emitCustomEvent(name, data)` 定义为反向投递能力，并且只向所属 Subsystem 投递；其路径受当前 RenderNode、Data 和 InputGate 等条件约束。
+### 4.3 状态与事件的区别不可抹平
 
-因此，当前实现不能仅靠在 Web Component 中调用 `emitCustomEvent()` 就获得跨 Subsystem 广播能力。也不能把“投递到所属 Subsystem”误认为“广播到整个 Session”。
+瞬时事件可按按下边沿发布，但松开事件也可能丢失，因此不能仅凭旧 pressed 永久保持状态。对于持续移动、摇杆或组合键，主要消费依据应为**有界有效期的完整当前状态**，而不是无期限累积事件。
 
-### 5.2 建议的兼容 API 形状
+推荐的业务协议不变量：
 
-保留既有两参数调用的语义，并增加显式 audience 选项：
+1. 同一动作的多个物理绑定使用引用计数/来源集合聚合，释放其中一个键不应误释放动作。
+2. Keyboard auto-repeat 默认不生成重复 pressed；长按重复是显式业务配置。
+3. 摇杆含 deadzone、量化、变化阈值、节流与最终中立值；不得将每一帧完整设备数据不加限制地广播。
+4. WC 每个 epoch 内的 revision 单调递增；消费者可抑制过期消息。epoch 切换时必须丢弃旧 epoch 的业务输入状态。
+5. 消费者在订阅建立时以“尚未获得当前状态”或中立态开始，不能从过去事件推导真值。
+6. 因现有 Session Events **不回放、不保证断线事件到达**，协议应规定可恢复的完整状态重发策略（例如状态变更时发送、活跃状态按受限周期重宣告）及 Consumer 超时退回中立态。
+7. 重置优先尝试发布 reset，但不能依赖它必然到达；消费者本地 TTL/epoch 替换规则是防 stuck input 的最终兜底。
+8. 对瞬时 confirm/cancel 的丢失，v1 可选择 best-effort；若玩法要求严格交付，需单独定义业务层 ACK/幂等/恢复机制，不能谎称 Session Events 已提供 exactly-once。
 
-```ts
+状态周期、TTL、轴阈值和具体限额必须经跨进程及浏览器测试后冻结，不能在本提案中虚构为现行 Framework 保证。
+
+## 5. 通用 emitCustomEvent 跨 Subsystem 广播扩展
+
+### 5.1 为什么必须扩展现有 API
+
+[Web Presentation API v1 §8](../../doc/15-contracts/web-presentation-api-v1.md) 当前定义：
+
+~~~ts
+emitCustomEvent(
+  name: string,
+  data?: InputEventV1["payload"],
+): void;
+~~~
+
+该接口目前是 owner-targeted User Input reverse capability：最终经 InputGate 投递到所属 Subsystem；不能单靠 WC 调用就实现广播。
+
+**目标**是在保留原两参数行为的前提下，给这个 WC Context 能力增加显式的跨 Subsystem 通用事件发布模式。新增部分不是“User Input 的特例”，而是任何被授权 business WC 可使用的通用事件能力。
+
+### 5.2 候选兼容 API（未冻结）
+
+~~~ts
 type CustomEventAudience = "owner" | "all-subsystems";
 
 interface CustomEventOptions {
   readonly audience?: CustomEventAudience;
+  // 仅 broadcast 模式使用，业务自定义的 opaque exact channel
+  readonly channel?: string;
 }
 
 interface WebPresentationContext {
   readonly resources: PresentationResourceClient;
-
   emitCustomEvent(
     name: string,
     data?: InputEventV1["payload"],
     options?: CustomEventOptions,
   ): void;
 }
-```
+~~~
 
-示意调用：
+示例：
 
-```ts
+~~~ts
 context.emitCustomEvent(
-  "game.controls.action",
+  "controls.event",
   {
+    protocol: "@loomrealm-game/common-controls/1",
+    epoch: "local-controls-epoch",
+    revision: 23,
+    kind: "event",
     action: "confirm",
-    phase: "pressed",
+    phase: "impulse",
     device: "keyboard",
     control: "Enter",
   },
-  { audience: "all-subsystems" },
+  { audience: "all-subsystems", channel: "game.controls/1" },
 );
-```
+~~~
 
-规则：
+候选语义：
 
-- 未传 `options` 时默认 `audience: "owner"`，保持现有行为。
-- `audience: "all-subsystems"` 是显式的跨 Subsystem 事件分发请求。
-- 组件不得在 payload 中自行伪造 Session、Subsystem、generation、Frame、Activation、InputTarget 或来源身份；这些信息如需用于路由，只能由 LoomRealm trusted host 根据当前 Context 注入。
-- 保留当前 Context 的 currentness 检查：已脱离、过期或结构失效的组件不得继续广播。
-- 参数格式错误应遵循正式 API 的同步校验约定；广播投递本身仍是 fire-and-forget，不增加业务 ACK、历史回放或自动重试。
+- 省略 options 时仍是 **owner**，不改变历史双参数调用的含义。
+- all-subsystems 指进入跨 Subsystem 分发范围，**并非强迫每个 Runtime 无订阅收到回调**；同 Session Events v1，实际接收者是订阅对应 exact channel 的 Runtime。
+- Channel 由业务选择，不能由 LM 把 common-controls 名称写死到 Bridge 中。
+- options 不是新权威身份载体，组件不能自行指定 Session、owner subsystemKey、generation、Frame、Activation 或 Source provenance。
+- 成功调用只代表通过同步检查并被本地异步投递路径接受，不代表所有目标成功处理；无业务 ACK、无自动重放、无默认重试。
+- owner 模式使用既有 currentness/InputGate 语义；broadcast 模式**不得通过 InputGate 或借用 InputTarget 来控制收件人**。
 
-这是建议的 API 扩展，当前仓库尚未实现。由于 Web Presentation API v1 已冻结并完成 qualification，实施前必须更新正式契约与 conformance fixtures；不能只修改 TypeScript 接口而不更新语义规范。
+版本策略尚待决定：由于 v1 Context 为 frozen closed shape，必须通过正式的 Web Presentation 新版本/可选扩展契约、适配兼容期与 conformance fixtures 发布，不得先改接口并声称仍符合原 v1。
 
-## 6. 广播路由与 Session Events 的关系
+## 6. Trusted Presentation Event Bridge：必须是通用机制
 
-广播应复用现有 Session 事件分发基础设施，而不是新建一套平行的 EventBus。建议由 LoomRealm trusted host 提供受限的 Presentation-to-Session-Events bridge：
+候选路径：
 
-```text
-<game-common-controls>
-    │ context.emitCustomEvent(..., audience: "all-subsystems")
-    ▼
-Web Projector / trusted host bridge
-    │ 验证 Context currentness、payload、来源身份
-    ▼
-Session Events routing
-    │ 通过约定的 controls channel 分发
-    ▼
-订阅该 channel 的 Subsystem Runtime
-```
+~~~text
+business WC -- emitCustomEvent(... all-subsystems)
+         |
+   Web Projector context/currentness check
+         |
+   trusted Renderer/Host presentation ingress
+         |  validate + authorize opaque channel
+         |  attach authoritative provenance
+         v
+    Session event routing
+         |
+    exact channel subscribers
+         v
+    Subsystem SessionEventClient
+~~~
 
-建议使用一个保留的精确 channel，例如：
+### 6.1 能力与权限边界
 
-```text
-x.loomrealm.game-common-controls
-```
+Bridge MUST/SHOULD 满足：
 
-事件名称映射到 Session Event 的 `type`，业务数据映射到 `payload`，来源身份由可信绑定产生。Renderer 不应获得任意的 SessionEventClient，也不应因此获得任意 channel 的发布权限；bridge 只允许发布 controls 专用 channel。
+1. 只有**当前、已挂载且受信任的 Context** 可发起广播；detached/expired RenderNode、旧 Session/generation、窗口 teardown 等不得产生新事件。
+2. name/channel/payload 按通用 Contract 同步验证，拒绝非 JSON、循环引用、不可表示的数字、超大数据与非法标识。
+3. 宿主注入经过验证的 provenance；业务字段不能覆盖 Source、Session、subsystemKey、generation、domain/key 等身份。
+4. Channel 发布权限由通用 capability/Host 配置授予，可选 opaque allow-list、配额及流控；**Renderer 不获得无限制的 SessionEventClient 或 Hub 内部引用**。
+5. Bridge 不推导 Frame/Activation/InputTarget，也不擅自让接收者变成 active；不解析 controls 业务字段。
+6. 跨平台只要求同一套逻辑广播 Contract，Desktop/PWA 可以有不同物理 Carrier，但不改协议。
+7. 对慢订阅者使用 Session Events 的有界消费语义，不让一个失败消费者拖住其他消费者；不建立历史队列或无限重试。
+8. 与现有 WC reverse input 一样，明确同步参数失败、异步投递失败、回调重入和 FIFO 的区别，并用专门 conformance 验证。
 
-需要准确区分两件事：
+### 6.2 一个必须先关闭的身份问题
 
-- Session Events v1 的正常语义是向匹配 channel 的订阅者分发，不是无条件向每个 Runtime 注入事件。
-- 因此，按本方案消费广播的 Subsystem 应订阅约定的 controls channel。若产品要求每个 live Subsystem 进程即使没有订阅也必须收到并执行回调，那是不同于现有 Session Events 语义的额外 Runtime contract，不应在本库里暗中实现。
+现有 Session Events v1 把业务可见 **source.subsystemKey** 绑定到真实的 Runtime publisher identity。新广播的发起执行点却是 Renderer 中的 WC。
 
-广播是 transient、无历史回放的通知。不得假设所有 Subsystem 都在线、都订阅了该 channel，或都成功处理了某个事件。广播本身不构成业务事实；必须长期成立的事实仍应由相应 authority 持有。
+建议优先评估以下**通用**身份方案，并在正式 Contract 中二选一：
 
-## 7. 与 User Input v1 的边界
+- **候选 A：按 RenderNode 业务 owner 归属发布。** Trusted Host 验证当前 RenderNode 所属的真实 Subsystem，并以该逻辑 owner 绑定受限发布端口；source.subsystemKey 表示发布行为的业务归属，而非代码实际运行进程。须明确这一语义是否仍满足 Session Events v1 已冻结的 publisher 真实性约束。
+- **候选 B：扩展 Session Events 的来源模型。** 使用经过认证的 presentation producer 身份（例如 source.kind = presentation），需要单独的协议版本和订阅者兼容方案。
 
-`<game-common-controls>` 的物理采集不应悄悄复制成第二份 User Input authority。
+**禁止**为求方便伪造一个“input-subsystem”、用客户端 payload 填 source 或让 WC 直接调用任意 Hub Binding。身份方案及其跨平台落地在冻结之前，Bridge 仍属于未闭合设计。
 
-- 对于仍需由当前 InputTarget 独占处理的原始输入，应继续使用现有 User Input v1 路径。
-- controls 广播表达的是“发生了一个可供多个 Subsystem 观察的控制语义事件”，不是向所有 Subsystem 授予普通输入权限。
-- 广播接收方必须自行确认其业务上下文是否适用；接收到 `confirm` 或 `move` 不代表当前 Frame 自动成为 active，也不代表接收方可以越过 Main 的 Frame/Activation authority。
-- 如果某些动作必须严格受当前 InputTarget 限制，应继续走 owner-targeted Input 路径，而不是使用广播模式。
-- 不应同时把同一物理事件通过原始 Input 和 controls 广播重复交付给同一业务处理器。
+## 7. 消费方输入处理属于业务策略，而非 LM
 
-这意味着 controls 组件主要负责跨 Subsystem 可观察的通用控制事件。对于连续移动状态或需要严格输入租约的玩法，后续必须根据实际需求决定是否使用原始 User Input、广播事件，或两者分工；不能把瞬时广播事件当作可恢复的状态流。
+跨 Subsystem 广播的目的，是让多个独立的业务模块都**有机会观察**到相同输入，而不是自动赋予每个模块操作权。
 
-## 8. 生命周期与故障语义
+~~~ts
+const subscription = await scope.events.subscribe(
+  ["game.controls/1"],
+  async (event) => {
+    if (event.type !== "controls.event") return;
+    // validate business controls protocol/version/epoch/revision
+    // test game-owned interaction/focus/priority policy
+    // execute only if this Subsystem is the proper business consumer
+  },
+);
+~~~
 
-- Context 是 Window presentation lifetime 的 capability；组件断开后停止采集并清理全部监听器。
-- 旧 RenderNode、旧 Session 或过期 Context 发起的事件必须被丢弃。
-- 失焦、页面隐藏、手柄断开时清除本地按下状态，避免 stuck key/stuck button。
-- 键盘自动重复不得重复生成离散 `pressed` 事件；若需要长按重复，应作为明确的业务配置。
-- 轴事件在发布前应进行 deadzone、阈值过滤和节流；数值必须有限且在定义的范围内。
-- 广播失败不得自动重试，因为事件可能已经被接受；也不得把普通的单次投递失败自动升级为 Session fatal，除非正式契约明确规定。
-- 接收方处理失败不应反向修改发送方状态，也不能阻塞其他订阅者。
-- 不保存事件历史，不对重连前的事件补发。需要当前状态的消费者必须通过明确的状态机制重新收敛。
+上述仅示意订阅模型；接口名字和具体消费 API 以现有 author-facing SessionEventClient 和最终业务包导出为准。
 
-## 9. 安全、性能与验证
+应在 **game-libs / game application** 侧决定：
 
-实施前应补充以下测试：
+- 当前 gameplay、对话、菜单、战斗等谁拥有动作优先权；
+- 某些控制是全局观察事件还是独占消费动作；
+- 多个订阅者可否同时响应，如何避免重复业务副作用；
+- 模态窗口、焦点切换、暂停、角色切换时的输入重置和状态继承；
+- 是否提供独立的 business input-focus/controller coordinator。
 
-1. 默认 audience 仍只投递给所属 Subsystem，既有调用保持兼容。
-2. `all-subsystems` 能通过正式的 trusted-host 路由到其他 Subsystem 进程中的匹配订阅者。
-3. 业务 payload 不能伪造来源 Subsystem 或覆盖宿主注入的路由身份。
-4. detached / stale Context 不会发出广播。
-5. 无效 name、非 JSON payload、超限 payload 同步拒绝，且不产生部分广播。
-6. 单个订阅者关闭或失败不会错误地改变其他订阅者的接收语义。
-7. 按住多个绑定到同一动作的物理键时，释放其中一个不会误判整个动作已经释放。
-8. Window blur、visibility change、Gamepad disconnect、WC disconnect 后不会留下 stuck input。
-9. 高频轴输入经过合并和节流，不会无界积压。
-10. 广播不会绕过 Main 的 Frame/Activation authority，也不会隐式改变 InputTarget。
+可以利用 LM 通用 Shared State 保存必要的业务焦点事实，但不得将其伪装成 LM InputTarget 或要求 LM 为 controls 维护输入兴趣表。
 
-## 10. 实施顺序
+**安全边界**：即使某个订阅者收到了 confirm，也不能因此绕过 Main 的 Frame/Activation/Session 生命周期。若目标业务操作需要运行许可，必须由本来的 Subsystem/Frame 业务执行边界校验。这里保留 LM 通用控制权，不等于保留 LM 输入协议。
 
-1. 冻结 controls 事件的 payload、动作名称和状态/事件语义。
-2. 决定 Web Presentation API 的 audience 扩展版本，并更新正式契约及 conformance fixtures。
-3. 在 trusted host 侧实现受限的 broadcast bridge，明确它与 Session Events 的边界。
-4. 实现 `<game-common-controls>` 的键盘、标准手柄采集、映射、清理与节流。
-5. 在至少两个不同 Subsystem Runtime 中验证跨进程分发。
-6. 验证失焦、断连、旧 Context、订阅终止和高频轴输入等故障场景。
+## 8. 浏览器设备支持与状态机
 
-## 11. 当前未冻结事项
+### 8.1 Keyboard
 
-以下内容应在编码前确定：
+- 统一使用稳定的物理 code（必要时允许业务键位按 key 映射）；排除不该影响游戏的文本输入/IME。
+- 处理 repeat、组合键、多个物理来源到同一 action 的聚合。
+- 遵循浏览器焦点和默认行为策略，按业务配置决定 preventDefault，不得全局吞掉表单输入。
 
-- 广播 API 扩展属于 Web Presentation API v2，还是采用单独、版本化的扩展契约。
-- “所有 Subsystem”是指所有订阅 controls channel 的 Subsystem，还是必须无条件向每个 live Runtime 投递。
-- controls channel 的正式名称与事件 payload schema。
-- 移动轴使用瞬时 `changed` 事件的阈值、节流和消费者状态恢复规则。
-- controls 组件的全局单实例约束及重复实例错误处理。
-- controls 广播和原始 User Input 同时存在时的明确分工。
+### 8.2 Standard Gamepad
 
-在这些事项冻结之前，本文件是设计提案，不代表现有仓库已经实现了广播能力。
+- 使用浏览器标准 Gamepad API 采样与连接/断连事件，不引入厂商专有 SDK。
+- 标准 button/axis 映射、deadzone、量化、阈值、抗抖、节流。
+- 手柄缺失和采样失败时发布中立状态或 reset，并终止依赖旧设备的 held action。
+- 多手柄冲突的选择/合并策略是业务配置，不进入 LM。
+
+### 8.3 Pointer 与原协议覆盖范围
+
+旧 User Input v1 已包含 Pointer；若目标是**完整取代** LM User Input 专属能力，则不能只实现 Keyboard + Gamepad 就宣称功能等价。初期可以先交付 Keyboard/Gamepad 最小链路，但正式退役旧协议之前，需要明确 Pointer（以及旧协议支持的全部其他通道）的迁移、替代或经过批准的范围缩减。
+
+### 8.4 单实例及恢复
+
+- Window blur、visibility hidden、disconnectedCallback、Gamepad disconnect 及时本地清零。
+- 组件不可依赖“最后一条 reset 必到”；消费方需要 epoch + TTL 等恢复策略。
+- 重连、重挂载产生新的 producer epoch；旧 Context 即使被业务保存，也不能继续有效发送。
+- 同一物理事件不应同时通过旧 LM InputGate 和新 Controls 通道触发**同一个游戏逻辑**，过渡期必须选择单一消费者路径。
+
+## 9. 部署与跨平台约束
+
+| 方面 | Desktop / Hostra | PWA |
+| --- | --- | --- |
+| WC 运行位置 | Renderer BrowserWindow | PWA Window |
+| 物理输入 | Window Keyboard/Pointer/Gamepad | Window Keyboard/Pointer/Gamepad |
+| WC 协议 | 相同 common-controls 业务协议 | 相同 |
+| Event bridge | 通用可信 Renderer→Session ingress | 通用可信 Renderer→Session ingress |
+| Event Hub 位置/传输 | 按 Desktop 既有宿主拓扑 | 按 PWA 既有 Worker/Port 拓扑 |
+| Subsystem 消费方式 | SessionEventClient exact-channel subscribe | 相同 |
+
+Bridge 必须用平台通用接口表达所需能力，并由 Desktop/PWA composition 各自接线；不把 ipcRenderer、WebSocket、MessagePort 或 ServiceWorker 放进 common-controls 业务代码。
+
+要验证全局 controls 的可用性，还须为 RenderNode 确定持有者：组件是否由持续存活的 presentation-shell Subsystem 挂载，以及该 Runtime 重启期间的输入中断/重建行为。**这由游戏组合决定**，不是 LM 内建一个隐式 GlobalInput Subsystem。
+
+## 10. 失败、顺序和性能语义
+
+- Event Bridge/Session Events 不提供有序跨 Plane 事务；控制事件与 Shared State 写入不存在全局原子顺序。
+- 同一发布源的业务序号用于发现丢失/过期状态；不能把跨 Runtime 到达顺序误认为完整输入因果顺序。
+- 收到未知协议版本或无效 controls payload 的消费者应明确拒绝或忽略，不将业务验证下沉给 LM。
+- Session Events 的投递失败或订阅关闭遵循现有通用契约；组件不得无条件自动重试瞬时输入，以免重复动作。
+- 中断期间瞬时输入允许丢失，但连续状态必须通过业务快照、期限或重建策略**收敛到安全的中立状态**。
+- 持续按住轴/键的活跃状态刷新应有界；使用吞吐上限、合并与背压，不能无限排队。
+- 单个订阅者 throw、断开或 overflow 不应阻断其他订阅者，不应未经正式契约直接升级为 Main Session fatal。
+- 不保存输入历史，不因新订阅者加入而回放已经完成的按键 impulse。
+
+## 11. 从 LM User Input v1 迁移：显式退出路径
+
+本设计不是让两套 User Input 机制永久并行。建议的迁移阶段：
+
+| 阶段 | 交付 | 旧 User Input 状态 |
+| --- | --- | --- |
+| M0 语义与边界 | 冻结业务输入协议目标、LM 广播能力界面及身份方案 | 保持不变 |
+| M1 LM 通用广播 | 新版本的 Web Presentation Broadcast、可信 Bridge、跨平台 Route、Conformance | 保持不变；旧双参数兼容 |
+| M2 WC Producer | common-controls：键盘/手柄、状态/Event/Reset、生命周期、Consumer helpers | 新游戏可选择 WC-only |
+| M3 业务接入 | Map + 至少另一 Subsystem 真实跨进程订阅；Desktop/PWA E2E | 对迁移游戏禁用旧输入业务处理路径 |
+| M4 范围收敛 | Pointer 与全部需保留的旧输入能力，焦点策略、故障恢复、性能 Qualification | 确认无必需业务依赖 |
+| M5 Framework 清理 | 经独立 ADR/Contract governance 废止 LM 输入专属 Producer、InputGate、Interest/State/Event/Reset 等 | 才能正式退役或移除 |
+
+迁移前**不能擅自声称** LM 已完全解耦，因为当前 RendererInputSource、InputGate、Main InputTarget 和相关 Data/Control Contract 仍存在。必须逐项审计这些能力是否仅为旧输入协议服务；对 Main 控制流仍有其他用途的通用概念不得仅因同名而删除。
+
+迁移验收的核心不是“两个 Subsystem 能收到键盘事件”，而是：
+
+1. 新游戏只引用业务 User Input Contract，业务输入行为不需要 LM 输入专属 API。
+2. LM Bridge 与 Session Events 不出现任何 common-controls、device、pressed、interest 等协议硬编码。
+3. Keyboard/Gamepad/Pointer 以及被保留的 User Input v1 行为完成已声明的范围覆盖。
+4. 新游戏无需经过旧 InputGate，也不出现两条输入路径造成重复业务动作。
+5. 断连、恢复和跨 Subsystem 输入状态不会卡死；广播失败不会改变 Main 既有 authority。
+6. Desktop/PWA 使用同一业务协议，通过正式 qualification。
+
+## 12. 测试和 Qualification 清单
+
+### Framework 通用广播 Conformance
+
+1. 既有双参数 owner-targeted 行为不变。
+2. 显式 all-subsystems 能通过通用通道到其他 Runtime 的匹配订阅者；未订阅不保证收到。
+3. Business payload 无法伪造 publisher 身份或覆写 host provenance。
+4. detached、stale、old Session/generation/RenderNode 不会成功广播。
+5. channel、name、JSON/payload、大小/深度违规同步拒绝，无部分投递。
+6. Channel 权限、绑定关闭、订阅失败、慢订阅者、overflow、FIFO 和回调重入有确定边界。
+7. 广播不绕过 Main Frame/Activation，也不通过 InputGate/InputTarget 改写业务收件人。
+8. Desktop/PWA 物理 realization 均符合相同广播逻辑 Contract。
+
+### common-controls 业务协议测试
+
+1. 键盘/手柄等价输入映射到相同 action，设备来源可按需区分。
+2. 两个物理键绑定同一动作，释放其中之一不提前结束动作。
+3. auto-repeat、deadzone、微小轴抖动、并发手柄、长按频率都被有界处理。
+4. blur、hidden、disconnect、component detach、source epoch replacement 不残留 stuck input。
+5. 慢/迟加入订阅者从完整当前状态或中立状态正确收敛，绝不误信历史 pressed。
+6. 丢 release/reset、Runtime reconnect、发布失败时，Consumer 超时恢复中立态。
+7. Map、Battle/另一个 Runtime 可同时观察广播，但只有游戏策略允许的模块执行独占动作。
+8. PWA/Hostra 实际浏览器输入 E2E 和 Pointer 范围闭合。
+9. 迁移模式下无旧 LM Input 路径重复触发；WC-only 游戏无需 LM input interest。
+
+## 13. 实施顺序
+
+1. **先关闭架构决策**：正式冻结 LM 通用 Broadcast Capability 的边界、Context 版本、Channel 授权、Publisher identity、跨平台桥接、会话/过期语义。
+2. **建立独立通用资格测试**：不出现 controls 专用业务数据，也能够从任意被授权的业务 WC 向精确 Channel 发布。
+3. **创建业务包**：定义独立 Controls Protocol v1、WC 生命周期、Keyboard/Gamepad 的完整状态/Event/Reset 行为。
+4. **接入 Consumer**：使用 SessionEventClient 订阅，业务自行判断焦点、优先级及实际可执行范围。
+5. **实现恢复验证**：epoch/revision、完整状态再同步、consumer TTL、blur/disconnect/断线。
+6. **完成跨平台垂直切片**：至少两个真实 Subsystem，Desktop/PWA 及 Browser E2E。
+7. **进行旧协议迁移与清理**：补齐 Pointer 和全部被声明保留的能力，通过 ADR/Conformance 后再移除旧 Framework User Input。
+
+## 14. 待冻结事项
+
+必须在实施之前明确：
+
+- Context 广播 API 采用 Web Presentation v2、可选 extension，还是其他明确版本化契约？
+- Broadcast Channel 由 Context options 传入、RenderNode 配置绑定，还是通用 Capability 预先授权？allow-list/额度如何表达？
+- Renderer WC 的认证 publisher 身份选择“RenderNode 真实 owner”还是新版 presentation-origin 身份？如何保持 Session Events 来源契约真实？
+- “all-subsystems”是否严格定义为订阅该 exact Channel 的 Subsystem（推荐），还是需要一种另立契约的无订阅强制投递？
+- Controls 业务 schema、动作命名、epoch/revision、state refresh/TTL、reset、设备映射、数值范围的正式版本。
+- game-common-controls 的 Window 唯一实例和 RenderNode 宿主 Subsystem 所有权。
+- Pointer/IME/文本输入等功能边界，以及旧 User Input v1 的功能迁移矩阵。
+- 游戏层 input focus/priority/消费仲裁机制是否由包附带 coordinator，还是由游戏独立实现。
+- 旧 LM User Input 退出的兼容窗口、废止/删除顺序及 Qualification 证据。
+
+## 15. 设计结论
+
+**最终目标是“LM 通用事件承载 + 业务 WC 完整输入协议”，而不是“LM User Input v1 + 额外广播适配器”。**
+
+LM 负责保真地承载/鉴权/路由 Web Presentation 事件，不关心它们是不是游戏输入；game-common-controls 才拥有完整用户输入领域逻辑和协议；Subystem 消费方只依赖该业务协议及 LM 已有的通用 Session Events 能力。待新链路功能和跨平台 Qualification 完成后，旧 LM 内建 User Input 专属设施才进入有治理的退役阶段。
+
+本文仍为 Proposed；任何尚未更新的 frozen Contract、尚未实现的 Bridge、尚未执行的 Qualification 都不得被写作已完成事实。
