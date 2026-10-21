@@ -10,7 +10,7 @@
 
 本文只规定这三份文档的落地顺序和各自拥有的事实。调用形状、组件行为和删除清单以对应分册为准，不在这里重写。
 
-[DESIGN.md](./DESIGN.md) 是更早的总体方案。其中「固定通道 `x.loomrealm.web-presentation.event`，设备名放在 `data.channel`」已经不作为落地依据。设备载荷、采样和空 State 中仍有效的部分，由组件分册引用。
+原先的总体设计草稿已退役；其中「固定通道 `x.loomrealm.web-presentation.event`，设备名放在 `data.channel`」的方案不再作为落地依据。当前以本页和三份分册为实施事实源；设备载荷以 [User Input v1](../../doc/15-contracts/user-input-v1.md) 为基准，采集行为与空 State 规则见 [设备输入 Web Components](./device-input-components.md)。
 
 三份分册都还没有实现，也不修改已冻结契约。
 
