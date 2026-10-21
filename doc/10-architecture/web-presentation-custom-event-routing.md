@@ -3,7 +3,7 @@
 > 状态：Proposed / Architecture Design / 未实现 / 未冻结 / 未 Qualification  
 > 更新：2026-10-21  
 > 目的：定义 LoomRealm Framework 如何把 WebPresentationContext.emitCustomEvent 从 User Input reverse capability 演进为通用 Web Presentation custom-event 路由能力。  
-> 上层用例：[Game Common Controls](../../game-libs/game-common-controls/DESIGN.md)  
+> 上层落地计划：[设备输入迁移落地顺序](../../game-libs/game-common-controls/landing.md)（具体 API、设备组件和删除步骤以其分册为准；本文早期固定 Channel 方案已被后续计划替代）  
 > 相关现行规范：[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Session Events v1](../15-contracts/session-events-v1.md)、[Main Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)
 
 本文描述目标架构，不改变现有 Frozen v1 的当前事实。
