@@ -52,10 +52,12 @@ test("Map presentation is resolved from PokeMan Content resources", async () => 
       { namespace: "Presentation", key: "page.css" },
     ],
     scripts: [
+      { namespace: "Presentation", key: "controls/device-input.browser.js" },
       { namespace: "Presentation", key: "map/map.browser.js" },
     ],
   });
 
+  await access(new URL("[resource]Presentation/controls/device-input.browser.js.js", fsdbRoot));
   await access(new URL("[resource]Presentation/map/map.css.css", fsdbRoot));
   await access(new URL("[resource]Presentation/map/map.browser.js.js", fsdbRoot));
   await access(new URL("[resource]Presentation/page.css.css", fsdbRoot));

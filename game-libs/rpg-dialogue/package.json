@@ -28,7 +28,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@loomrealm/data": "0.1.0-alpha.0",
     "@loomrealm/subsystem": "0.1.0-alpha.0",
     "@loomrealm/wire": "0.1.0-alpha.0"
   },

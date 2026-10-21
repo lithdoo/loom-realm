@@ -7,7 +7,7 @@ test("constructor validates closed options, booleans, zIndex, scope, and Frame s
   const frame = { id: "f", params: null, signal: new AbortController().signal, async call() {} };
   const scope = {
     signal: new AbortController().signal,
-    createInputListener() {},
+    events: { async subscribe() { return { closed: new Promise(() => {}), close() {} }; } },
     createRenderDomain() {},
   };
   for (const options of [

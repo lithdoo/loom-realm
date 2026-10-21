@@ -220,8 +220,8 @@ export function validateConstructor(
   options: unknown,
 ): { readonly scope: SubsystemScope; readonly frame: Frame; readonly cancelable: boolean; readonly zIndex: number } {
   if (scope === null || typeof scope !== "object" ||
-      typeof (scope as SubsystemScope).createInputListener !== "function" ||
       typeof (scope as SubsystemScope).createRenderDomain !== "function" ||
+      typeof (scope as SubsystemScope).events?.subscribe !== "function" ||
       !isAbortSignal((scope as SubsystemScope).signal)) {
     throw new TypeError("Invalid SubsystemScope");
   }

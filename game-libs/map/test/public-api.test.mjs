@@ -35,7 +35,13 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
         return { bytes: png(), mime: "image/png", contentVersion: "image" };
       },
     },
-    createInputListener() { return { on(channel, listener) { inputHandlers.set(channel, listener); return () => inputHandlers.delete(channel); }, setChannels() {}, close() {} }; },
+    events: { async subscribe(channels, listener) {
+      for (const channel of channels) inputHandlers.set(channel, (data) => listener({
+        channel, type: channel.endsWith(".state") ? "input.state" : "input.event",
+        payload: { domainId: "map", targetKey: "map-input-keyboard", data }, source: { subsystemKey: "map" },
+      }));
+      return { closed: new Promise(() => {}), close() { inputHandlers.clear(); } };
+    } },
     createRenderDomain(initial) {
       states.push(structuredClone(initial));
       return { replace(state) { states.push(structuredClone(state)); }, update() {}, emit() {}, close() { closed = true; } };

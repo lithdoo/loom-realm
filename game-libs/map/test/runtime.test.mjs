@@ -225,18 +225,16 @@ describe("map runtime walking", { concurrency: false }, () => {
           return { bytes: new Uint8Array([1]), mime: "image/png", contentVersion: "v-image" };
         },
       },
-      createInputListener({ channels }) {
+      events: { async subscribe(channels, listener) {
         assert.deepEqual([...channels], ["keyboard.event", "keyboard.state"]);
-        return {
-          on(channel, handler) {
-            handlers.set(channel, handler);
-            if (channel === "keyboard.state" && options.baseline) handler(options.baseline);
-            return () => {};
-          },
-          setChannels() {},
-          close() { listenerClosed = true; },
-        };
-      },
+        for (const channel of channels) handlers.set(channel, (payload) => listener({
+          channel, type: channel.endsWith(".state") ? "input.state" : "input.event",
+          payload: { domainId: "map", targetKey: "map-input-keyboard", data: payload },
+          source: { subsystemKey: "map" },
+        }));
+        if (options.baseline) handlers.get("keyboard.state")(options.baseline);
+        return { closed: new Promise(() => {}), close() { listenerClosed = true; handlers.clear(); } };
+      } },
       createRenderDomain(initial) {
         states.push(structuredClone(initial));
         const handle = renderHandle(states, () => { domainClosed = true; }, updates, replaces);
@@ -1460,18 +1458,16 @@ describe("map runtime transfer", { concurrency: false }, () => {
           return { bytes: new Uint8Array([1]), mime: "image/png", contentVersion: "v-image" };
         },
       },
-      createInputListener({ channels }) {
+      events: { async subscribe(channels, listener) {
         assert.deepEqual([...channels], ["keyboard.event", "keyboard.state"]);
-        return {
-          on(channel, handler) {
-            handlers.set(channel, handler);
-            if (channel === "keyboard.state" && options.baseline) handler(options.baseline);
-            return () => {};
-          },
-          setChannels() {},
-          close() { listenerClosed = true; },
-        };
-      },
+        for (const channel of channels) handlers.set(channel, (payload) => listener({
+          channel, type: channel.endsWith(".state") ? "input.state" : "input.event",
+          payload: { domainId: "map", targetKey: "map-input-keyboard", data: payload },
+          source: { subsystemKey: "map" },
+        }));
+        if (options.baseline) handlers.get("keyboard.state")(options.baseline);
+        return { closed: new Promise(() => {}), close() { listenerClosed = true; handlers.clear(); } };
+      } },
       createRenderDomain(initial) {
         states.push(structuredClone(initial));
         const handle = renderHandle(states, () => { domainClosed = true; }, updates, replaces);

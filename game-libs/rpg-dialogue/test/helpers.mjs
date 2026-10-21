@@ -90,21 +90,20 @@ export function harness(options = {}) {
     state: {},
     content: {},
     viewport: {},
-    createInputListener({ frame, channels }) {
-      assert.equal(frame, frameObject);
+    events: { async subscribe(channels, listener) {
       listenerCreates += 1;
       if (options.inputCreateError) throw options.inputCreateError;
       operations.push({ type: "listener.create", channels: [...channels] });
-      return {
-        on(channel, handler) {
-          if (options.inputOnError && channel === options.inputOnError.channel) throw options.inputOnError.error;
-          handlers.set(channel, handler);
-          return () => { handlers.delete(channel); unsubscribeCount += 1; };
-        },
-        setChannels() {},
-        close() { listenerCloses += 1; operations.push({ type: "listener.close" }); },
-      };
-    },
+      for (const channel of channels) handlers.set(channel, (payload) => listener({
+        channel,
+        type: channel === "x.loomrealm.web-presentation.event" ? payload.name : "input.event",
+        payload: channel === "x.loomrealm.web-presentation.event"
+          ? { domainId: payload.domainId, targetKey: payload.targetKey, data: payload.data }
+          : { domainId: "map", targetKey: `map-input-${channel.split(".")[0]}`, data: payload },
+        source: { subsystemKey: "game" },
+      }));
+      return { closed: new Promise(() => {}), close() { listenerCloses += 1; operations.push({ type: "listener.close" }); handlers.clear(); } };
+    } },
     createRenderDomain(initial) {
       domainCreates += 1;
       if (options.domainCreateError) throw options.domainCreateError;

@@ -1,11 +1,10 @@
-import { WEB_PRESENTATION_EVENT_CHANNEL_V1 } from "@loomrealm/data";
 import type {
   Frame,
-  InputListener,
   RenderDomain,
   RenderDomainState,
+  SessionEvent,
+  SessionEventSubscription,
   SubsystemScope,
-  Unsubscribe,
 } from "@loomrealm/subsystem";
 import type {
   SchemaFormDataV1,
@@ -35,6 +34,7 @@ const THEME_CLASSES =
   "wa-theme-default wa-palette-default wa-brand-blue wa-neutral-gray " +
   "wa-success-green wa-warning-yellow wa-danger-red";
 const SCHEMA_FORM_Z_INDEX = 2_147_483_647;
+const WEB_PRESENTATION_EVENT_CHANNEL = "x.loomrealm.web-presentation.event";
 let nextFormSerial = 1;
 
 function isAbortSignal(value: unknown): value is AbortSignal {
@@ -47,7 +47,7 @@ function isAbortSignal(value: unknown): value is AbortSignal {
 function validateOuter(scope: unknown, frame: unknown, request: unknown): asserts scope is SubsystemScope {
   if (scope === null || typeof scope !== "object" ||
       typeof (scope as SubsystemScope).createRenderDomain !== "function" ||
-      typeof (scope as SubsystemScope).createInputListener !== "function") {
+      typeof (scope as SubsystemScope).events?.subscribe !== "function") {
     throw new TypeError("Invalid SubsystemScope");
   }
   if (frame === null || typeof frame !== "object" || !isAbortSignal((frame as Frame).signal)) {
@@ -151,8 +151,7 @@ class Session {
   private errors: Record<string, string> = {};
   private fieldRender: SchemaFormFieldRenderDataV1[];
   private domain?: RenderDomain;
-  private listener?: InputListener;
-  private unsubscribe?: Unsubscribe;
+  private subscription?: SessionEventSubscription;
   private settled = false;
   private resolve!: (value: SchemaFormResultV1) => void;
   private reject!: (cause: unknown) => void;
@@ -179,33 +178,38 @@ class Session {
   }
 
   start(): Promise<SchemaFormResultV1> {
+    void this.initialize();
+    return this.result;
+  }
+
+  private async initialize(): Promise<void> {
     try {
       this.domain = this.scope.createRenderDomain(this.state);
-      this.listener = this.scope.createInputListener({
-        frame: this.frame,
-        channels: [WEB_PRESENTATION_EVENT_CHANNEL_V1],
-      });
-      this.unsubscribe = this.listener.on(WEB_PRESENTATION_EVENT_CHANNEL_V1, (payload) => this.receive(payload));
+      this.subscription = await this.scope.events.subscribe(
+        [WEB_PRESENTATION_EVENT_CHANNEL],
+        (event: SessionEvent) => this.receive(event),
+      );
+      if (this.settled) { this.subscription.close(); return; }
       this.frame.signal.addEventListener("abort", this.abort, { once: true });
       if (this.frame.signal.aborted) this.abort();
     } catch (cause) {
       this.finishReject(cause);
     }
-    return this.result;
   }
 
-  private receive(payload: unknown): void {
-    if (this.settled || !ownDataObject(payload) || payload.targetKey !== this.rootKey || typeof payload.name !== "string") return;
+  private receive(event: SessionEvent): void {
+    const payload = event.payload;
+    if (this.settled || event.channel !== WEB_PRESENTATION_EVENT_CHANNEL || !ownDataObject(payload) || payload.targetKey !== this.rootKey) return;
     const data = payload.data;
-    if (payload.name === "cancel") {
+    if (event.type === "cancel") {
       if (this.request.cancelable === true && isEmptyData(data)) this.finishResolve({ type: "cancelled" });
       return;
     }
-    if (payload.name !== "change" && payload.name !== "submit") return;
+    if (event.type !== "change" && event.type !== "submit") return;
     const candidate = validateEventData(data, this.schema);
     if (candidate === null) return;
     try {
-      if (payload.name === "change") {
+      if (event.type === "change") {
         this.applyCandidate(candidate, this.validators.change, "schema.validateOnChange", false);
       } else {
         this.applyCandidate(candidate, this.validators.submit, "schema.validateOnSubmit", true);
@@ -256,8 +260,7 @@ class Session {
 
   private cleanup(): void {
     const operations = [
-      () => this.unsubscribe?.(),
-      () => this.listener?.close(),
+      () => this.subscription?.close(),
       () => this.domain?.close(),
       () => this.frame.signal.removeEventListener("abort", this.abort),
       () => { if (activeForms.get(this.frame) === this) activeForms.delete(this.frame); },

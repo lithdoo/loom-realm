@@ -12,6 +12,7 @@ export async function prepareExamplePresentation(origin) {
   const add = (namespace, key, bytes, mime, browserPath) => {
     artifacts.set(`${namespace}/${key}`, { bytes, mime, contentVersion: version(bytes), browserPath });
   };
+  add("Presentation", "controls/device-input.browser.js", await readFile(fileURLToPath(import.meta.resolve("@loomrealm-game/common-controls/browser/device-input.browser.js"))), "text/javascript", "/presentation/controls/device-input.browser.js");
   add("Presentation", "map/map.css", await readFile(fileURLToPath(import.meta.resolve("@loomrealm-game/map/browser/map.css"))), "text/css", "/presentation/map/map.css");
   add("Presentation", "map/map.browser.js", await readFile(fileURLToPath(import.meta.resolve("@loomrealm-game/map/browser/map.browser.js"))), "text/javascript", "/presentation/map/map.browser.js");
   add("Presentation", "essentials/page.css", await readFile(new URL("presentation.css", root)), "text/css", "/presentation/essentials/page.css");
