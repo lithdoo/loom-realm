@@ -584,3 +584,88 @@ test("Render Events preserve retained ordering, FIFO, presentation isolation, an
   assert.equal(delivered.length, deliveredBeforeRemovedEvent);
   publisher.retire();
 });
+
+test("Web Presentation v2 separates channel, type, payload, and owner/broadcast routing", async (t) => {
+  const dataPeers = [];
+  const publications = [];
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  const binding = {
+    async publish(event) {
+      publications.push(structuredClone(event));
+      if (publications.length === 1) await firstGate;
+    },
+  };
+  const holder = createRendererControlHolder({
+    async acquire(subsystemKey, generation, dataProfile) {
+      const pair = createMemoryCarrierPair();
+      const peer = createSubsystemDataPeer({
+        binding: { carrier: pair.left, subsystemKey, generation, dataProfile },
+        handlers: {
+          onInputState: () => ({ kind: "accepted" }),
+          onInputEvent: () => ({ kind: "accepted" }),
+          onInputReset: () => ({ kind: "accepted" }),
+          onViewportState: () => ({ kind: "accepted" }),
+        },
+      });
+      dataPeers.push(peer);
+      return pair.right;
+    },
+  }, undefined, undefined, binding);
+  t.after(async () => Promise.allSettled(dataPeers.map((peer) => peer.close())));
+
+  let emitNodeEvent;
+  const detach = attachRendererPresentation(holder, {
+    reevaluate(_source, emit) { emitNodeEvent = emit; },
+  });
+  t.after(detach);
+  const control = createMemoryCarrierPair();
+  const publisher = main(control, "S", [authority("owner")]);
+  await holder.connect({ carrier: control.right, rendererControlToken: "token" });
+  await waitFor(() => dataPeers.length === 1, "v2 Data peer");
+  await dataPeers[0].render.sendDomains({ type: "render.domains", domains: ["domain"] });
+  await dataPeers[0].render.sendSnapshot({
+    type: "render.snapshot", domainId: "domain", revision: 1, zIndex: 0,
+    roots: [{ key: "node", tag: "lr-node", attrs: {}, data: {}, children: [] }],
+  });
+  await waitFor(() => typeof emitNodeEvent === "function", "v2 presentation event callback");
+
+  const event = (overrides = {}) => ({
+    sessionId: "S", subsystemKey: "owner", generation: 1,
+    domainId: "domain", targetKey: "node", name: "input.state",
+    data: { down: ["KeyW"] }, options: undefined, ...overrides,
+  });
+  emitNodeEvent(event());
+  emitNodeEvent(event({
+    name: "input.event",
+    data: { action: "down", code: "KeyW", repeat: false },
+    options: { broadcast: true, channel: "keyboard.event" },
+  }));
+  await waitFor(() => publications.length === 1, "first v2 publication");
+  assert.equal(publications.length, 1, "binding FIFO holds the second publication");
+  releaseFirst();
+  await waitFor(() => publications.length === 2, "second v2 publication");
+  assert.deepEqual(publications.map(({ channel, type, broadcast }) => [channel, type, broadcast]), [
+    ["x.loomrealm.web-presentation.event", "input.state", false],
+    ["keyboard.event", "input.event", true],
+  ]);
+  assert.deepEqual(publications[1].payload, {
+    domainId: "domain",
+    targetKey: "node",
+    data: { action: "down", code: "KeyW", repeat: false },
+  });
+  assert.equal(publications[1].ownerSubsystemKey, "owner");
+  assert.equal("name" in publications[1].payload, false);
+  assert.equal("channel" in publications[1].payload.data, false);
+
+  for (const options of [null, true, "keyboard.state", { broadcast: 1 }, { channel: "" }, { extra: true }]) {
+    assert.throws(() => emitNodeEvent(event({ options })), TypeError);
+  }
+  assert.throws(() => emitNodeEvent(event({ name: "bad\nname" })), TypeError);
+  assert.throws(() => emitNodeEvent(event({ options: { channel: "bad\nchannel" } })), TypeError);
+  const beforeStale = publications.length;
+  assert.doesNotThrow(() => emitNodeEvent(event({ targetKey: "missing", options: null, name: Symbol() })));
+  await turn();
+  assert.equal(publications.length, beforeStale, "currentness precedes argument validation");
+  publisher.retire();
+});

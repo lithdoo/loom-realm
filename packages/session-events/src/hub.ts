@@ -5,6 +5,7 @@ import type {
   SessionEventBindingPublishDispatch,
   SessionEventBindingTerminalReason,
   SessionEventListener,
+  SessionEventDelegatedPublisher,
   SessionEventPhysicalBinding,
   SessionEventSubscription,
   SessionEventSubscriptionCloseReason,
@@ -167,6 +168,30 @@ export class SessionEventHub {
     return binding;
   }
 
+  createDelegatedPublisher(subsystemKey: string): SessionEventDelegatedPublisher {
+    const sourceSubsystemKey = validateSubsystemKey(subsystemKey);
+    return Object.freeze({
+      publish: (
+        channel: string,
+        type: string,
+        payload: JsonValue,
+        targetSubsystemKey?: string,
+      ) => {
+        if (this.terminalValue) {
+          return Promise.reject(sessionEventError("TERMINAL", "Session Event Hub is terminal"));
+        }
+        let accepted: ValidatedSessionEventInput;
+        try {
+          accepted = validatePublish(channel, type, payload);
+          if (targetSubsystemKey !== undefined) validateSubsystemKey(targetSubsystemKey);
+        } catch (error) {
+          return Promise.reject(error);
+        }
+        return this.route(sourceSubsystemKey, accepted, targetSubsystemKey);
+      },
+    });
+  }
+
   terminate(): void {
     this.selfTerminal();
   }
@@ -185,10 +210,20 @@ export class SessionEventHub {
     input: ValidatedSessionEventInput,
   ): Promise<void> {
     this.assertCurrent(binding);
-    const source = Object.freeze({ subsystemKey: binding.subsystemKey });
+    await this.route(binding.subsystemKey, input);
+  }
+
+  private async route(
+    sourceSubsystemKey: string,
+    input: ValidatedSessionEventInput,
+    targetSubsystemKey?: string,
+  ): Promise<void> {
+    if (this.terminalValue) throw sessionEventError("TERMINAL", "Session Event Hub is terminal");
+    const source = Object.freeze({ subsystemKey: sourceSubsystemKey });
     const recipients = [...(this.channelIndex.get(input.channel) ?? [])];
     for (const subscription of recipients) {
       if (subscription.owner.hub !== this) continue;
+      if (targetSubsystemKey !== undefined && subscription.owner.subsystemKey !== targetSubsystemKey) continue;
       const event: SessionEvent = Object.freeze({
         channel: input.channel,
         type: input.type,

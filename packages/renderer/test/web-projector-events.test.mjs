@@ -103,12 +103,15 @@ test("WebProjector provides stable per-node contexts with exact-live event prove
   b.context.emitCustomEvent("b-event");
   b.context.emitCustomEvent("undefined-event", undefined);
   b.context.emitCustomEvent("null-event", null);
+  a.context.emitCustomEvent("broadcast-event", { value: 1 }, { broadcast: true, channel: "keyboard.state" });
   assert.deepEqual(firstEvents.map(({ targetKey, name, data }) => ({ targetKey, name, data })), [
     { targetKey: "A", name: "a-event", data: { value: "A" } },
     { targetKey: "B", name: "b-event", data: {} },
     { targetKey: "B", name: "undefined-event", data: {} },
     { targetKey: "B", name: "null-event", data: null },
+    { targetKey: "A", name: "broadcast-event", data: { value: 1 } },
   ]);
+  assert.deepEqual(firstEvents.at(-1).options, { broadcast: true, channel: "keyboard.state" });
   assert.equal(firstEvents[1].data, firstEvents[2].data);
   assert.equal(Object.isFrozen(firstEvents[1].data), true);
   assert.ok(firstEvents.every(({ sessionId, subsystemKey, generation, domainId }) =>
@@ -117,7 +120,7 @@ test("WebProjector provides stable per-node contexts with exact-live event prove
   current = view([node("B")]);
   projector.reevaluate(source, firstCallback);
   a.context.emitCustomEvent("removed", { invalid: 1n });
-  assert.equal(firstEvents.length, 4);
+  assert.equal(firstEvents.length, 5);
 
   current = view([node("A"), node("B")]);
   projector.reevaluate(source, firstCallback);
@@ -126,13 +129,13 @@ test("WebProjector provides stable per-node contexts with exact-live event prove
   a.context.emitCustomEvent("expired-record", {});
   freshA.context.emitCustomEvent("fresh-record", {});
   assert.equal(firstEvents.at(-1).name, "fresh-record");
-  assert.equal(firstEvents.length, 5);
+  assert.equal(firstEvents.length, 6);
 
   const secondEvents = [];
   const secondCallback = (event) => secondEvents.push(event);
   projector.reevaluate(source, secondCallback);
   freshA.context.emitCustomEvent("new-attachment", {});
-  assert.equal(firstEvents.length, 5);
+  assert.equal(firstEvents.length, 6);
   assert.equal(secondEvents.length, 1);
 
   projector.teardown();
