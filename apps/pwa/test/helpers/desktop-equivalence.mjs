@@ -47,14 +47,8 @@ export async function runDesktopEquivalenceReference() {
     const view = await prepareDesktopContentView(prepared);
     service = await createDesktopContentService({ view });
     const access = service.access(service.createGrant({ permissions: ["records"], expiresAtUnixMs: Date.now() + 60_000 }));
-    let emitInput = null;
-    const input = Object.freeze({
-      start(emit) {
-        emitInput = emit;
-        emit({ kind: "availability", channel: "keyboard.event", available: true });
-        return () => { emitInput = null; };
-      },
-    });
+    const sessionEventHub = createSessionEventHub();
+    const presentationPublisher = sessionEventHub.createDelegatedPublisher("web-presentation");
     const viewport = Object.freeze({ start(emit) { emit({ width: 1280, height: 720 }); return () => {}; } });
     let holder = null;
     let rendererFailure = null;
@@ -62,7 +56,11 @@ export async function runDesktopEquivalenceReference() {
       acquire(token, signal) {
         if (signal.aborted || holder !== null) return Promise.reject(signal.reason ?? new Error("Renderer already acquired"));
         const pair = createMemoryCarrierPair();
-        holder = createRendererControlHolder(broker.rendererDataBinding(token), input, viewport);
+        holder = createRendererControlHolder(broker.rendererDataBinding(token), viewport, {
+          publish(event) {
+            return presentationPublisher.publish(event.channel, event.type, event.payload, event.ownerSubsystemKey);
+          },
+        });
         void holder.connect({ carrier: pair.right, rendererControlToken: token }).catch((cause) => { rendererFailure = cause; });
         return Promise.resolve(pair.left);
       },
@@ -70,7 +68,7 @@ export async function runDesktopEquivalenceReference() {
     const runtimeHosting = createHostraRuntimeHosting({
       launchPlan: prepared.launchPlan,
       sharedStateAuthority: authority,
-      sessionEventHub: createSessionEventHub(),
+      sessionEventHub,
       contentAccess: { origin: access.origin.href, installationId: access.installationId, token: access.token },
       onRuntimeDataProvisioner: broker.onRuntimeDataProvisioner,
     });
@@ -82,8 +80,11 @@ export async function runDesktopEquivalenceReference() {
     });
     await waitFor(() => holder !== null && inspectRendererRenderForQualification(holder, "demo")?.domains[0]?.baselined === true, "Desktop logical Render baseline");
     const render = structuredClone(inspectRendererRenderForQualification(holder, "demo").domains[0].roots[0]);
-    await waitFor(() => emitInput !== null, "Desktop input source");
-    emitInput({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "Enter", repeat: false } });
+    await presentationPublisher.publish("keyboard.event", "input.event", {
+      domainId: "keyboard-device",
+      targetKey: "keyboard-device",
+      data: { action: "down", code: "Enter", repeat: false },
+    });
     const outcome = await result;
     const state = await authority.read([{ namespace: "demo", key: "visits" }]);
     await waitFor(() => holder.current() === null, "Desktop Renderer cleanup");
@@ -93,6 +94,6 @@ export async function runDesktopEquivalenceReference() {
     broker.close();
     authority?.terminate();
     await service?.close();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }

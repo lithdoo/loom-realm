@@ -26,6 +26,7 @@ async function realMapFixture() {
       { kind: "resource", namespace: "resource.Graphics", key: "Characters/m14_player", mime: "image/png", encoding: "base64", body: await binary(fsdb, "[resource]Graphics", "Characters", "m14_player.png") },
       { kind: "resource", namespace: "resource.Graphics", key: "Characters/m14_npc", mime: "image/png", encoding: "base64", body: await binary(fsdb, "[resource]Graphics", "Characters", "m14_npc.png") },
       { kind: "resource", namespace: "resource.Graphics", key: "Tilesets/m14_tileset", mime: "image/png", encoding: "base64", body: await binary(fsdb, "[resource]Graphics", "Tilesets", "m14_tileset.png") },
+      { kind: "resource", namespace: "resource.Presentation", key: "controls/device-input.browser.js", mime: "text/javascript; charset=utf-8", encoding: "text", body: await text(fsdb, "[resource]Presentation", "controls", "device-input.browser.js.js") },
       { kind: "resource", namespace: "resource.Presentation", key: "map/map.browser.js", mime: "text/javascript; charset=utf-8", encoding: "text", body: await text(fsdb, "[resource]Presentation", "map", "map.browser.js.js") },
       { kind: "resource", namespace: "resource.Presentation", key: "map/map.css", mime: "text/css; charset=utf-8", encoding: "text", body: await text(fsdb, "[resource]Presentation", "map", "map.css.css") },
       { kind: "resource", namespace: "resource.Presentation", key: "essentials/page.css", mime: "text/css; charset=utf-8", encoding: "text", body: await text(fsdb, "[resource]Presentation", "essentials", "page.css.css") },
