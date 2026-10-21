@@ -599,6 +599,7 @@ SessionEvent.payload
 
 SessionEvent.source
     = trusted RenderNode owner
+~~~
 
 设备输入示例：
 
@@ -614,7 +615,6 @@ SessionEvent.payload.data = { down: ["KeyW"] }
 ~~~
 
 channel 省略时使用默认 Web Presentation Channel。显式 Channel 是实际路由字段，不是 Payload 元数据；Session Events Hub 继续按精确 Channel 匹配。
-~~~
 
 职责必须保持分离：
 
@@ -662,7 +662,7 @@ broadcast=false / options omitted 在迁移阶段继续走现有 owner-only 路�
 ~~~text
 business WC
   |
-  | emitCustomEvent(name, data, { broadcast: true })
+  | emitCustomEvent(name, data, { broadcast: true, channel? })
   v
 WebProjector / Renderer currentness
   |
@@ -970,10 +970,11 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 3. channel 仅在 broadcast=true 时合法；否则同步抛出 TypeError。
 4. broadcast=true 且 channel 省略时使用默认 Web Presentation Event Channel；显式 channel 则成为真实的 SessionEvent.channel。
 5. input.state / input.event 是 event.type，keyboard.state 等是实际 event.channel，不放在 data.channel。
-6. business code 不能伪造 source/session/owner/domain/target；channel 只决定精确路由身份。
-7. stale RenderNode/Context 不产生事件。
-8. InputTarget 不参与 broadcast=true 新 Event path；legacy owner-only path 的现行依赖不在本阶段重写。
-9. Desktop/PWA logical observables 一致。
+6. 订阅 keyboard.state 的消费者只收到 keyboard.state；pointer.state 等其他 Channel 互相隔离，event.type 不替代 Channel 过滤。
+7. business code 不能伪造 source/session/owner/domain/target；channel 只决定精确路由身份。
+8. stale RenderNode/Context 不产生事件。
+9. InputTarget 不参与 broadcast=true 新 Event path；legacy owner-only path 的现行依赖不在本阶段重写。
+10. Desktop/PWA logical observables 一致。
 
 ### User Input v1-compatible device migration
 
