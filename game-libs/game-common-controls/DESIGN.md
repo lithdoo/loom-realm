@@ -545,7 +545,7 @@ options omitted
     => cross-Subsystem broadcast
 ~~~
 
-broadcast 只改变 audience。它不得改变：
+broadcast 只选择 recipient scope / publication path。它不得改变：
 
 - Web Presentation Event Channel；
 - custom-event name；
@@ -614,7 +614,7 @@ broadcast=false
 - Channel：这是 Web Presentation custom event；
 - name/type：这条业务事件是什么；
 - data：业务协议数据；
-- broadcast：谁可以收到。
+- broadcast：是否进入跨 Subsystem broadcast path。
 
 
 ### 5.4 owner-only 与 broadcast 的迁移边界
@@ -709,7 +709,7 @@ true
        -> existing Session Events routing
 ~~~
 
-这样 Channel 仍然独立承担 Session Events routing scope，不被第二套 audience 规则覆盖。
+这样 Channel 仍然独立承担 Session Events routing scope，不被第二套 recipient 规则覆盖。
 
 ### 6.2 source identity
 
