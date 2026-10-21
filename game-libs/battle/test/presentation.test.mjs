@@ -44,7 +44,6 @@ function harness(viewport = { width: 640, height: 480 }, custom = {}) {
       current: viewport,
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     },
-    createInputListener() { throw new Error("not used"); },
     createRenderDomain(state) { const domain = new Domain(state); domains.push(domain); return domain; },
     ...custom.scope,
   };

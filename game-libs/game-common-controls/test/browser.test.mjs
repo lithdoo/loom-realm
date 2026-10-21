@@ -61,3 +61,66 @@ test("pointer component emits State before edge Event on exact channels", async 
   assert.equal(events[down].options.channel, "pointer.event");
   assert.equal(events[down].options.broadcast, true);
 });
+
+test("gamepad component preserves normalization, threshold, ordering, and exact channels", async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent("<!doctype html><body></body>");
+  await page.evaluate(() => {
+    const values = Array(17).fill(0);
+    globalThis.padValues = values;
+    globalThis.pad = {
+      index: 7, connected: true, mapping: "standard",
+      axes: [-1, -0.25, 0.5, 2],
+      buttons: values.map((value) => ({ value })),
+    };
+    Object.defineProperty(navigator, "getGamepads", { configurable: true, value: () => [globalThis.pad] });
+  });
+  await page.addScriptTag({ path: browserBundle });
+  await page.evaluate(() => {
+    globalThis.deviceEvents = [];
+    const gamepad = document.createElement("game-gamepad-input");
+    gamepad.receiveRenderContext({ emitCustomEvent(name, data, options) { deviceEvents.push({ name, data, options }); } });
+    document.body.append(gamepad);
+  });
+  await page.evaluate(() => { padValues[0] = 0.5; pad.buttons[0].value = 0.5; });
+  await page.waitForFunction(() => deviceEvents.some(({ name }) => name === "input.event"));
+  const events = await page.evaluate(() => deviceEvents);
+  const edge = events.findIndex(({ name }) => name === "input.event");
+  assert.ok(edge > 0);
+  assert.equal(events[edge - 1].options.channel, "gamepad.state");
+  assert.equal(events[edge].options.channel, "gamepad.event");
+  assert.deepEqual(events[edge].data, { action: "down", gamepadId: 1, button: "south", value: 500000 });
+  const sample = events[edge - 1].data.gamepads[0];
+  assert.deepEqual(sample.axes, { leftX: -1000000, leftY: -250000, rightX: 500000, rightY: 1000000 });
+  assert.equal(events.every(({ options }) => options.broadcast === true), true);
+});
+
+test("non-neutral State refreshes and disconnect stops publication while releasing the duplicate claim", async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent("<!doctype html><body></body>");
+  await page.addScriptTag({ path: browserBundle });
+  await page.evaluate(() => {
+    globalThis.deviceEvents = [];
+    const keyboard = document.createElement("game-keyboard-input");
+    keyboard.receiveRenderContext({ emitCustomEvent(name, data, options) { deviceEvents.push({ name, data, options }); } });
+    document.body.append(keyboard);
+  });
+  await page.keyboard.down("KeyW");
+  await page.waitForTimeout(1100);
+  const refreshed = await page.evaluate(() => deviceEvents.filter(({ name, data }) => name === "input.state" && data.down?.includes("KeyW")).length);
+  assert.ok(refreshed >= 2);
+  await page.evaluate(() => document.querySelector("game-keyboard-input").remove());
+  const before = await page.evaluate(() => deviceEvents.length);
+  await page.waitForTimeout(1100);
+  assert.equal(await page.evaluate(() => deviceEvents.length), before);
+  assert.equal(await page.evaluate(() => {
+    const replacement = document.createElement("game-keyboard-input");
+    replacement.receiveRenderContext({ emitCustomEvent() {} });
+    document.body.append(replacement);
+    return replacement.hasAttribute("data-input-disabled");
+  }), false);
+});

@@ -260,7 +260,7 @@ try {
     sourceFingerprint: `sha256:${fingerprint}`,
     fsdbRoot: production.fsdbRoot,
     content: { seam: "Desktop FSDB HTTP -> Bound ContentClient", mapVersion: mapResult.contentVersion, tilesetVersion: tilesetResult.contentVersion, tilesetMime: tilesetResource.mime, playerMime: playerResource.mime },
-    input: { seam: "RendererInputSource -> M10 -> Data -> Subsystem InputListener", action: "down", code: "ArrowRight", repeat: false },
+    input: { seam: "Game Common Controls -> Presentation Event -> Session Events", action: "down", code: "ArrowRight", repeat: false },
     selection: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] },
     tileset: tileset.tileset_name,
     movement: { code: "ArrowRight", before: { x: before.x, y: before.y }, after: { x: after.x, y: after.y }, direction: after.direction },
