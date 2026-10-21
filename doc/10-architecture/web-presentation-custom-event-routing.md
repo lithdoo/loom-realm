@@ -75,7 +75,7 @@ broadcast=true
 
 CustomEventOptions 保留对象形态。broadcast 是当前唯一字段，但不是把整个第三参数设计成 boolean；未来可以在 options 中增加新的正交能力。
 
-broadcast 只改变 recipient audience，不改变事件其他组成部分。
+broadcast 只选择 Web Presentation publication path / recipient scope，不改变事件其他组成部分。
 
 
 ## 3. Channel、type、payload、broadcast 职责
