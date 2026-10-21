@@ -58,34 +58,34 @@ export default (scope) => ({
     const stopViewport = scope.viewport.subscribe((viewport) => {
       if (viewport) domain.update({ nodes: [{ key: "demo-root", attrs: { set: { "data-viewport": viewport.width + "x" + viewport.height } } }] });
     });
-    const input = scope.createInputListener({ frame, channels: ["keyboard.event"] });
-    return await new Promise((resolve) => {
-      const finish = (outcome) => {
-        stopViewport();
-        input.close();
-        resolve(outcome);
-      };
-      input.on("keyboard.event", (event) => {
-        if (event.action === "down" && event.code === "Enter") {
-          finish({
-            type: "completed",
-            value: {
-              result: "demo-complete",
-              visits,
-              content: content.value.message,
-              sessionEvent: {
-                channel: sessionEvent.channel,
-                type: sessionEvent.type,
-                payload: sessionEvent.payload,
-                source: sessionEvent.source,
-                closed: sessionEventClosed
-              }
-            }
-          });
+    let resolveOutcome;
+    const outcome = new Promise((resolve) => { resolveOutcome = resolve; });
+    let keyboardSubscription;
+    const finish = (value) => {
+      stopViewport();
+      keyboardSubscription?.close();
+      resolveOutcome(value);
+    };
+    keyboardSubscription = await scope.events.subscribe(["keyboard.event"], (message) => {
+      const event = message.payload?.data;
+      if (event?.action === "down" && event?.code === "Enter") finish({
+        type: "completed",
+        value: {
+          result: "demo-complete",
+          visits,
+          content: content.value.message,
+          sessionEvent: {
+            channel: sessionEvent.channel,
+            type: sessionEvent.type,
+            payload: sessionEvent.payload,
+            source: sessionEvent.source,
+            closed: sessionEventClosed
+          }
         }
       });
-      frame.signal.addEventListener("abort", () => finish({ type: "cancelled" }), { once: true });
     });
+    frame.signal.addEventListener("abort", () => finish({ type: "cancelled" }), { once: true });
+    return await outcome;
   }
 });
 `.trim();

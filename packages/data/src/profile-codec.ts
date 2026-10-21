@@ -1,7 +1,6 @@
 import type { JsonValue } from "@loomrealm/wire";
 import { assertJsonValue, jsonDepth, parseJsonText, stringifyJson, utf8ByteLength } from "@loomrealm/wire";
-import type { DataProtocolFamily, RendererDataMessageV1 } from "./model.js";
-import { validateInputEvent, validateInputInterest, validateInputReset, validateInputState } from "./input-codec.js";
+import type { DataProtocolFamily, RendererDataMessageV2 } from "./model.js";
 import {
   validateRenderDomains,
   validateRenderEvent,
@@ -21,7 +20,6 @@ import {
 export type DataRole = "subsystem" | "renderer";
 
 export function protocolFamilyOfType(type: string): DataProtocolFamily {
-  if (type.startsWith("input.")) return "input";
   if (type.startsWith("render.")) return "render";
   if (type === "viewport.state") return "viewport";
   return "profile";
@@ -32,12 +30,8 @@ function typeOfObject(raw: unknown): string {
   return stringValue(o.type, "profile", "type");
 }
 
-function validateByType(raw: unknown): RendererDataMessageV1 {
+function validateByType(raw: unknown): RendererDataMessageV2 {
   const type = typeOfObject(raw);
-  if (type === "input.interest") return validateInputInterest(raw);
-  if (type === "input.state") return validateInputState(raw);
-  if (type === "input.event") return validateInputEvent(raw);
-  if (type === "input.reset") return validateInputReset(raw);
   if (type === "render.domains") return validateRenderDomains(raw);
   if (type === "render.snapshot") return validateRenderSnapshot(raw);
   if (type === "render.patch") return validateRenderPatch(raw);
@@ -48,17 +42,17 @@ function validateByType(raw: unknown): RendererDataMessageV1 {
 
 function inboundAllowed(role: DataRole, type: string): boolean {
   return role === "subsystem"
-    ? type === "input.state" || type === "input.event" || type === "input.reset" || type === "viewport.state"
-    : type === "input.interest" || type.startsWith("render.");
+    ? type === "viewport.state"
+    : type.startsWith("render.");
 }
 
 function outboundAllowed(role: DataRole, type: string): boolean {
   return role === "subsystem"
-    ? type === "input.interest" || type.startsWith("render.")
-    : type === "input.state" || type === "input.event" || type === "input.reset" || type === "viewport.state";
+    ? type.startsWith("render.")
+    : type === "viewport.state";
 }
 
-export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV1 {
+export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV2 {
   if (typeof raw !== "string") fail("profile", "carrier application unit must be string");
   if (utf8ByteLength(raw) > MAX_MESSAGE_BYTES) fail("profile", "message byte limit exceeded");
   let parsed: JsonValue;
@@ -77,7 +71,7 @@ export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV
   return message;
 }
 
-export function encodeForRole(message: RendererDataMessageV1, role: DataRole): string {
+export function encodeForRole(message: RendererDataMessageV2, role: DataRole): string {
   const validated = validateByType(message);
   const t = (validated as { type: string }).type;
   if (!outboundAllowed(role, t)) {

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createMainRendererControlPeer, prepareRendererHelloResultV1 } from "../dist/index.js";
+import { createMainRendererControlPeer, prepareRendererHelloResultV2 } from "../dist/index.js";
 
-const snapshot = (revision) => ({ sessionId: "s", revision, runtimes: [], stack: [], inputTarget: null, dataAuthorities: [] });
+const snapshot = (revision) => ({ sessionId: "s", revision, runtimes: [], stack: [], dataAuthorities: [] });
 
 test("publication holds one in-flight and only latest pending Snapshot", async () => {
   const sent = [];
@@ -11,7 +11,7 @@ test("publication holds one in-flight and only latest pending Snapshot", async (
   let resolveClosed;
   const closed = new Promise((resolve) => { resolveClosed = resolve; });
   async function* messages() {
-    yield JSON.stringify({ jsonrpc: "2.0", id: 1, method: "renderer.hello", params: { rendererControlToken: "t", protocolVersions: [1] } });
+    yield JSON.stringify({ jsonrpc: "2.0", id: 1, method: "renderer.hello", params: { rendererControlToken: "t", protocolVersions: [2] } });
     await closed;
   }
   const carrier = {
@@ -20,7 +20,7 @@ test("publication holds one in-flight and only latest pending Snapshot", async (
     send(text) { sent.push(text); return new Promise((resolve) => releases.push(resolve)); },
     async close() { closeCalls += 1; resolveClosed({ kind: "closed" }); },
   };
-  const peer = createMainRendererControlPeer({ carrier, acceptHello() { const initial = snapshot(1); return { kind: "accepted", snapshot: initial, preparedHelloText: prepareRendererHelloResultV1(initial) }; } });
+  const peer = createMainRendererControlPeer({ carrier, acceptHello() { const initial = snapshot(1); return { kind: "accepted", snapshot: initial, preparedHelloText: prepareRendererHelloResultV2(initial) }; } });
   while (releases.length === 0) await new Promise((resolve) => setImmediate(resolve));
   peer.publish(snapshot(2));
   peer.publish(snapshot(3));
@@ -40,7 +40,7 @@ test("retirement wins once, clears pending, and never starts a post-retirement s
   let resolveClosed;
   const closed = new Promise((resolve) => { resolveClosed = resolve; });
   async function* messages() {
-    yield JSON.stringify({ jsonrpc: "2.0", id: 1, method: "renderer.hello", params: { rendererControlToken: "t", protocolVersions: [1] } });
+    yield JSON.stringify({ jsonrpc: "2.0", id: 1, method: "renderer.hello", params: { rendererControlToken: "t", protocolVersions: [2] } });
     await closed;
   }
   const carrier = {
@@ -49,7 +49,7 @@ test("retirement wins once, clears pending, and never starts a post-retirement s
     send(text) { sent.push(text); return new Promise((resolve) => releases.push(resolve)); },
     async close() { resolveClosed({ kind: "closed" }); },
   };
-  const peer = createMainRendererControlPeer({ carrier, acceptHello() { const initial = snapshot(1); return { kind: "accepted", snapshot: initial, preparedHelloText: prepareRendererHelloResultV1(initial) }; } });
+  const peer = createMainRendererControlPeer({ carrier, acceptHello() { const initial = snapshot(1); return { kind: "accepted", snapshot: initial, preparedHelloText: prepareRendererHelloResultV2(initial) }; } });
   while (releases.length === 0) await new Promise((resolve) => setImmediate(resolve));
   releases.shift()();
   while (sent.length < 1) await new Promise((resolve) => setImmediate(resolve));

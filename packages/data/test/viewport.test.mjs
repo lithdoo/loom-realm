@@ -4,7 +4,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import {
   createRendererDataPeer,
   createSubsystemDataPeer,
-  RENDERER_DATA_PROFILE_V1,
+  RENDERER_DATA_PROFILE_V2,
 } from "../dist/index.js";
 
 const accepted = () => ({ kind: "accepted" });
@@ -12,16 +12,12 @@ const binding = (carrier) => ({
   carrier,
   subsystemKey: "map",
   generation: 1,
-  dataProfile: RENDERER_DATA_PROFILE_V1,
+  dataProfile: RENDERER_DATA_PROFILE_V2,
 });
 const subsystemHandlers = {
-  onInputState: accepted,
-  onInputEvent: accepted,
-  onInputReset: accepted,
   onViewportState: accepted,
 };
 const rendererHandlers = {
-  onInputInterest: accepted,
   onRenderDomains: accepted,
   onRenderSnapshot: accepted,
   onRenderPatch: accepted,
@@ -206,26 +202,18 @@ test("blocked writer coalesces a resize burst to one in-flight and one pending l
   for (let width = 1; width <= 1200; width += 1) {
     burst.push(renderer.viewport.sendState(viewport(width, 480)));
   }
-  const reset = renderer.input.sendReset({
-    type: "input.reset",
-    frameId: "f1",
-    activationId: "a1",
-  });
   await tick();
   assert.equal(carrier.maxActive, 1);
   carrier.releaseSend();
-  const [firstResult, resetResult, ...burstResults] = await Promise.all([first, reset, ...burst]);
+  const [firstResult, ...burstResults] = await Promise.all([first, ...burst]);
   assert.equal(firstResult.kind, "sent");
-  assert.equal(resetResult.kind, "sent");
   assert.ok(burstResults.every((result) => result.kind === "sent"));
   const parsed = carrier.sent.map((text) => JSON.parse(text));
   const types = parsed.map((message) => message.type);
   assert.equal(types.filter((type) => type === "viewport.state").length, 2);
-  assert.equal(types.filter((type) => type === "input.reset").length, 1);
   const viewports = parsed.filter((message) => message.type === "viewport.state");
   assert.deepEqual(viewports[0], viewport(320, 240));
   assert.deepEqual(viewports[1], viewport(1200, 480));
-  assert.ok(types.indexOf("input.reset") > 0);
   await renderer.close();
 });
 

@@ -3,15 +3,15 @@ import type { JsonValue } from "@loomrealm/wire";
 import type {
   MainRendererControlPeer,
   MainRendererControlPeerOptions,
-  RendererAuthoritySnapshotV1,
+  RendererAuthoritySnapshotV2,
   RendererControlPublishOutcome,
   RendererControlTerminal,
 } from "./model.js";
 import {
   decodeRendererControlMessage,
   encodeRendererControlMessage,
-  prepareRendererStateV1,
-  validateRendererHelloParamsV1,
+  prepareRendererStateV2,
+  validateRendererHelloParamsV2,
 } from "./validation.js";
 
 function deferred<T>() {
@@ -28,7 +28,7 @@ class MainPeer implements MainRendererControlPeer {
   private terminalValue: RendererControlTerminal | undefined;
   private helloState: "pending" | "sending" | "current" = "pending";
   private inFlight = false;
-  private pendingLatest: RendererAuthoritySnapshotV1 | undefined;
+  private pendingLatest: RendererAuthoritySnapshotV2 | undefined;
 
   constructor(
     private readonly carrier: MessageCarrier,
@@ -44,7 +44,7 @@ class MainPeer implements MainRendererControlPeer {
     ), (cause) => this.commit({ kind: "carrier-lost", cause }, false));
   }
 
-  publish(snapshot: RendererAuthoritySnapshotV1): RendererControlPublishOutcome {
+  publish(snapshot: RendererAuthoritySnapshotV2): RendererControlPublishOutcome {
     if (this.terminalValue !== undefined)
       return frozen({ kind: "terminal", terminal: this.terminalValue });
     if (this.helloState !== "current" || this.inFlight) {
@@ -92,19 +92,19 @@ class MainPeer implements MainRendererControlPeer {
         }
         let params;
         try {
-          params = validateRendererHelloParamsV1(message.params ?? {});
+          params = validateRendererHelloParamsV2(message.params ?? {});
         } catch (cause) {
           this.protocolFatal(cause, "invalid-params");
           return;
         }
-        if (!params.protocolVersions.includes(1)) {
+        if (!params.protocolVersions.includes(2)) {
           await this.sendSemanticError("RENDERER_CONTROL_PROTOCOL_UNSUPPORTED");
           this.commit({ kind: "protocol-fatal", cause: new Error("Unsupported Renderer Control version") });
           return;
         }
         let accepted;
         try {
-          accepted = await this.acceptHello(this, params, 1);
+          accepted = await this.acceptHello(this, params, 2);
         } catch (cause) {
           this.commit({ kind: "local-fatal", cause });
           return;
@@ -134,11 +134,11 @@ class MainPeer implements MainRendererControlPeer {
     }
   }
 
-  private startStateSend(snapshot: RendererAuthoritySnapshotV1): void {
+  private startStateSend(snapshot: RendererAuthoritySnapshotV2): void {
     if (this.terminalValue !== undefined || this.helloState !== "current") return;
     let text: string;
     try {
-      text = prepareRendererStateV1(snapshot);
+      text = prepareRendererStateV2(snapshot);
     } catch (cause) {
       this.commit({ kind: "local-fatal", cause });
       return;

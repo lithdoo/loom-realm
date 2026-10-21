@@ -17,7 +17,6 @@ import {
   type WebPresentationResourceRefV1,
 } from "@loomrealm/renderer/web-presentation";
 import {
-  createBrowserRendererInputSource,
   createBrowserRendererViewportSource,
 } from "@loomrealm/renderer/browser-window";
 import { pwaPath } from "./base-path.js";
@@ -169,7 +168,6 @@ export async function createPwaRendererHost(installationId: string, presentation
   const presentationEvents = new PwaPresentationEventBinding();
   const holder = createRendererControlHolder(
     data.binding,
-    createBrowserRendererInputSource(window),
     createBrowserRendererViewportSource(window),
     presentationEvents,
   );

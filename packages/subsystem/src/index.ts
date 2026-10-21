@@ -20,22 +20,6 @@ export type {
   SubsystemScope,
 } from "./model.js";
 export type {
-  InputStateChannel,
-  InputEventChannel,
-  InputChannel,
-  KeyboardStateInput,
-  KeyboardEventInput,
-  PointerStateInput,
-  PointerEventInput,
-  GamepadStateInput,
-  GamepadEventInput,
-  InputPayload,
-  InputHandler,
-  Unsubscribe,
-  CreateInputListenerOptions,
-  InputListener,
-} from "./input.js";
-export type {
   RenderNode,
   RenderDomainState,
   RenderEvent,

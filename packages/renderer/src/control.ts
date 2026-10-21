@@ -1,23 +1,18 @@
 import {
   createRendererDataPeer,
-  RENDERER_DATA_PROFILE_V1,
-  validateInputPayloadV1,
-  WEB_PRESENTATION_EVENT_CHANNEL_V1,
+  RENDERER_DATA_PROFILE_V2,
   type RendererDataPeer,
-  type InputEventChannelV1,
-  type InputEventV1,
   type RenderEventV1,
 } from "@loomrealm/data";
 import type { RendererDataBinding } from "@loomrealm/platform-ports";
 import {
   connectRendererControlPeer,
-  type RendererAuthoritySnapshotV1,
+  type RendererAuthoritySnapshotV2,
   type RendererControlPeer,
   type RendererPeerConnectOptions,
   type RendererPeerConnectOutcome,
 } from "@loomrealm/renderer-control";
 import { utf8ByteLength, type JsonValue } from "@loomrealm/wire";
-import { RendererInputGate } from "./internal/input-gate.js";
 import { RendererRenderStore } from "./internal/render-store.js";
 import { renderQualification } from "./internal/render-qualification.js";
 import {
@@ -28,7 +23,6 @@ import {
   type RendererPresentationSource,
   type RendererPresentationView,
 } from "./internal/presentation-seam.js";
-import type { RendererInputSource, RendererInputSourceChange } from "./input.js";
 import type { RendererViewportLogicalSample, RendererViewportSource } from "./viewport.js";
 import { RendererViewportPublisher } from "./internal/viewport-publisher.js";
 import {
@@ -39,7 +33,7 @@ import {
 
 export interface RendererControlCurrent {
   readonly peer: RendererControlPeer;
-  readonly snapshot: RendererAuthoritySnapshotV1;
+  readonly snapshot: RendererAuthoritySnapshotV2;
 }
 
 export type RendererControlHolderConnectOutcome =
@@ -80,13 +74,7 @@ interface RendererDataSlot {
 type JsonObject = Readonly<Record<string, JsonValue>>;
 
 type AcceptedPresentationEvent =
-  | { readonly kind: "publication"; readonly publication: PresentationEventPublication }
-  | {
-      readonly kind: "legacy-owner";
-      readonly subsystemKey: string;
-      readonly channel: InputEventChannelV1;
-      readonly payload: InputEventV1["payload"];
-    };
+  { readonly kind: "publication"; readonly publication: PresentationEventPublication };
 
 interface QueuedPresentationEvent {
   readonly epoch: number;
@@ -94,7 +82,7 @@ interface QueuedPresentationEvent {
 }
 
 const acceptedDataMessage = Object.freeze({ kind: "accepted" } as const);
-const MAX_STAGED_PRESENTATION_INPUTS = 256;
+const MAX_STAGED_PRESENTATION_EVENTS = 256;
 const MAX_PRESENTATION_PUBLICATIONS = 256;
 
 function sameIdentity(
@@ -267,20 +255,6 @@ function validateRendererDataBinding(
   if (!valid) throw new TypeError("Invalid RendererDataBinding");
 }
 
-function validateRendererInputSource(
-  input: RendererInputSource | undefined,
-): void {
-  if (input === undefined) return;
-  let valid = false;
-  try {
-    valid = input !== null && typeof input === "object" &&
-      typeof input.start === "function";
-  } catch {
-    // Accessor-backed integration objects are not valid source capabilities.
-  }
-  if (!valid) throw new TypeError("Invalid RendererInputSource");
-}
-
 function validateRendererViewportSource(
   viewport: RendererViewportSource | undefined,
 ): void {
@@ -315,28 +289,19 @@ interface ViewportSourceSubscription {
   stop: (() => void) | null;
 }
 
-interface SourceSubscription {
-  readonly peer: RendererControlPeer;
-  phase: "starting" | "current" | "invalid";
-  readonly staged: RendererInputSourceChange[];
-  stop: (() => void) | null;
-}
-
 class ControlHolder implements RendererControlHolder {
   private currentValue: RendererControlCurrent | null = null;
   private connecting = false;
   private readonly dataSlots = new Map<string, RendererDataSlot>();
   private renderSessionId: string | null = null;
   private readonly renderHistories = new Map<string, RendererRenderStore>();
-  private readonly inputGate = new RendererInputGate();
-  private sourceSubscription: SourceSubscription | null = null;
   private viewportSubscription: ViewportSourceSubscription | null = null;
   private readonly viewportPublisher = new RendererViewportPublisher();
   private presentationEffect: RendererPresentationEffect | null = null;
   private presentationAttachmentToken: object | null = null;
   private presentationEmitNodeEvent: ((event: RendererPresentationNodeEvent) => void) | null = null;
   private presentationForwardDepth = 0;
-  private readonly stagedPresentationInputs: AcceptedPresentationEvent[] = [];
+  private readonly stagedPresentationEvents: AcceptedPresentationEvent[] = [];
   private readonly presentationPublications: QueuedPresentationEvent[] = [];
   private presentationPublicationEpoch = 1;
   private presentationPublicationPumping = false;
@@ -346,7 +311,6 @@ class ControlHolder implements RendererControlHolder {
 
   constructor(
     private readonly data?: RendererDataBinding,
-    private readonly input?: RendererInputSource,
     private readonly viewport?: RendererViewportSource,
     private readonly presentationEvents?: RendererPresentationEventBinding,
   ) {}
@@ -396,16 +360,12 @@ class ControlHolder implements RendererControlHolder {
     if (this.currentValue !== null) {
       this.currentValue = null;
       this.clearAllData();
-      this.stopInputSource();
       this.stopViewportSource();
-      this.inputGate.setControl(null);
       this.retirePresentationPublications();
     }
     this.prepareRenderSession(outcome.snapshot.sessionId);
     const installed = Object.freeze({ peer, snapshot: outcome.snapshot });
     this.currentValue = installed;
-    this.inputGate.setControl(outcome.snapshot);
-    this.startInputSource(peer);
     this.startViewportSource(peer);
     this.reconcileData(peer, outcome.snapshot);
     this.notifyPresentation();
@@ -414,9 +374,7 @@ class ControlHolder implements RendererControlHolder {
       if (this.currentValue?.peer !== peer) return;
       this.currentValue = null;
       this.clearAllData();
-      this.stopInputSource();
       this.stopViewportSource();
-      this.inputGate.setControl(null);
       this.retirePresentationPublications();
     });
     return Object.freeze({ kind: "installed", current: installed });
@@ -428,7 +386,6 @@ class ControlHolder implements RendererControlHolder {
       this.retireMismatchedData(peer, snapshot);
       this.prepareRenderSession(snapshot.sessionId);
       this.currentValue = Object.freeze({ peer, snapshot });
-      this.inputGate.setControl(snapshot);
       this.reconcileData(peer, snapshot);
       this.notifyPresentation();
     }
@@ -436,7 +393,7 @@ class ControlHolder implements RendererControlHolder {
 
   private reconcileData(
     controlPeer: RendererControlPeer,
-    snapshot: RendererAuthoritySnapshotV1,
+    snapshot: RendererAuthoritySnapshotV2,
   ): void {
     if (this.data === undefined) return;
     const desired = new Map(snapshot.dataAuthorities.map((authority) => [
@@ -466,7 +423,6 @@ class ControlHolder implements RendererControlHolder {
         const current = slot.current;
         slot.current = null;
         if (current !== null) {
-          this.inputGate.retireData(subsystemKey, current.peer);
           this.viewportPublisher.detach(current.peer);
           slot.render.retireCarrier();
           void current.peer.close().catch(() => {});
@@ -497,7 +453,7 @@ class ControlHolder implements RendererControlHolder {
 
   private retireMismatchedData(
     controlPeer: RendererControlPeer,
-    snapshot: RendererAuthoritySnapshotV1,
+    snapshot: RendererAuthoritySnapshotV2,
   ): void {
     const desired = new Map(snapshot.dataAuthorities.map((authority) => [
       authority.subsystemKey,
@@ -509,7 +465,6 @@ class ControlHolder implements RendererControlHolder {
         const current = slot.current;
         slot.current = null;
         if (current !== null) {
-          this.inputGate.retireData(subsystemKey, current.peer);
           this.viewportPublisher.detach(current.peer);
           slot.render.retireCarrier();
           void current.peer.close().catch(() => {});
@@ -561,7 +516,7 @@ class ControlHolder implements RendererControlHolder {
 
     let peer: RendererDataPeer;
     try {
-      if (attempt.identity.dataProfile !== RENDERER_DATA_PROFILE_V1) {
+      if (attempt.identity.dataProfile !== RENDERER_DATA_PROFILE_V2) {
         throw new TypeError("Unsupported Renderer Data profile");
       }
       slot.render.beginCarrier();
@@ -573,16 +528,6 @@ class ControlHolder implements RendererControlHolder {
           dataProfile: attempt.identity.dataProfile,
         },
         handlers: {
-          onInputInterest: (message) => {
-            if (slot.current?.peer === peer) {
-              this.inputGate.replaceInterest(
-                attempt.identity.subsystemKey,
-                peer,
-                message,
-              );
-            }
-            return acceptedDataMessage;
-          },
           onRenderDomains: (message) => this.commitRenderMessage(slot, peer, () => slot.render.onDomains(message)),
           onRenderSnapshot: (message) => this.commitRenderMessage(slot, peer, () => slot.render.onSnapshot(message)),
           onRenderPatch: (message) => this.commitRenderMessage(slot, peer, () => slot.render.onPatch(message)),
@@ -606,11 +551,9 @@ class ControlHolder implements RendererControlHolder {
     }
     slot.pending = null;
     slot.current = { identity: attempt.identity, peer };
-    this.inputGate.installData(attempt.identity.subsystemKey, peer);
     this.viewportPublisher.attach(peer);
     void peer.terminal.then(() => {
       if (slot.current?.peer !== peer) return;
-      this.inputGate.retireData(attempt.identity.subsystemKey, peer);
       this.viewportPublisher.detach(peer);
       slot.render.retireCarrier();
       slot.current = null;
@@ -751,29 +694,9 @@ class ControlHolder implements RendererControlHolder {
     } catch {
       throw new TypeError("Invalid Web Presentation custom event payload");
     }
-    let accepted: AcceptedPresentationEvent;
-    if (this.presentationEvents === undefined && !options.broadcast) {
-      let legacyPayload: InputEventV1["payload"];
-      try {
-        legacyPayload = validateInputPayloadV1({
-          domainId: event.domainId,
-          targetKey: event.targetKey,
-          name,
-          data,
-        });
-      } catch {
-        throw new TypeError("Invalid Web Presentation custom event payload");
-      }
-      accepted = Object.freeze({
-        kind: "legacy-owner" as const,
-        subsystemKey: event.subsystemKey,
-        channel: options.channel as InputEventChannelV1,
-        payload: detachedFrozenJson(legacyPayload),
-      });
-    } else {
-      accepted = Object.freeze({
-        kind: "publication" as const,
-        publication: Object.freeze({
+    const accepted: AcceptedPresentationEvent = Object.freeze({
+      kind: "publication" as const,
+      publication: Object.freeze({
         sessionId: event.sessionId,
         ownerSubsystemKey: event.subsystemKey,
         generation: event.generation,
@@ -787,20 +710,19 @@ class ControlHolder implements RendererControlHolder {
           targetKey: event.targetKey,
           data,
         }),
-        }),
-      });
-    }
+      }),
+    });
     if (this.presentationForwardDepth > 0) {
-      if (this.stagedPresentationInputs.length >= MAX_STAGED_PRESENTATION_INPUTS) return;
-      this.stagedPresentationInputs.push(accepted);
+      if (this.stagedPresentationEvents.length >= MAX_STAGED_PRESENTATION_EVENTS) return;
+      this.stagedPresentationEvents.push(accepted);
       return;
     }
     this.enqueuePresentationEvent(accepted);
   }
 
   private flushStagedPresentationInputs(): void {
-    while (this.stagedPresentationInputs.length > 0) {
-      const staged = this.stagedPresentationInputs.shift();
+    while (this.stagedPresentationEvents.length > 0) {
+      const staged = this.stagedPresentationEvents.shift();
       if (staged !== undefined) this.enqueuePresentationEvent(staged);
     }
   }
@@ -821,14 +743,6 @@ class ControlHolder implements RendererControlHolder {
       while (this.presentationPublications.length > 0) {
         const queued = this.presentationPublications.shift();
         if (queued === undefined || queued.epoch !== this.presentationPublicationEpoch) continue;
-        if (queued.event.kind === "legacy-owner") {
-          this.inputGate.emitEventForSubsystem(
-            queued.event.subsystemKey,
-            queued.event.channel,
-            queued.event.payload,
-          );
-          continue;
-        }
         try {
           await this.presentationEvents?.publish(queued.event.publication);
         } catch {
@@ -844,7 +758,7 @@ class ControlHolder implements RendererControlHolder {
   private retirePresentationPublications(): void {
     this.presentationPublicationEpoch += 1;
     this.presentationPublications.length = 0;
-    this.stagedPresentationInputs.length = 0;
+    this.stagedPresentationEvents.length = 0;
   }
 
   private readPresentation(): RendererPresentationView | null {
@@ -898,7 +812,6 @@ class ControlHolder implements RendererControlHolder {
       const current = slot.current;
       slot.current = null;
       if (current !== null) {
-        this.inputGate.retireData(current.identity.subsystemKey, current.peer);
         this.viewportPublisher.detach(current.peer);
         slot.render.retireCarrier();
         void current.peer.close().catch(() => {});
@@ -933,60 +846,6 @@ class ControlHolder implements RendererControlHolder {
       this.renderHistories.set(key, store);
     }
     return store;
-  }
-
-  private startInputSource(peer: RendererControlPeer): void {
-    const source = this.input;
-    this.inputGate.resetProducerFacts();
-    if (source === undefined) return;
-    const subscription: SourceSubscription = {
-      peer,
-      phase: "starting",
-      staged: [],
-      stop: null,
-    };
-    this.sourceSubscription = subscription;
-    const emit = (change: RendererInputSourceChange): void => {
-      if (this.sourceSubscription !== subscription || subscription.phase === "invalid") return;
-      if (subscription.phase === "starting") {
-        this.validateSourceChange(change);
-        if (change.kind !== "event") subscription.staged.push(change);
-        return;
-      }
-      this.applySourceChange(change);
-    };
-
-    try {
-      const stop = source.start(emit);
-      if (typeof stop !== "function") throw new TypeError("Input source start must return stop function");
-      subscription.stop = stop;
-      for (const change of subscription.staged) this.applySourceChange(change);
-      subscription.staged.length = 0;
-      subscription.phase = "current";
-    } catch {
-      subscription.phase = "invalid";
-      if (this.sourceSubscription === subscription) this.sourceSubscription = null;
-      this.inputGate.resetProducerFacts();
-      try {
-        subscription.stop?.();
-      } catch {
-        // Failed source bootstrap cleanup is locally contained.
-      }
-    }
-  }
-
-  private stopInputSource(): void {
-    const subscription = this.sourceSubscription;
-    if (subscription === null) return;
-    this.sourceSubscription = null;
-    subscription.phase = "invalid";
-    subscription.staged.length = 0;
-    this.inputGate.resetProducerFacts();
-    try {
-      subscription.stop?.();
-    } catch {
-      // Local stop failure cannot restore retired producer facts.
-    }
   }
 
   private startViewportSource(peer: RendererControlPeer): void {
@@ -1033,55 +892,15 @@ class ControlHolder implements RendererControlHolder {
     }
   }
 
-  private validateSourceChange(change: RendererInputSourceChange): void {
-    if (change === null || typeof change !== "object") {
-      throw new TypeError("Invalid Renderer input source change");
-    }
-    if (change.kind === "availability") {
-      if (typeof change.channel !== "string" || typeof change.available !== "boolean") {
-        throw new TypeError("Invalid Renderer input availability change");
-      }
-      if (change.channel === WEB_PRESENTATION_EVENT_CHANNEL_V1) {
-        throw new TypeError("Renderer input source cannot produce the Web Presentation event channel");
-      }
-      return;
-    }
-    if (change.kind === "state" || change.kind === "event") {
-      if (
-        typeof change.channel !== "string" ||
-        change.payload === null ||
-        typeof change.payload !== "object" ||
-        Array.isArray(change.payload)
-      ) throw new TypeError("Invalid Renderer input payload change");
-      if (change.channel === WEB_PRESENTATION_EVENT_CHANNEL_V1) {
-        throw new TypeError("Renderer input source cannot produce the Web Presentation event channel");
-      }
-      return;
-    }
-    throw new TypeError("Invalid Renderer input source change kind");
-  }
-
-  private applySourceChange(change: RendererInputSourceChange): void {
-    this.validateSourceChange(change);
-    if (change.kind === "availability") {
-      this.inputGate.setAvailability(change.channel, change.available);
-    } else if (change.kind === "state") {
-      this.inputGate.updateState(change.channel, change.payload);
-    } else {
-      this.inputGate.emitEvent(change.channel, change.payload);
-    }
-  }
 }
 
 export function createRendererControlHolder(
   data?: RendererDataBinding,
-  input?: RendererInputSource,
   viewport?: RendererViewportSource,
   presentationEvents?: RendererPresentationEventBinding,
 ): RendererControlHolder {
   validateRendererDataBinding(data);
-  validateRendererInputSource(input);
   validateRendererViewportSource(viewport);
   validateRendererPresentationEventBinding(presentationEvents);
-  return new ControlHolder(data, input, viewport, presentationEvents);
+  return new ControlHolder(data, viewport, presentationEvents);
 }

@@ -13,7 +13,6 @@ import {
 } from "@loomrealm/renderer/web-presentation";
 import { DESKTOP_BOOTSTRAP_CHANNEL, type DesktopRendererBootstrapEnvelope } from "./desktop-bootstrap.js";
 import { connectBrowserControlCarrier } from "./browser-control-carrier.js";
-import { createDesktopRendererInputSource } from "./renderer-input-source.js";
 import { createDesktopRendererViewportSource } from "./renderer-viewport-source.js";
 import { connectLoopbackRendererDataBinding } from "./window-data-binding.js";
 
@@ -75,11 +74,9 @@ void (async () => {
     connectLoopbackRendererDataBinding(envelope.dataSettlementEndpoint, NativeWebSocket),
     connectBrowserControlCarrier(envelope.presentationEventsEndpoint, lifetime.signal, NativeWebSocket),
   ]);
-  const inputSource = createDesktopRendererInputSource(window);
   const viewportSource = createDesktopRendererViewportSource(window);
   const holder = createRendererControlHolder(
     dataBinding,
-    inputSource,
     viewportSource,
     createRendererPresentationEventBinding(presentationEventCarrier),
   );
