@@ -126,7 +126,7 @@ context.emitCustomEvent(
 | 内容 | 归属 |
 | --- | --- |
 | Web Component / RenderNode / Context | LM Web Presentation |
-| 固定 Web Presentation Event Channel 与 broadcast=true trusted publication | LM Framework |
+| 默认 Web Presentation Event Channel、options.channel 精确路由与 broadcast=true trusted publication | LM Framework |
 | keyboard.state/event payload | game-keyboard-input |
 | pointer.state/event payload | game-pointer-input |
 | gamepad.state/event payload | game-gamepad-input |
@@ -577,14 +577,14 @@ const WEB_PRESENTATION_EVENT_CHANNEL_V1 =
   "x.loomrealm.web-presentation.event";
 ~~~
 
-目标架构保留这一“Web Presentation Event Channel”职能，但将其从 User Input v1 的 custom-input ownership 中迁出，改由 Web Presentation / generic event infrastructure 拥有。
+目标架构保留该标识作为通用 Web Presentation Event 的默认 Channel，并将其 ownership 从 User Input custom-input 路由迁移到 Web Presentation / generic event infrastructure。
 
 逻辑映射：
 
 ~~~text
 SessionEvent.channel
-    = x.loomrealm.web-presentation.event
-      // Framework-owned routing domain
+    = options.channel ?? WEB_PRESENTATION_EVENT_CHANNEL_V1
+      // broadcast=true 时的真实路由身份
 
 SessionEvent.type
     = emitCustomEvent 的 name
@@ -600,16 +600,25 @@ SessionEvent.payload
 SessionEvent.source
     = trusted RenderNode owner
 
-broadcast=true
-    = publish into the fixed Web Presentation Event Channel
+设备输入示例：
 
-broadcast=false
-    = does not enter this Session Events broadcast path during migration
+~~~
+emitCustomEvent("input.state", { down: ["KeyW"] }, {
+  broadcast: true,
+  channel: "keyboard.state"
+})
+
+SessionEvent.channel = keyboard.state
+SessionEvent.type    = input.state
+SessionEvent.payload.data = { down: ["KeyW"] }
+~~~
+
+channel 省略时使用默认 Web Presentation Channel。显式 Channel 是实际路由字段，不是 Payload 元数据；Session Events Hub 继续按精确 Channel 匹配。
 ~~~
 
 职责必须保持分离：
 
-- Channel：这是 Web Presentation custom event；
+- Channel：实际路由身份；
 - name/type：这条业务事件是什么；
 - data：业务协议数据；
 - broadcast：是否进入跨 Subsystem broadcast path。
@@ -623,7 +632,8 @@ broadcast=false
 | --- | --- |
 | emitCustomEvent(name, data) | 保持现行 owner-only v1 行为 |
 | emitCustomEvent(name, data, { broadcast: false }) | 与现行 owner-only 行为一致 |
-| emitCustomEvent(name, data, { broadcast: true }) | 进入新的 trusted cross-Subsystem Presentation Event path |
+| emitCustomEvent(name, data, { broadcast: true }) | 进入默认 Web Presentation Channel 的 trusted broadcast path |
+| emitCustomEvent(name, data, { broadcast: true, channel: "keyboard.state" }) | 进入 keyboard.state 精确路由 Channel |
 
 因此本项目**不通过修改 SessionEventHub 来实现 owner-only filtering**。
 
@@ -657,7 +667,7 @@ business WC
 WebProjector / Renderer currentness
   |
   | Framework binds:
-  | fixed Web Presentation Channel
+  | resolved Channel (options.channel or default)
   | RenderNode owner provenance
   | event type = name
   v
@@ -666,7 +676,7 @@ trusted Renderer/Host presentation ingress
   v
 Session Events routing
   |
-  +-> every matching subscription of the fixed Channel
+  +-> every matching subscription of the resolved exact Channel
 ~~~
 
 Bridge 必须满足：
