@@ -256,232 +256,205 @@ game / presentation
 
 common-controls 不应导入 LM 内部 InputGate、RendererInputSource、Input Interest Registry、InputTarget wire schema 或 SessionEventHub 内部类型。
 
-## 4. 业务 User Input 协议的完整职责
+## 4. User Input v1 兼容迁移协议
 
-### 4.1 设备层协议，而不是单一最终 controls 协议
+### 4.1 迁移策略
 
-每个设备 WC 自己完成：
+第一阶段目标不是设计新的 device protocol，而是把 User Input v1 的设备部分从 LR Framework 搬到 game-common-controls。
 
-~~~text
-physical browser samples
-   -> canonical device normalization
-   -> current device state
-   -> device edge event
-   -> reset / recovery
-   -> emitCustomEvent
-~~~
-
-设备层输出不要求提前转换成 confirm/move 等最终 gameplay action。
-
-推荐事件名：
+保留六个标准 input channel：
 
 ~~~text
-input.keyboard.state
-input.keyboard.event
-input.keyboard.reset
-
-input.pointer.state
-input.pointer.event
-input.pointer.reset
-
-input.gamepad.state
-input.gamepad.event
-input.gamepad.reset
+keyboard.state
+keyboard.event
+pointer.state
+pointer.event
+gamepad.state
+gamepad.event
 ~~~
 
-以上均为 Web Presentation custom-event name / Session Event type，**不是 Channel**。底层仍统一使用 Framework 固定 Web Presentation Event Channel。
+Web Presentation custom event 只使用两个 name/type：
 
-### 4.2 公共 envelope
+~~~text
+input.state
+input.event
+~~~
 
-每个 Producer 独立维护 epoch/revision：
+统一 data shape：
 
 ~~~ts
-type InputDevice = "keyboard" | "pointer" | "gamepad";
+interface MigratedInputStateData {
+  readonly channel: "keyboard.state" | "pointer.state" | "gamepad.state";
+  readonly payload: JsonObject;
+}
 
-interface DeviceMessageBase {
-  readonly protocol: "@loomrealm-game/common-controls/1";
-  readonly device: InputDevice;
-  readonly epoch: string;
-  readonly revision: number;
+interface MigratedInputEventData {
+  readonly channel: "keyboard.event" | "pointer.event" | "gamepad.event";
+  readonly payload: JsonObject;
 }
 ~~~
 
-同一设备：
+因此迁移关系是：
 
 ~~~text
-epoch
-    = 此 WC producer lifetime
+User Input v1:
+  type + frameId + activationId + channel + payload
 
-revision
-    = 此 epoch 内单调递增
+WC:
+  emitCustomEvent(type, { channel, payload }, { broadcast:true })
 ~~~
 
-不同设备之间不共享 revision，也不建立全局顺序。
+只移除旧 authority envelope 的 frameId / activationId。
 
-### 4.3 Keyboard protocol
+### 4.2 Keyboard：完全复用 v1 payload
 
-候选：
+State 继续使用 KeyboardStatePayloadV1：
 
 ~~~ts
-interface KeyboardState extends DeviceMessageBase {
-  readonly device: "keyboard";
-  readonly kind: "state";
-  readonly down: readonly string[];
-}
-
-interface KeyboardEvent extends DeviceMessageBase {
-  readonly device: "keyboard";
-  readonly kind: "event";
-  readonly action: "down" | "up";
-  readonly code: string;
-  readonly repeat: boolean;
-}
-
-interface KeyboardReset extends DeviceMessageBase {
-  readonly device: "keyboard";
-  readonly kind: "reset";
-  readonly reason: "blur" | "hidden" | "disconnected" | "source-replaced";
-}
+{ down: readonly KeyboardCodeV1[] }
 ~~~
 
-### 4.4 Pointer protocol
-
-候选：
+Event 继续使用 KeyboardEventPayloadV1：
 
 ~~~ts
-interface PointerSample {
-  readonly pointerId: number;
-  readonly kind: "mouse" | "touch" | "pen";
-  readonly x: number;
-  readonly y: number;
-  readonly buttons: readonly string[];
-}
-
-interface PointerState extends DeviceMessageBase {
-  readonly device: "pointer";
-  readonly kind: "state";
-  readonly pointers: readonly PointerSample[];
-}
-
-interface PointerEvent extends DeviceMessageBase {
-  readonly device: "pointer";
-  readonly kind: "event";
-  readonly action: "down" | "up" | "cancel";
-  readonly pointer: PointerSample;
-  readonly button: string | null;
-}
-
-interface PointerReset extends DeviceMessageBase {
-  readonly device: "pointer";
-  readonly kind: "reset";
-  readonly reason: "blur" | "hidden" | "disconnected" | "surface-invalid" | "source-replaced";
+{
+  action: "down" | "up";
+  code: KeyboardCodeV1;
+  repeat: boolean;
 }
 ~~~
 
-组件名使用 Pointer 而不是 Mouse，因为浏览器 Pointer API 同时覆盖 mouse/touch/pen。游戏若只接受鼠标，应在业务配置中限制 pointer kind。
-
-### 4.5 Gamepad protocol
-
-候选：
+发送方式：
 
 ~~~ts
-interface GamepadState extends DeviceMessageBase {
-  readonly device: "gamepad";
-  readonly kind: "state";
-  readonly gamepads: readonly GamepadSample[];
-}
+context.emitCustomEvent(
+  "input.state",
+  { channel: "keyboard.state", payload: { down: [...held].sort() } },
+  { broadcast: true },
+);
 
-interface GamepadEvent extends DeviceMessageBase {
-  readonly device: "gamepad";
-  readonly kind: "event";
-  readonly action: "down" | "up";
-  readonly gamepadId: number;
-  readonly button: string;
-  readonly value: number;
-}
-
-interface GamepadReset extends DeviceMessageBase {
-  readonly device: "gamepad";
-  readonly kind: "reset";
-  readonly reason: "hidden" | "blur" | "device-lost" | "disconnected" | "source-replaced";
-}
+context.emitCustomEvent(
+  "input.event",
+  { channel: "keyboard.event", payload: { action, code, repeat } },
+  { broadcast: true },
+);
 ~~~
 
-标准 mapping、axes/buttons normalization、deadzone/threshold/quantization 属于 game-gamepad-input，不进入 LR。
+第一阶段保留 KEYBOARD_CODES_V1、held set、排序、repeat 规则、keyup repeat=false、event.isTrusted 和原 payload validation。
 
-### 4.6 State / Event / Reset 共同语义
+### 4.3 Pointer：完全复用 v1 payload
 
-State：
+继续使用 User Input v1 的 PointerKindV1、PointerButtonV1、PointerSampleV1、PointerStatePayloadV1、PointerEventPayloadV1。
 
-- self-contained current truth；
-- 状态改变立即发送；
-- 非中立持续状态可按有界周期重宣告，用于 late subscriber/reconnect 收敛；
-- Consumer 不能靠历史 Event 重建 current state。
+第一阶段保留：canonical pointerId、mouse/touch/pen、viewport-relative x/y normalization、1_000_000 scale、pointer limit 32、canonical button order、pointercancel、State 先于对应 button Event、resize/surface validity、event.isTrusted。
 
-Event：
-
-- future-only transient edge；
-- 不 replay；
-- 不自动重试；
-- 丢失时不能伪装为 exactly-once。
-
-Reset：
-
-- producer 主动表示旧状态失效；
-- 但正确性不能依赖 Reset 必达；
-- Consumer 仍需 epoch replacement + TTL 退回 neutral。
-
-### 4.7 availability 不迁移成 Framework 协议
-
-旧 RendererInputSource 的 availability 是 InputGate 内部机制，不需要一比一公开迁移。
-
-每个 WC 内部维护：
+发送仍是：
 
 ~~~text
-window usable
-device available
-surface valid
-gamepad connected
+name = input.state
+data.channel = pointer.state
+data.payload = PointerStatePayloadV1
+
+name = input.event
+data.channel = pointer.event
+data.payload = PointerEventPayloadV1
 ~~~
 
-availability loss 应转换为本设备的：
+### 4.4 Gamepad：完全复用 v1 payload
+
+继续使用 GamepadAxesV1、GamepadButtonsV1、GamepadSampleV1、GamepadStatePayloadV1、GamepadEventPayloadV1 和 GamepadButtonNameV1。
+
+第一阶段保留：
+
+- navigator.getGamepads()；
+- mapping === "standard"；
+- requestAnimationFrame polling；
+- gamepad limit 16；
+- canonical local gamepadId；
+- axes -1_000_000..1_000_000；
+- buttons 0..1_000_000；
+- pressed threshold >= 500_000；
+- button crossing down/up；
+- crossing canonical sort；
+- full State 仅在 sample 变化时发送。
+
+第一阶段不新增 deadzone、新量化算法或新的按钮模型；这些属于后续业务协议演进。
+
+### 4.5 input.reset：不机械迁移
+
+旧 InputResetV1 是 Activation-scoped retained-State teardown barrier，由 InputTarget/Activation/Data/Producer gate 驱动，不是某一个物理设备的自然事件。
+
+因此三个 WC 不发送等价的全局 input.reset。设备失效时继续使用 v1 已有的 neutral State：
 
 ~~~text
-clear local state
-+ reset
-+ neutral state when appropriate
+keyboard.state -> { down: [] }
+pointer.state  -> { pointers: [] }
+gamepad.state  -> { gamepads: [] }
 ~~~
 
-如果某个游戏需要“当前是否连接手柄”等信息，可以由 game-gamepad-input 作为业务设备状态另行定义，不恢复 LR 的 Producer(C) Framework 概念。
+这与现有 browser-input-source 的 leaveUsable() 行为一致：清空 local state 后发送空 State。
 
-### 4.8 跨设备 Controls 聚合
+### 4.6 availability：保持内部实现，不公开迁移
 
-例如：
+现有 RendererInputSourceChange 的 availability 只服务 InputGate 的 Producer(C) 计算，不是 User Input v1 的业务 wire message。
+
+新 WC 继续在内部维护 window usable、pointer surface valid、navigator.getGamepads availability 和 device connected；availability loss 转换为 clear local state + neutral State，不新增 input.availability。
+
+### 4.7 State baseline 的最小补偿
+
+旧 InputGate 在 Effective false -> true 时会立即发送 fresh self-contained State baseline。Session Events 没有 replay，late subscriber 可能错过之前的 State。
+
+第一阶段采用最小增量方案，不重新设计 epoch/revision wire：
 
 ~~~text
-Keyboard W --------+
-                   +--> move-forward
-Gamepad leftY -----+
+State changed
+    -> immediate full State
+
+State is non-neutral
+    -> bounded low-frequency full-State refresh
+
+State becomes neutral
+    -> immediate neutral State
+    -> stop refresh
+
+Consumer stale timeout
+    -> locally converge to neutral
 ~~~
 
-若 Keyboard W 松开，但 Gamepad 仍向前：
+具体 refresh/timeout 数值由 Qualification 决定，不在设计阶段提前冻结。
+
+### 4.8 类型与 validator ownership 迁移
+
+为减少重复，User Input v1 的设备 types/constants/validators 应移动 ownership，而不是复制两份：
 
 ~~~text
-keyboard source inactive
-gamepad source active
-        |
-        v
-move-forward remains active
+Step 1  move Keyboard/Pointer/Gamepad payload types/constants/validators to game-common-controls
+Step 2  @loomrealm/data temporarily re-export / alias for old User Input v1
+Step 3  new WCs and consumers import only game-common-controls
+Step 4  remove @loomrealm/data compatibility exports after LR User Input removal
 ~~~
 
-因此设备 WC 不应各自直接宣布“最终 move-forward released”。Aggregator 应按 source set / contribution model 合并：
+### 4.9 可选 Consumer compatibility layer
 
-~~~text
-ActionState[action]
-    = aggregate(contributions from keyboard/pointer/gamepad)
+common-controls 可以提供薄兼容层，使业务继续按六个标准 channel 注册 handler：
+
+~~~ts
+const input = createCommonInputClient(scope.events);
+input.on("keyboard.state", handler);
+input.on("keyboard.event", handler);
+input.on("pointer.state", handler);
+input.on("pointer.event", handler);
+input.on("gamepad.state", handler);
+input.on("gamepad.event", handler);
 ~~~
 
-跨设备 mapper 可以输出另一个纯业务协议，例如 controls.state / controls.event，但这属于 game-libs 上层协议，不改变设备 WC 或 LR Framework。
+内部只订阅固定 Web Presentation Event Channel，过滤 event.type == input.state | input.event，读取 event.payload.data.channel，校验 v1-compatible payload 后 dispatch(channel, payload)。
+
+这样大部分原业务 handler 不需要理解新的 transport，也不再依赖 createInputListener / InputManager / Frame-scoped Interest。
+
+### 4.10 跨设备 Controls 聚合
+
+设备协议保持 v1-compatible，不意味着 gameplay action 回到 Framework。Keyboard W 与 Gamepad leftY 等仍由可选 Mapper/Aggregator 合并；action mapping/focus/priority 与设备 WC 迁移分离。
 
 ## 5. 通用 emitCustomEvent 跨 Subsystem 广播扩展
 
