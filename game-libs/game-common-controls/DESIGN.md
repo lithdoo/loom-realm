@@ -3,7 +3,8 @@
 > 状态：**Proposed / 设计方案，尚未实现、尚未冻结、尚未 Qualification**  
 > 位置：game-libs/game-common-controls/  
 > 目标包：**@loomrealm-game/common-controls**  
-> 目标组件：**`<game-common-controls>`**  
+> 目标设备组件：**game-keyboard-input / game-pointer-input / game-gamepad-input**  
+> 可选业务聚合层：**Controls Mapper / Aggregator（非必须 WC）**  
 > 设计核心：**用户输入属于 game-libs 业务协议，而非 LoomRealm Framework 协议。**  
 > Framework 细化方案：[Web Presentation Custom Event Routing](../../doc/10-architecture/web-presentation-custom-event-routing.md)  
 > 相关现行契约：[Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md)、[User Input v1](../../doc/15-contracts/user-input-v1.md)、[Session Events v1](../../doc/15-contracts/session-events-v1.md)、[Render Update v1](../../doc/15-contracts/render-update-v1.md)、[ADR 0031](../../doc/decisions/0031-business-owned-web-component-projection.md)
@@ -12,21 +13,22 @@
 
 ## 1. 核心目标与架构原则
 
-本项目不只是把键盘或手柄映射为 confirm/move 等动作，也不是 LM User Input v1 的附属适配器。
+本项目不是一个“大而全”的输入组件，也不是 LM User Input v1 的适配器。
 
-**目标是以 Render 层的业务 Web Component 为输入实现主体，将完整的 User Input 领域协议从 LoomRealm（下称 LM）架构层迁移到 game-libs；LM 仅提供 Web Component 承载、通用跨 Subsystem 事件分发及已有的通用 Session/Runtime 能力。**
+**目标是把完整 User Input 领域从 LoomRealm Framework 迁移到 game-libs，并按物理输入类型拆成可按需挂载的业务 Web Components。LM 只提供 Web Component 承载、Web Presentation custom-event 发布和通用跨 Subsystem 事件分发。**
 
-具体要求：
+核心原则：
 
-1. **输入协议归业务层所有**：输入设备采集、设备标准化、状态快照、瞬时事件、重置、订阅消费规则、映射与焦点/优先级策略，在 common-controls 或其业务协作模块定义和演进。
-2. **LM 不理解输入语义**：跨 Subsystem 路由只校验通用事件、来源、授权、大小、生命周期和流控；不得解析或特判 keyboard/gamepad/pointer、pressed、confirm、deadzone、Input Interest 等字段。
-3. **Web Component 是实际生产者**：通过 Web Projector 挂载的 `<game-common-controls>` 直接采集浏览器设备事件，在组件内运行输入协议状态机，再调用注入的 WebPresentationContext.emitCustomEvent(...) 发布。
-4. **广播是通用基础能力**：为 emitCustomEvent 增加显式的跨 Subsystem 广播模式；复用现有 Session Events 通路/语义，不另造 LM 输入专属 IPC 或第二个事件总线。
-5. **广播不授予执行权**：观察者可能不止一个，但事件可见性不等于 Frame、Activation、Main 控制权或写状态权限；具体业务谁消费、谁执行由业务层决定。
-6. **兼容地迁移，而不是永久双轨**：旧 User Input v1 作为迁移来源及兼容对象，不是新组件长期必须依赖的底层。达到覆盖和 Qualification 后，再独立决策废止其专属 Framework 协议/生产者。
-7. **设备与宿主可替换**：同一个业务输入协议及 WC 面向 Desktop/PWA；LM 的物理 MessagePort/WebSocket、Worker/进程拓扑不能进入游戏输入包。
+1. **按设备拆分 Producer**：Keyboard、Pointer、Gamepad 各自拥有独立 WC、独立生命周期、独立 epoch/revision 和独立状态机。
+2. **业务按需引入**：游戏只挂载实际需要的设备组件；Framework 不默认创建任何浏览器输入 Producer。
+3. **设备 WC 只拥有设备语义**：各组件负责 physical capture、canonical device state、device event、reset/recovery，不直接拥有跨设备最终 action 真值。
+4. **跨设备 action 聚合独立**：WASD 与摇杆同时映射 move、Enter 与 Gamepad South 同时映射 confirm 等逻辑，由可选 Controls Mapper/Aggregator 或游戏业务层处理。
+5. **LM 不理解输入语义**：不得解析或特判 keyboard/gamepad/pointer、pressed、deadzone、confirm、Input Interest 等业务字段。
+6. **广播是通用基础能力**：设备 WC 通过 WebPresentationContext.emitCustomEvent 发布；options.broadcast 只改变 audience。
+7. **不永久双轨**：旧 User Input v1 仅作为迁移来源；新链路覆盖并 Qualification 后删除 LR 内建输入 Producer、InputGate、InputManager、input.* Data family 与 InputTarget。
+8. **跨平台协议一致**：Desktop/PWA 使用相同设备协议和 Web Presentation Event Contract；MessagePort/WebSocket/Worker/Hostra 细节不进入 game-common-controls。
 
-这里的“与 LM 架构层完全解耦”特指**LM 不拥有任何 User Input 领域契约、状态机、设备采集或专属路由策略**，并不是说业务组件不依赖 LM 通用的 Web Presentation 和事件承载接口。
+这里的“与 LM 架构层完全解耦”指：**LM 不拥有任何 User Input 领域协议、设备采集、输入状态机、Interest 或 InputTarget 路由。** 业务组件仍使用 LM 提供的通用 Web Presentation 和 Session Events 基础设施。
 
 ## 2. 现状与目标边界
 
@@ -56,35 +58,39 @@ Web Component -- context.emitCustomEvent(name, data)
 
 ~~~text
 Browser Window
-  Keyboard / Pointer / Standard Gamepad
-                |
-                v
-     <game-common-controls>
-       - physical capture
-       - business User Input protocol
-       - state/event/reset lifecycle
-                |
-                v
+
+  Keyboard                Pointer                  Standard Gamepad
+     |                       |                           |
+     v                       v                           v
+<game-keyboard-input>  <game-pointer-input>      <game-gamepad-input>
+     |                       |                           |
+     | keyboard.*            | pointer.*                | gamepad.*
+     | state/event/reset     | state/event/reset        | state/event/reset
+     +-----------+-----------+-------------+-------------+
+                 |
+                 v
  WebPresentationContext.emitCustomEvent(
    name, data, { broadcast: true }
  )
-                |
-                v
+                 |
+                 v
  LM Web Presentation Event path
-   - currentness
-   - authenticated provenance
-   - validation / bounded delivery
-                |
-                v
- fixed Web Presentation Event Channel
- event type = custom-event name
- payload = presentation envelope + business data
-                |
-                v
- Session Event routing
-      /        |        \
-     v         v         v
-   Map       Battle    Menu/other
+   fixed Framework Channel
+   type = custom-event name
+   payload = presentation envelope + device data
+                 |
+                 v
+ Session Events
+                 |
+        +--------+---------+
+        |                  |
+        v                  v
+ device-aware       optional Controls
+ consumers          Mapper/Aggregator
+                           |
+                           v
+                  move / confirm / cancel
+                  game-owned focus/priority
 ~~~
 
 分界原则：
@@ -92,19 +98,21 @@ Browser Window
 | 内容 | 归属 |
 | --- | --- |
 | Custom Element、RenderNode 投影、Context 生命周期 | LM Web Presentation |
-| 固定 Web Presentation Event Channel、可信来源、owner/broadcast audience | LM Framework 通用事件基础设施 |
+| 固定 Web Presentation Event Channel、可信来源、owner/broadcast audience | LM Framework |
 | Channel 路由、订阅、队列与投递生命周期 | LM Session Events |
-| custom-event name 的业务含义与 data schema | 业务层 |
-| Keyboard / Pointer / Gamepad 采集与标准化 | game-common-controls |
-| User Input state/event/reset、恢复与设备映射 | game-common-controls |
-| 游戏输入焦点、优先级、消费策略 | 游戏业务层 |
+| Keyboard DOM 采集与 canonical state | game-keyboard-input |
+| Pointer DOM 采集与 canonical state | game-pointer-input |
+| Standard Gamepad polling/normalization | game-gamepad-input |
+| 每设备 state/event/reset、epoch/revision/TTL | 对应设备 WC / common protocol |
+| Keyboard + Gamepad 等跨设备 action 合并 | Controls Mapper/Aggregator 或游戏业务 |
+| 游戏焦点、优先级、消费策略 | 游戏业务层 |
 | Frame / Activation / Session / Runtime authority | LM Main |
 
 特别禁止：
 
+- 不得把多个设备 WC 重新包回一个 Framework-owned global input source。
+- 不得让单个设备 WC 声称拥有其他设备的最终 action 状态。
 - 不得把 custom-event name 重新解释成 Session Events channel。
-- 不得在 emitCustomEvent options 中让业务选择 Framework 路由 Channel。
-- 不得由 LM Bridge 理解 keyboard/gamepad/pointer 或 controls 动作。
 - broadcast 只改变接收范围，不改变 Channel、type、payload schema 或 source identity。
 
 ## 3. 包交付、组件挂载和依赖
@@ -117,124 +125,363 @@ game-libs/game-common-controls/
   README.md
   package.json
   src/
-    game-common-controls.ts   # WC / lifecycle
-    device/                   # keyboard, pointer, gamepad producers
-    protocol/                 # message, validation, epoch/sequence
-    state/                    # held controls, reset, snapshots
-    mapping/                  # bindings, axes, chords
-    consumer/                 # optional author-facing helpers
+    protocol/
+      common.ts
+      keyboard.ts
+      pointer.ts
+      gamepad.ts
+
+    elements/
+      game-keyboard-input.ts
+      game-pointer-input.ts
+      game-gamepad-input.ts
+
+    devices/
+      keyboard-source.ts
+      pointer-source.ts
+      gamepad-source.ts
+
+    controls/
+      mapper.ts
+      aggregator.ts
+      consumer.ts
+
+    index.ts
+
   test/
-    unit/
-    browser/
+    keyboard/
+    pointer/
+    gamepad/
+    controls/
     integration/
 ~~~
 
-目录只表示职责拆分建议，不要求提前引入所有文件。
+目标 Custom Elements：
 
-组件是业务拥有的 Custom Element，不是新的 Renderer，也不直接管理 Render Store。它必须由某个普通业务 Subsystem 的 RenderDomain 创建 RenderNode，再经 Web Projector 挂载并获得 WebPresentationContext。可以由游戏入口或 presentation-shell/controls-owner Subsystem 持有这个节点，但 LM 不得为它建立输入专属的特殊 Host。
-
-建议每个 Renderer Window 在同一输入所有权范围内最多有一个启用中的全局实例。重复实例应有可测试的拒绝、禁用或明确多实例隔离规则，绝不能默默双份采集和广播。WC 应在 disconnectedCallback/过期 Context 及时停止事件源；重新挂载应产生新输入 epoch。
-
-推荐依赖方向：
-
-~~~text
-examples / game Subsystems
-         |
-         v
-@loomrealm-game/common-controls
-         |
-         +--> browser standard APIs (physical capture)
-         +--> public Web Presentation Context (generic event publish)
-         +--> public Session Events author interface (consumers)
+~~~html
+<game-keyboard-input></game-keyboard-input>
+<game-pointer-input></game-pointer-input>
+<game-gamepad-input></game-gamepad-input>
 ~~~
 
-common-controls 不应导入 LM 内部 InputGate、RendererInputSource、Input Interest Registry、InputTarget wire schema、SessionEventHub 内部类型，也不得按 Desktop/PWA 定制业务协议。
+这些组件彼此独立，业务方可以只挂载其中一个，也可以组合多个：
+
+~~~html
+<!-- keyboard-only -->
+<game-keyboard-input></game-keyboard-input>
+
+<!-- desktop action game -->
+<game-keyboard-input></game-keyboard-input>
+<game-pointer-input></game-pointer-input>
+<game-gamepad-input></game-gamepad-input>
+~~~
+
+### 3.1 每设备唯一实例
+
+唯一性按设备类型计算，而不是整个 common-controls 包只能有一个组件。
+
+一个 Renderer Window 的同一输入 ownership scope 中，默认最多允许：
+
+~~~text
+1 x game-keyboard-input
+1 x game-pointer-input
+1 x game-gamepad-input
+~~~
+
+重复挂载同类型 Producer 必须拒绝、禁用或显式隔离，不能静默产生双份物理事件。不同类型组件可以同时存在。
+
+每个组件独立拥有：
+
+~~~text
+producer epoch
+revision
+physical state
+reset lifecycle
+event listeners / polling resources
+~~~
+
+组件 disconnected 或 Context 失效时，只清理自己的设备状态，不影响其他设备组件。
+
+### 3.2 组件归属
+
+设备组件仍然是普通业务 Custom Elements：
+
+~~~text
+Subsystem RenderDomain
+    -> RenderNode
+    -> WebProjector
+    -> device WC
+    -> WebPresentationContext
+~~~
+
+LM 不建立 Keyboard Host、Gamepad Host 或 GlobalInput Subsystem。由 presentation/game composition 决定挂载哪些组件、由哪个业务 Subsystem 持有 RenderNode。
+
+### 3.3 可选 Controls Mapper/Aggregator
+
+设备 WC 默认输出 canonical device protocol。跨设备 action mapping 是另一层职责：
+
+~~~text
+keyboard state/event ----+
+                         |
+gamepad state/event -----+--> Controls Mapper/Aggregator
+                         |        |
+pointer state/event -----+        +--> move / confirm / cancel / menu
+~~~
+
+Aggregator 可以是普通 TypeScript helper、Subsystem 内业务服务或其他 game-lib；**不要求做成 WC**。
+
+它解决：
+
+- 多物理 binding 映射同一个 action；
+- Keyboard + Gamepad 同时控制同一 action；
+- 松开一个来源时其他来源仍保持 action；
+- deadzone / chord / long-press / remap；
+- 游戏层 focus、priority、modal ownership。
+
+设备 WC 不承担这些跨设备聚合职责。
+
+### 3.4 依赖方向
+
+~~~text
+game / presentation
+    |
+    +--> device WCs
+    |      +--> browser standard APIs
+    |      +--> WebPresentationContext
+    |
+    +--> optional controls mapper
+           +--> common device protocol
+           +--> Session Events author API
+~~~
+
+common-controls 不应导入 LM 内部 InputGate、RendererInputSource、Input Interest Registry、InputTarget wire schema 或 SessionEventHub 内部类型。
 
 ## 4. 业务 User Input 协议的完整职责
 
-### 4.1 从设备到业务协议
+### 4.1 设备层协议，而不是单一最终 controls 协议
 
-WC 自身拥有完整处理流水线：
+每个设备 WC 自己完成：
 
 ~~~text
-DOM / Gamepad physical samples
-   -> normalize (key, pointer, axis, device identity)
-   -> aggregate current held/axis state
-   -> map to game control semantics
-   -> derive state / event / reset
-   -> validate + bounded rate/size
-   -> emitCustomEvent broadcast
+physical browser samples
+   -> canonical device normalization
+   -> current device state
+   -> device edge event
+   -> reset / recovery
+   -> emitCustomEvent
 ~~~
 
-例如 Enter/手柄 South 映射为 confirm，Escape/手柄 East 为 cancel，方向键/WASD/左摇杆为 move，Start 为 menu。这只是**业务默认映射**，不得冻结进 LM Contract。
+设备层输出不要求提前转换成 confirm/move 等最终 gameplay action。
 
-业务库需要同时支持：
-- **状态类输入**：当前按键集合、连续摇杆值、指针位置等，以自包含的当前状态表示，并具有恢复/失效机制。
-- **瞬时类输入**：点击、确认、取消或其他 impulse，只表示某次发生，不承诺重放。
-- **重置类输入**：设备断开、焦点丢失、WC 失活、Source epoch 更换时，使下游停止相信旧状态。
-- **业务订阅意图**：业务 Consumer 可根据 Channel、动作或游戏上下文选择处理；若需要类似旧 Input Interest 的能力，应由业务协议定义，不复用 LM InputGate。
+推荐事件名：
 
-### 4.2 候选消息格式（未冻结）
+~~~text
+input.keyboard.state
+input.keyboard.event
+input.keyboard.reset
 
-建议将整个业务协议版本放进 payload，并按逻辑消息类型区分：
+input.pointer.state
+input.pointer.event
+input.pointer.reset
+
+input.gamepad.state
+input.gamepad.event
+input.gamepad.reset
+~~~
+
+以上均为 Web Presentation custom-event name / Session Event type，**不是 Channel**。底层仍统一使用 Framework 固定 Web Presentation Event Channel。
+
+### 4.2 公共 envelope
+
+每个 Producer 独立维护 epoch/revision：
 
 ~~~ts
-type ControlsProtocol = "@loomrealm-game/common-controls/1";
+type InputDevice = "keyboard" | "pointer" | "gamepad";
 
-interface ControlsBase {
-  readonly protocol: ControlsProtocol;
-  readonly epoch: string;       // WC 输入生产者生命周期；非 LM Session/Activation
-  readonly revision: number;    // 本 epoch 内单调递增的业务序号
+interface DeviceMessageBase {
+  readonly protocol: "@loomrealm-game/common-controls/1";
+  readonly device: InputDevice;
+  readonly epoch: string;
+  readonly revision: number;
 }
-
-interface ControlsEvent extends ControlsBase {
-  readonly kind: "event";
-  readonly action: string;
-  readonly phase: "pressed" | "released" | "impulse";
-  readonly device: "keyboard" | "pointer" | "gamepad";
-  readonly control: string;
-  readonly value?: number;
-}
-
-interface ControlsState extends ControlsBase {
-  readonly kind: "state";
-  // 有界、自包含的当前 held/axis 状态，不是局部增量 patch
-  readonly values: Readonly<Record<string, number>>;
-}
-
-interface ControlsReset extends ControlsBase {
-  readonly kind: "reset";
-  readonly reason:
-    | "blur"
-    | "hidden"
-    | "disconnected"
-    | "device-lost"
-    | "source-replaced";
-}
-
-type ControlsMessage = ControlsEvent | ControlsState | ControlsReset;
 ~~~
 
-这份示例用于说明 **User Input 协议由业务包拥有**，不代表最终必须保留全部字段或原样继承 User Input v1 wire。消息仍须满足通用 JSON 安全边界、长度、深度、字节上限，数值均为有限数；明确 action/value 的合法范围和协议版本策略。
+同一设备：
 
-Web Presentation 的 name 映射为 Session Event type（如 controls.event、controls.state、controls.reset），data 携带上述业务消息。底层始终使用 Framework 固定的 Web Presentation Event Channel；业务协议不拥有、不选择、也不重定义该 Channel。
+~~~text
+epoch
+    = 此 WC producer lifetime
 
-### 4.3 状态与事件的区别不可抹平
+revision
+    = 此 epoch 内单调递增
+~~~
 
-瞬时事件可按按下边沿发布，但松开事件也可能丢失，因此不能仅凭旧 pressed 永久保持状态。对于持续移动、摇杆或组合键，主要消费依据应为**有界有效期的完整当前状态**，而不是无期限累积事件。
+不同设备之间不共享 revision，也不建立全局顺序。
 
-推荐的业务协议不变量：
+### 4.3 Keyboard protocol
 
-1. 同一动作的多个物理绑定使用引用计数/来源集合聚合，释放其中一个键不应误释放动作。
-2. Keyboard auto-repeat 默认不生成重复 pressed；长按重复是显式业务配置。
-3. 摇杆含 deadzone、量化、变化阈值、节流与最终中立值；不得将每一帧完整设备数据不加限制地广播。
-4. WC 每个 epoch 内的 revision 单调递增；消费者可抑制过期消息。epoch 切换时必须丢弃旧 epoch 的业务输入状态。
-5. 消费者在订阅建立时以“尚未获得当前状态”或中立态开始，不能从过去事件推导真值。
-6. 因现有 Session Events **不回放、不保证断线事件到达**，协议应规定可恢复的完整状态重发策略（例如状态变更时发送、活跃状态按受限周期重宣告）及 Consumer 超时退回中立态。
-7. 重置优先尝试发布 reset，但不能依赖它必然到达；消费者本地 TTL/epoch 替换规则是防 stuck input 的最终兜底。
-8. 对瞬时 confirm/cancel 的丢失，v1 可选择 best-effort；若玩法要求严格交付，需单独定义业务层 ACK/幂等/恢复机制，不能谎称 Session Events 已提供 exactly-once。
+候选：
 
-状态周期、TTL、轴阈值和具体限额必须经跨进程及浏览器测试后冻结，不能在本提案中虚构为现行 Framework 保证。
+~~~ts
+interface KeyboardState extends DeviceMessageBase {
+  readonly device: "keyboard";
+  readonly kind: "state";
+  readonly down: readonly string[];
+}
+
+interface KeyboardEvent extends DeviceMessageBase {
+  readonly device: "keyboard";
+  readonly kind: "event";
+  readonly action: "down" | "up";
+  readonly code: string;
+  readonly repeat: boolean;
+}
+
+interface KeyboardReset extends DeviceMessageBase {
+  readonly device: "keyboard";
+  readonly kind: "reset";
+  readonly reason: "blur" | "hidden" | "disconnected" | "source-replaced";
+}
+~~~
+
+### 4.4 Pointer protocol
+
+候选：
+
+~~~ts
+interface PointerSample {
+  readonly pointerId: number;
+  readonly kind: "mouse" | "touch" | "pen";
+  readonly x: number;
+  readonly y: number;
+  readonly buttons: readonly string[];
+}
+
+interface PointerState extends DeviceMessageBase {
+  readonly device: "pointer";
+  readonly kind: "state";
+  readonly pointers: readonly PointerSample[];
+}
+
+interface PointerEvent extends DeviceMessageBase {
+  readonly device: "pointer";
+  readonly kind: "event";
+  readonly action: "down" | "up" | "cancel";
+  readonly pointer: PointerSample;
+  readonly button: string | null;
+}
+
+interface PointerReset extends DeviceMessageBase {
+  readonly device: "pointer";
+  readonly kind: "reset";
+  readonly reason: "blur" | "hidden" | "disconnected" | "surface-invalid" | "source-replaced";
+}
+~~~
+
+组件名使用 Pointer 而不是 Mouse，因为浏览器 Pointer API 同时覆盖 mouse/touch/pen。游戏若只接受鼠标，应在业务配置中限制 pointer kind。
+
+### 4.5 Gamepad protocol
+
+候选：
+
+~~~ts
+interface GamepadState extends DeviceMessageBase {
+  readonly device: "gamepad";
+  readonly kind: "state";
+  readonly gamepads: readonly GamepadSample[];
+}
+
+interface GamepadEvent extends DeviceMessageBase {
+  readonly device: "gamepad";
+  readonly kind: "event";
+  readonly action: "down" | "up";
+  readonly gamepadId: number;
+  readonly button: string;
+  readonly value: number;
+}
+
+interface GamepadReset extends DeviceMessageBase {
+  readonly device: "gamepad";
+  readonly kind: "reset";
+  readonly reason: "hidden" | "blur" | "device-lost" | "disconnected" | "source-replaced";
+}
+~~~
+
+标准 mapping、axes/buttons normalization、deadzone/threshold/quantization 属于 game-gamepad-input，不进入 LR。
+
+### 4.6 State / Event / Reset 共同语义
+
+State：
+
+- self-contained current truth；
+- 状态改变立即发送；
+- 非中立持续状态可按有界周期重宣告，用于 late subscriber/reconnect 收敛；
+- Consumer 不能靠历史 Event 重建 current state。
+
+Event：
+
+- future-only transient edge；
+- 不 replay；
+- 不自动重试；
+- 丢失时不能伪装为 exactly-once。
+
+Reset：
+
+- producer 主动表示旧状态失效；
+- 但正确性不能依赖 Reset 必达；
+- Consumer 仍需 epoch replacement + TTL 退回 neutral。
+
+### 4.7 availability 不迁移成 Framework 协议
+
+旧 RendererInputSource 的 availability 是 InputGate 内部机制，不需要一比一公开迁移。
+
+每个 WC 内部维护：
+
+~~~text
+window usable
+device available
+surface valid
+gamepad connected
+~~~
+
+availability loss 应转换为本设备的：
+
+~~~text
+clear local state
++ reset
++ neutral state when appropriate
+~~~
+
+如果某个游戏需要“当前是否连接手柄”等信息，可以由 game-gamepad-input 作为业务设备状态另行定义，不恢复 LR 的 Producer(C) Framework 概念。
+
+### 4.8 跨设备 Controls 聚合
+
+例如：
+
+~~~text
+Keyboard W --------+
+                   +--> move-forward
+Gamepad leftY -----+
+~~~
+
+若 Keyboard W 松开，但 Gamepad 仍向前：
+
+~~~text
+keyboard source inactive
+gamepad source active
+        |
+        v
+move-forward remains active
+~~~
+
+因此设备 WC 不应各自直接宣布“最终 move-forward released”。Aggregator 应按 source set / contribution model 合并：
+
+~~~text
+ActionState[action]
+    = aggregate(contributions from keyboard/pointer/gamepad)
+~~~
+
+跨设备 mapper 可以输出另一个纯业务协议，例如 controls.state / controls.event，但这属于 game-libs 上层协议，不改变设备 WC 或 LR Framework。
 
 ## 5. 通用 emitCustomEvent 跨 Subsystem 广播扩展
 
@@ -463,31 +710,79 @@ WEB_PRESENTATION_EVENT_CHANNEL 表示未来应正式导出的 Framework 常量�
 
 这些规则不得重新下沉成 LR InputTarget / Input Interest。Frame/Activation 仍是 LR Main 的运行生命周期与调用 authority，但不再承担用户输入路由资格。
 
-## 8. 浏览器设备支持与状态机
+## 8. 浏览器设备组件
 
-### 8.1 Keyboard
+### 8.1 game-keyboard-input
 
-- 统一使用稳定的物理 code（必要时允许业务键位按 key 映射）；排除不该影响游戏的文本输入/IME。
-- 处理 repeat、组合键、多个物理来源到同一 action 的聚合。
-- 遵循浏览器焦点和默认行为策略，按业务配置决定 preventDefault，不得全局吞掉表单输入。
+职责：
 
-### 8.2 Standard Gamepad
+- 监听 keydown / keyup；
+- 使用稳定 code 建立 canonical held set；
+- 处理 repeat；
+- blur / visibility hidden / disconnect 时清空；
+- 产生 keyboard state/event/reset；
+- 自己维护 keyboard epoch/revision；
+- 可按配置处理 preventDefault，但不得默认吞掉文本/表单输入。
 
-- 使用浏览器标准 Gamepad API 采样与连接/断连事件，不引入厂商专有 SDK。
-- 标准 button/axis 映射、deadzone、量化、阈值、抗抖、节流。
-- 手柄缺失和采样失败时发布中立状态或 reset，并终止依赖旧设备的 held action。
-- 多手柄冲突的选择/合并策略是业务配置，不进入 LM。
+不负责 Gamepad、Pointer，也不负责 confirm/move 等跨设备 action 聚合。
 
-### 8.3 Pointer 与原协议覆盖范围
+迁移难度：低到中。大部分行为可参考现有 browser-input-source 的 Keyboard slice。
 
-旧 User Input v1 已包含 Pointer；若目标是**完整取代** LM User Input 专属能力，则不能只实现 Keyboard + Gamepad 就宣称功能等价。初期可以先交付 Keyboard/Gamepad 最小链路，但正式退役旧协议之前，需要明确 Pointer（以及旧协议支持的全部其他通道）的迁移、替代或经过批准的范围缩减。
+### 8.2 game-pointer-input
 
-### 8.4 单实例及恢复
+职责：
 
-- Window blur、visibility hidden、disconnectedCallback、Gamepad disconnect 及时本地清零。
-- 组件不可依赖“最后一条 reset 必到”；消费方需要 epoch + TTL 等恢复策略。
-- 重连、重挂载产生新的 producer epoch；旧 Context 即使被业务保存，也不能继续有效发送。
-- 同一物理事件不应同时通过旧 LM InputGate 和新 Controls 通道触发**同一个游戏逻辑**，过渡期必须选择单一消费者路径。
+- pointerdown / pointermove / pointerup / pointercancel；
+- mouse/touch/pen canonicalization；
+- canonical pointerId；
+- buttons state；
+- coordinate normalization；
+- resize/surface validity；
+- blur/hidden reset；
+- pointer state/event/reset。
+
+不把组件命名为 mouse，因为旧协议和浏览器 Pointer API 都覆盖 mouse/touch/pen。
+
+迁移难度：中。主要风险是 pointer lifecycle、surface resize 和 cancel。
+
+### 8.3 game-gamepad-input
+
+职责：
+
+- navigator.getGamepads()；
+- requestAnimationFrame polling；
+- standard mapping；
+- stable local gamepad identity；
+- axes/buttons normalization；
+- button crossing detection；
+- deadzone、threshold、quantization；
+- connect/disconnect/reset；
+- bounded state update frequency。
+
+迁移难度：中高。物理采集本身已有实现参考，重点是节流、状态重宣告和设备断连收敛。
+
+### 8.4 每设备恢复独立
+
+每个 WC 独立执行：
+
+~~~text
+blur / hidden / disconnected
+    -> clear own physical state
+    -> recreate/advance producer epoch as defined
+    -> emit own reset / neutral state
+~~~
+
+Keyboard reset 不能清空 Gamepad state；Gamepad disconnect 也不能让 Pointer epoch 失效。
+
+消费者分别追踪：
+
+~~~text
+keyboard epoch/revision/TTL
+pointer epoch/revision/TTL
+gamepad epoch/revision/TTL
+~~~
+
+Aggregator 再基于这些独立 source state 计算最终 controls。
 
 ## 9. 部署与跨平台约束
 
@@ -495,14 +790,14 @@ WEB_PRESENTATION_EVENT_CHANNEL 表示未来应正式导出的 Framework 常量�
 | --- | --- | --- |
 | WC 运行位置 | Renderer BrowserWindow | PWA Window |
 | 物理输入 | Window Keyboard/Pointer/Gamepad | Window Keyboard/Pointer/Gamepad |
-| WC 协议 | 相同 common-controls 业务协议 | 相同 |
+| WC 协议 | 相同 keyboard/pointer/gamepad device protocols | 相同 |
 | Event bridge | 通用可信 Renderer→Session ingress | 通用可信 Renderer→Session ingress |
 | Event Hub 位置/传输 | 按 Desktop 既有宿主拓扑 | 按 PWA 既有 Worker/Port 拓扑 |
 | Subsystem 消费方式 | SessionEventClient exact-channel subscribe | 相同 |
 
 Bridge 必须用平台通用接口表达所需能力，并由 Desktop/PWA composition 各自接线；不把 ipcRenderer、WebSocket、MessagePort 或 ServiceWorker 放进 common-controls 业务代码。
 
-要验证全局 controls 的可用性，还须为 RenderNode 确定持有者：组件是否由持续存活的 presentation-shell Subsystem 挂载，以及该 Runtime 重启期间的输入中断/重建行为。**这由游戏组合决定**，不是 LM 内建一个隐式 GlobalInput Subsystem。
+要验证设备 Producer 的可用性，还须为各设备 RenderNode 确定持有者。Keyboard/Pointer/Gamepad 可以由同一个 presentation-shell Subsystem 挂载，也可以按业务拆开；Runtime 重启期间各 Producer 独立重建 epoch。**这由游戏组合决定**，不是 LM 内建一个 GlobalInput Subsystem。
 
 ## 10. 失败、顺序和性能语义
 
@@ -577,8 +872,8 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 | --- | --- | --- |
 | M0 | 冻结 options.broadcast、固定 Channel、name/type、owner/session audience | 原样保留 |
 | M1 | 实现 trusted Presentation Event path，Desktop/PWA E2E | 双参数旧行为兼容 |
-| M2 | common-controls 实现 Keyboard/Gamepad/Pointer 与业务 state/event/reset | 新游戏切 WC 输入 |
-| M3 | Subsystem 业务消费者切到 common-controls + Session Events | createInputListener 不再用于新游戏 |
+| M2 | 实现 game-keyboard-input / game-pointer-input / game-gamepad-input 及各自 state/event/reset | 新游戏按需挂载设备 WC |
+| M3 | 设备消费者与可选 Controls Mapper/Aggregator 切到 Session Events | createInputListener 不再用于新游戏 |
 | M4 | owner-only custom event 也切到通用 Presentation Event path | WC custom event 脱离 InputGate |
 | M5 | 删除 Renderer Input Source / InputGate / Data input.* / Subsystem InputManager | Framework Input Plane 退出 |
 | M6 | Renderer Control/Main 删除 InputTarget，更新 Data/Control Profiles 与 Qualification | User Input v1 正式退役 |
@@ -591,7 +886,7 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 4. SubsystemScope 不再有 createInputListener。
 5. Main / Renderer Control 不再发布 inputTarget。
 6. emitCustomEvent 不依赖 InputGate。
-7. game-common-controls 只依赖 browser API、Web Presentation Context 和通用事件消费能力。
+7. 各设备 WC 只依赖对应 browser API + Web Presentation Context；可选 Mapper/Aggregator 只依赖业务设备协议 + 通用事件消费能力。
 8. Frame/Activation/Render/Viewport/Shared State/Session Events 在删除 User Input 后仍独立通过 Qualification。
 
 ## 12. 测试和 Qualification 清单
@@ -613,15 +908,17 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 
 ### common-controls 业务协议
 
-1. 键盘/手柄等价输入映射到相同 action，设备来源可按需区分。
-2. 两个物理键绑定同一动作，释放其中之一不提前结束动作。
-3. auto-repeat、deadzone、微小轴抖动、并发手柄、长按频率有界处理。
-4. blur、hidden、disconnect、component detach、source epoch replacement 不残留 stuck input。
-5. 慢/迟加入订阅者从完整当前状态或中立状态正确收敛。
-6. 丢 release/reset、Runtime reconnect、发布失败时 Consumer 能恢复中立态。
-7. 多个 Subsystem 可观察 broadcast，但游戏业务自己决定谁执行动作。
-8. PWA/Hostra 实际浏览器输入 E2E 和 Pointer 范围闭合。
-9. 新输入链路不存在与旧 Renderer Input Source 的重复业务触发。
+1. Keyboard、Pointer、Gamepad 可以分别单独挂载并独立工作。
+2. 不挂载某设备 WC 时，不存在该设备的隐式 Framework Producer。
+3. 同类型重复 Producer 的行为明确且可测试，不产生静默双份事件。
+4. 每个设备拥有独立 epoch/revision；一个设备 reset 不影响其他设备。
+5. Keyboard repeat、held state、blur/hidden reset 正确。
+6. Pointer move/button/cancel/resize/surface-invalid lifecycle 正确。
+7. Gamepad standard mapping、deadzone、button crossing、disconnect、poll throttling 正确。
+8. late subscriber / reconnect 能通过完整 State refresh + TTL 收敛，不依赖历史 Event。
+9. Controls Mapper 能正确合并多个物理来源；释放 Keyboard binding 时不会覆盖仍活跃的 Gamepad contribution。
+10. PWA/Hostra 使用相同 device protocol。
+11. 新链路不存在与旧 Renderer Input Source 的重复业务触发。
 
 ### User Input 删除回归
 
@@ -637,8 +934,8 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 3. Host/Hub audience：实现固定 Channel 的 trusted publication ingress 和 owner/session recipient filter，不改变 business Channel 职责。
 4. PWA realization：Window -> Session Worker 受限发布链路和 E2E。
 5. Desktop realization：BrowserWindow -> Desktop Host 受限发布链路和 E2E。
-6. common-controls：实现业务 Input protocol 与设备 Producer。
-7. owner-only 切换：默认 broadcast=false 也走通用 Presentation Event path。
+6. device WCs：分别实现 Keyboard / Pointer / Gamepad protocol、独立 lifecycle 与 Producer。
+7. business controls：实现可选 Mapper/Aggregator，并迁移业务消费者；随后默认 broadcast=false 也切到通用 Presentation Event path。
 8. Framework User Input 删除：清理 Subsystem InputManager、Data input family、Renderer sources/InputGate、Main/Renderer Control InputTarget，并同步更新 Contract/Qualification。
 
 ## 14. 待冻结事项
@@ -651,12 +948,17 @@ Frame、Activation、Session、Runtime authority 本身继续存在；只删除�
 - Presentation Event publisher 的 queue/backpressure/异步失败诊断边界。
 - owner-only 从旧 InputGate 切到通用 Event path 的版本切换点。
 - User Input v1、Data Profile input slice、Renderer Control InputTarget 的废止版本与迁移窗口。
-- Controls 业务 schema、epoch/revision、state refresh/TTL、reset、设备映射和游戏层 focus/priority。
+- Keyboard/Pointer/Gamepad 各自 schema、epoch/revision、state refresh/TTL/reset 规则，以及可选 Controls Mapper/Aggregator 的 action contribution/focus/priority 规则。
 
 ## 15. 设计结论
 
-**最终目标是“LM 通用事件承载 + 业务 WC 完整输入协议”，而不是“LM User Input v1 + 额外广播适配器”。**
+**最终目标是“LM 通用事件承载 + 按需设备 WC + 可选业务 Controls 聚合”，而不是“LM User Input v1 + 一个新的全局输入组件”。**
 
-LM 负责保真地承载/鉴权/路由 Web Presentation 事件，不关心它们是不是游戏输入；game-common-controls 才拥有完整用户输入领域逻辑和协议；Subsystem 消费方只依赖该业务协议及 LM 已有的通用 Session Events 能力。待新链路功能和跨平台 Qualification 完成后，旧 LM 内建 User Input 专属设施才进入有治理的退役阶段。
+game-common-controls 是包和协议集合，不再等同于单一 game-common-controls 元素。Keyboard、Pointer、Gamepad 分别由独立业务 Web Component 采集和发布 canonical device state/event/reset；游戏只引入需要的设备能力。
+
+跨设备的 move/confirm/cancel 等最终 action 不由任一设备 WC 单独拥有，而由可选 Mapper/Aggregator 或游戏业务层根据多个 source contribution 合并。这避免设备间状态互相覆盖，也保持每个组件职责单一。
+
+LM 只负责 Web Component hosting、Web Presentation custom-event transport、可信 provenance 和 Session Events delivery，不知道当前页面是否安装 Keyboard、Pointer、Gamepad，也不理解它们如何组成游戏控制。旧 LR User Input 完成迁移后进入正式退役。
+
 
 本文仍为 Proposed；任何尚未更新的 frozen Contract、尚未实现的 Bridge、尚未执行的 Qualification 都不得被写作已完成事实。
