@@ -33,7 +33,7 @@ test("M14 workspace identity and dependency direction are explicit", async () =>
   assert.ok(buildM14.indexOf("-w @loomrealm/fsdb-http") < buildM14.indexOf("-w @loomrealm/desktop"));
   const map = await json("game-libs/map/package.json");
   assert.equal(map.name, "@loomrealm-game/map");
-  assert.deepEqual(Object.keys(map.dependencies), ["@loomrealm/subsystem", "@loomrealm-game/tile-presentation"]);
+  assert.deepEqual(Object.keys(map.dependencies), ["@loomrealm-game/common-controls", "@loomrealm/subsystem", "@loomrealm-game/tile-presentation"]);
   const tilePresentation = await json("game-libs/tile-presentation/package.json");
   assert.equal(tilePresentation.name, "@loomrealm-game/tile-presentation");
   assert.equal(tilePresentation.sideEffects, false);
@@ -75,7 +75,11 @@ test("exact-local qualification enforces the current five-field production Map s
   assert.match(source, /Object\.keys\(map\), \["tileset_id", "width", "height", "data", "behaviors"\]/u);
   assert.match(source, /Array\.isArray\(map\.behaviors\)/u);
   assert.match(source, /viewportSource = Object\.freeze\(\{ start\(emit\) \{ emit\(\{ width: 800, height: 600 \}\)/u);
-  assert.match(source, /createRendererControlHolder\(hub\.rendererBinding, inputSource, viewportSource\)/u);
+  assert.match(source, /createRendererControlHolder\(hub\.rendererBinding, viewportSource, \{/u);
+  assert.match(source, /createDelegatedPublisher\(event\.ownerSubsystemKey\)/u);
+  assert.match(source, /createSessionEventClient\(sessionEventHub\.createBinding\(request\.subsystemKey\)\)/u);
+  assert.match(source, /emitNodeEvent\(\{[\s\S]*broadcast: true, channel: "keyboard\.event"/u);
+  assert.doesNotMatch(source, /\binputSource\b|\binputEmit\b/u);
   assert.match(source, /createSharedStateClient\(\)/u);
   assert.match(source, /state: \(\(\) => \{/u);
   assert.match(source, /if \(mainFailure\) throw mainFailure/u);
