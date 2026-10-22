@@ -10,7 +10,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
 import { createSharedStateClient } from "@loomrealm/shared-state";
-import { createSessionEventClient } from "@loomrealm/session-events";
+import { createSessionEventClient, createSessionEventHub } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
 import { createBoundContentClient, runSubsystem } from "@loomrealm/subsystem/host";
@@ -178,6 +178,7 @@ const production = await prepareProductionContent(options);
 const controller = new AbortController();
 let main;
 let detach = () => {};
+let sessionEventHub;
 try {
   const mapResult = await production.content.record("struct.Map", String(options["map-id"]));
   const map = mapResult.value;
@@ -197,15 +198,24 @@ try {
   ]);
 
   const hub = createDataHub();
-  let inputEmit;
-  const inputSource = Object.freeze({ start(emit) { inputEmit = emit; emit({ kind: "availability", channel: "keyboard.event", available: true }); return () => {}; } });
+  sessionEventHub = createSessionEventHub();
   const viewportSource = Object.freeze({ start(emit) { emit({ width: 800, height: 600 }); return () => {}; } });
   let holder;
   const rendererControl = Object.freeze({
     acquire(token, signal) {
       if (holder) return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
       const pair = createMemoryCarrierPair();
-      holder = createRendererControlHolder(hub.rendererBinding, inputSource, viewportSource);
+      holder = createRendererControlHolder(hub.rendererBinding, viewportSource, {
+        async publish(event) {
+          const publisher = sessionEventHub.createDelegatedPublisher(event.ownerSubsystemKey);
+          await publisher.publish(
+            event.channel,
+            event.type,
+            event.payload,
+            event.broadcast ? undefined : event.ownerSubsystemKey,
+          );
+        },
+      });
       void holder.connect({ carrier: pair.right, rendererControlToken: token });
       return Promise.resolve(pair.left);
     },
@@ -227,7 +237,7 @@ try {
           return Object.freeze({ client, terminate: () => client.terminate() });
         })(),
         events: (() => {
-          const client = createSessionEventClient();
+          const client = createSessionEventClient(sessionEventHub.createBinding(request.subsystemKey));
           return Object.freeze({ client, terminate: () => client.terminate() });
         })(),
       });
@@ -245,14 +255,31 @@ try {
   void main.catch((error) => { mainFailure = error; });
   await waitFor(() => {
     if (mainFailure) throw mainFailure;
-    return holder?.current() !== null && typeof inputEmit === "function";
-  }, "Renderer and M10 input source");
+    return holder?.current() !== null;
+  }, "Renderer");
   let latestView;
-  detach = attachRendererPresentation(holder, { reevaluate(source) { latestView = structuredClone(source.read()); } });
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 2, "initial exact-source Render state");
-  const before = latestView.subsystems[0].domains[0].roots[0].children[0].data;
-  inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "ArrowRight", repeat: false } });
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 6, "ArrowRight through M10");
+  let emitNodeEvent;
+  detach = attachRendererPresentation(holder, {
+    reevaluate(source, emit) {
+      latestView = structuredClone(source.read());
+      emitNodeEvent = emit;
+    },
+  });
+  await waitFor(() => typeof emitNodeEvent === "function" && latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 2, "initial exact-source Render state");
+  const subsystem = latestView.subsystems[0];
+  const initialDomain = subsystem.domains[0];
+  const before = initialDomain.roots[0].children[0].data;
+  emitNodeEvent({
+    sessionId: latestView.sessionId,
+    subsystemKey: subsystem.subsystemKey,
+    generation: subsystem.generation,
+    domainId: initialDomain.domainId,
+    targetKey: "map-input-keyboard",
+    name: "input.event",
+    data: { action: "down", code: "ArrowRight", repeat: false },
+    options: { broadcast: true, channel: "keyboard.event" },
+  });
+  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 6, "ArrowRight through Game Common Controls input");
   const domain = latestView.subsystems[0].domains[0];
   const after = domain.roots[0].children[0].data;
   const browser = await browserQualification(domain, resources);
@@ -273,6 +300,7 @@ try {
   detach();
   controller.abort(new Error("M14 exact-source qualification complete"));
   if (main) await main.catch(() => {});
+  sessionEventHub?.terminate();
   production.lifetime.abort();
   await production.service.close().catch(() => {});
   await rm(production.installationRoot, { recursive: true, force: true });

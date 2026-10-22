@@ -11,7 +11,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { parseGameEntryV1 } from "@loomrealm/game-package";
 import { runMain } from "@loomrealm/main";
 import { createSharedStateClient } from "@loomrealm/shared-state";
-import { createSessionEventClient } from "@loomrealm/session-events";
+import { createSessionEventClient, createSessionEventHub } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
 import { runSubsystem } from "@loomrealm/subsystem/host";
@@ -122,7 +122,7 @@ async function fixtureServer(t, resources) {
   return { origin, presentation };
 }
 
-test("M14 checked-in game traverses Main, Input, Render, Content and real Chromium", { timeout: 30_000 }, async (t) => {
+test("M14 checked-in game traverses Main, Presentation Events, Render, Content and real Chromium", { timeout: 30_000 }, async (t) => {
   const fixture = JSON.parse(await readFile(path.join(exampleRoot, "fixtures", "semantic-content.json"), "utf8"));
   const tilesetBytes = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_tileset.png"));
   const playerBytes = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_player.png"));
@@ -156,16 +156,26 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
   t.after(() => page.evaluate(() => globalThis.teardownM14?.()).catch(() => {}));
 
   const hub = createDataHub();
-  let inputEmit;
+  const sessionEventHub = createSessionEventHub();
+  t.after(() => sessionEventHub.terminate());
   let viewportEmit;
-  const inputSource = Object.freeze({ start(emit) { inputEmit = emit; emit({ kind: "availability", channel: "keyboard.event", available: true }); return () => {}; } });
   const viewportSource = Object.freeze({ start(emit) { viewportEmit = emit; emit({ width: 800, height: 600 }); return () => {}; } });
   let holder;
   const rendererControl = Object.freeze({
     acquire(token, signal) {
       if (holder) return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
       const pair = createMemoryCarrierPair();
-      holder = createRendererControlHolder(hub.rendererBinding, inputSource, viewportSource);
+      holder = createRendererControlHolder(hub.rendererBinding, viewportSource, {
+        async publish(event) {
+          const publisher = sessionEventHub.createDelegatedPublisher(event.ownerSubsystemKey);
+          await publisher.publish(
+            event.channel,
+            event.type,
+            event.payload,
+            event.broadcast ? undefined : event.ownerSubsystemKey,
+          );
+        },
+      });
       void holder.connect({ carrier: pair.right, rendererControlToken: token });
       return Promise.resolve(pair.left);
     },
@@ -179,7 +189,7 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
         definition: mapSubsystem, runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
         runtimePolicy, launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] }, data: hub.subsystemBinding, content,
         state: (() => { const client = createSharedStateClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
-        events: (() => { const client = createSessionEventClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
+        events: (() => { const client = createSessionEventClient(sessionEventHub.createBinding(request.subsystemKey)); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
       });
       void runtime.catch(() => {});
       return Object.freeze({ runtimeControl: { acquire() { return Promise.resolve(pair.left); } }, terminated: runtime, async requestTermination() { await pair.left.close(); } });
@@ -193,12 +203,26 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
     platform: { scheduler, opaqueMaterial: { generate: () => randomBytes(32).toString("base64url") }, runtimeHosting, rendererControl, dataConnections: { replace() {} } },
   });
   void main.catch(() => {});
-  await waitFor(() => holder?.current() !== null && typeof inputEmit === "function", "Renderer and input source");
+  await waitFor(() => holder?.current() !== null, "Renderer");
 
-  let browserDelivery = Promise.resolve(); let latestView;
-  const detach = attachRendererPresentation(holder, { reevaluate(source) { latestView = structuredClone(source.read()); browserDelivery = browserDelivery.then(() => page.evaluate((view) => globalThis.applyM14View(view), latestView)); } });
+  let browserDelivery = Promise.resolve(); let latestView; let emitNodeEvent;
+  const detach = attachRendererPresentation(holder, { reevaluate(source, emit) { latestView = structuredClone(source.read()); emitNodeEvent = emit; browserDelivery = browserDelivery.then(() => page.evaluate((view) => globalThis.applyM14View(view), latestView)); } });
   t.after(detach);
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.data?.viewportWidth === 800, "initial map Render state");
+  await waitFor(() => typeof emitNodeEvent === "function" && latestView?.subsystems[0]?.domains[0]?.roots[0]?.data?.viewportWidth === 800, "initial map Render state");
+  const emitKeyboardDown = () => {
+    const subsystem = latestView.subsystems[0];
+    const domain = subsystem.domains[0];
+    emitNodeEvent({
+      sessionId: latestView.sessionId,
+      subsystemKey: subsystem.subsystemKey,
+      generation: subsystem.generation,
+      domainId: domain.domainId,
+      targetKey: "map-input-keyboard",
+      name: "input.event",
+      data: { action: "down", code: "ArrowRight", repeat: false },
+      options: { broadcast: true, channel: "keyboard.event" },
+    });
+  };
   await browserDelivery;
   await waitFor(async () => (await sampleVisibleTilePixel(page, 400, 268))[3] === 255, "initial Canvas paint");
   await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas")?.getContext("2d")?.getImageData(5, 5, 1, 1).data[3] === 255), "initial player paint");
@@ -216,14 +240,14 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
     return [getComputedStyle(content).height, getComputedStyle(footer).height, footer.textContent];
   }), ["568px", "32px", "1"]);
 
-  inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "ArrowRight", repeat: false } });
+  emitKeyboardDown();
   await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.x === 11, "first movement commit"); await browserDelivery;
   const moved = latestView.subsystems[0].domains[0].roots[0];
   assert.equal(moved.data.cameraX, 0); assert.deepEqual([moved.children[0].data.screenX, moved.children[0].data.screenY, moved.children[0].data.direction], [352, 256, 6]);
   await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data[2] === 240), "right-facing player crop");
   assert.deepEqual(await page.evaluate(() => [...document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data]), fixture.expectedPixels.playerRight);
   assert.deepEqual(await page.evaluate(() => [document.querySelector("lr-map-view").instance, document.querySelector("lr-map-sprite").instance]), [1, 2]);
-  inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "ArrowRight", repeat: false } });
+  emitKeyboardDown();
   await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 6, "blocked movement render"); await new Promise((resolve) => setTimeout(resolve, 20));
   const blocked = latestView.subsystems[0].domains[0].roots[0];
   assert.equal(blocked.children[0].data.x, 11); assert.equal(blocked.data.cameraX, 0);
