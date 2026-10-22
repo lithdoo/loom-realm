@@ -843,6 +843,14 @@ test("M15 movement latency harness records input-to-paint traces", { timeout: 90
     const records = [];
     globalThis.__loomrealmMovementRecords = records;
     globalThis.__loomrealmMovementQualification = (record) => { records.push(record); };
+    window.addEventListener("keydown", (event) => {
+      if (!event.isTrusted || event.repeat) return;
+      globalThis.__loomrealmMovementQualification?.({
+        name: "input-captured",
+        at: performance.now(),
+        detail: { code: event.code },
+      });
+    }, { capture: true });
   });
   await page.bringToFront();
   await page.mouse.click(320, 240);
@@ -912,6 +920,14 @@ test(`M15 Hostra ${fullLatencyQualification ? "640/720/1080 full P95" : "640 PR 
     const records = [];
     globalThis.__loomrealmMovementRecords = records;
     globalThis.__loomrealmMovementQualification = (record) => { records.push(record); };
+    window.addEventListener("keydown", (event) => {
+      if (!event.isTrusted || event.repeat) return;
+      globalThis.__loomrealmMovementQualification?.({
+        name: "input-captured",
+        at: performance.now(),
+        detail: { code: event.code },
+      });
+    }, { capture: true });
   });
   await page.bringToFront();
   await page.mouse.click(320, 240);
