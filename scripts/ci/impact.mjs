@@ -177,7 +177,7 @@ export function classifyPaths(paths) {
       continue;
     }
 
-    if (path.startsWith("test/user-input-v1/") || path.startsWith("test/render-update-v1/")) {
+    if (path.startsWith("test/game-common-controls-input-v1/") || path.startsWith("test/render-update-v1/")) {
       impact.code = true;
       continue;
     }

@@ -73,6 +73,9 @@ test("impact routing is selective for docs, routes Battle to Browser, and fails 
   assert.equal(dialogue.presentation, true);
   assert.equal(requiresBrowser(dialogue), true);
 
+  const commonControlsQualification = classifyPaths(["test/game-common-controls-input-v1/qualification.test.mjs"]);
+  assert.equal(commonControlsQualification.code, true);
+
   const unknown = classifyPaths(["new-runtime-surface.bin"]);
   assert.equal(unknown.code, true);
   assert.equal(unknown.desktop, true);

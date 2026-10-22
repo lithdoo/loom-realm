@@ -114,7 +114,6 @@ async function packPublishable() {
 function runDesktopTests() {
   node(
     "--test",
-    "apps/desktop/test/renderer-input-source.test.mjs",
     "apps/desktop/test/renderer-viewport-source.test.mjs",
     "apps/desktop/test/product-viewport-composition.test.mjs",
     "apps/desktop/test/loopback-renderer-control.test.mjs",
@@ -128,8 +127,8 @@ const capabilities = {
   core() {
     buildRegressionStack();
     npm("run", "test:regression");
-    node("--test", "test/user-input-v1/qualification.test.mjs");
-    node("--test", "test/m10-boundary.test.mjs");
+    npm("run", "build", "-w", "@loomrealm-game/common-controls");
+    node("--test", "test/game-common-controls-input-v1/qualification.test.mjs");
     node("--test", "test/render-update-v1/qualification.test.mjs");
     node("--test", "test/m11-boundary.test.mjs");
   },
@@ -147,7 +146,14 @@ const capabilities = {
 
   presentation() {
     npm("run", "build:desktop-stack");
-    node("--test", "test/web-presentation-v1/qualification.test.mjs");
+    node(
+      "--test",
+      "packages/renderer/test/web-presentation-config.test.mjs",
+      "packages/renderer/test/web-projector-events.test.mjs",
+      "packages/renderer/test/presentation-event.test.mjs",
+      "packages/renderer/test/presentation-seam.test.mjs",
+      "test/web-presentation-v2/qualification.test.mjs",
+    );
     node("--test", "test/m13-boundary.test.mjs");
     npm("pack", "-w", "@loomrealm/renderer", "--dry-run");
   },
