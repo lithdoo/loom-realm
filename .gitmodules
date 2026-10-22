@@ -1,0 +1,3 @@
+[submodule "adventure-island"]
+	path = adventure-island
+	url = https://github.com/lithdoo/adventure-island.git
