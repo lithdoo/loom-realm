@@ -31,8 +31,10 @@ test("Renderer keeps Render replica and qualification observation internal", asy
   assert.doesNotMatch(control, /(?:snapshotForQualification|renderQualification|RendererRenderStore)/);
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), [
     "@loomrealm/data",
+    "@loomrealm/foundation",
     "@loomrealm/platform-ports",
     "@loomrealm/renderer-control",
+    "@loomrealm/wire",
   ]);
 });
 
