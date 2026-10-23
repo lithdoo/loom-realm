@@ -9,6 +9,33 @@ export type DeviceInputChannel = typeof DEVICE_INPUT_CHANNELS[number];
 export type DeviceStateChannel = "keyboard.state" | "pointer.state" | "gamepad.state";
 export type DeviceEventChannel = "keyboard.event" | "pointer.event" | "gamepad.event";
 
+export const CONTROLS_INPUT_CHANNELS = Object.freeze([
+  "controls.state", "controls.event",
+] as const);
+export type ControlsInputChannel = typeof CONTROLS_INPUT_CHANNELS[number];
+
+export const CONTROLS_BUTTONS_V1 = Object.freeze([
+  "up", "down", "left", "right",
+  "south", "east", "west", "north",
+  "leftBumper", "rightBumper", "leftTrigger", "rightTrigger",
+  "start", "select",
+] as const);
+export type ControlsButtonV1 = typeof CONTROLS_BUTTONS_V1[number];
+
+export interface ControlsStatePayloadV1 extends JsonObject {
+  readonly down: readonly ControlsButtonV1[];
+}
+export interface ControlsEventPayloadV1 extends JsonObject {
+  readonly action: "down" | "up";
+  readonly button: ControlsButtonV1;
+  readonly repeat: boolean;
+}
+
+const EMPTY_CONTROLS_DOWN_V1: readonly ControlsButtonV1[] = Object.freeze([]);
+export const EMPTY_CONTROLS_STATE_V1: ControlsStatePayloadV1 = Object.freeze({ down: EMPTY_CONTROLS_DOWN_V1 });
+export const CONTROLS_STATE_REFRESH_MS = 1_000;
+export const CONTROLS_STATE_STALE_MS = 2_500;
+
 export const KEYBOARD_CODES_V1 = Object.freeze([
   "KeyA", "KeyB", "KeyC", "KeyD", "KeyE", "KeyF", "KeyG", "KeyH", "KeyI", "KeyJ",
   "KeyK", "KeyL", "KeyM", "KeyN", "KeyO", "KeyP", "KeyQ", "KeyR", "KeyS", "KeyT",
