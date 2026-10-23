@@ -2,407 +2,1015 @@
 
 > 状态：Proposed / Implementation Plan；**本文提交不代表功能已实现或测试已通过**
 > 日期：2026-10-23
-> 范围：`broadcast: "top-frame"`、可信 Frame/Activation 绑定、Frame-scoped Channel 订阅与 Desktop/PWA 对等实现
-> 当前基线：Web Presentation API v2、Renderer Control v2、Renderer Data Profile v2、Session Events v1
-> 历史基线：PR #102 之前提交 `d8578e0855a35407dc42d3980bbdf7e22afdde25` 的 User Input v1
-> 目标：本地 Agent 按本文完成编码、测试、资格验证、文档升级与最终证据记录，不停留在架构分析
+> 目标：为 `WebPresentationContext.emitCustomEvent(..., { broadcast: "top-frame" })` 增加严格的 Top Frame 精确投递能力
+> 历史参照：PR #102 之前 `d8578e0855a35407dc42d3980bbdf7e22afdde25` 的 User Input v1 精确 Frame 投递
+> 当前基线：Web Presentation API v2、Renderer Control v2、Renderer Data Profile v2
+> 边界：**本功能不修改 Session Events、SessionEventHub、Session Events Carrier 或其 Subsystem↔Subsystem 业务语义**
 
-## 0. 执行约束与入口
+## 0. 先锁定边界
 
-**只完成这份文档不等于交付功能。** 本地 Agent 接到实施任务后，应从仓库最新工作树起步，逐阶段修改实现并执行测试，最终给出更改文件、协议版本、测试命令及实际结果。不得将尚未运行的测试写为 PASS；如有环境限制，应明确报告。
-
-开始先读取：
-
-- `doc/15-contracts/web-presentation-api-v2.md`、`doc/15-contracts/main-renderer-control-v2.md`、`doc/15-contracts/session-events-v1.md`、`doc/15-contracts/session-events-runtime-profile-v1.md`。
-- `doc/15-contracts/renderer-data-profile-v2.md`、`doc/10-architecture/web-presentation-custom-event-routing.md`。
-- `game-libs/game-common-controls/game-controls-input.md`（新组件的设计草案，不能当作已有实现）。
-- 历史 `git show d8578e0:packages/main/src/internal/main-session.ts`、`:packages/renderer/src/internal/input-gate.ts`、`:packages/subsystem/src/internal/input-manager.ts`、`:packages/subsystem/src/internal/frame-runtime.ts` 与 `:doc/15-contracts/user-input-v1.md`；历史测试 `packages/renderer/test/input-gate.test.mjs`、`packages/subsystem/test/input-manager.test.mjs`（需用 `git show` 从历史查看）。
-
-实施原则：
-
-1. **Main 仍是唯一 Frame 栈/Activation Authority**；Renderer、Platform、Hub 仅使用经过绑定或验证的派生事实，不创建第二套 Frame 栈。
-2. **不恢复** InputTarget、InputGate、Input Interest、RendererInputSource、Data `input.*`、`createInputListener` 或旧设备 Framework 协议。
-3. `false`、省略 `broadcast`、`true` 的既有行为必须保持。`"top-frame"` 是新增且显式 opt-in 的投递模式。
-4. Channel 仍为原始 exact Channel；不能把所有帧事件广播成一个固定公共 Channel 并要求消费者根据 `payload.data.channel` 过滤。
-5. 已冻结 v1/v2 协议必须通过**新版本及适配层**演进；不得静默扩充旧 closed schema。
-6. **不能把“只投递给栈顶 Subsystem”当成“只有栈顶 Frame 响应”。** 完成标准包含同 Subsystem 多 Frame 隔离。
-7. 内部绑定的目标 Frame 不能由 Web Component 或普通 Subsystem 自行提供/覆盖；业务只决定 `name`、`data`、`options`。
-
-## 1. 功能定义、边界及非目标
-
-新增 Web Presentation 调用：
+本任务只解决一件事：
 
 ```ts
-interface CustomEventOptions {
-  readonly broadcast?: boolean | "top-frame";
-  readonly channel?: string;
-}
-
 context.emitCustomEvent(
   "input.event",
   { action: "down", button: "south", repeat: false },
-  { broadcast: "top-frame", channel: "controls.event" },
+  {
+    broadcast: "top-frame",
+    channel: "controls.event",
+  },
 );
 ```
 
-三种模式：
+使该 reverse Web Presentation Event：
 
-| 模式 | Hub 逻辑路由 | 接收 API | Frame 限制 |
-| --- | --- | --- | --- |
-| 省略 / `false` | 只到 RenderNode owner Subsystem | 既有 `scope.events.subscribe` | 无 |
-| `true` | Session 内所有 exact Channel 订阅者 | 既有 `scope.events.subscribe` | 无 |
-| `"top-frame"` | 只到当前 Top Active Frame 所属 Subsystem，并匹配 exact Channel | **新 Frame-scoped 订阅** | FrameId + ActivationId + 本地执行资格 |
+1. 在 Renderer 接受时绑定 Main 当前 Top Active Frame 的 `subsystemKey + frameId + activationId`；
+2. 按 exact `channel` 检查该 Frame 的 Presentation Interest；
+3. 通过 **Renderer → 目标 Subsystem Data Connection** 直接发送；
+4. 在目标 Runtime 内再次检查 `frameId + activationId + deliveryOpen`；
+5. 只调用该 Frame 的 Presentation listener；
+6. Frame/Activation 已变化时旧 Event 直接丢弃，不改投新的 Top Frame。
 
-约束：
+### 0.1 本文中的“Render 侧事件”指什么
 
-- 发送 WC 可以由 World 的 RenderDomain 拥有，而目标可以是 Battle 的栈顶 Frame。**source owner 不等于 target Frame owner**；`SessionEvent.source.subsystemKey` 始终由发送 WC 的所属 Subsystem 派生。
-- 栈为空、栈顶非 `active`、没有 `activationId`、Renderer/Platform 对 Frame 身份认识不一致时均 fail-closed/drop，**不可改投下一帧或降级为 `true`**。
-- 此能力属于通用 Frame-targeted Presentation Event，不感知 Keyboard、Gamepad、ControlsButton 或具体 action。
-- Frame-targeted Event 非持久、不可重放；UI DOM currentness 与 Session/owner/generation 检查仍然先于正式业务发布。
-- 与现有普通 Session Events 消费者隔离：即使对 `controls.event` 有 `scope.events.subscribe`，也**不能**因 `"top-frame"` 而收到该事件。相反，新 Frame-scoped 订阅也不能收到不带 Frame Target 的普通 Session 广播，除非未来另有明确模式。
-- **不实现**整个 `<game-controls-input>`（它目前仍是设计草案）；本任务只落地通用路由及验证用的模拟源/消费端，并更新草案的使用方式。不要意外修改已有三个设备组件 `broadcast: true` 的既有默认行为。
-- 不改变 `RenderDomain.emit`（Subsystem → Renderer 的 `render.event`）正向路径；本任务针对 `WebPresentationContext.emitCustomEvent` 的 Renderer → Runtime 反向路径。
-
-## 2. 历史方案中必须保留的语义
-
-历史 Main 的 `currentInputTarget()` 只从栈顶 `this.stack.at(-1)` 取得 `{subsystemKey,frameId,activationId}`，且只在栈顶 `active`、`currentActivationId` 非空时有效。旧 Renderer InputGate 的 `currentLease()` 比较 `inputTarget` 和 Active Frame；发布 `input.event/state` 时带上 `frameId`、`activationId`。旧 Subsystem `InputManager.onEvent()` 又检查 `inspectById(frameId)`、`deliveryOpen`、Activation 一致性、Frame Interest，并只执行该 Frame 的 listeners。
-
-由此得到三个必须恢复、但与旧 `input.*` 无关的不变量：
-
-1. **Ingress 绑定**：事件产生时固定 `(sessionId, subsystemKey, frameId, activationId)`，不得在延迟到达时重新寻址到新的 top Frame。
-2. **双端栅栏**：Renderer 依据 Main 镜像栈绑定；Platform 依据 Main 当前权威状态再次验证；接收 Runtime 在真正调用回调之前再次验证本地 Frame/Activation 与 `deliveryOpen`。
-3. **隔离**：Frame A、Frame B 即使同属一个 Subsystem，也只能分别处理绑定给自己的事件。旧 Frame 撤销 Activation 后，其未执行 Event 直接丢弃。
-
-不要照搬旧 Interest Registry、`input.reset` 或旧 Data 连接：Session Events 已经有 exact Channel 订阅；Frame 目标和消费资格是本任务的新增正交维度。
-
-## 3. 冻结的目标语义
-
-### 3.1 可信路由身份
-
-建议独立内部类型（名字可以按包惯例调整，但字段及条件不能变）：
-
-```ts
-type TopFrameLease = Readonly<{
-  sessionId: string;
-  subsystemKey: string; // receiver, NOT source
-  frameId: string;
-  activationId: string;
-}>;
-
-type PresentationBroadcast = false | true | "top-frame";
-
-type PresentationEventPublicationV2 = Readonly<{
-  sessionId: string;
-  ownerSubsystemKey: string; // trusted source identity
-  generation: number;
-  domainId: string;
-  targetKey: string;
-  channel: string;
-  type: string;
-  payload: { domainId: string; targetKey: string; data: JsonObject };
-  broadcast: PresentationBroadcast;
-  topFrame?: TopFrameLease; // required iff broadcast === "top-frame"
-}>;
-```
-
-`topFrame` 仅由 Renderer Control 快照生成，且在 Host 入口重新验证；`payload` 的原有 `{domainId,targetKey,data}` 不变。不让业务在 `data` 内指定 `frameId/activationId/source/owner`；这些字段即使作为普通 data 存在，也不得被解释为投递凭据。
-
-当 `broadcast !== "top-frame"` 时必须**不存在** `topFrame` 字段；当 `broadcast === "top-frame"` 时字段必须齐全、经过严格格式校验。不得使用 truthiness 把字符串解释成普通 `true`。
-
-### 3.2 事件生命周期的精确时点
+需要避免三个概念混淆：
 
 ```text
-T0: WC emitCustomEvent(...)
-    Renderer 先查验 live RenderNode、Session、owner、generation、carrier、target；
-    验证 options/name/data；仅在 "top-frame" 模式下从当前 Control snapshot
-    的 stack.at(-1) 派生且固定 TopFrameLease；若没有 Active top -> drop。
-T1: Renderer 的有界队列与 Desktop WebSocket / PWA MessagePort 传输，
-    不得覆盖/重算 T0 绑定的 topFrame。
-T2: Host 再次验证来源当前性、Session 及 topFrame 与 Main 的当前权威事实严格相等。
-    不一致 -> drop；不 retarget；无异步验证-发布空档。
-T3: Hub 对 exact channel ∩ target subsystem ∩ target frame-scoped subscriptions
-    做路由准入，传送可信 targetFrameId + activationId。
-T4: Subsystem 开始业务 listener 之前检查本地 Frame 当前仍 active、
-    activationId 相同、deliveryOpen，且订阅仍属于该 Frame；不成立 -> drop。
+A. RenderDomain.emit(...)
+   Subsystem → Renderer
+   wire type: render.event
+
+B. WebPresentationContext.emitCustomEvent(...)
+   Renderer / Web Component → Runtime
+   reverse Presentation Event
+
+C. Session Events
+   Subsystem Runtime ↔ Subsystem Runtime
+   Session-scoped business event
 ```
 
-同一事件的目标 F/A **只能确定一次**。若 Renderer 观察到滞后的快照，Host 可丢弃本来合法的事件（瞬时 Event best-effort），但绝不把其转发给新 Frame。不要在 Host 只读取“收到事件时的当前 top”然后重新定向。
+本任务修改的是 **B 的 `"top-frame"` 分支**。
 
-Host 检查与 Hub admission 之间不允许引入 `await`、消息队列转交或依赖可能发生变化的宽松缓存；使用同一平台 JS 事件循环中的同步校验/路由准入，或者等效的原子串行化。若 Main 的权威 Frame 变化与 Host 接收处于不同并发单元，必须提供明确串行化/代次 fencing，不得只声称比较一次即可保证无竞态。
+本任务：
 
-### 3.3 Main Authority 的 Host 可验证镜像
+- **不修改 A 的 `render.event` 正向协议语义**；
+- **不修改 C 的 Session Events**；
+- 仅因为 B 的新分支需要 Renderer→Subsystem 直达，所以会为 Renderer Data Profile 增加新的 `presentation.*` 子协议。
 
-Renderer 已有 Control v2 `snapshot.stack`，所以**不恢复** `snapshot.inputTarget`。Renderer 只从当前 `stack.at(-1)` 且 `lifecycle === "active"`、存在 `activationId` 的条目派生 lease。
+### 0.2 现有 `false/true` 行为保持原样
 
-但 Desktop/PWA Host 当前无法直接访问 Renderer 镜像，且不能信任它作为 Host 二次校验的唯一权威。需要通过 `MainPlatform` 的**窄、内部、只读派生 authority sink**，或者等价的 Main 当前状态验证方法，将 `{sessionId,topFrame|null}` 交给 Host。推荐：
+当前：
+
+```text
+broadcast omitted / false
+broadcast true
+    ↓
+existing Presentation Event publication
+    ↓
+Desktop/PWA Platform
+    ↓
+SessionEventHub
+```
+
+本任务不重构这一既有行为。
+
+新增：
+
+```text
+broadcast "top-frame"
+    ↓
+Renderer Frame Gate
+    ↓
+Renderer Data
+    ↓
+exact target Frame
+```
+
+因此：
 
 ```ts
-interface TopFrameRouteSnapshot {
-  readonly sessionId: string;
-  readonly topFrame: null | {
+switch (options.broadcast) {
+  case false:
+  case true:
+    // existing path, unchanged
+    publishExistingPresentationEvent(...);
+    break;
+
+  case "top-frame":
+    // new direct Renderer -> target Subsystem Data path
+    publishTopFramePresentationEvent(...);
+    break;
+}
+```
+
+**`"top-frame"` MUST NOT 进入 SessionEventHub。**
+
+## 1. 修改范围：明确 MUST CHANGE / MUST NOT CHANGE
+
+### 1.1 MUST CHANGE
+
+| 层 | 主要路径 | 修改内容 |
+| --- | --- | --- |
+| Web Presentation public ABI | `packages/renderer/src/internal/web-projector.ts`、`packages/renderer/src/control.ts` | `broadcast?: boolean \| "top-frame"`；currentness-first；新增 top-frame 分支 |
+| Renderer Frame Gate | 建议新增 `packages/renderer/src/internal/presentation-frame-gate.ts` | 复用 InputGate 的 lease / interest / queue 思路，按 Top Frame 精确投递 |
+| Renderer Data model/profile | `packages/data/src/model.ts`、`peers.ts`、`runtime.ts`、exports/tests | 新 Renderer Data Profile `/3`；新增 `presentation.interest` / `presentation.event` |
+| Renderer Data ingress | `packages/renderer/src/control.ts` | 接收目标 Runtime 的 `presentation.interest`；把 target Data peer 安装到 Frame Gate |
+| Subsystem Presentation manager | 建议新增 `packages/subsystem/src/internal/presentation-event-manager.ts` 与 public type 文件 | Frame-scoped listeners、Interest registry、本地 Frame/Activation/deliveryOpen gate |
+| Subsystem FrameRuntime | `packages/subsystem/src/internal/frame-runtime.ts` | 提供只读 Frame delivery facts；Frame close/Activation 切换通知 manager |
+| SubsystemScope | `packages/subsystem/src/model.ts`、`host/run-subsystem.ts` | 暴露 Presentation-specific Frame listener capability；不复用 `scope.events` |
+| Main Data profile selection | `packages/main/src/internal/main-session.ts` 及相关测试 | current Renderer Data profile 从 `/2` 升到 `/3`；**不改 Frame authority 逻辑** |
+| Data provisioning expectations | Desktop/PWA/Hostra 的 Data Broker / fixtures / tests（仅实际硬编码 profile 时） | 仅适配 `loomrealm.renderer-data/3`，不加入 Top Frame 路由逻辑 |
+| Contracts | 新 Web Presentation API v3、Renderer Data Profile v3、Frame-targeted Presentation Event contract | 冻结新 schema / ordering / lifecycle / limits |
+| Game common-controls draft | `game-libs/game-common-controls/game-controls-input.md` | 新组件未来使用 `broadcast:"top-frame"` 和 Presentation Frame listener |
+| Qualification | 新 `doc/30-implementation/*qualification*.md` + package scripts | 自动化证明 Frame 精确投递闭环 |
+
+### 1.2 MUST NOT CHANGE
+
+以下模块不是本功能的实现层，除回归测试或文档引用外不得改造：
+
+| 模块 | 约束 |
+| --- | --- |
+| `packages/session-events/**` | **不修改 API、Hub、Carrier、wire、routing、subscription semantics** |
+| `SessionEventHub` | 不增加 `frameId`、`activationId`、`publishToFrame` 或 Frame selector |
+| `scope.events` | 继续 Runtime-scoped；不接收 `"top-frame"` Event |
+| Desktop `createDelegatedPublisher` 路径 | `false/true` 保持原样；`"top-frame"` 不进入 |
+| PWA Presentation Event Platform endpoint | `false/true` 保持原样；`"top-frame"` 不进入 |
+| Hostra Session Events provisioning | 不增加 Frame routing |
+| Renderer Control v2 schema | 已有 `snapshot.stack` 足够；不恢复 `inputTarget`，不增加 TopFrame 字段 |
+| Main Frame stack / call / return authority | 不新增第二套 TopFrame authority，不增加 Platform sink |
+| `platform-ports` | 不增加 Main→Platform TopFrame sink |
+| `packages/renderer/src/presentation-event.ts` | 现有 Platform publication wire 仍服务 boolean `false/true`，**不为 top-frame 升级** |
+| User Input v1 | 保持历史冻结；不恢复 `input.*`、InputTarget、InputGate、InputManager、RendererInputSource |
+| `RenderDomain.emit / render.event` | 正向 Render Event 契约不变 |
+
+如果实现过程中发现必须修改上述 MUST NOT CHANGE 项才能让 `"top-frame"` 工作，应停止并重新检查设计，而不是扩大范围。
+
+## 2. 为什么以 User Input v1 为实现模板
+
+历史 User Input v1 的关键路径是：
+
+```text
+Main
+  stack.at(-1)
+  → InputTarget(S,F,A)
+        │ Renderer Control
+        ▼
+RendererInputGate
+  current Data(S)
+  ∩ Main target(S,F,A)
+  ∩ mirrored F active/A
+  ∩ Interest[F][channel]
+        │
+        ▼
+Renderer → target Subsystem Data
+  input.event { frameId, activationId, channel, payload }
+        │
+        ▼
+Subsystem InputManager
+  inspectById(frameId)
+  ∩ activationId
+  ∩ deliveryOpen
+  ∩ local Interest[F][channel]
+        │
+        ▼
+exact Frame listener
+```
+
+本任务要保留的是这套**authority 与 delivery topology**，而不是旧 Input 业务协议。
+
+对应关系：
+
+| User Input v1 | 新能力 |
+| --- | --- |
+| `InputTarget(S,F,A)` | 从当前 Renderer Control `snapshot.stack.at(-1)` 派生的 `TopFrameLease(S,F,A)` |
+| `InputGate` | `PresentationFrameGate` |
+| `input.interest` | `presentation.interest` |
+| `input.event` | `presentation.event` |
+| `InputManager` | `PresentationEventManager` |
+| `createInputListener({frame,channels})` | Presentation-specific Frame listener |
+| Input Producer availability | **不需要**；Web Presentation live RenderNode currentness 已是 producer/currentness gate |
+| `input.state/reset` | **不恢复**；Presentation Event 全部按 transient event 处理 |
+
+### 2.1 必须保留的三个历史不变量
+
+1. **发送时绑定 F/A**：Event 一旦 accepted，目标 `frameId + activationId` 固定；不能在稍后发送时重新读取最新 Top Frame。
+2. **Sender-side Effective Gate**：Renderer 在进入目标 Data writer 前同时检查 current Data、Top Frame lease、Active/Activation、Interest channel。
+3. **Receiver-side Gate**：Runtime 真正执行 callback 前再次检查 Frame 当前仍 live/active、Activation 相同、`deliveryOpen`。
+
+这三个不变量共同解决 delayed event、同 Subsystem 多 Frame 与 Activation 重用问题。
+
+## 3. Public API
+
+Web Presentation API v3 建议：
+
+```ts
+type WebPresentationBroadcast =
+  | false
+  | true
+  | "top-frame";
+
+interface CustomEventOptions {
+  readonly broadcast?: WebPresentationBroadcast;
+  readonly channel?: string;
+}
+```
+
+兼容：
+
+- 省略或 `false`：现有 owner-only Session Event publication；
+- `true`：现有 Session-wide Session Event publication；
+- `"top-frame"`：新的 Renderer Data direct lane。
+
+`name`、`channel`、`data`、options closed-shape validation 延续 v2；`channel` 保持 exact routing key。
+
+对 stale Web Presentation Context，继续保持 currentness-first：
+
+```text
+stale/revoked source
+→ silent drop
+→ do not validate user arguments
+```
+
+Current source 才验证 `broadcast/name/channel/data`。
+
+## 4. Renderer：TopFrameLease 与 PresentationFrameGate
+
+### 4.1 不恢复 `inputTarget`
+
+Renderer Control v2 已有：
+
+```ts
+interface RendererFrameStateV2 {
+  readonly frameId: string;
+  readonly subsystemKey: string;
+  readonly lifecycle: "starting" | "active" | "suspended" | "closing";
+  readonly activationId?: string;
+}
+
+interface RendererAuthoritySnapshotV2 {
+  readonly stack: readonly RendererFrameStateV2[];
+  // ...
+}
+```
+
+因此：
+
+```ts
+interface TopFrameLease {
+  readonly subsystemKey: string;
+  readonly frameId: string;
+  readonly activationId: string;
+}
+
+function currentTopFrameLease(
+  snapshot: RendererAuthoritySnapshotV2,
+): TopFrameLease | null {
+  const top = snapshot.stack.at(-1);
+  if (
+    top === undefined ||
+    top.lifecycle !== "active" ||
+    top.activationId === undefined
+  ) return null;
+
+  return Object.freeze({
+    subsystemKey: top.subsystemKey,
+    frameId: top.frameId,
+    activationId: top.activationId,
+  });
+}
+```
+
+Main 仍通过 Control snapshot 是唯一公共 Frame authority；不新增 Main→Platform route。
+
+### 4.2 `emitCustomEvent` 接受时固定 lease
+
+Renderer 已验证 source：
+
+```text
+Session current
+AND source subsystem Data authority current
+AND source generation current
+AND source Data carrier current
+AND RenderNode(domainId,targetKey) current
+```
+
+之后解析 options。
+
+若 `broadcast !== "top-frame"`，完全走现有 publication queue。
+
+若为 `"top-frame"`：
+
+1. 从**同一当前 Control snapshot**取得 `TopFrameLease`；
+2. lease 为空则 drop；
+3. 构造不可变 accepted event，把 F/A 固定下来；
+4. 交给 `PresentationFrameGate`，之后绝不重新寻址。
+
+建议 accepted shape：
+
+```ts
+interface AcceptedTopFramePresentationEvent {
+  readonly sourceSubsystemKey: string;
+  readonly sourceGeneration: number; // Renderer internal currentness/fencing fact
+  readonly frameId: string;
+  readonly activationId: string;
+  readonly targetSubsystemKey: string;
+  readonly channel: string;
+  readonly name: string;
+  readonly domainId: string;
+  readonly targetKey: string;
+  readonly data: JsonObject;
+}
+```
+
+`sourceGeneration` 可以只用于 Renderer 内部 queue/currentness bookkeeping；business wire 是否暴露 generation 由新 contract 决定，默认不需要业务可见。
+
+### 4.3 Effective Gate
+
+对已绑定事件 `E(S,F,A,C)`：
+
+```text
+Effective(E)
+=
+current Control still belongs to same Session
+AND current target Data Connection for S
+AND current Top Frame == (S,F,A)
+AND mirrored F exists
+AND mirrored F lifecycle == active
+AND mirrored F activationId == A
+AND C ∈ published PresentationInterest[S][F]
+```
+
+注意：这里检查“current Top Frame 仍是原 lease”，不是为了 retarget，而是为了决定旧 event 是否仍可发送。
+
+如果任何条件失效：
+
+```text
+not-yet-started Event → discard
+already in-flight Event → cannot retract; receiver local gate drops if stale
+```
+
+### 4.4 队列语义复用旧 InputGate
+
+`PresentationFrameGate` 应复用旧 `BoundedInputPublisher` 的关键行为：
+
+- 每个 current target Data peer 单 writer / one send in flight；
+- Event FIFO；
+- queue bounded；
+- lease 改变时丢弃尚未开始的旧 lease Event；
+- Interest 缩小时丢弃对应尚未开始的 channel Event；
+- Data peer retired 时清空未开始 work；
+- already-started physical send 不尝试回滚；
+- fresh Data carrier 从 empty remote Interest 开始，Subsystem 自动 republish full registry。
+
+本任务没有 Framework-retained State，因此：
+
+- 不实现 `input.reset`；
+- 不做 State coalescing；
+- `controls.state` 只是 name/channel 上的普通 transient Presentation Event；
+- 新 Frame 状态收敛依赖未来 `game-controls-input` 的周期 State refresh / fresh-state tracker。
+
+## 5. Renderer Data Profile v3
+
+当前 `loomrealm.renderer-data/2` 是 closed message set：
+
+```text
+Subsystem → Renderer
+  render.domains
+  render.snapshot
+  render.patch
+  render.event
+
+Renderer → Subsystem
+  viewport.state
+```
+
+因此不能偷偷加入新消息。必须创建：
+
+```text
+loomrealm.renderer-data/3
+```
+
+### 5.1 v3 消息方向
+
+```text
+Subsystem → Renderer
+  render.domains
+  render.snapshot
+  render.patch
+  render.event
+  presentation.interest
+
+Renderer → Subsystem
+  viewport.state
+  presentation.event
+```
+
+`render.*` 与 `viewport.*` 的既有语义不变。
+
+Data `protocol-fatal` family 增加 `"presentation"`（或项目最终 contract 采用的等价名称）。
+
+### 5.2 `presentation.interest`
+
+建议 wire：
+
+```ts
+interface PresentationFrameInterestV1 {
+  readonly frameId: string;
+  readonly channels: readonly string[];
+}
+
+interface PresentationInterestV1 {
+  readonly type: "presentation.interest";
+  readonly frames: readonly PresentationFrameInterestV1[];
+}
+```
+
+语义直接复用 User Input v1 Registry：
+
+```text
+PresentationInterestRegistry
+=
+Map<frameId, Set<channel>>
+```
+
+规则：
+
+- current Data carrier 上 full replacement；
+- fresh carrier remote registry 初始为空；
+- unknown/stale Frame interest 保存为 inert configuration，不创造 authority；
+- Frame id 在 Session 内不应复用；
+- Frame close 前本地 listener 必须关闭/remove desired interest；
+- multiple local listeners 对同一 Frame/channel 做 union；
+- Interest 是 configuration，不是 Frame authority。
+
+建议复用旧 Input v1 限制：
+
+```text
+0..128 frame entries
+1..64 channels per present frame
+<=4096 frame×channel pairs
+
+frames sorted by frameId
+channels sorted lexically
+no empty frame entry
+{"type":"presentation.interest","frames":[]} clears all
+```
+
+channel 验证必须与 Web Presentation `options.channel` 完全一致：
+
+- Unicode scalar string；
+- 不允许 C0/DEL；
+- 1..256 UTF-8 bytes。
+
+### 5.3 `presentation.event`
+
+建议 wire：
+
+```ts
+interface PresentationEventV1 {
+  readonly type: "presentation.event";
+
+  // trusted source provenance from the live RenderNode
+  readonly sourceSubsystemKey: string;
+  readonly domainId: string;
+  readonly targetKey: string;
+
+  // trusted destination lease from Main Renderer Control snapshot
+  readonly frameId: string;
+  readonly activationId: string;
+
+  // business routing/content
+  readonly channel: string;
+  readonly name: string;
+  readonly data: JsonObject;
+}
+```
+
+该消息运行在**目标 Subsystem 的 Data Connection**上，因此：
+
+```text
+Data binding owner = destination Subsystem
+sourceSubsystemKey = source Web Presentation RenderNode owner
+```
+
+两者允许不同：
+
+```text
+source WC owner = world
+top Frame owner  = battle
+→ message physically sent over battle Data peer
+→ sourceSubsystemKey remains "world"
+```
+
+业务不能提供或覆盖 `sourceSubsystemKey/frameId/activationId/domainId/targetKey`；这些字段由 Renderer 可信绑定。`channel/name/data` 来自 current Web Component 调用并经过验证。
+
+## 6. Subsystem：PresentationEventManager
+
+### 6.1 不使用 `scope.events`
+
+新增独立 Presentation capability，建议形态：
+
+```ts
+interface PresentationFrameEvent {
+  readonly channel: string;
+  readonly name: string;
+  readonly data: JsonObject;
+  readonly source: {
     readonly subsystemKey: string;
-    readonly frameId: string;
-    readonly activationId: string;
+    readonly domainId: string;
+    readonly targetKey: string;
   };
 }
 
-interface MainTopFrameRouteSink {
-  replace(view: TopFrameRouteSnapshot | null): void;
+interface PresentationEventListener {
+  on(
+    channel: string,
+    handler: (
+      event: PresentationFrameEvent,
+    ) => void | Promise<void>,
+  ): () => void;
+
+  setChannels(channels: readonly string[]): void;
+  close(): void;
 }
-```
 
-此 sink 只镜像 `MainSession` 的事实，**不是新的 authority**。Main 初始、Frame activate/call/return/resume/suspend/close、失败展开、Session 终止以及 Renderer replacement 时必须正确发布/清除。尤其注意 `onFrameCall` 开始撤销调用者 Activation 的时刻；不能仅在异步 `mutate` 尾部最终刷新，导致过渡期仍能使用过期 Host 镜像。为状态变化写一条统一同步更新路径，保证 Main 栈/Activation 的变更和 Host 路由镜像不会跨越可观察的异步间隙。
-
-Host 对应验证：
-
-```ts
-function isCurrentTopFrame(
-  event: PresentationEventPublicationV2,
-  authority: TopFrameRouteSnapshot | null,
-): boolean {
-  const bound = event.topFrame;
-  const top = authority?.topFrame;
-  return event.broadcast === "top-frame" &&
-    bound !== undefined &&
-    top !== null && top !== undefined &&
-    authority?.sessionId === event.sessionId &&
-    bound.sessionId === event.sessionId &&
-    bound.subsystemKey === top.subsystemKey &&
-    bound.frameId === top.frameId &&
-    bound.activationId === top.activationId;
-}
-```
-
-此外继续校验当前 Renderer/Session/owner/generation 与 live Source currentness。不可只比较 F/A 而忽略 Session 或 owner generation。Session/generation 轮换一律 fail-closed。
-
-### 3.4 Frame-scoped 订阅必须是一等能力
-
-**现有 `scope.events.subscribe` 是 Runtime-scoped；不可把 `"top-frame"` Event 直接送到它。** 否则即使 Hub 仅限定 Subsystem，同 Subsystem 内父子 Frame 的旧监听器仍可执行。
-
-建议新建**独立** author-facing capability，避免修改冻结的普通 `SessionEventClient`：
-
-```ts
-interface FrameEventClient {
-  subscribe(
-    frame: Frame,
-    channels: readonly string[],
-    listener: (event: SessionEvent) => void | Promise<void>,
-  ): Promise<SessionEventSubscription>;
+interface PresentationEventClient {
+  createListener(options: {
+    readonly frame: Frame;
+    readonly channels: readonly string[];
+  }): PresentationEventListener;
 }
 
 interface SubsystemScope {
-  // existing capabilities...
-  readonly frameEvents: FrameEventClient;
+  // existing fields...
+  readonly presentationEvents: PresentationEventClient;
 }
 ```
 
-这是目标接口草案；实现必须给它独立的版本化 public contract。Frame 对象通过 `FrameRuntime` 原有 `WeakMap<Frame,FrameContext>` 验证 ownership；业务不得传字符串冒充其他 Frame。订阅应关联 `frameId`、当前 Runtime 与 exact Channels；同一 Frame 的新 Activation 可保留所需 Channel 配置，但**旧 Event 不可跨 Activation 执行**。Frame close/Runtime terminal 自动 close 对应订阅；手工 `close()` 幂等。
+最终命名可以按 package 风格微调，但必须满足：
 
-恢复旧 FrameRuntime 的内部只读 inspect 能力，至少返回：
+- listener 显式绑定真实 `Frame` object；
+- Frame ownership 通过 `WeakMap<Frame, FrameContext>` 校验，不允许业务用字符串伪造 foreign frame；
+- Channel contribution 与 handler registration 分离，语义可直接参考旧 InputManager；
+- listener close 幂等；
+- Frame close 自动关闭其 listeners；
+- Runtime terminal 自动全部关闭。
+
+### 6.2 Frame delivery facts
+
+`FrameRuntime` 提供内部只读检查：
 
 ```ts
 type FrameDeliveryFacts =
-  | { kind: "closed" }
+  | { readonly kind: "closed" }
   | {
-      kind: "live";
-      frameId: string;
-      activationId: string | null;
-      deliveryOpen: boolean; // context.state === "active"
+      readonly kind: "live";
+      readonly frameId: string;
+      readonly activationId: string | null;
+      readonly deliveryOpen: boolean;
     };
 ```
 
-在最终监听器执行**当下**检查 `frameId`、`activationId`、`deliveryOpen`、subscription currentness。`calling`、`awaiting-resume`、`suspending`、`admin-suspended`、`resuming`、`returning`、`closing` 均不得打开 delivery gate。入队时有效不代表执行时仍有效；异步 listener 已经开始之后发生的 suspension 不会神奇回滚副作用，业务异步续体仍应检查自己的取消/Activation token；文档不可承诺强制抢占已运行 handler。
+其中：
 
-`scope.frameEvents` 的普通业务可见 event 可以保持 `{channel,type,payload,source}`；目标 F/A 只用于可信 routing metadata，不必暴露给业务 callback。普通 `scope.events` 语义与队列上限不变。
-
-### 3.5 Hub 的 Channel ∩ Frame 选择，而非客户端过滤
-
-对 `"top-frame"` 的 Hub 逻辑 eligibility：
-
-```text
-subscription.channels contains event.channel
-AND subscription.owner.subsystemKey === topFrame.subsystemKey
-AND subscription.kind === "frame-scoped"
-AND subscription.frameId === topFrame.frameId
+```ts
+deliveryOpen = context.state === "active";
 ```
 
-普通发布只匹配普通 Runtime-scoped subscription；两类订阅隔离，且每次 publish 只选择一类。Host 指定 frameTarget 的入口只能由受信 Platform 使用；普通 `SessionEventClient.publish` 不得伪造。保留 `source.subsystemKey = ownerSubsystemKey`（来自受信 RenderNode），不是接收 Frame 的 Subsystem。
+以下均为 false：
 
-当前 `SessionEventHub.createDelegatedPublisher` 只有可选 `targetSubsystemKey`，不具备 Frame targeting；不能把 `publisher.publish(channel,type,payload,top.subsystemKey)` 当作最终实现。应新增受信 `publishToFrame`/`routeToFrame` 或等效 API，并使 Hub 从自己的 exact Channel 索引直接筛选 Frame-scoped subscription。不得先把事件广播到所有 Runtime 后交给业务 code 判定。
+```text
+initialized
+activating
+calling
+awaiting-resume
+resuming
+suspending
+admin-suspended
+returning
+closing
+closed
+```
 
-### 3.6 Session Events transport 的版本要求
+### 6.3 receiver-side gate
 
-当前 `packages/session-events/src/carrier.ts` 使用冻结 `loomrealm.session-events/1`：`subscribe` 请求只含 `channels`，`event` schema 仅有 `channel/type/payload/source`。单独增加 Host 端 `targetFrameId` 而不升级 wire，会因为 closed schema 或缺少订阅类型无法完成功能。
+`PresentationEventManager.onEvent(message)`：
 
-因此实施必须：
+```ts
+const view = frameRuntime.inspectById(message.frameId);
 
-1. 设计、实现、记录新的 **Session Events frame-routing transport/profile v2**（可与 v1 implementation 共存）；增加可信 Frame-scoped subscribe request 与 targeted delivery envelope，严格封闭字段和上下行校验。
-2. 旧 v1 `publish`、`subscribe`、事件 payload、source binding、limits、terminal、ordering 仍按冻结规范运行；v1 接收方不得误把 v2 消息解析成 v1。生产 Hostra/PWA 的 Host/Runner 使用明确的新 profile/version；不要隐式混用。
-3. `FrameEventClient.subscribe(frame, ...)` 在 Subsystem Runtime 侧通过受信 frame binding 建立对 Host 的 frame-scoped subscription；客户端自己的 `FrameRuntime` 再执行最后一道资格校验。
-4. Hub 的目标 Frame 元数据必须端到端受信、per-event 固定，不能让普通 Runtime publish 通过伪造 data 或 source 注入。对远端的 frame-scoped subscribe `frameId` 同时验证其所绑定的 Runtime 身份；如需要 Host 校验 Frame ownership，消费 Main 的派生只读 Frame authority，不建立新权威。
-5. 针对 frame-scoped Event 明确定义 **stale frame drop**（入队后取消/Activation 变化时允许在进入业务回调前丢弃），不得误套普通 Session Events v1“健康订阅入队后必须回调”的承诺；这是独立 v2 eligibility 语义。排序与 bounded queue、overflow terminal、订阅建立/关闭 race 必须有对应测试。
+if (
+  view?.kind !== "live" ||
+  !view.deliveryOpen ||
+  view.activationId !== message.activationId ||
+  !desired.get(message.frameId)?.has(message.channel)
+) {
+  return accepted; // stale/ineligible: drop only
+}
 
-**实现选择已确定：采用 explicit v2 frame-scoped subscription/transport；不要使用固定秘密 Channel + payload.channel 伪路由，也不要把所有顶帧事件偷送给普通 Runtime listener 再期望消费者自行过滤。**
+deliverToExactFrame(
+  message.frameId,
+  message.channel,
+  event,
+);
+```
 
-### 3.7 Presentation Event wire 版本要求
+`deliverToExactFrame` 只扫描绑定同 `frameId`、同 channel、仍 active 的 registrations。
 
-`packages/renderer/src/presentation-event.ts` 的 `PresentationEventPublishRequestV1` 目前 `formatVersion: 1`，`broadcast: boolean`，closed event schema。
+这一步是**同 Subsystem 多 Frame 精确隔离的最终保证**。
 
-新增 `"top-frame"` + `topFrame` 时，须定义新 `PresentationEventPublishRequestV2`（及 result v2 或显式版本配对）。保留 v1 编解码验证既有 boolean/default 行为；v2 强制 `broadcast` 与 `topFrame` 的形状关联。Desktop WebSocket / PWA MessagePort 都要更新，不能只改 public TypeScript type 而不改 codec。统一限定大小、UTF-8、JSON 深度和 FIFO；畸形消息 fail-closed。将版本/compatibility 正式写入新的 Web Presentation API v3 contract；保持既有 frozen v2 不变。
+## 7. Activation / Frame 切换时序
 
-### 3.8 State、事件顺序与新 Frame
+### 7.1 World A1 → Battle B1
 
-`controls.state` / `controls.event` 的业务载荷仍与 `game-controls-input.md` 一致。Frame-targeted transport **不**存储手柄物理当前状态，不实现通用 State cache，不创建新版 `input.reset`。
+```text
+T0 Renderer current top = World / A1
+T1 WC emits Event
+T2 Renderer binds Event to World/A1
+T3 World frame.call(Battle)
+T4 Control snapshot changes to Battle/B1
+```
 
-- 同一有效发送 binding 依旧保证 State 先于对应 edge Event 交给按序发布通道；同一个 Frame-scoped 订阅含两个 Channel 时维持顺序。
-- Frame 变化后，旧 Activation 的 State cache 必须在 Frame consumer/其 fresh tracker 中清空；不可把旧 Frame 的 `down` 当作新 Frame 的按键状态。
-- 未来 `game-controls-input` 新实现仍可按其草案每 1000ms 刷新非空 State，2500ms stale fallback；新 Frame 获取下一次 State 后收敛。**不能假称现有路由提供切换瞬间 State baseline**。
-- Event future-only、不重放，不复制“旧 Frame 的确认”给新 Frame；没有订阅或尚未建立时允许丢失。跨不同发布者没有全局顺序。
-- 普通 Session Event `broadcast:true` 原有业务顺序/语义不受本功能影响。
+行为：
 
-## 4. 文件级实施清单
+- `PresentationFrameGate` 看到 lease 改变，丢弃尚未开始发送的 World/A1 Event；
+- 如果 Event 已进入物理 Data send，则消息仍携带 World/A1；
+- World Runtime 此时 `deliveryOpen=false` 或 activation 已撤销；
+- receiver drop；
+- **绝不改投 Battle/B1**。
 
-| 层 | 必查/必改路径 | 工作 |
+### 7.2 World A1 → Battle → World A2
+
+即使恢复后是同一个 `frameId`：
+
+```text
+A1 != A2
+```
+
+因此旧 A1 Event 不能执行于 A2。
+
+Interest MAY 跨 fresh Activation 保留，只要 Frame 仍 live 且业务 listener 未关闭；但 Event 永不跨 Activation replay。
+
+### 7.3 同 Subsystem parent/child
+
+这是不能只做 `targetSubsystemKey` 的原因：
+
+```text
+Subsystem "rpg"
+  Frame parent F1
+  Frame child  F2
+both listen controls.event
+```
+
+如果当前 top = F2/A2，只能 F2 listener 执行。
+
+F1 的 listener 即使仍注册、Interest 仍保留，也因为 wire target `frameId=F2` 不匹配而完全不会被调用。
+
+## 8. 与现有 Presentation `false/true` 路径的隔离
+
+新逻辑必须在 Renderer 内明确分叉：
+
+```text
+emitCustomEvent
+  |
+  +-- broadcast false / true
+  |      existing accepted publication
+  |      existing presentation-event.ts
+  |      Platform
+  |      Session Events
+  |
+  +-- broadcast "top-frame"
+         AcceptedTopFramePresentationEvent
+         PresentationFrameGate
+         target RendererDataPeer.presentation.sendEvent()
+```
+
+因此下面文件**不应因为新 top-frame wire 而变化**：
+
+- `packages/renderer/src/presentation-event.ts`；
+- `apps/desktop/src/presentation-events-websocket.ts`；
+- Desktop `product-composition.ts` 的 `createDelegatedPublisher` routing；
+- `apps/pwa/src/pwa-platform.ts` Presentation Event server routing；
+- `packages/session-events/**`。
+
+若 TypeScript control flow 需要更清晰，可以把 `AcceptedPresentationEvent` 改为 discriminated union：
+
+```ts
+type AcceptedPresentationEvent =
+  | {
+      readonly kind: "existing-publication";
+      readonly publication: PresentationEventPublication; // boolean only
+    }
+  | {
+      readonly kind: "top-frame";
+      readonly event: AcceptedTopFramePresentationEvent;
+    };
+```
+
+但 `PresentationEventPublication.broadcast` 本身继续保持 boolean。
+
+## 9. Data Profile / Platform 的跨界边界
+
+从 `/2` 升到 `/3` 会触及 Data provisioning identity，这属于不可避免的 profile 版本切换，但不是新的 routing authority。
+
+### 9.1 Main
+
+Main 只需把 committed Data authority 中：
+
+```text
+loomrealm.renderer-data/2
+```
+
+更新为：
+
+```text
+loomrealm.renderer-data/3
+```
+
+Main 的：
+
+- Stack；
+- Frame lifecycle；
+- Activation；
+- `validateFrameSource`；
+- call/return/suspend/resume；
+
+全部保持原语义。
+
+### 9.2 Desktop/PWA/Hostra Data Broker
+
+Broker 当前按 authority tuple：
+
+```text
+subsystemKey + generation + dataProfile
+```
+
+做 provisioning/currentness。
+
+允许修改：
+
+- profile constant / tests / fixture expectation；
+- 为新 `/3` 建立同一条 Data carrier。
+
+禁止修改：
+
+- Broker 解析 top Frame；
+- Broker 解析 `presentation.event`；
+- Broker 决定目标 Frame；
+- Platform 增加 Main TopFrame sink。
+
+Frame routing 全部停留在 Renderer + target Runtime 两端。
+
+## 10. 文件级实施清单
+
+### 10.1 预期代码修改
+
+```text
+packages/data/
+  src/model.ts
+  src/peers.ts
+  src/runtime.ts
+  src/index.ts
+  test/*
+  + presentation validation/sender helper（如需要）
+
+packages/renderer/
+  src/control.ts
+  src/internal/web-projector.ts
+  src/internal/presentation-frame-gate.ts   [new]
+  test/*
+  NOTE: src/presentation-event.ts should remain unchanged for top-frame
+
+packages/subsystem/
+  src/model.ts
+  src/host/run-subsystem.ts
+  src/internal/frame-runtime.ts
+  src/internal/presentation-event-manager.ts [new]
+  src/presentation-events.ts                  [new, if public types separated]
+  test/*
+
+packages/main/
+  src/internal/main-session.ts
+  test/*
+  only dataProfile /3 selection + expectations
+
+apps/desktop/, apps/pwa/, packages/game-launcher-hostra/
+  only Data Profile /3 provisioning tests/fixtures if hard-coded
+  no Frame routing logic
+
+game-libs/game-common-controls/
+  game-controls-input.md
+  future implementation/tests only when this component is actually implemented
+
+doc/15-contracts/
+  web-presentation-api-v3.md                  [new]
+  renderer-data-profile-v3.md                 [new]
+  frame-targeted-presentation-event-v1.md     [new or equivalent]
+  README.md navigation
+
+doc/30-implementation/
+  frame-targeted-presentation-events.md       [this plan]
+  frame-targeted-presentation-events-qualification.md [new at implementation completion]
+```
+
+### 10.2 明确不允许出现的 diff
+
+实施 PR 中如出现以下改动，应逐项解释；正常设计下应为 **zero functional diff**：
+
+```text
+packages/session-events/src/**
+packages/session-events protocol version
+SessionEventHub routing
+SessionEventClient API
+Session Events carrier schema
+
+MainPlatform TopFrame sink
+platform-ports TopFrame authority
+
+apps/desktop Session Events routing
+apps/pwa Session Events routing
+Hostra Session Events provisioning
+
+Renderer Control v2 frame schema
+snapshot.inputTarget
+
+Framework input.* / InputGate / InputManager restoration
+```
+
+## 11. 实施顺序
+
+### P0：先冻结新 contract 与 failing tests
+
+写明：
+
+- `broadcast:"top-frame"`；
+- Data Profile `/3`；
+- `presentation.interest` / `presentation.event` closed schema；
+- TopFrameLease / Effective Gate；
+- receiver delivery gate；
+- queue / replacement / stale drop；
+- source provenance；
+- profile upgrade compatibility。
+
+先加入至少以下 failing tests：
+
+1. 同 Subsystem parent/child 同 Channel；
+2. World/A1 Event 在 Battle/B1 成为 top 后不执行；
+3. World/A1 → World/A2 旧 Event 不执行；
+4. owner=World、target=Battle 时 source provenance 仍为 World；
+5. `scope.events` 绝不会收到 `"top-frame"` Event。
+
+### P1：Data Profile v3 + Subsystem manager
+
+先实现新 Data 消息和 Frame-scoped Presentation listener：
+
+- Data codec/closed message set；
+- full replacement Interest；
+- listener registry union；
+- fresh carrier Interest republish；
+- receiver F/A/deliveryOpen gate；
+- frame close / runtime terminal cleanup。
+
+此阶段可用 synthetic Renderer Data peer 验证，不涉及 Session Events。
+
+### P2：Renderer PresentationFrameGate
+
+实现：
+
+- top lease from current Control snapshot；
+- target Data slot currentness；
+- target Interest；
+- queue / one send in flight；
+- lease replacement discard；
+- Data retirement fencing；
+- source provenance；
+- accepted top-frame Event 不 retarget。
+
+### P3：接入 `emitCustomEvent`
+
+修改 options union 与 `control.ts` branch：
+
+- stale source currentness-first；
+- `false/true` regression untouched；
+- `"top-frame"` 进入 Frame Gate；
+- top-frame 不调用 `this.presentationEvents?.publish(...)`。
+
+### P4：Profile rollout、业务草案与端到端
+
+- Main 切 Data Profile `/3`；
+- 更新必要 Data Broker fixture/expectation；
+- 更新 `game-controls-input.md`；
+- Desktop 与 PWA 各做真实 Renderer→Data→Runtime Frame callback 闭环；
+- 跑全套回归及 docs。
+
+## 12. 必测矩阵
+
+| ID | 场景 | 预期 |
 | --- | --- | --- |
-| Presentation ABI | `packages/renderer/src/internal/web-projector.ts`、`packages/renderer/src/control.ts` | 扩展 option；解析/校验；从 Control v2 stack 派生 top Frame lease；stale fail-closed |
-| Presentation wire | `packages/renderer/src/presentation-event.ts`、`packages/renderer/test/presentation-event.test.mjs` | V2 closed codec；wire/result 对等；v1 不变 |
-| Main | `packages/main/src/internal/main-session.ts`、`packages/main/src/model.ts`、`packages/main/test/runtime.test.mjs` | Main-derived Host current Top Frame route 镜像；精确更新/清空时点 |
-| Main Platform port | `packages/platform-ports/src/*` | 为 Main→Platform 增加窄只读路由 sink；不向业务暴露 |
-| Hub | `packages/session-events/src/hub.ts`、`packages/session-events/src/model.ts`、`packages/session-events/test/hub.test.mjs` | trusted Frame-targeted publish + typed Frame-scoped subscription；exact Channel 且无 Runtime listener 泄露 |
-| Carrier | `packages/session-events/src/carrier.ts`、`packages/session-events/src/client.ts`、对应测试 | v2 frame-scoped subscribe/delivery 及 v1 compatibility；Queue、rebind、terminal fencing |
-| Subsystem | `packages/subsystem/src/model.ts`、`packages/subsystem/src/host/run-subsystem.ts`、`packages/subsystem/src/internal/frame-runtime.ts` | 新 `scope.frameEvents`；验证 Frame 对象/目标 F/A、deliveryOpen、关闭及恢复 |
-| Desktop | `apps/desktop/src/product-composition.ts`、`apps/desktop/src/presentation-events-websocket.ts`、相关测试 | source/host authority 双验证；Frame-targeted Hub routing；event carrier v2 |
-| PWA | `apps/pwa/src/pwa-platform.ts`、`apps/pwa/src/runner-session-events.ts`、`apps/pwa/src/runtime-hosting.ts`、相关测试 | 与 Desktop 同语义；PWA Worker/MessagePort 版本对齐及退出/重连 fencing |
-| Hostra | `packages/game-launcher-hostra/src/runtime-hosting.ts`、Runner Session Events 接线 | frame-scoped 订阅可穿过 Hostra 传输；Host 与 Runner v2 一致 |
-| 业务草案 | `game-libs/game-common-controls/game-controls-input.md` | 将未来 `game-controls-input` 的推荐发送改为 `broadcast:"top-frame"`、订阅改为 Frame-scoped；注明实现前提和 State 冷启动 |
-| 文档 | `doc/15-contracts/`、`doc/30-implementation/`、相关导航 | 新 Web Presentation v3、Session Events frame routing v2 与 Qualification；冻结旧文档不回写 |
-| 回归 | `packages/renderer/test/*`、`packages/session-events/test/*`、`packages/subsystem/test/*`、`apps/{desktop,pwa}/test/*` | 单元、平台对等、真实传输及 Frame 竞争回归 |
+| F01 | 省略 / `broadcast:false` | 现有 owner-only 路径不变 |
+| F02 | `broadcast:true` | 现有 Session-wide 路径不变 |
+| F03 | `"top-frame"` + no active top | drop；不进入 Platform/Session Events |
+| F04 | owner=World，top=Battle | Battle Frame 收到，source=World |
+| F05 | World/A1 accepted，发送前切到 Battle/B1 | queue 中旧 Event discard |
+| F06 | World/A1 已在-flight，随后切 Battle | World Runtime receiver drop；Battle 不收到 |
+| F07 | World/A1 → Battle → World/A2 | A1 Event 不在 A2 执行 |
+| F08 | same Subsystem parent/child 同 Channel | 仅 target `frameId` listener 执行 |
+| F09 | target Frame calling/awaiting-resume | `deliveryOpen=false`，drop |
+| F10 | target Frame closing/closed | drop + listener cleanup |
+| F11 | Interest-first / authority-first | 两种顺序最终 Effective 一致 |
+| F12 | Interest shrink 时 Event 尚未发送 | 对应 queued Event discard |
+| F13 | fresh Data carrier | remote Interest empty，然后自动 republish full desired registry |
+| F14 | target Data retirement / generation replacement | old queue fenced，不能复活 |
+| F15 | stale RenderNode + invalid args | stale-first silent drop，不抛业务参数错误 |
+| F16 | invalid current `broadcast:"bad"` | synchronous `TypeError` |
+| F17 | `presentation.event` forged F/A/source from Runtime side | schema/direction拒绝；Runtime 不能发送 Renderer→Subsystem message |
+| F18 | Frame listener callback throw/reject | callback-local isolation，Data peer 不因此 terminal |
+| F19 | normal `scope.events` subscribes same channel | 不收到 top-frame Event |
+| F20 | top-frame listener exists, ordinary Session Event same channel | Presentation listener 不收到普通 Session Event |
+| F21 | `render.event` forward path | 完全保持既有行为 |
+| F22 | Renderer Data `/2` old message set historical contract | 不篡改历史 contract；current runtime 明确使用 `/3` |
+| F23 | Desktop actual Data carrier end-to-end | browser source → exact Frame callback |
+| F24 | PWA actual Data carrier end-to-end | browser source → exact Frame callback |
 
-`packages/platform-ports/src/*` 与各 Runner 接线具体文件应以工作树实际 import/re-export 关系确定；不要凭本表猜测不存在的路径。仅新增本任务必要的 API；不要顺手重构完整 Session Events v1。
+## 13. Qualification 与回归
 
-## 5. 分阶段执行顺序（每阶段必须可验证）
+建议新增：
 
-### P0：固定契约和可执行证据
+```text
+test:frame-targeted-presentation:qualification:run
+test:frame-targeted-presentation:qualification
+```
 
-- 先写独立的新协议/ABI 文档，定义 `Presentation broadcast` 三模式、TopFrameLease、wire v2、Hub frame-target eligibility、callback gate、错误/丢弃与兼容性。
-- 将旧 Input v1 历史测试的语义转成当前目标测试矩阵，不复制旧 `input.*` 的数据格式或设备协议。
-- 补一条针对同 Subsystem 父/子 Frame 的 failing test，避免只验“目标 Subsystem”。
+Qualification 至少覆盖：
 
-**完成标志：** 代码实现前即可准确列出所有 expected pass/fail；新协议为 closed schema，旧 v1/v2 不变。
+- Data `presentation.*` validation；
+- PresentationFrameGate；
+- Subsystem PresentationEventManager；
+- Frame lifecycle race；
+- Renderer Web Presentation branch；
+- Desktop Data vertical；
+- PWA Data vertical。
 
-### P1：Hub + Carrier + Subsystem Frame-scoped capability
+现有 Session Events 不属于本实现，但仍可通过全仓 regression 验证“没有被影响”；**不需要新增或修改 Session Events qualification case 来证明 top-frame**。
 
-- 优先落地受信 targeted routing、frame-scoped selector 和新运输版本；接收侧 `FrameRuntime` 在 listener 执行前二次校验。
-- 旧 `scope.events` 订阅仍仅接收 `false/true` 对应的普通事件。
-- 测试同 Subsystem 多 Frame、父 Frame suspended、Activation 更新、Frame close、subscription close、队列未开始执行时 stale drop、v1/2 兼容。
-
-**完成标志：** 不依赖 Renderer 的 Host/Runner synthetic frame event 集成测试可以通过。
-
-### P2：Renderer + Presentation wire v2
-
-- 让 Renderer 对 `"top-frame"` 取栈顶 lease 并绑定到 accepted publication；保留原有 live RenderNode/currentness/provenance。
-- 新 V2 codec，Desktop/PWA 的发布能力可处理三态，畸形 V1/V2 分别按其 schema 判定。
-- 测试发送者 owner 与目标 top 不一致、无 active Frame、从 T0 到 T1 的队列过期、Session/generation 退役、FIFO。
-
-**完成标志：** Renderer 不重新定向；发布对象里有可信目标而业务无法注入目标。
-
-### P3：Main Authority + Desktop/PWA Host ingress
-
-- 用 Main 当前栈导出只读派生路由镜像，在状态变化的同步边界更新；平台收到 V2 时 revalidate。
-- 将 Desktop/PWA 重复的 top-frame 判定尽量抽成共享纯逻辑 helper，避免行为差异。
-- 重点模拟：World A1 → Battle B1、World 恢复 A2、异步 transport 延迟、两个同 Subsystem Frames、window/session replacement。
-
-**完成标志：** 旧事件不投给新 Frame；两个产品平台有等价证明。
-
-### P4：业务用法、资格证据、回归
-
-- 更新 `game-controls-input.md` 中两条发送和订阅示例，但**不默认为新 WC 已经实现**。
-- 用真实 Web Component 或测试专用 synthetic WC + 两个真实 Subsystem Runtime / Frame stack 构建跨 Renderer→Host→Hub→Runner→Frame listener 的垂直测试。
-- 同时回归原始 `broadcast:false/true`、Map、Dialogue、Schema Form、设备三个现有组件。
-- 新建 qualification entry，并更新受影响的文档导航/索引、变化边界和证据。
-
-**完成标志：** 从浏览器 Custom Event 到正确 Frame callback 的一次真实闭环可复现；文档与代码一致。
-
-## 6. 必测矩阵（写成可执行断言，而非人工口头核对）
-
-| ID | 场景 | 必须断言 |
-| --- | --- | --- |
-| F01 | 省略/`false`、原默认 Channel | 原 owner-only 行为不变 |
-| F02 | `true` + 任意合法 exact Channel | 原 Session-wide 订阅路由不变 |
-| F03 | `"top-frame"`，World top、World/Battle 均订阅 | 仅 World 的 frame-scoped listener 收到，普通 Runtime 订阅均收不到 |
-| F04 | WC owner=World，top=Battle | Battle 接收；`source.subsystemKey` 仍为 World |
-| F05 | Frame Stack 为空、top starting/suspended/closing | 事件丢弃，不降级广播 |
-| F06 | Renderer 捕获 World A1，Host 时已切到 Battle B1 | drop；Battle 不接到旧 Event |
-| F07 | World A1 → Battle → World A2 | A1 的 queued Event 不能打到 A2 |
-| F08 | 同 Subsystem 内父子 Frame 有同 Channel listener | 只有指定 F/A 的 listener 可执行 |
-| F09 | 入队后父 Frame 进入 calling/awaiting-resume，回调尚未启动 | local deliveryOpen=false → 不执行 |
-| F10 | 同 Subsystem Frame close、subscription close、Runtime terminal | 无新回调，释放资源，延迟消息不复活 |
-| F11 | State 后接对应 Event，同订阅多 Channel | State-before-Event；无跨 Activation State 继承 |
-| F12 | 订阅尚未存在、Event 发布后订阅 | Event 不重放 |
-| F13 | 非法 `broadcast`、伪造 `topFrame`、缺字段、V1/V2 schema 混用 | fail-closed；按 currentness-first 规则处理 stale source |
-| F14 | PWA/Hostra carrier reconnect、Renderer Session 更换、Data generation 更换 | old source/target/queue 被 fencing；没有跨 Session 泄漏 |
-| F15 | Frame-scoped 监听器抛错或 reject、其他监听器正常 | 错误隔离，协议连接/业务 sibling 不误终止 |
-| F16 | 同一 Frame 的快速连续 `controls.state`/`controls.event` | exact Channel 路由、FIFO、bounded delivery；不改造业务 payload |
-| F17 | v1 Session Events 与当前 map/dialogue/schema-form 回归 | 既有 channel/订阅/序列化/桥接契约不退化 |
-| F18 | 完整 Desktop 与 PWA 各一条端到端覆盖 | 出现实际 browser source → 正确 top Frame 消费，而非仅 mocked Hub |
-
-特别加入 **invalid input + stale RenderNode** 的边界测试：沿用 Web Presentation v2 currentness-first；已经失效的来源先静默丢弃，不能让失效 Context 通过新的 option 验证路径制造异常或发布。
-
-## 7. 本地执行与证据
-
-以 `package.json` 的实际脚本为准，新增资格入口建议名 `test:frame-targeted-presentation:qualification`，其 `:run` 先执行有针对性的 Hub/Carrier/Subsystem/Renderer、Desktop/PWA 纵向测试。下面列出当前已存在、可作为回归的入口（本计划文档提交时**未运行**）：
+实施完成后执行实际可用命令，例如：
 
 ```bash
-npm run build:game-common-controls-input
-npm run test:session-events:qualification
+npm test -w @loomrealm/data
+npm test -w @loomrealm/renderer
+npm test -w @loomrealm/subsystem
+npm test -w @loomrealm/main
+
+npm run test:frame-targeted-presentation:qualification
+
 npm run test:game-common-controls-input:qualification
 npm run test:regression
 npm run docs:check-links
 npm run docs:build
 ```
 
-另在修改后执行至少：
+测试结果必须记录实际 PASS/FAIL/SKIP；没有运行的命令不得写成 PASS。
 
-```bash
-npm test -w @loomrealm/session-events
-npm test -w @loomrealm/subsystem
-npm test -w @loomrealm/renderer
-npm test -w @loomrealm/main
-```
+## 14. 明确禁止的实现捷径
 
-先构建依赖再运行涉及 `dist` 的 Node tests；平台测试遵循既有 Desktop/PWA 构建入口。若某项测试依赖 Chromium、操作系统权限或符号链接而无法执行，必须逐条记录「环境限制 / 实际跳过数量 / 无法提供的证据」，不得把 skip 当成 PASS。
+- 给 `SessionEventHub` 增加 Frame awareness。
+- 新建 Session Events v2 只为 `"top-frame"`。
+- 增加 `scope.frameEvents` 但底层仍走 Session Events。
+- 在 Platform/Host 收到事件后才重新读取 top Frame。
+- 新增 Main→Platform TopFrame authority sink。
+- 只按 `targetSubsystemKey` 投递，忽略同 Subsystem 多 Frame。
+- 把 `frameId` / `activationId` 放进 business `data` 让消费者自己过滤。
+- 让业务 Web Component 指定目标 Frame。
+- 复活 `InputTarget`、`InputGate`、`InputManager`、`input.*`。
+- 修改 frozen Renderer Control v2 只为添加现成已有的 top-frame 信息。
+- 把 `presentation.event` 做成 `render.event` 的反向同名消息；两者方向和职责必须保持清晰。
+- 将 existing `PresentationEventPublication` 的 boolean wire 扩展为 `"top-frame"` 并发送 Platform；top-frame 必须在 Renderer 内分叉。
+- 因 Data Profile `/3` 升级而把 Desktop/PWA Broker 变成 Frame router。
 
-完成报告至少包含：修改文件清单、v2/v3 协议版本及兼容策略、所有实际运行的命令与结果、Desktop 与 PWA 验证、关闭/切换时序证据、剩余风险及下一步（若有）。将可复现的结果记录在新增 `doc/30-implementation/` qualification 文档，并把相关新契约加入 `doc/15-contracts/README.md` 及文档导航。
+## 15. Definition of Done
 
-## 8. 明确禁止的实现捷径
+只有全部满足，才可宣布完成：
 
-- 只改 `WebPresentationContext` 的 TypeScript union，而不改 wire codec 和 Platform。
-- `"top-frame"` 在 Platform 简单执行 `publisher.publish(channel,type,payload,top.subsystemKey)` 后宣称已实现 Frame 独占。
-- 让 `scope.events.subscribe` 直接接收 frame-targeted Event，然后在业务 callback 内约定“自己判断”。
-- 在 Host 收到事件时重新查 top，丢掉原始 `frameId/activationId`，导致旧输入投给新帧。
-- 在公共 payload 内加 `data.frameId`/`data.channel` 让业务自筛，或使普通 Runtime 自行指定 Frame target。
-- 修改冻结 v1/v2 closed schema 而不版本化；将普通 Session Events v1 无条件改成 Frame-scoped。
-- 恢复 InputGate、InputTarget、Interest、`input.*` 或把平台键盘/手柄采集移回 Framework。
-- 将 `game-controls-input.md` 草案当成当前代码已实现；或者为了本功能无差别迁移现有三个设备 WC 的广播模式。
-- 只跑 mocked Hub unit test，不做 Hostra/PWA 与 Renderer 的端到端通路。
+- [ ] `broadcast:"top-frame"` public API 可用；`false/true` 无行为改变。
+- [ ] top-frame Event 不进入 Platform Presentation Event endpoint，不进入 SessionEventHub。
+- [ ] Renderer 只从 current Control v2 `stack.at(-1)` 派生 `S/F/A`，没有第二套 Frame authority。
+- [ ] Event 在 acceptance 时绑定 F/A；之后永不 retarget。
+- [ ] Renderer sender-side gate 包含 current target Data + current top F/A + exact Interest channel。
+- [ ] Data Profile `/3` 有 closed `presentation.interest` / `presentation.event` 双向 schema。
+- [ ] fresh Data carrier 从 empty Interest 开始并自动 republish full desired registry。
+- [ ] Subsystem listener 绑定真实 Frame object，foreign Frame 被拒绝。
+- [ ] receiver 在 callback 前检查 exact frameId、activationId、deliveryOpen、local Interest。
+- [ ] 同 Subsystem parent/child 同 Channel 测试证明仅 target Frame 执行。
+- [ ] A1→B1、A1→A2 delayed Event 测试证明旧 Event 不改投、不复活。
+- [ ] owner 与 target 不同 Subsystem 时 source provenance 正确。
+- [ ] `render.event`、Viewport、Session Events 全部保持原契约。
+- [ ] Session Events 源码无本功能性修改；没有 Hub/Carrier Frame routing。
+- [ ] Main 无 TopFrame sink、Renderer Control v2 无 schema 扩展、无 `inputTarget` 回流。
+- [ ] Desktop/PWA 只承担既有 Data profile provisioning，不承担 Frame 决策。
+- [ ] 新 contracts、qualification、docs navigation 与代码一致。
+- [ ] F01–F24 均有自动化证据或明确记录的环境阻断。
+- [ ] regression / docs checks 有实际结果。
 
-## 9. Definition of Done
+## 16. 交给本地 Agent 的实施指令
 
-只有同时满足以下清单，才允许本地 Agent 宣布功能完成：
-
-- [ ] 新 `broadcast: "top-frame"` 可从 Web Component 安全调用；`false/true` 兼容。
-- [ ] Renderer 在 T0 绑定 Main Control v2 栈顶有效 `FrameId+ActivationId`，无目标时安全丢弃。
-- [ ] Host 在发布前按 Main 当前权威再次验证，不把旧输入改投新 Frame；Session/owner/generation 也通过。
-- [ ] Hub 对 frame-scoped Channel + target Frame 做受信精确路由；普通 Runtime subscribers 不能接收 target-only 事件。
-- [ ] Subsystem 自动以拥有的 `Frame` 建立/关闭 frame-scoped subscription，并在 listener 执行前二次检查 Active/Activation。
-- [ ] 同 Subsystem 父子 Frame 以及跨 Subsystem World/Battle、Frame A1→A2 的竞态测试通过。
-- [ ] Desktop/WebSocket、PWA/MessagePort、Hostra/Runner 版本与桥接对等。
-- [ ] Presentation Event wire 及 Session Events Frame Routing 均显式版本化，冻结旧契约不破坏。
-- [ ] `game-controls-input.md` 更新成新路由使用方式但不虚报统一操控 WC 的实现状态。
-- [ ] F01–F18 转成自动测试，至少真实跑通一条 Desktop 和一条 PWA 端到端。
-- [ ] 新 qualification + 回归 + docs check/build 有实际证据；未通过项明确记录，不隐藏失败。
-- [ ] 无 InputGate/InputTarget/Input Interest/Data `input.*` 回流。
-
-## 10. 交给本地 Agent 的实施指令
-
-> 以本文为实施主线，先验证仓库现状和历史 `d8578e0` 的 Main/InputGate/InputManager 语义。完整实现 `broadcast: "top-frame"` 的 Renderer 可信绑定、Main Host 二次验证、Hub 精确 Frame 路由、版本化 Carrier、Subsystem Frame-scoped callback gate，覆盖 Desktop/PWA/Hostra。不得只做到 Subsystem 定向。保持 `false/true` 与现有 Session Events v1 不变；不恢复 Framework User Input。按 P0→P4 分阶段提交代码与测试，完成全部适用的资格验证和文档更新，用可复现的运行结果证明 Definition of Done。除真实阻断项外不要把关键架构问题留给后续实现者。
+> 以本文为实施主线。先用历史 `d8578e0` 的 `currentInputTarget`、`RendererInputGate.currentLease/recompute`、`InputManager.onEvent/deliver`、`FrameRuntime.inspectById` 校准行为，然后把这一精确 Frame 投递模式泛化为 Presentation Event。新增 `broadcast:"top-frame"` 时必须在 Renderer 内与现有 boolean publication 分叉：`false/true` 保持现有 Session Events 路径，`"top-frame"` 通过 Renderer Data Profile `/3` 的 `presentation.interest/event` 直接投递到目标 Runtime，再由本地 Frame/Activation/deliveryOpen gate 精确执行。不得修改 Session Events、Hub、Carrier、Hostra Session Events，不得新增 Main→Platform TopFrame authority，不得只做 target Subsystem 定向，也不得恢复 Framework User Input。按 P0→P4 完成代码、自动测试、Desktop/PWA Data vertical、contracts、qualification 与回归，并以实际运行结果闭环。
