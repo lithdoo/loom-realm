@@ -10,6 +10,14 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import WebSocket from "ws";
 import { syncMapPresentation } from "../examples/essentials-v21.1-local/scripts/sync-map-presentation.mjs";
+import {
+  executable as frameEventExecutable,
+  expectedPresentationEvent,
+  gameEntryText as frameEventGameEntry,
+  launchManifestText as frameEventLaunchManifest,
+  presentation as frameEventPresentation,
+  presentationSource as frameEventPresentationSource,
+} from "./frame-targeted-presentation-v1/browser-fixture.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workspace = path.resolve(repository, "..");
@@ -312,6 +320,24 @@ async function prepareLocalPresentationInstallation() {
   return installation;
 }
 
+async function prepareFrameTargetedPresentationInstallation() {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "loomrealm-frame-events-desktop-"));
+  const exampleRoot = path.join(temporary, "game");
+  const subsystemRoot = path.join(exampleRoot, "subsystems");
+  const presentationRoot = path.join(exampleRoot, "[FSDB]frame-events", "[resource]Presentation");
+  await fs.mkdir(subsystemRoot, { recursive: true });
+  await fs.mkdir(presentationRoot, { recursive: true });
+  await Promise.all([
+    writeFile(path.join(exampleRoot, "game.json"), frameEventGameEntry),
+    writeFile(path.join(exampleRoot, "launch.hostra.json"), frameEventLaunchManifest),
+    writeFile(path.join(exampleRoot, "presentation.json"), JSON.stringify(frameEventPresentation)),
+    writeFile(path.join(subsystemRoot, "game.mjs"), frameEventExecutable),
+    writeFile(path.join(presentationRoot, ".desc.meta"), "Frame-targeted Presentation Event qualification resources.\n"),
+    writeFile(path.join(presentationRoot, "frame-event-probe.browser.js.js"), frameEventPresentationSource),
+  ]);
+  return { temporary, exampleRoot };
+}
+
 test("syncMapPresentation atomically replaces all three Presentation resources", async () => {
   const fixture = await presentationFixture();
   try {
@@ -567,6 +593,65 @@ test("Local Presentation fills six real Hostra viewports and keeps the footer vi
     assert.equal(actual.world[2], expected.width);
     assert.equal(actual.world[3], expected.contentHeight);
   }
+});
+
+test("M15 real Custom Element delivers top-frame through Hostra to its exact Frame", { timeout: 90_000 }, async (t) => {
+  const installation = await prepareFrameTargetedPresentationInstallation();
+  const eventLog = path.join(installation.temporary, "events.jsonl");
+  await writeFile(eventLog, "");
+  const hostra = launchHostra(eventLog, path.join(installation.temporary, "hostra-user-data"), {
+    LOOMREALM_DESKTOP_INSTALLATION_ROOT: installation.exampleRoot,
+  });
+  let browser = null;
+  t.after(async () => {
+    try {
+      await browser?.close().catch(() => {});
+      await terminateChild(hostra.child);
+    } finally {
+      await rmBusy(installation.temporary);
+    }
+  });
+
+  const ready = await hostra.ready;
+  browser = await chromium.connectOverCDP(ready.data.cdpEndpoint);
+  const context = browser.contexts()[0];
+  await waitFor(
+    () => context.pages().some((candidate) => /\/_lr\/window\//u.test(candidate.url())),
+    "Hostra Window",
+  );
+  const page = context.pages().find((candidate) => /\/_lr\/window\//u.test(candidate.url()));
+  assert.ok(page);
+  const diagnostics = [];
+  page.on("console", (message) => diagnostics.push(`console:${message.type()}:${message.text()}`));
+  page.on("pageerror", (error) => diagnostics.push(`pageerror:${error.stack ?? error.message}`));
+
+  try {
+    await page.waitForFunction(() => {
+      const element = document.querySelector("#frame-event-probe");
+      return document.documentElement.dataset.loomrealmRenderer === "installed" &&
+        element?.dataset.contextReady === "true" &&
+        typeof element.sendTopFrameEvent === "function";
+    }, null, { timeout: 30_000 });
+    await page.locator("#frame-event-probe").evaluate((element) => element.sendTopFrameEvent());
+    await page.waitForFunction(() => document.querySelector("#frame-event-probe")?.hasAttribute("data-delivered"), null, { timeout: 20_000 });
+  } catch (cause) {
+    const state = await page.evaluate(() => ({
+      dataset: { ...document.documentElement.dataset },
+      html: document.documentElement.outerHTML.slice(0, 4_000),
+    })).catch((error) => ({ error: error.message }));
+    throw new Error(`${cause.message}\n${JSON.stringify(state)}\n${diagnostics.join("\n")}\n${hostra.output()}\n${JSON.stringify(await events(eventLog))}`);
+  }
+
+  const delivered = JSON.parse(await page.locator("#frame-event-probe").getAttribute("data-delivered"));
+  assert.deepEqual(delivered, {
+    ...expectedPresentationEvent,
+    source: {
+      subsystemKey: "game",
+      domainId: delivered.source.domainId,
+      targetKey: "probe",
+    },
+  });
+  assert.match(delivered.source.domainId, /^d[0-9a-z]+$/u);
 });
 
 test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_000 }, async (t) => {

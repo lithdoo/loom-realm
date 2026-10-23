@@ -114,6 +114,41 @@ test("accepted events never retarget across A1 to B1 or A2", async () => {
   assert.deepEqual(sent.map((message) => message.data.sequence), [1], "A1 does not execute in A2");
 });
 
+test("lease replacement immediately frees pending capacity for the new activation", async () => {
+  const first = deferred();
+  const sent = [];
+  const target = peer(async (message) => {
+    sent.push(message.data.sequence);
+    if (message.data.sequence === 0) await first.promise;
+    return { kind: "sent" };
+  });
+  const gate = new PresentationFrameGate(() => true);
+  gate.installData("game", target);
+  gate.replaceInterest("game", target, {
+    type: "presentation.interest",
+    frames: [
+      { frameId: "battle", channels: ["controls.event"] },
+      { frameId: "world", channels: ["controls.event"] },
+    ],
+  });
+  gate.setControl(snapshot());
+  gate.offer(event(target, { sequence: 0 }));
+  for (let sequence = 1; sequence <= 256; sequence += 1) {
+    gate.offer(event(target, { sequence }));
+  }
+  assert.deepEqual(sent, [0]);
+
+  gate.setControl(snapshot("battle", "b1", "game"));
+  gate.offer(event(target, {
+    frameId: "battle",
+    activationId: "b1",
+    sequence: 999,
+  }));
+  first.resolve();
+  await turn();
+  assert.deepEqual(sent, [0, 999]);
+});
+
 test("target replacement and interest shrink fence queued work", async () => {
   const first = deferred();
   const sent = [];

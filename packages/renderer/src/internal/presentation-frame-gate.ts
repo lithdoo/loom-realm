@@ -44,6 +44,9 @@ export class PresentationFrameGate {
 
   setControl(snapshot: RendererAuthoritySnapshotV2 | null): void {
     this.snapshot = snapshot;
+    for (const [subsystemKey, slot] of this.slots) {
+      this.pruneIneffective(subsystemKey, slot);
+    }
   }
 
   currentTopLease(): {
@@ -93,15 +96,13 @@ export class PresentationFrameGate {
     if (slot?.peer !== peer) return;
     const next = new Map(message.frames.map((frame) => [frame.frameId, new Set(frame.channels)]));
     slot.interest = next;
-    for (let index = slot.queue.length - 1; index >= 0; index -= 1) {
-      const queued = slot.queue[index]!;
-      if (next.get(queued.frameId)?.has(queued.channel) !== true) slot.queue.splice(index, 1);
-    }
+    this.pruneIneffective(subsystemKey, slot);
   }
 
   offer(event: AcceptedTopFramePresentationEvent): void {
     const slot = this.slots.get(event.targetSubsystemKey);
     if (slot === undefined || slot.peer !== event.targetPeer || slot.retired) return;
+    if (!this.effective(event.targetSubsystemKey, slot, event)) return;
     if (slot.queue.length >= MAX_PENDING_EVENTS) return;
     slot.queue.push(event);
     this.pump(event.targetSubsystemKey, slot);
@@ -159,6 +160,13 @@ export class PresentationFrameGate {
     slot.retired = true;
     slot.queue.length = 0;
     slot.interest.clear();
+  }
+
+  private pruneIneffective(subsystemKey: string, slot: Slot): void {
+    for (let index = slot.queue.length - 1; index >= 0; index -= 1) {
+      const event = slot.queue[index]!;
+      if (!this.effective(subsystemKey, slot, event)) slot.queue.splice(index, 1);
+    }
   }
 
   private pruneSource(peer: RendererDataPeer): void {
