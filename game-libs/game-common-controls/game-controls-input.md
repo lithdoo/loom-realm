@@ -1,12 +1,12 @@
 # 统一操控输入 Web Component
 
-> 状态：**Draft / Freeze candidate**
+> 状态：**Active / Normative / Frozen / Implemented**
 > 位置：`game-libs/game-common-controls/game-controls-input.md`
 > 所属包：`@loomrealm-game/common-controls`
 > 发送路径：[emitCustomEvent 扩展](./emit-custom-event.md)、[Web Presentation API v3](../../doc/15-contracts/web-presentation-api-v3.md)、[Frame-targeted Presentation Event v1](../../doc/15-contracts/frame-targeted-presentation-event-v1.md)
 > 相邻实现：[设备输入 Web Components](./device-input-components.md)、[Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)
 
-本文定义一个新的业务 Web Component：把键盘和手柄收成同一套数字按键，再以一对 Frame-targeted Presentation 频道发给当前 Top Active Frame。现行六个设备频道保持不变。本文还不是正式契约；实现前不改写已冻结的 Game Common Controls Input v1。
+本文定义一个业务 Web Component：把键盘和手柄收成同一套数字按键，再以一对 Frame-targeted Presentation 频道发给当前 Top Active Frame。现行六个设备频道保持不变。本文是已实现并完成 qualification 的规范；它不改写已冻结的 Game Common Controls Input v1。
 
 ## 1. 组件
 
@@ -538,3 +538,42 @@ npm run docs:build
 - 不按游戏改键盘表，也不在载荷里提供厂商丝印别名。
 - 不把多名玩家拆成多套频道。
 - 不替换现有 `game-keyboard-input`、`game-pointer-input`、`game-gamepad-input`。
+
+## 12. Implementation qualification
+
+实现位置：
+
+~~~text
+game-libs/game-common-controls/src/model.ts
+game-libs/game-common-controls/src/fresh-state.ts
+game-libs/game-common-controls/browser/controls-source.ts
+game-libs/game-common-controls/browser/device-input.browser.ts
+game-libs/game-common-controls/scripts/build-browser.mjs
+~~~
+
+自动化证据：
+
+~~~text
+game-libs/game-common-controls/test/controls-browser.test.mjs
+game-libs/game-common-controls/test/fresh-state.test.mjs
+test/game-common-controls-input-v1/qualification.test.mjs
+test/frame-targeted-presentation-v1/qualification.test.mjs
+~~~
+
+Qualified implementation subject：`610d55ec`。
+
+2026-10-24 在 Windows checkout 上实际执行结果：
+
+- `npm run build:game-common-controls-input`：PASS；完整依赖 cohort 与 browser bundle 构建成功。
+- `npm test -w @loomrealm-game/common-controls`：PASS，17/17。
+- `node --test test/game-common-controls-input-v1/qualification.test.mjs`：PASS，12/12。
+- `npm run test:game-common-controls-input:qualification:run`：PASS；common-controls 17/17，Hub/Presentation/bridge 与仓库 qualification 42/42，Map 106/106，RPG Dialogue 30/30，Schema Form 22/22。
+- `npm run test:frame-targeted-presentation:qualification`：PASS；核心与集成 50/50，Desktop Hostra Chromium 1/1，PWA Chromium/Worker 1/1。
+- `npm test -w @loomrealm/desktop`：PASS，29/29。
+- `npm run test:m17 -w @loomrealm/pwa`：PASS；unit 39/39，Chromium 17/17。初次 Chromium 15/17 揭示两份已提交 Presentation fixture 仍携带旧 browser bundle；同步 Essentials 与 PokeMan fixture 后，受影响用例与完整套件均复跑通过。
+- `npm run test:regression`：PASS，494 pass、0 fail、6 个仓库既有平台权限 skip。
+- `npm run docs:check-links`：PASS，167 个 Markdown 文件中的 782 个相对链接全部有效。
+- `npm run docs:build`：PASS，VitePress client/server build 与页面渲染完成。
+- `npm run test:game-common-controls-input:qualification`：PASS；在最终 fixture 与文档树上一次性完成 build、controls qualification、Desktop、PWA、frame-targeted 与文档门禁。
+
+Qualification 证明 State/Event 原因分类、Keyboard capture、多 Gamepad OR、freshness、duplicate ownership、raw channel compatibility 以及 exact Frame + Activation 投递均按本文闭环；没有新增 Framework Input Authority、retained input、replay、retry 或 Main-level routing。
