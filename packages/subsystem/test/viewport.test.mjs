@@ -145,7 +145,7 @@ test("Runtime scope.viewport receives Data state and goes inert after shutdown",
         return {
           carrier: dataPair.right,
           generation: 1,
-          dataProfile: "loomrealm.renderer-data/2",
+          dataProfile: "loomrealm.renderer-data/3",
         };
       },
     },
@@ -166,7 +166,7 @@ test("Runtime scope.viewport receives Data state and goes inert after shutdown",
       carrier: dataPair.left,
       subsystemKey: "demo",
       generation: 1,
-      dataProfile: "loomrealm.renderer-data/2",
+      dataProfile: "loomrealm.renderer-data/3",
     },
     handlers: {
       onRenderDomains: () => ({ kind: "accepted" }),

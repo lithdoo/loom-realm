@@ -65,7 +65,7 @@ test("RenderDomain state traverses WebProjector into battle custom elements", { 
   const manager = new RenderManager(); const renderDomain = manager.createDomain(domain(1));
   const accepted = (outcome) => assert.deepEqual(outcome, { kind: "accepted" });
   manager.setDataPeer({
-    binding: { subsystemKey: "battle", generation: 1, dataProfile: "loomrealm.renderer-data/2" },
+    binding: { subsystemKey: "battle", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
     render: {
       async sendDomains(message) { accepted(store.onDomains(message)); return { kind: "sent" }; },
       async sendSnapshot(message) { accepted(store.onSnapshot(message)); return { kind: "sent" }; },
@@ -172,7 +172,7 @@ test("RenderDomain state traverses WebProjector into battle custom elements", { 
     const handlerStore = new RendererRenderStore(2); handlerStore.beginCarrier();
     const handlerManager = new RenderManager();
     handlerManager.setDataPeer({
-      binding: { subsystemKey: "battle", generation: 2, dataProfile: "loomrealm.renderer-data/2" },
+      binding: { subsystemKey: "battle", generation: 2, dataProfile: "loomrealm.renderer-data/3" },
       render: {
         async sendDomains(message) { accepted(handlerStore.onDomains(message)); return { kind: "sent" }; },
         async sendSnapshot(message) { accepted(handlerStore.onSnapshot(message)); return { kind: "sent" }; },

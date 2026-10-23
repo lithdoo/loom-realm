@@ -12,7 +12,7 @@
 
 原先的总体设计草稿已退役；其中「固定通道 `x.loomrealm.web-presentation.event`，设备名放在 `data.channel`」的方案不再作为落地依据。当前以本页和三份分册为实施事实源；设备载荷以 [User Input v1](../../doc/15-contracts/user-input-v1.md) 为基准，采集行为与空 State 规则见 [设备输入 Web Components](./device-input-components.md)。
 
-三份分册已按顺序实现；正式化见 [Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)、[Web Presentation API v2](../../doc/15-contracts/web-presentation-api-v2.md)、[Renderer Data Profile v2](../../doc/15-contracts/renderer-data-profile-v2.md) 与 [Renderer Control v2](../../doc/15-contracts/main-renderer-control-v2.md)。
+三份分册已按顺序实现；当前运行时正式化见 [Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)、[Web Presentation API v3](../../doc/15-contracts/web-presentation-api-v3.md)、[Renderer Data Profile v3](../../doc/15-contracts/renderer-data-profile-v3.md) 与 [Renderer Control v2](../../doc/15-contracts/main-renderer-control-v2.md)。
 
 ## 1. 顺序
 

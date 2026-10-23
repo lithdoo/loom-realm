@@ -15,7 +15,7 @@ const valid = () => ({
   revision: 1,
   runtimes: [{ subsystemKey: "a", state: "ready" }],
   stack: [{ frameId: "f", subsystemKey: "a", lifecycle: "active", activationId: "x" }],
-  dataAuthorities: [{ subsystemKey: "a", generation: 1, dataProfile: "loomrealm.renderer-data/2" }],
+  dataAuthorities: [{ subsystemKey: "a", generation: 1, dataProfile: "loomrealm.renderer-data/3" }],
 });
 
 test("package root exposes only peer constructors and exact hello preflight at runtime", () => {

@@ -14,7 +14,7 @@
 - [Frame / Call v1](./frame-call-protocol-v1.md) · [Conformance](./frame-call-conformance-v1.md)
 - [Main ⇄ Renderer Control v2](./main-renderer-control-v2.md) · [v1 historical contract](./main-renderer-control-v1.md)
 - [Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)
-- [Renderer Data Profile `/2`](./renderer-data-profile-v2.md) · [v1 historical contract](./renderer-data-profile-v1.md)
+- [Renderer Data Profile `/3`](./renderer-data-profile-v3.md) · [v2 historical contract](./renderer-data-profile-v2.md) · [v1 historical contract](./renderer-data-profile-v1.md)
 - [Viewport State v1](./viewport-state-v1.md) · [Conformance](./viewport-state-conformance-v1.md)
 - [Game Common Controls Input v1](./game-common-controls-input-v1.md) · [Framework User Input v1 historical contract](./user-input-v1.md)
 - [Render Update v1](./render-update-v1.md)
@@ -23,7 +23,7 @@
 ## Web Presentation
 
 - [Web Presentation Config v1](./web-presentation-config-v1.md) — Window bootstrap resources / scripts / styles。
-- [Web Presentation API v2](./web-presentation-api-v2.md) · [v1 historical contract](./web-presentation-api-v1.md) — 通用 Custom Event、精确 Channel、可信来源与 owner/broadcast 路由。
+- [Web Presentation API v3](./web-presentation-api-v3.md) · [Frame-targeted Presentation Event v1](./frame-targeted-presentation-event-v1.md) · [v2 historical contract](./web-presentation-api-v2.md) — boolean publication 兼容并新增 Top Frame 精确投递。
 
 Renderer current Store 与 Main/DataAuthority topology 不因 DOM 或 business WebComponent 生成第二份 authority。平台可以有不同 physical composition，但不创建第二套公开 Presentation ABI。
 

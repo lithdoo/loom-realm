@@ -18,7 +18,7 @@ import type {
 type JsonObject = RenderEventV1["data"];
 
 export interface CustomEventOptions {
-  readonly broadcast?: boolean;
+  readonly broadcast?: boolean | "top-frame";
   readonly channel?: string;
 }
 

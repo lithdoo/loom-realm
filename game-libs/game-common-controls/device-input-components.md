@@ -4,7 +4,7 @@
 > 位置：`game-libs/game-common-controls/device-input-components.md`  
 > 调用形状：[emitCustomEvent 扩展](./emit-custom-event.md)  
 > 设备语义来源：[User Input v1](../../doc/15-contracts/user-input-v1.md) 中的 Keyboard / Pointer / Gamepad 规范载荷，以及迁移前 [browser-input-source.ts](../../packages/renderer/src/browser-input-source.ts) 的采集行为  
-> 现行契约：[Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)、[Web Presentation API v2](../../doc/15-contracts/web-presentation-api-v2.md)、[Session Events v1](../../doc/15-contracts/session-events-v1.md)
+> 现行契约：[Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)、[Web Presentation API v3](../../doc/15-contracts/web-presentation-api-v3.md)、[Session Events v1](../../doc/15-contracts/session-events-v1.md)
 
 本文只定义三个设备 Web Component 如何按 [emitCustomEvent 扩展](./emit-custom-event.md) 生产用户输入。框架输入层的删除范围不在这里重复。本文不修改已冻结契约，也不修改同目录既有设计文档。
 

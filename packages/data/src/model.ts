@@ -1,14 +1,14 @@
 import type { MessageCarrier } from "@loomrealm/foundation";
 import type { JsonObject, JsonValue } from "@loomrealm/wire";
 
-export const RENDERER_DATA_PROFILE_V2 = "loomrealm.renderer-data/2" as const;
-export type RendererDataProfileV2 = typeof RENDERER_DATA_PROFILE_V2;
+export const RENDERER_DATA_PROFILE_V3 = "loomrealm.renderer-data/3" as const;
+export type RendererDataProfileV3 = typeof RENDERER_DATA_PROFILE_V3;
 
-export interface DataCurrentBindingV2 {
+export interface DataCurrentBindingV3 {
   readonly carrier: MessageCarrier;
   readonly subsystemKey: string;
   readonly generation: number;
-  readonly dataProfile: RendererDataProfileV2;
+  readonly dataProfile: RendererDataProfileV3;
 }
 
 export interface RenderDomainsV1 { readonly type: "render.domains"; readonly domains: readonly string[]; }
@@ -35,9 +35,32 @@ export interface ViewportStateV1 {
   readonly width: number;
   readonly height: number;
 }
-export type RendererDataMessageV2 = RenderUpdateMessageV1 | ViewportStateV1;
+export interface PresentationFrameInterestV1 {
+  readonly frameId: string;
+  readonly channels: readonly string[];
+}
+export interface PresentationInterestV1 {
+  readonly type: "presentation.interest";
+  readonly frames: readonly PresentationFrameInterestV1[];
+}
+export interface PresentationEventV1 {
+  readonly type: "presentation.event";
+  readonly sourceSubsystemKey: string;
+  readonly domainId: string;
+  readonly targetKey: string;
+  readonly frameId: string;
+  readonly activationId: string;
+  readonly channel: string;
+  readonly name: string;
+  readonly data: JsonObject;
+}
+export type RendererDataMessageV3 =
+  | RenderUpdateMessageV1
+  | ViewportStateV1
+  | PresentationInterestV1
+  | PresentationEventV1;
 
-export type DataProtocolFamily = "profile" | "render" | "viewport";
+export type DataProtocolFamily = "profile" | "render" | "viewport" | "presentation";
 export type DataTerminal =
   | { readonly kind: "carrier-closed" }
   | { readonly kind: "carrier-lost"; readonly cause?: unknown }
@@ -48,18 +71,23 @@ export type DataInboundDisposition = { readonly kind: "accepted" } | { readonly 
 
 export interface SubsystemDataHandlers {
   onViewportState(message: ViewportStateV1): DataInboundDisposition | Promise<DataInboundDisposition>;
+  onPresentationEvent?(message: PresentationEventV1): DataInboundDisposition | Promise<DataInboundDisposition>;
 }
-export interface SubsystemDataPeerOptions { readonly binding: DataCurrentBindingV2; readonly handlers: SubsystemDataHandlers; }
+export interface SubsystemDataPeerOptions { readonly binding: DataCurrentBindingV3; readonly handlers: SubsystemDataHandlers; }
 export interface SubsystemRenderDataPeer {
   sendDomains(message: RenderDomainsV1): Promise<DataSendOutcome>;
   sendSnapshot(message: RenderSnapshotV1): Promise<DataSendOutcome>;
   sendPatch(message: RenderPatchV1): Promise<DataSendOutcome>;
   sendEvent(message: RenderEventV1): Promise<DataSendOutcome>;
 }
-export interface DataBindingViewV2 { readonly subsystemKey: string; readonly generation: number; readonly dataProfile: RendererDataProfileV2; }
+export interface SubsystemPresentationDataPeer {
+  sendInterest(message: PresentationInterestV1): Promise<DataSendOutcome>;
+}
+export interface DataBindingViewV3 { readonly subsystemKey: string; readonly generation: number; readonly dataProfile: RendererDataProfileV3; }
 export interface SubsystemDataPeer {
-  readonly binding: Readonly<DataBindingViewV2>;
+  readonly binding: Readonly<DataBindingViewV3>;
   readonly render: SubsystemRenderDataPeer;
+  readonly presentation: SubsystemPresentationDataPeer;
   readonly terminal: Promise<DataTerminal>;
   close(): Promise<void>;
 }
@@ -69,14 +97,19 @@ export interface RendererDataHandlers {
   onRenderSnapshot(message: RenderSnapshotV1): DataInboundDisposition | Promise<DataInboundDisposition>;
   onRenderPatch(message: RenderPatchV1): DataInboundDisposition | Promise<DataInboundDisposition>;
   onRenderEvent(message: RenderEventV1): DataInboundDisposition | Promise<DataInboundDisposition>;
+  onPresentationInterest?(message: PresentationInterestV1): DataInboundDisposition | Promise<DataInboundDisposition>;
 }
-export interface RendererDataPeerOptions { readonly binding: DataCurrentBindingV2; readonly handlers: RendererDataHandlers; }
+export interface RendererDataPeerOptions { readonly binding: DataCurrentBindingV3; readonly handlers: RendererDataHandlers; }
 export interface RendererViewportDataPeer {
   sendState(message: ViewportStateV1): Promise<DataSendOutcome>;
 }
+export interface RendererPresentationDataPeer {
+  sendEvent(message: PresentationEventV1): Promise<DataSendOutcome>;
+}
 export interface RendererDataPeer {
-  readonly binding: Readonly<DataBindingViewV2>;
+  readonly binding: Readonly<DataBindingViewV3>;
   readonly viewport: RendererViewportDataPeer;
+  readonly presentation: RendererPresentationDataPeer;
   readonly terminal: Promise<DataTerminal>;
   close(): Promise<void>;
 }

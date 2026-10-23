@@ -943,7 +943,7 @@ test("optional Renderer Binding drives a real candidate hello and committed proj
   assert.deepEqual(holder.current().snapshot.dataAuthorities, [{
     subsystemKey: "root",
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/2",
+    dataProfile: "loomrealm.renderer-data/3",
   }]);
   assert.ok(holder.current().snapshot.revision >= 1);
   assert.deepEqual(holder.current().snapshot.runtimes.map(({ subsystemKey }) => subsystemKey), ["root"]);
@@ -1012,7 +1012,7 @@ test("M9 projects immutable full Data authority views with exact Runtime identit
   assert.deepEqual(published.entries.map(({ subsystemKey, generation, dataProfile }) => ({ subsystemKey, generation, dataProfile })), [{
     subsystemKey: "root",
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/2",
+    dataProfile: "loomrealm.renderer-data/3",
   }]);
   assert.equal(published.entries[0].runtime, fake.runtimes.get("root").hosted);
 
@@ -1105,7 +1105,7 @@ test("M8 deterministic vertical installs real paired Data peers and recovers und
   assert.deepEqual(authorityBefore, {
     subsystemKey: "root",
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/2",
+    dataProfile: "loomrealm.renderer-data/3",
   });
 
   data.pairs[0].lose(new Error("test Data loss"));
@@ -1215,8 +1215,8 @@ test("connected Renderer mirrors committed frame.call and frame.return through f
   assert.deepEqual(
     holder.current().snapshot.dataAuthorities.map(({ subsystemKey, generation, dataProfile }) => ({ subsystemKey, generation, dataProfile })),
     [
-      { subsystemKey: "root", generation: 1, dataProfile: "loomrealm.renderer-data/2" },
-      { subsystemKey: "child", generation: 1, dataProfile: "loomrealm.renderer-data/2" },
+      { subsystemKey: "root", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
+      { subsystemKey: "child", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
     ],
   );
   const firstActivation = holder.current().snapshot.stack[0].activationId;
@@ -1288,7 +1288,7 @@ test("connected Renderer mirrors fixed-point failure unwind without changing Mai
   assert.deepEqual(holder.current().snapshot.dataAuthorities.find(({ subsystemKey }) => subsystemKey === "root"), {
     subsystemKey: "root",
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/2",
+    dataProfile: "loomrealm.renderer-data/3",
   });
   assert.notEqual(holder.current().snapshot.stack[0].activationId, oldRootActivation);
 

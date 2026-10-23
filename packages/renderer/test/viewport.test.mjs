@@ -12,7 +12,7 @@ import { normalizeViewportSample } from "../dist/internal/viewport-publisher.js"
 const authority = {
   subsystemKey: "demo",
   generation: 1,
-  dataProfile: "loomrealm.renderer-data/2",
+  dataProfile: "loomrealm.renderer-data/3",
 };
 
 const snapshot = (sessionId, revision, generation = 1) => ({
@@ -70,7 +70,7 @@ test("floors legal CSS logical samples, discards invalid ones, and fences old so
           carrier: pair.left,
           subsystemKey: "demo",
           generation: 1,
-          dataProfile: "loomrealm.renderer-data/2",
+          dataProfile: "loomrealm.renderer-data/3",
         },
         handlers: {
           onViewportState(message) {
@@ -118,7 +118,7 @@ test("invalid-only samples never synthesize zero, default, or null viewport.stat
           carrier: pair.left,
           subsystemKey: "demo",
           generation: 1,
-          dataProfile: "loomrealm.renderer-data/2",
+          dataProfile: "loomrealm.renderer-data/3",
         },
         handlers: {
           onViewportState(message) {
@@ -177,7 +177,7 @@ test("fresh Renderer does not republish the previous Renderer observation on a s
           carrier: pair.left,
           subsystemKey: "demo",
           generation,
-          dataProfile: "loomrealm.renderer-data/2",
+          dataProfile: "loomrealm.renderer-data/3",
         },
         handlers: {
           onViewportState(message) {
@@ -232,7 +232,7 @@ test("fresh Renderer fences the old source and queued callback", async () => {
           carrier: pair.left,
           subsystemKey: "demo",
           generation,
-          dataProfile: "loomrealm.renderer-data/2",
+          dataProfile: "loomrealm.renderer-data/3",
         },
         handlers: {
           onViewportState(message) {
@@ -280,7 +280,7 @@ test("fresh Data carrier republishes the current legal baseline", async () => {
           carrier: pair.left,
           subsystemKey: "demo",
           generation,
-          dataProfile: "loomrealm.renderer-data/2",
+          dataProfile: "loomrealm.renderer-data/3",
         },
         handlers: {
           onViewportState(message) {

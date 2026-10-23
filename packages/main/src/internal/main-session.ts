@@ -48,7 +48,7 @@ import {
   validProtocolString,
 } from "./primitives.js";
 
-const RENDERER_DATA_PROFILE_V2 = "loomrealm.renderer-data/2" as const;
+const RENDERER_DATA_PROFILE_V3 = "loomrealm.renderer-data/3" as const;
 
 type RuntimePhase =
   | "starting"
@@ -1333,7 +1333,7 @@ class MainSessionRuntime {
       return [Object.freeze({
         subsystemKey,
         generation: 1,
-        dataProfile: RENDERER_DATA_PROFILE_V2,
+        dataProfile: RENDERER_DATA_PROFILE_V3,
       })];
     });
     return Object.freeze({
@@ -1385,7 +1385,7 @@ class MainSessionRuntime {
       entries.push(Object.freeze({
         subsystemKey,
         generation: 1,
-        dataProfile: RENDERER_DATA_PROFILE_V2,
+        dataProfile: RENDERER_DATA_PROFILE_V3,
         runtime: record.hosted,
       }));
     }
