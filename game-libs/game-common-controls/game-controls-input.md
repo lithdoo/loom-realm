@@ -102,29 +102,44 @@ type ControlsButtonV1 =
 
 v1 是一名本地玩家。所有已连接的 standard 手柄先按按键做 OR，再进入第 5 节的合并。订阅者看不到 `gamepadId`。某一只手柄中途接入时，已经按住的支持键进入 State，不为它们补 `down` Event；这与现有手柄源的 baseline 相同。
 
-## 4. 键盘别名
+## 4. 键盘捕获
 
 键盘只接受第 2 节那 14 个 `code`，并且必须是 `isTrusted` 的 `keydown` / `keyup`。一颗统一按键只对应一个键，表以外的键忽略。对应关系在 v1 写死，组件不读取属性或配置。
 
-键盘采集还必须服从浏览器已有的编辑和焦点语义。组件统一维护一条 keyboard capture policy，而不是让 Map、Dialogue、Battle 各自判断：
+键盘侧维护一个本地的 capture availability；它不是 Framework authority，也不进入线协议：
 
 ~~~text
-事件来自可编辑或浏览器交互控件
-    -> 浏览器优先
-    -> 不改变 keyboard held
-    -> 不发送 controls.state / controls.event
-    -> 不调用 preventDefault()
+windowUsable
+    = document.visibilityState === "visible"
+      && document.hasFocus()
 
-事件来自普通游戏展示区域，且 code 命中第 2 节映射
-    -> 游戏 controls 优先
-    -> 更新 keyboard held
-    -> 发送对应 State / Event
-    -> 对会触发滚动、焦点移动等浏览器默认行为的键调用 preventDefault()
+keyboardCaptureAvailable
+    = windowUsable
+      && 当前焦点不属于浏览器交互区域
 ~~~
 
-实现时至少把 `input`、`textarea`、`select`、`button`、可导航链接和 `contenteditable` 视为浏览器拥有键盘语义的区域；从这些元素或其可编辑后代产生的按键不进入 controls。这样在表单里输入 `Z` 不会同时触发 `south`，在浏览器控件上使用方向键或 `Tab` 也不会同时改变游戏状态。
+浏览器交互区域至少包括 `input`、`textarea`、`select`、`button`、可导航链接和 `contenteditable`。实现必须按实际焦点所在的 composed tree 判断，不能只看某次 keyboard event 的 target；否则“游戏区按下 -> 点击输入框 -> 在输入框里松开”会漏掉释放，留下卡住的 held。
 
-`Tab -> select` 因此只在当前按键属于游戏 capture 范围时成立；一旦焦点进入浏览器交互控件，`Tab` 保持原生焦点导航，不发送 `select`。具体的 blocked-target 判定必须集中在本组件实现和 Qualification 中，不能由各业务 Subsystem 自行复制。
+capture 状态转换定义为：
+
+~~~text
+available -> unavailable
+    清空全部 keyboard held
+    重新计算 effective controls
+    effective 若变化，只发送新的 controls.state
+    不为被清掉的按键补 controls.event up
+
+unavailable -> available
+    keyboard held 从 empty 开始
+    不根据物理上仍按住的键补 down
+    等后续 trusted keyboard event 建立新状态
+~~~
+
+capture unavailable 时，映射键完全交给浏览器：组件不改变 keyboard held、不发送 controls、不调用 `preventDefault()`。这只屏蔽 Keyboard；Gamepad 仍按第 3 节采集。
+
+capture available 时，命中第 2 节映射的 trusted keyboard event 属于游戏 controls。若事件可取消，组件调用 `preventDefault()`，再更新 held / Event；因此方向键和 `Tab` 等不会同时触发浏览器滚动或焦点移动。未映射按键仍完全交给浏览器。
+
+`Tab -> select` 只在 capture available 时成立。blocked-focus / composed-tree 判定集中在本组件实现和 Qualification 中，Map、Dialogue、Battle 不各自复制。
 
 键盘自动重复只产生 Event，不重复 State。`repeat: true` 只在下面三件事同时成立时发送：
 
@@ -136,19 +151,11 @@ v1 是一名本地玩家。所有已连接的 standard 手柄先按按键做 OR�
 
 手柄轮询不制造 `repeat`。
 
-## 5. State
+## 5. 有效状态机
 
-现有三个设备组件的 State 都是当前整份快照，不是增量：
+原始 Keyboard/Gamepad 组件暴露设备事实；本组件只暴露统一的数字 controls。Pointer 保持独立。
 
-~~~text
-keyboard.state  { down: KeyboardCode[] }
-pointer.state   { pointers: [{ pointerId, kind, x, y, buttons }] }
-gamepad.state   { gamepads: [{ gamepadId, axes, buttons }] }
-~~~
-
-键盘只回答「哪些键正按着」。指针和手柄还要保留设备身份和位置：指针有坐标，手柄有 `gamepadId`、摇杆轴和按键压力。那些字段是原始设备组件的职责。
-
-`controls.state` 跟随键盘，不跟随手柄的模拟快照。对外只有一份数字集合：
+`controls.state` 对外只有一份数字集合：
 
 ~~~ts
 { down: readonly ControlsButtonV1[] }
@@ -234,34 +241,6 @@ PresentationFrameEvent.source  = { subsystemKey, domainId, targetKey }
 
 订阅者按 `channel` 区分 State 和 Event。`input.state` / `input.event` 只说明这是整份状态还是一次边沿。
 
-边沿与现有键盘、手柄组件对齐：
-
-~~~text
-键盘第一次按下
-    controls.state
-    controls.event  action=down  repeat=false
-
-键盘按住后的自动重复
-    只发 controls.event  action=down  repeat=true
-    仅当这颗键由键盘按住、手柄侧为松开
-
-键盘或手柄使有效值从有到无
-    controls.state
-    controls.event  action=up  repeat=false
-
-手柄越过 500_000
-    与键盘边沿相同，先 State 后 Event
-
-手柄刚接入时已经按住的键
-    只进入 controls.state，不补 down
-
-同一颗键的第二边再按下，或其中一边先松开
-    有效集合不变，State 和 Event 都不发
-
-摇杆轴变化、扳机压力留在阈值同一侧
-    不发
-~~~
-
 非空 State 的 1000ms 刷新重复当前 `down`，不重复 Event。变为空 State 时立即发送并停止刷新。订阅侧 2500ms 没有新的 `controls.state`，本地退回 `{ down: [] }`。实现时把 `controls.state` 纳入 `createFreshDeviceStateTracker` 能识别的 State 频道。Event 不刷新、不重放。
 
 ### 6.1 Activation 边界
@@ -285,11 +264,9 @@ controls.event
 
 ### 6.2 Interest 建立窗口
 
-`broadcast: "top-frame"` 继续服从 Frame-targeted Presentation Event 的 fail-closed sender gate。Frame 刚切换时，如果目标 listener 的 exact channel Interest 尚未到达 Renderer，这段窗口内的瞬时 Event 可以被丢弃；Framework 不缓存、不重放，也不在 Interest 后补投。
+`broadcast: "top-frame"` 完全服从 Frame-targeted Presentation Event v1：exact Interest 尚未建立时 Event fail closed；不缓存、不补投、不重放；State 可以通过后续 publication 恢复当前 held fact。
 
-实现和业务组合应尽量在一次 Frame activation 开始时先创建所需 listener，再进入依赖这些输入的交互逻辑。v1 不引入 Interest-ready ACK，也不把短暂 tap 存进 Renderer 队列等待未来 Interest。State 可由后续刷新恢复当前 held 事实，Event 则保持纯 transient。
-
-Qualification 必须覆盖“新 Frame 刚激活时立即产生完整 down/up tap”的场景，并把 fail-closed 丢弃作为显式协议行为，而不是偶发现象。若未来某类 UI 要求切换瞬间的首个 tap 也保证必达，应另行设计可交互 readiness，而不是偷偷给本组件增加 replay。
+本组件不定义 presentation readiness，也不引入 Interest-ready ACK。业务应在 Frame activation 开始时尽早创建 listener；如果未来某类 UI 要求切换瞬间的首个 tap 也保证必达，应另行设计 readiness，而不是给 controls 增加 replay。
 
 失焦、页面隐藏和组件卸下时的收尾见第 7 节。窗口仍可用而手柄断开，使某颗键的有效值从有到无时，按本节先发 State，再按规范顺序发 `up`。
 
@@ -303,24 +280,36 @@ input.reset、input.availability
 
 ## 7. 可用性与断开
 
-窗口可用性仍是 `visible && document.hasFocus()`，键盘和手柄共用这一结果。
+Window 可用性是 `document.visibilityState === "visible" && document.hasFocus()`。它控制 Keyboard 和 Gamepad 的共同采集生命周期；第 4 节的 keyboard capture availability 在此基础上只进一步约束 Keyboard。
 
 ~~~text
-变为不可用
-    清空键盘 held 和手柄本地表
-    发送 controls.state { down: [] }
-    不为每颗键补 up
+Window 变为不可用
+    清空 keyboard held 和 gamepad 本地表
+    重新计算 effective controls
+    发送当前 controls.state；通常为 { down: [] }
+    不为被清掉的按键补 up Event
 
-重新可用
-    键盘 held 从空开始，不把失焦前的按键补回来
-    重扫 standard 手柄，已按下的支持键只进入 State
+Window 重新可用
+    keyboard held 从 empty 开始
+    重扫 standard gamepad
+    已经按下的支持键只进入 State，不补 down Event
     发送当前 controls.state
     继续轮询
+
+Keyboard capture available -> unavailable
+    只清 keyboard held
+    gamepad 本地表保持
+    重新计算 effective controls
+    effective 若变化只发 State，不补 up Event
+
+Keyboard capture unavailable -> available
+    keyboard held 保持 empty
+    不补 down Event
 
 disconnectedCallback / stop
     先停止监听、轮询和刷新
     释放本 Window 的 controls 占用
-    不补空 State，也不补 up
+    不补空 State，也不补 up Event
 ~~~
 
 手柄从系统里断开，属于一次采样变化：受影响的有效键若从按下变为松开，先发新 State，再按规范顺序发 `up`。
@@ -373,7 +362,8 @@ listener.close();
 - Keyboard 和 Gamepad 同时按住同一统一按键，只产生一个 effective `down`；任一侧先松开不产生 `up`，最后一侧松开才产生 `up`。
 - Frame 切换时旧 Activation 的 Event 不进入新 Activation；玩家持续按住的键可以通过后续 State publication 被新 Activation 重新观察到。
 - 新 Frame 的 Interest 尚未被 Renderer 观察到时，瞬时 Event fail closed 丢弃，不缓存、不重放、不改投后来的 Frame。
-- `input`、`textarea`、`select`、`button`、可导航链接和 `contenteditable` 获得键盘语义时，映射键不进入 controls；普通游戏区域中的方向键和 `Tab` 等被 capture 后不再同时触发对应浏览器默认行为。
+- 游戏区按住映射键后把焦点移入 `input` / `textarea` / `select` / `button` / 可导航链接 / `contenteditable`：capture loss 必须立即清 keyboard held，只按 effective 变化发 State，不补 up Event；随后在交互控件里的 keyup 不得造成卡键。
+- capture unavailable 时映射键保持浏览器原生行为；capture available 时命中的 trusted 映射事件由 controls 接管并在可取消时 `preventDefault()`，包括方向键和 `Tab`。
 - `game-controls-input` 与原始 Keyboard/Gamepad 组件同时挂载时，两套频道彼此独立；Framework 不去重，测试明确把它视为游戏 composition 选择。
 - 非空 State 刷新、2500ms freshness fallback、失焦清空、重新可用 baseline 和 disconnect 不补 Event 的规则继续成立。
 
