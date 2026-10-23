@@ -1,6 +1,6 @@
 # 统一操控输入 Web Component
 
-> 状态：**Draft**
+> 状态：**Draft / Freeze candidate**
 > 位置：`game-libs/game-common-controls/game-controls-input.md`
 > 所属包：`@loomrealm-game/common-controls`
 > 发送路径：[emitCustomEvent 扩展](./emit-custom-event.md)、[Web Presentation API v3](../../doc/15-contracts/web-presentation-api-v3.md)、[Frame-targeted Presentation Event v1](../../doc/15-contracts/frame-targeted-presentation-event-v1.md)
@@ -94,6 +94,54 @@ type ControlsButtonV1 =
 
 左右摇杆、摇杆按下和 Home 不在这套词汇里。摇杆推到尽头也不产生 `up` / `down` / `left` / `right`。方向只来自十字键，以及上表的键盘列。
 
+### 2.1 公开 ABI
+
+实现必须在 `@loomrealm-game/common-controls` 根导出下面这些名字；这是 v1 的公开形状，不由实现者另起别名：
+
+~~~ts
+export const CONTROLS_INPUT_CHANNELS = Object.freeze([
+  "controls.state",
+  "controls.event",
+] as const);
+export type ControlsInputChannel = typeof CONTROLS_INPUT_CHANNELS[number];
+
+export const CONTROLS_BUTTONS_V1 = Object.freeze([
+  "up", "down", "left", "right",
+  "south", "east", "west", "north",
+  "leftBumper", "rightBumper", "leftTrigger", "rightTrigger",
+  "start", "select",
+] as const);
+export type ControlsButtonV1 = typeof CONTROLS_BUTTONS_V1[number];
+
+export interface ControlsStatePayloadV1 extends JsonObject {
+  readonly down: readonly ControlsButtonV1[];
+}
+
+export interface ControlsEventPayloadV1 extends JsonObject {
+  readonly action: "down" | "up";
+  readonly button: ControlsButtonV1;
+  readonly repeat: boolean;
+}
+
+export const EMPTY_CONTROLS_STATE_V1: ControlsStatePayloadV1;
+export const CONTROLS_STATE_REFRESH_MS = 1_000;
+export const CONTROLS_STATE_STALE_MS = 2_500;
+
+export interface FreshControlsStateTracker {
+  accept(payload: ControlsStatePayloadV1): void;
+  close(): void;
+}
+
+export function createFreshControlsStateTracker(
+  deliver: (payload: ControlsStatePayloadV1) => void,
+  options?: { readonly staleAfterMs?: number },
+): FreshControlsStateTracker;
+~~~
+
+`EMPTY_CONTROLS_STATE_V1` 的值固定为冻结的 `{ down: [] }`；fresh tracker 默认 2500ms 无新 State 时向 consumer 交付该 empty State。
+
+现有 `DEVICE_INPUT_CHANNELS` 继续**恰好只有六个** `keyboard.* / pointer.* / gamepad.*` 频道；不得把 `controls.*` 塞进去。现有 `createFreshDeviceStateTracker` 也保持原签名，`controls.state` 使用上面的独立 `createFreshControlsStateTracker`。这样 raw device contract 与 unified controls contract 不互相扩张。
+
 ## 3. 手柄采集
 
 只读取 `mapping === "standard"` 的手柄，沿用现有手柄源的轮询方式：`requestAnimationFrame` 加上 `navigator.getGamepads()`。按下阈值是 `500_000`，和现有 `gamepad.event` 的越阈一致。`leftTrigger` / `rightTrigger` 在硬件上常常是模拟扳机，这里越过阈值之后只当作数字键，载荷里不保留压力。
@@ -118,7 +166,32 @@ keyboardCaptureAvailable
       && 当前焦点不属于浏览器交互区域
 ~~~
 
-浏览器交互区域至少包括 `input`、`textarea`、`select`、`button`、可导航链接和 `contenteditable`。实现必须按实际焦点所在的 composed tree 判断，不能只看某次 keyboard event 的 target；否则“游戏区按下 -> 点击输入框 -> 在输入框里松开”会漏掉释放，留下卡住的 held。至少在 `focusin` / `focusout`、Window focus / blur 和 `visibilitychange` 后重新计算 availability。
+v1 的浏览器交互区域使用**封闭集合**，不允许实现者自行扩大。先从 `document.activeElement` 开始，沿 open Shadow Root 的 `shadowRoot.activeElement` 向内找到 deepest active element；再从该元素沿 composed ancestor 向外检查。composed ancestor 的下一跳是 `parentElement`，没有 `parentElement` 且 root 是 `ShadowRoot` 时跳到 `root.host`。
+
+只要 deepest active element 或其 composed ancestor 满足下面任一条件，Keyboard capture 就是 unavailable：
+
+~~~text
+HTMLInputElement
+HTMLTextAreaElement
+HTMLSelectElement
+HTMLButtonElement
+HTMLAnchorElement 且带 href 属性
+HTMLElement.isContentEditable === true
+~~~
+
+v1 **不因为**任意 `tabindex`、ARIA `role` 或普通自定义元素而额外 blocked；以后如要扩展必须改契约。
+
+availability 的重算时机也固定：
+
+~~~text
+start                         -> 立即 reconcile
+document focusin              -> 同步 reconcile
+document focusout             -> queueMicrotask(reconcile)
+Window focus / blur           -> 同步 reconcile
+document visibilitychange     -> 同步 reconcile
+~~~
+
+`focusout` 延迟一个 microtask 是为了让 `document.activeElement` 先稳定到新的目标。
 
 capture 状态转换定义为：
 
@@ -131,15 +204,37 @@ available -> unavailable
 
 unavailable -> available
     keyboard held 从 empty 开始
-    不根据物理上仍按住的键补 down
-    等后续 trusted keyboard event 建立新状态
+    不主动查询物理键盘，也不补 down Event
 ~~~
 
 capture unavailable 时，映射键完全交给浏览器：组件不改变 keyboard held、不发送 controls、不调用 `preventDefault()`。这只屏蔽 Keyboard；Gamepad 仍按第 3 节采集。
 
-capture available 时，命中第 2 节映射的 trusted keyboard event 属于游戏 controls。若事件可取消，组件调用 `preventDefault()`，再更新 held / Event；因此方向键和 `Tab` 等不会同时触发浏览器滚动或焦点移动。未映射按键仍完全交给浏览器。
+capture available 时，任何 trusted、mapped 的 `keydown` 都属于游戏 controls；若 `event.cancelable`，先调用 `preventDefault()`，不让方向键、`Tab` 等同时触发浏览器默认行为。未映射按键完全交给浏览器。mapped `keyup` 只处理本地已经 held 的键，不依赖 `preventDefault()`。
 
-`Tab -> select` 只在 capture available 时成立。blocked-focus / composed-tree 判定集中在本组件实现和 Qualification 中，Map、Dialogue、Battle 不各自复制。
+键盘状态机固定为：
+
+~~~text
+keydown，keyboardDown=false
+    -> keyboardDown=true
+    -> 忽略 DOM event.repeat，逻辑上视为新的按下
+    -> 若 effective false->true：先 State，再 down Event repeat=false
+    -> 若 effective 本来已因 Gamepad=true：不发 State/Event
+
+keydown，keyboardDown=true
+    -> 只有 DOM event.repeat=true 且 gamepadDown=false 时
+       发送 down Event repeat=true
+    -> 其他情况忽略
+
+keyup，keyboardDown=true
+    -> keyboardDown=false
+    -> 若 effective true->false：先 State，再 up Event repeat=false
+    -> 若 Gamepad 仍按住：不发 State/Event
+
+keyup，keyboardDown=false
+    -> 忽略
+~~~
+
+因此 capture 丢失后即使物理键仍按着，焦点回到游戏后收到的第一个 repeat-keydown 也会重新建立本地 held，并在需要时作为新的 `repeat=false` 逻辑按下；不会因为浏览器的 repeat 标志留下灰区。
 
 键盘自动重复只产生 Event，不重复 State。`repeat: true` 只在下面三件事同时成立时发送：
 
@@ -178,29 +273,71 @@ effective = keyboardDown || gamepadDown
 | 松开 | 按下 | 是 |
 | 按下 | 按下 | 是，只出现一次 |
 
-State 只在这颗键的有效值发生变化时重发整份 `down`，顺序始终是第 2 节。有效值没变就不发 State：第二台设备再按下同一颗键、其中一台先松开、摇杆轴在动、扳机压力在变，都不产生新的 State。非空 State 的 1000ms 刷新重复的是这份有效集合，不是两台设备各自的快照。
+State 在 effective 集合发生变化时重发整份 `down`，顺序始终是第 2 节。effective 没变就不发 State。非空 State 每 1000ms 刷新同一份 effective 集合。
 
-Event 只描述有效值的边沿。从「不在 `down`」变成「在 `down`」时发一次 `down`；反过来发一次 `up`。两台设备先后按住同一颗键，只有第一次进入集合时有 `down`。后松开的那一边才产生 `up`。
+Event 不等于“所有 effective 变化”。v1 把变化来源分成两类：
+
+~~~text
+physical edge
+    accepted Keyboard keydown / keyup
+    已跟踪 standard Gamepad 的阈值 crossing
+    live polling 中 standard Gamepad 消失造成的释放
+
+reconciliation / baseline
+    组件启动时的初始状态
+    新接入 Gamepad 的首次 baseline
+    Window usable -> unusable
+    Window unusable -> usable 后的 Gamepad rescan
+    Keyboard capture available -> unavailable
+    Keyboard capture unavailable -> available
+~~~
+
+规则固定为：
+
+~~~text
+physical edge 造成 effective 改变
+    -> 先发送一份完整 State
+    -> 再发送对应 down/up Event
+
+reconciliation / baseline 造成 effective 改变
+    -> 只发送 State
+    -> 不合成 down/up Event
+
+Keyboard repeat
+    -> 只发送 repeat=true 的 down Event
+    -> 不发送 State
+~~~
+
+Gamepad 一次 animation-frame 采样可能同时改变多个设备/按键。实现先应用整批采样并按所有 standard Gamepad 做 OR，得到新的 effective 集合；若有 effective 改变，只发送**一份**完整 State，然后按第 2 节 `CONTROLS_BUTTONS_V1` 的规范顺序发送真正发生的 effective edge Event。某一只手柄松开或断开，但另一只手柄/Keyboard 仍按着同一统一按键时，不产生该按键的 Event。
+
+新接入的 standard Gamepad 即使已经按住支持键，也只通过 baseline 进入 State，不补 `down` Event。运行中的已跟踪 Gamepad 从系统消失属于 physical edge；只有因此使某个 effective button 从 true 变 false 时才产生对应 `up` Event。
+
+例子：
 
 ~~~text
 KeyZ down
     state [south]
     event down south repeat=false
 
-手柄 south down
-    有效值仍是按下，不发 State，也不发 Event
+Gamepad south down
+    effective 仍为 true
+    不发
 
 KeyZ up
-    手柄仍按住 south，不发
+    Gamepad 仍按着 south
+    不发
 
-手柄 south up
+Gamepad south up / 该已跟踪 Gamepad 断开
     state []
     event up south repeat=false
+
+窗口失焦 / capture 进入 input
+    若因此 effective 改变
+    只发 State
+    不补 up Event
 ~~~
 
-已经按住的手柄键在 baseline 里只进入 State，不为它们补 `down` Event。此后的越阈才产生 Event。键盘自动重复仍只发 `repeat: true` 的 Event，不改 State；而且只有键盘按着、手柄没按这颗键时才发。
-
-## 6. 发送
+## 6. 发送## 6. 发送
 
 组件拥有一对精确频道，用 `emitCustomEvent(..., { broadcast: "top-frame" })` 投递给接受时的 Top Active Frame。同一次变化先发整份 State，再发对应边沿 Event。指针不进入这里，也不转发 `keyboard.*` 或 `gamepad.*`。
 
@@ -226,7 +363,7 @@ context.emitCustomEvent(
 | 频道 | 事件名 | data | 何时发送 |
 | --- | --- | --- | --- |
 | `controls.state` | `input.state` | `{ down: readonly ControlsButtonV1[] }` | 有效集合变化（含 keyboard capture loss）；Window 不可用时发 neutral；重新可用时发当前快照；非空时每 1000ms 再发同一份 |
-| `controls.event` | `input.event` | `{ action: "down" \| "up"; button: ControlsButtonV1; repeat: boolean }` | 某一颗键的有效值从无到有，或从有到无 |
+| `controls.event` | `input.event` | `{ action: "down" \| "up"; button: ControlsButtonV1; repeat: boolean }` | physical edge 使 effective 改变；或 Keyboard 已 held 时产生允许的 `repeat:true` |
 
 `down` 按第 2 节的规范顺序排列，同一按键只出现一次。空 State 是 `{ down: [] }`。`button` 使用同一套位置名。`domainId`、`targetKey` 和 source 仍由 Framework 按当前 live RenderNode 填写。组件必须带上 `options.channel`，避免落到 `x.loomrealm.web-presentation.event`。
 
@@ -241,7 +378,7 @@ PresentationFrameEvent.source  = { subsystemKey, domainId, targetKey }
 
 订阅者按 `channel` 区分 State 和 Event。`input.state` / `input.event` 只说明这是整份状态还是一次边沿。
 
-非空 State 的 1000ms 刷新重复当前 `down`，不重复 Event。变为空 State 时立即发送并停止刷新。订阅侧 2500ms 没有新的 `controls.state`，本地退回 `{ down: [] }`。实现时把 `controls.state` 纳入 `createFreshDeviceStateTracker` 能识别的 State 频道。Event 不刷新、不重放。
+非空 State 的 1000ms 刷新重复当前 `down`，不重复 Event。变为空 State 时立即发送并停止刷新。订阅侧使用 `createFreshControlsStateTracker`；2500ms 没有新的 `controls.state` 时本地退回 `EMPTY_CONTROLS_STATE_V1`。Event 不刷新、不重放。
 
 ### 6.1 Activation 边界
 
@@ -347,27 +484,68 @@ listener.close();
 
 每次新的 Frame Activation 都必须重新建立自己的 listener 和本地消费状态；旧 Activation 的 listener 随 Frame teardown 关闭。消费方的 held/down 缓存从 neutral 开始，随后只接受该 Activation 实际收到的 `controls.state`。
 
-## 9. 实现时落在哪里
+## 9. 实现落点
 
-仍放在 `@loomrealm-game/common-controls`，并打进现有的 `device-input.browser.js`，这样加载这一份浏览器脚本就会注册第四个元素。运行时根导出增加 `ControlsButtonV1`、两个频道名，以及 `controls.state` 的空 State。
+实现范围固定在 `@loomrealm-game/common-controls`，仍打进现有 `./browser/device-input.browser.js`，加载这一份浏览器脚本会注册第四个元素 `game-controls-input`。不新增第二个 browser bundle。
 
-采集可以复用包内的键盘源和手柄源作为本地采样器。复用时，它们的 `keyboard.*` / `gamepad.*` 只留在组件内部，外发前换成第 6 节的载荷。摇杆轴在合并前丢掉。
+必须完成这些源码层变化：
 
-本组件不进入 Main，不读取或指定 Frame/Activation，也不发送 `input.reset`。Renderer 从 current Control v2 stack 派生 Top Frame lease；Subsystem listener 才显式绑定业务持有的真实 `Frame` object。
+~~~text
+src/model.ts
+    增加 §2.1 的 controls public ABI
 
-## 10. Qualification 重点
+src/fresh-state.ts
+    增加 createFreshControlsStateTracker
+    不改变 createFreshDeviceStateTracker 的既有六频道语义
 
-实现前至少固定下面这些边界用例：
+browser/controls-source.ts
+    新增 controls-specific Keyboard + Gamepad sampler/state machine
 
-- Keyboard 和 Gamepad 同时按住同一统一按键，只产生一个 effective `down`；任一侧先松开不产生 `up`，最后一侧松开才产生 `up`。
-- Frame 切换时旧 Activation 的 Event 不进入新 Activation；玩家持续按住的键可以通过后续 State publication 被新 Activation 重新观察到。
-- 新 Frame 的 Interest 尚未被 Renderer 观察到时，瞬时 Event fail closed 丢弃，不缓存、不重放、不改投后来的 Frame。
-- 游戏区按住映射键后把焦点移入 `input` / `textarea` / `select` / `button` / 可导航链接 / `contenteditable`：capture loss 必须立即清 keyboard held，只按 effective 变化发 State，不补 up Event；随后在交互控件里的 keyup 不得造成卡键。
-- capture unavailable 时映射键保持浏览器原生行为；capture available 时命中的 trusted 映射事件由 controls 接管并在可取消时 `preventDefault()`，包括方向键和 `Tab`。
-- `game-controls-input` 与原始 Keyboard/Gamepad 组件同时挂载时，两套频道彼此独立；Framework 不去重，测试明确把它视为游戏 composition 选择。
-- 非空 State 刷新、2500ms freshness fallback、失焦清空、重新可用 baseline 和 disconnect 不补 Event 的规则继续成立。
+browser/device-input.browser.ts
+    PresentationContext.broadcast 扩展为 boolean | "top-frame"
+    注册 game-controls-input
+    duplicate registry 使用独立 key "controls"
+    controls publication 使用 broadcast: "top-frame"
 
-## 11. v1 不做的事
+scripts/build-browser.mjs
+    collision banner 加入 game-controls-input
+~~~
+
+现有 `browser/keyboard-source.ts`、`gamepad-source.ts`、`pointer-source.ts` 是已实现的 raw device 行为，**不得为了 unified controls 改写其对外语义**。`controls-source.ts` 可以复用纯常量、量化/standard mapping 等无状态 helper，但不能直接把 raw source 的 `keyboard.* / gamepad.*` 输出再转发，因为它必须独立实现 §4 的 capture availability、§5 的 reason 分类和多 Gamepad OR。
+
+`game-controls-input` 不进入 Main，不读取或指定 Frame/Activation，不发送 `input.reset`。Renderer 从 current Control v2 stack 派生 Top Frame lease；Subsystem listener 显式绑定业务持有的真实 `Frame` object。
+
+## 10. Qualification 重点## 10. Qualification 重点
+
+实现完成必须至少覆盖下面这些边界用例；这些不是建议，而是 acceptance criteria：
+
+- 根导出精确包含 §2.1 的公开符号；`DEVICE_INPUT_CHANNELS` 仍严格等于原六频道，`createFreshDeviceStateTracker` 原行为不变。
+- Keyboard/Gamepad 同时按住同一统一按键，只产生一个 effective `down`；任一侧先松开不产生 `up`，最后一侧松开才产生 `up`。
+- 新 Gamepad baseline 已按住的键只进入 State；已跟踪 Gamepad 运行中断开导致最后一份有效按住消失时，先 State 再按规范顺序发 `up`。
+- Window unusable、Gamepad rescan baseline、Keyboard capture loss/regain 都属于 reconciliation：可以修正 State，但绝不合成 down/up Event。
+- 游戏区按住映射键后把焦点移入 blocked focus target：capture loss 立即清 keyboard held，只按 effective 变化发 State；随后在控件中的 keyup 不得造成卡键。
+- blocked focus target 的判定严格按 §4 的封闭集合和 deep-active/composed-ancestor 算法；普通 `tabindex` 或 ARIA role 不得自行扩大 blocked 集合。
+- capture unavailable 时 mapped 键保持浏览器原生行为；capture available 时 trusted mapped keydown 在可取消时 `preventDefault()`。
+- capture loss 后物理键持续按住，重新 available 后收到的第一个 mapped repeat-keydown 在本地未 held 时必须按新的 `repeat=false` logical down 处理。
+- Frame 切换时旧 Activation Event 不进入新 Activation；持续 held 可以通过新的 State publication 被新 Activation 重新观察。
+- exact Interest 尚未建立时 Event fail closed，不缓存、不重放、不改投后来的 Frame。
+- 非空 State 1000ms refresh、`createFreshControlsStateTracker` 默认 2500ms fallback、empty State 停止 refresh、disconnect 不补消息都成立。
+- `game-controls-input` 与 raw Keyboard/Gamepad 组件同时挂载时，两套频道独立；Framework 不去重。
+- browser bundle 的 collision guard 包含第四个 tag，且现有三个 raw device 组件回归测试保持通过。
+
+仓库级落地新增 `test/game-controls-input-v1/qualification.test.mjs`，并新增 root script `test:game-controls-input:qualification`。该 script 至少执行：
+
+~~~text
+npm run build:game-common-controls-input
+npm test -w @loomrealm-game/common-controls
+node --test test/game-controls-input-v1/qualification.test.mjs
+npm run test:frame-targeted-presentation:qualification
+npm run docs:check-links
+~~~
+
+只有上述 acceptance criteria 和命令全部通过，才把本文状态从 `Draft / Freeze candidate` 改为 `Active / Normative / Frozen / Implemented`。
+
+## 11. v1 不做的事## 11. v1 不做的事
 
 - 不读取左右摇杆，也不提供摇杆死区、八向量化或摇杆按下。
 - 不输出模拟量、手柄 id、原始 `code` 或设备来源。
