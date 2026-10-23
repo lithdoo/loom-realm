@@ -36,7 +36,7 @@ function typeOfObject(raw: unknown): string {
   return stringValue(o.type, "profile", "type");
 }
 
-function messageDepthLimit(type: string): number {
+function messageDepthLimit(type: unknown): number {
   return type === "presentation.event" ? MAX_PRESENTATION_MESSAGE_DEPTH : MAX_JSON_DEPTH;
 }
 
@@ -73,8 +73,10 @@ export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV
   } catch (cause) {
     fail("profile", `invalid JSON: ${String(cause)}`);
   }
-  const parsedType = typeOfObject(parsed);
-  const maxDepth = messageDepthLimit(parsedType);
+  const parsedTypeHint = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, JsonValue>).type
+    : undefined;
+  const maxDepth = messageDepthLimit(parsedTypeHint);
   if (jsonDepth(parsed) > maxDepth) fail("profile", "JSON depth limit exceeded");
   assertBoundedJson(parsed, "profile", maxDepth);
   const message = validateByType(parsed);

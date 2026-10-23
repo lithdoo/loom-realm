@@ -29,7 +29,7 @@ Business Web Component
   → exact live Frame + Activation listener
 ```
 
-`options.channel`、`name`、`data` 和 `options.broadcast` 正交。省略 channel 时使用 `x.loomrealm.web-presentation.event`。不得使用“固定广播 Channel + `data.channel` + 消费端过滤”模型。
+`options.channel`、`name`、`data` 和 `options.broadcast` 正交；在 boolean 路径中，`name` 仍是 Session Event type。省略 channel 时使用 `x.loomrealm.web-presentation.event`。不得使用旧的“固定广播 Channel + `data.channel` + 消费端过滤”模型。
 
 Renderer 从 live RenderNode 固定 source session、owner、generation、`domainId`、`targetKey` 和 source Data peer；平台入口或 Frame Gate 在发送前再次验证 currentness。业务不能伪造 source 或底层身份。
 
