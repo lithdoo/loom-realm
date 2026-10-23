@@ -1,4 +1,4 @@
-for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-input"]) { if (customElements.get(tag) !== undefined) throw new TypeError("Game Common Controls element collision: " + tag); }
+for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-input", "game-controls-input"]) { if (customElements.get(tag) !== undefined) throw new TypeError("Game Common Controls element collision: " + tag); }
 "use strict";
 (() => {
   // src/model.ts
@@ -10,6 +10,29 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
     "gamepad.state",
     "gamepad.event"
   ]);
+  var CONTROLS_INPUT_CHANNELS = Object.freeze([
+    "controls.state",
+    "controls.event"
+  ]);
+  var CONTROLS_BUTTONS_V1 = Object.freeze([
+    "up",
+    "down",
+    "left",
+    "right",
+    "south",
+    "east",
+    "west",
+    "north",
+    "leftBumper",
+    "rightBumper",
+    "leftTrigger",
+    "rightTrigger",
+    "start",
+    "select"
+  ]);
+  var EMPTY_CONTROLS_DOWN_V1 = Object.freeze([]);
+  var EMPTY_CONTROLS_STATE_V1 = Object.freeze({ down: EMPTY_CONTROLS_DOWN_V1 });
+  var CONTROLS_STATE_REFRESH_MS = 1e3;
   var KEYBOARD_CODES_V1 = Object.freeze([
     "KeyA",
     "KeyB",
@@ -132,6 +155,222 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
   // browser/source-types.ts
   function windowUsable(target) {
     return target.document.visibilityState === "visible" && target.document.hasFocus();
+  }
+
+  // browser/controls-source.ts
+  var keyboardButtons = /* @__PURE__ */ new Map([
+    ["ArrowUp", "up"],
+    ["ArrowDown", "down"],
+    ["ArrowLeft", "left"],
+    ["ArrowRight", "right"],
+    ["KeyZ", "south"],
+    ["KeyX", "east"],
+    ["KeyC", "west"],
+    ["KeyV", "north"],
+    ["KeyQ", "leftBumper"],
+    ["KeyE", "rightBumper"],
+    ["ShiftLeft", "leftTrigger"],
+    ["ControlLeft", "rightTrigger"],
+    ["Enter", "start"],
+    ["Tab", "select"]
+  ]);
+  var gamepadButtons = Object.freeze([
+    [12, "up"],
+    [13, "down"],
+    [14, "left"],
+    [15, "right"],
+    [0, "south"],
+    [1, "east"],
+    [2, "west"],
+    [3, "north"],
+    [4, "leftBumper"],
+    [5, "rightBumper"],
+    [6, "leftTrigger"],
+    [7, "rightTrigger"],
+    [9, "start"],
+    [8, "select"]
+  ]);
+  var GAMEPAD_DOWN_THRESHOLD = 5e5;
+  function normalizedButtonValue(gamepad, index) {
+    const value = gamepad.buttons[index]?.value ?? 0;
+    return Math.round(Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0)) * 1e6);
+  }
+  function sampleGamepad(gamepad) {
+    return new Set(gamepadButtons.filter(([index]) => normalizedButtonValue(gamepad, index) >= GAMEPAD_DOWN_THRESHOLD).map(([, button]) => button));
+  }
+  function deepestActiveElement(document) {
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement != null) active = active.shadowRoot.activeElement;
+    return active;
+  }
+  function composedParent(element) {
+    if (element.parentElement !== null) return element.parentElement;
+    const root = element.getRootNode();
+    return root instanceof ShadowRoot ? root.host : null;
+  }
+  function isBlockedElement(element) {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement || element instanceof HTMLButtonElement) return true;
+    if (element instanceof HTMLAnchorElement && element.hasAttribute("href")) return true;
+    return element instanceof HTMLElement && element.isContentEditable;
+  }
+  function keyboardCaptureAvailable(target) {
+    if (!windowUsable(target)) return false;
+    for (let element = deepestActiveElement(target.document); element !== null; element = composedParent(element)) {
+      if (isBlockedElement(element)) return false;
+    }
+    return true;
+  }
+  function sameSet(left, right) {
+    return left.size === right.size && [...left].every((button) => right.has(button));
+  }
+  function createControlsInputSource(target) {
+    let subscribed = false;
+    const read = typeof target.navigator.getGamepads === "function" ? target.navigator.getGamepads.bind(target.navigator) : null;
+    return Object.freeze({
+      start(emit) {
+        if (subscribed) throw new TypeError("Controls input source already started");
+        subscribed = true;
+        let active = true;
+        let usable = null;
+        let captureAvailable = null;
+        let frame = null;
+        const keyboardDown = /* @__PURE__ */ new Set();
+        const trackedGamepads = /* @__PURE__ */ new Map();
+        let gamepadDown = /* @__PURE__ */ new Set();
+        let effective = /* @__PURE__ */ new Set();
+        const send = (change) => {
+          if (active) emit(change);
+        };
+        const ordered = (buttons) => Object.freeze(CONTROLS_BUTTONS_V1.filter((button) => buttons.has(button)));
+        const aggregateGamepads = () => {
+          const aggregate = /* @__PURE__ */ new Set();
+          for (const pressed of trackedGamepads.values()) for (const button of pressed) aggregate.add(button);
+          return aggregate;
+        };
+        const nextEffective = () => /* @__PURE__ */ new Set([...keyboardDown, ...gamepadDown]);
+        const state = () => send({ kind: "state", payload: { down: ordered(effective) } });
+        const applyEffective = (physicalButtons, alwaysState = false) => {
+          const previous = effective;
+          const next = nextEffective();
+          const changed = !sameSet(previous, next);
+          effective = next;
+          if (changed || alwaysState) state();
+          if (!changed || physicalButtons === void 0) return;
+          for (const button of CONTROLS_BUTTONS_V1) {
+            if (!physicalButtons.has(button) || previous.has(button) === next.has(button)) continue;
+            send({ kind: "event", payload: { action: next.has(button) ? "down" : "up", button, repeat: false } });
+          }
+        };
+        const stopPolling = () => {
+          if (frame !== null) target.cancelAnimationFrame(frame);
+          frame = null;
+        };
+        const baselineGamepads = () => {
+          trackedGamepads.clear();
+          if (read !== null) for (const pad of read()) {
+            if (pad && pad.connected && pad.mapping === "standard") trackedGamepads.set(pad.index, sampleGamepad(pad));
+          }
+          gamepadDown = aggregateGamepads();
+        };
+        const poll = () => {
+          if (!active || usable !== true || read === null) return;
+          const seen = /* @__PURE__ */ new Set();
+          const physicalButtons = /* @__PURE__ */ new Set();
+          for (const pad of read()) {
+            if (!pad || !pad.connected || pad.mapping !== "standard") continue;
+            seen.add(pad.index);
+            const next = sampleGamepad(pad);
+            const previous = trackedGamepads.get(pad.index);
+            trackedGamepads.set(pad.index, next);
+            if (previous === void 0) continue;
+            for (const button of CONTROLS_BUTTONS_V1) if (previous.has(button) !== next.has(button)) physicalButtons.add(button);
+          }
+          for (const [index, previous] of trackedGamepads) {
+            if (seen.has(index)) continue;
+            trackedGamepads.delete(index);
+            for (const button of previous) physicalButtons.add(button);
+          }
+          const previousGamepadDown = gamepadDown;
+          gamepadDown = aggregateGamepads();
+          if (!sameSet(previousGamepadDown, gamepadDown)) applyEffective(physicalButtons);
+          frame = target.requestAnimationFrame(poll);
+        };
+        const reconcileWindow = () => {
+          const next = windowUsable(target);
+          if (next === usable) return;
+          usable = next;
+          stopPolling();
+          keyboardDown.clear();
+          trackedGamepads.clear();
+          gamepadDown = /* @__PURE__ */ new Set();
+          captureAvailable = next ? keyboardCaptureAvailable(target) : false;
+          if (next) baselineGamepads();
+          applyEffective(void 0, true);
+          if (next && read !== null) frame = target.requestAnimationFrame(poll);
+        };
+        const reconcileCapture = () => {
+          if (usable !== true) return;
+          const next = keyboardCaptureAvailable(target);
+          if (next === captureAvailable) return;
+          const previous = captureAvailable;
+          captureAvailable = next;
+          if (previous === true && !next) {
+            keyboardDown.clear();
+            applyEffective();
+          }
+        };
+        const keydown = (event) => {
+          const button = keyboardButtons.get(event.code);
+          if (captureAvailable !== true || !event.isTrusted || button === void 0) return;
+          if (event.cancelable) event.preventDefault();
+          if (!keyboardDown.has(button)) {
+            keyboardDown.add(button);
+            const previous = effective;
+            applyEffective();
+            if (!previous.has(button) && effective.has(button)) {
+              send({ kind: "event", payload: { action: "down", button, repeat: false } });
+            }
+            return;
+          }
+          if (event.repeat && !gamepadDown.has(button)) {
+            send({ kind: "event", payload: { action: "down", button, repeat: true } });
+          }
+        };
+        const keyup = (event) => {
+          const button = keyboardButtons.get(event.code);
+          if (captureAvailable !== true || !event.isTrusted || button === void 0 || !keyboardDown.delete(button)) return;
+          const previous = effective;
+          applyEffective();
+          if (previous.has(button) && !effective.has(button)) {
+            send({ kind: "event", payload: { action: "up", button, repeat: false } });
+          }
+        };
+        const focusout = () => queueMicrotask(reconcileCapture);
+        target.addEventListener("focus", reconcileWindow);
+        target.addEventListener("blur", reconcileWindow);
+        target.addEventListener("keydown", keydown);
+        target.addEventListener("keyup", keyup);
+        target.document.addEventListener("focusin", reconcileCapture);
+        target.document.addEventListener("focusout", focusout);
+        target.document.addEventListener("visibilitychange", reconcileWindow);
+        reconcileWindow();
+        return () => {
+          if (!active) return;
+          active = false;
+          subscribed = false;
+          stopPolling();
+          target.removeEventListener("focus", reconcileWindow);
+          target.removeEventListener("blur", reconcileWindow);
+          target.removeEventListener("keydown", keydown);
+          target.removeEventListener("keyup", keyup);
+          target.document.removeEventListener("focusin", reconcileCapture);
+          target.document.removeEventListener("focusout", focusout);
+          target.document.removeEventListener("visibilitychange", reconcileWindow);
+          keyboardDown.clear();
+          trackedGamepads.clear();
+        };
+      }
+    });
   }
 
   // browser/gamepad-source.ts
@@ -564,7 +803,76 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
       return createGamepadInputSource(target);
     }
   };
+  var GameControlsInputElement = class extends HTMLElement {
+    context;
+    stopSource;
+    refreshTimer;
+    refresh;
+    claimed = false;
+    receiveRenderContext(context) {
+      if (context === null || typeof context !== "object" || typeof context.emitCustomEvent !== "function") {
+        throw new TypeError("Invalid WebPresentationContext");
+      }
+      this.context = context;
+      this.startIfReady();
+    }
+    connectedCallback() {
+      this.startIfReady();
+    }
+    disconnectedCallback() {
+      this.stopSource?.();
+      this.stopSource = void 0;
+      this.stopRefresh();
+      const target = this.ownerDocument.defaultView;
+      if (target !== null && this.claimed) {
+        const registry = owners.get(target);
+        if (registry?.get("controls") === this) registry.delete("controls");
+      }
+      this.claimed = false;
+    }
+    startIfReady() {
+      if (!this.isConnected || this.context === void 0 || this.stopSource !== void 0) return;
+      const target = this.ownerDocument.defaultView;
+      if (target === null) return;
+      const registry = owners.get(target) ?? /* @__PURE__ */ new Map();
+      if (!owners.has(target)) owners.set(target, registry);
+      const current = registry.get("controls");
+      if (current !== void 0 && current !== this) {
+        this.setAttribute("data-input-disabled", "duplicate");
+        return;
+      }
+      this.removeAttribute("data-input-disabled");
+      registry.set("controls", this);
+      this.claimed = true;
+      this.stopSource = createControlsInputSource(target).start((change) => this.emit(change));
+    }
+    emit(change) {
+      this.context?.emitCustomEvent(
+        change.kind === "state" ? "input.state" : "input.event",
+        change.payload,
+        { broadcast: "top-frame", channel: change.kind === "state" ? "controls.state" : "controls.event" }
+      );
+      if (change.kind !== "state") return;
+      if (change.payload.down.length === 0) {
+        this.stopRefresh();
+        return;
+      }
+      this.refresh = change.payload;
+      if (this.refreshTimer !== void 0) return;
+      this.refreshTimer = setInterval(() => {
+        if (this.refresh !== void 0 && this.isConnected) {
+          this.context?.emitCustomEvent("input.state", this.refresh, { broadcast: "top-frame", channel: "controls.state" });
+        }
+      }, CONTROLS_STATE_REFRESH_MS);
+    }
+    stopRefresh() {
+      if (this.refreshTimer !== void 0) clearInterval(this.refreshTimer);
+      this.refreshTimer = void 0;
+      this.refresh = void 0;
+    }
+  };
   customElements.define("game-keyboard-input", GameKeyboardInputElement);
   customElements.define("game-pointer-input", GamePointerInputElement);
   customElements.define("game-gamepad-input", GameGamepadInputElement);
+  customElements.define("game-controls-input", GameControlsInputElement);
 })();
