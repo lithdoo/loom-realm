@@ -4,7 +4,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import {
   createRendererDataPeer,
   createSubsystemDataPeer,
-  RENDERER_DATA_PROFILE_V2,
+  RENDERER_DATA_PROFILE_V3,
 } from "../dist/index.js";
 
 const accepted = () => ({ kind: "accepted" });
@@ -12,11 +12,11 @@ const binding = (carrier) => ({
   carrier,
   subsystemKey: "map",
   generation: 1,
-  dataProfile: RENDERER_DATA_PROFILE_V2,
+  dataProfile: RENDERER_DATA_PROFILE_V3,
 });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-test("routes Render and Viewport over Renderer Data Profile v2", async () => {
+test("routes Render, Viewport, and Presentation over Renderer Data Profile v3", async () => {
   const pair = createMemoryCarrierPair();
   const seen = [];
   const subsystem = createSubsystemDataPeer({

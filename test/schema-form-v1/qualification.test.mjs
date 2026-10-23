@@ -168,7 +168,7 @@ async function setup(page, origin, { cancelable = true } = {}) {
       launch: { subsystemKey: "forms", bootstrapToken: "secret", controlProtocolVersions: [1] },
       data: {
         async acquire() {
-          return { carrier: dataPair.left, generation: 1, dataProfile: "loomrealm.renderer-data/2" };
+          return { carrier: dataPair.left, generation: 1, dataProfile: "loomrealm.renderer-data/3" };
         },
       },
       state: (() => {
@@ -183,7 +183,7 @@ async function setup(page, origin, { cancelable = true } = {}) {
 
     const holder = renderer.createRendererControlHolder({
       async acquire(subsystemKey, generation, dataProfile) {
-        if (subsystemKey !== "forms" || generation !== 1 || dataProfile !== "loomrealm.renderer-data/2") throw new Error("Unexpected Data authority");
+        if (subsystemKey !== "forms" || generation !== 1 || dataProfile !== "loomrealm.renderer-data/3") throw new Error("Unexpected Data authority");
         return dataPair.right;
       },
     }, undefined, {
@@ -211,7 +211,7 @@ async function setup(page, origin, { cancelable = true } = {}) {
       revision: 1,
       runtimes: [{ subsystemKey: "forms", state: "ready" }],
       stack: [{ frameId: "form-frame", subsystemKey: "forms", lifecycle: "active", activationId: "form-activation" }],
-      dataAuthorities: [{ subsystemKey: "forms", generation: 1, dataProfile: "loomrealm.renderer-data/2" }],
+      dataAuthorities: [{ subsystemKey: "forms", generation: 1, dataProfile: "loomrealm.renderer-data/3" }],
     };
     const publisher = rendererControl.createMainRendererControlPeer({
       carrier: rendererPair.left,

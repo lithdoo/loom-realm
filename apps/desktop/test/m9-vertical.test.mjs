@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,6 +11,7 @@ import { runMain } from "@loomrealm/main";
 import { createSharedStateAuthority, prepareSharedStateDefinition } from "@loomrealm/shared-state";
 import { createSessionEventHub } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
+import { attachRendererPresentation } from "@loomrealm/renderer/web-presentation";
 import { DesktopDataConnectionBroker } from "../dist/index.js";
 
 const runnerPolicy = Object.freeze({
@@ -60,22 +62,34 @@ async function installation(t) {
     formatVersion: 1,
     subsystems: [{ key: "root", module: "subsystems/root.mjs" }],
   }));
+  const marker = path.join(root, "presentation-event.json");
   await writeFile(path.join(root, "subsystems", "root.mjs"), `
-    export default () => ({
-      async frame() {
+    import { writeFile } from "node:fs/promises";
+    export default (scope) => {
+      scope.createRenderDomain({
+        zIndex: 0,
+        roots: [{ key: "controls", tag: "lr-controls", attrs: {}, data: {}, children: [] }],
+      });
+      return ({
+      async frame(frame) {
+        const listener = scope.presentationEvents.createListener({ frame, channels: ["controls.event"] });
+        listener.on("controls.event", async (event) => {
+          await writeFile(${JSON.stringify(marker)}, JSON.stringify(event));
+        });
         await new Promise((resolve) => {
           const timer = setTimeout(resolve, 10_000);
           timer.unref();
         });
         return { type: "completed", value: null };
       }
-    });
+    }); };
   `);
-  return prepareHostraGame({ source: { installationRoot: root }, runnerPolicy });
+  return { prepared: await prepareHostraGame({ source: { installationRoot: root }, runnerPolicy }), marker };
 }
 
 test("real M9 Main → Desktop Broker → Hostra Runner vertical installs and recovers fresh Data peers", { timeout: 15_000 }, async (t) => {
-  const prepared = await installation(t);
+  const fixture = await installation(t);
+  const prepared = fixture.prepared;
   let candidateId = 0;
   const broker = new DesktopDataConnectionBroker({
     candidateId: () => `vertical-${++candidateId}`,
@@ -106,7 +120,13 @@ test("real M9 Main → Desktop Broker → Hostra Runner vertical installs and re
         },
       });
       const holder = createRendererControlHolder(observedBinding);
-      const host = { token, holder, outcome: null, failure: null };
+      const host = { token, holder, outcome: null, failure: null, emitNodeEvent: null, view: null, detach: null };
+      host.detach = attachRendererPresentation(holder, {
+        reevaluate(source, emitNodeEvent) {
+          host.emitNodeEvent = emitNodeEvent;
+          host.view = source.read();
+        },
+      });
       void holder.connect({
         carrier: pair.right,
         rendererControlToken: token,
@@ -147,6 +167,31 @@ test("real M9 Main → Desktop Broker → Hostra Runner vertical installs and re
     () => rendererHosts[0].outcome !== null || rendererHosts[0].failure !== null,
     "Renderer Control installation",
   );
+  await waitFor(() => rendererHosts[0].emitNodeEvent !== null && rendererHosts[0].view?.subsystems[0]?.domains.length > 0, "live Web Presentation source");
+  const presentation = rendererHosts[0].view;
+  const owner = presentation.subsystems.find((item) => item.subsystemKey === "root");
+  const domain = owner.domains[0];
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    rendererHosts[0].emitNodeEvent({
+      sessionId: presentation.sessionId,
+      subsystemKey: "root",
+      generation: 1,
+      domainId: domain.domainId,
+      targetKey: "controls",
+      name: "input.event",
+      data: { action: "down", button: "south", repeat: false },
+      options: { broadcast: "top-frame", channel: "controls.event" },
+    });
+    try {
+      await waitFor(() => existsSync(fixture.marker), "Desktop exact Frame callback", 50);
+      break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+  const delivered = JSON.parse(await import("node:fs/promises").then(({ readFile }) => readFile(fixture.marker, "utf8")));
+  assert.equal(delivered.channel, "controls.event");
+  assert.equal(delivered.source.subsystemKey, "root");
   assert.equal(rendererHosts[0].failure, null);
   assert.equal(rendererHosts[0].outcome.kind, "installed");
   await waitFor(() => acquiredCarriers.length === 1, "first real Renderer Data carrier");
@@ -158,7 +203,7 @@ test("real M9 Main → Desktop Broker → Hostra Runner vertical installs and re
   assert.deepEqual(before.dataAuthorities, [{
     subsystemKey: "root",
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/2",
+    dataProfile: "loomrealm.renderer-data/3",
   }]);
 
   await acquiredCarriers[0].send(JSON.stringify({ type: "not-a-data-message" }));
@@ -177,4 +222,5 @@ test("real M9 Main → Desktop Broker → Hostra Runner vertical installs and re
   assert.equal(mainFailure, null);
   assert.deepEqual(mainOutcome, { kind: "shutdown" });
   await waitFor(() => rendererHosts[0].holder.current() === null, "Renderer terminal");
+  rendererHosts[0].detach?.();
 });

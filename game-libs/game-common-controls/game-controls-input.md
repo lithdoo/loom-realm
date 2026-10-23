@@ -3,10 +3,10 @@
 > 状态：**Draft**
 > 位置：`game-libs/game-common-controls/game-controls-input.md`
 > 所属包：`@loomrealm-game/common-controls`
-> 发送路径：[emitCustomEvent 扩展](./emit-custom-event.md)、[Web Presentation API v2](../../doc/15-contracts/web-presentation-api-v2.md)、[Session Events v1](../../doc/15-contracts/session-events-v1.md)
+> 发送路径：[emitCustomEvent 扩展](./emit-custom-event.md)、[Web Presentation API v3](../../doc/15-contracts/web-presentation-api-v3.md)、[Frame-targeted Presentation Event v1](../../doc/15-contracts/frame-targeted-presentation-event-v1.md)
 > 相邻实现：[设备输入 Web Components](./device-input-components.md)、[Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)
 
-本文定义一个新的业务 Web Component：把键盘和手柄收成同一套数字按键，再以一对 Session Events 频道发出。现行六个设备频道保持不变。本文还不是正式契约；实现前不改写已冻结的 Game Common Controls Input v1。
+本文定义一个新的业务 Web Component：把键盘和手柄收成同一套数字按键，再以一对 Frame-targeted Presentation 频道发给当前 Top Active Frame。现行六个设备频道保持不变。本文还不是正式契约；实现前不改写已冻结的 Game Common Controls Input v1。
 
 ## 1. 组件
 
@@ -153,7 +153,7 @@ KeyZ up
 
 ## 6. 发送
 
-发送方式与 `game-keyboard-input`、`game-pointer-input`、`game-gamepad-input` 相同：一个组件只拥有一对精确频道，用 `emitCustomEvent` 广播。同一次变化先发整份 State，再发对应边沿 Event。指针不进入这里，也不转发 `keyboard.*` 或 `gamepad.*`。
+组件拥有一对精确频道，用 `emitCustomEvent(..., { broadcast: "top-frame" })` 投递给接受时的 Top Active Frame。同一次变化先发整份 State，再发对应边沿 Event。指针不进入这里，也不转发 `keyboard.*` 或 `gamepad.*`。
 
 ~~~text
 controls.state
@@ -164,13 +164,13 @@ controls.event
 context.emitCustomEvent(
   "input.state",
   { down },
-  { broadcast: true, channel: "controls.state" },
+  { broadcast: "top-frame", channel: "controls.state" },
 );
 
 context.emitCustomEvent(
   "input.event",
   { action, button, repeat },
-  { broadcast: true, channel: "controls.event" },
+  { broadcast: "top-frame", channel: "controls.event" },
 );
 ~~~
 
@@ -181,12 +181,13 @@ context.emitCustomEvent(
 
 `down` 按第 2 节的规范顺序排列，同一按键只出现一次。空 State 是 `{ down: [] }`。`button` 使用同一套位置名。`domainId`、`targetKey` 和 source 仍由 Framework 按当前 live RenderNode 填写。组件必须带上 `options.channel`，避免落到 `x.loomrealm.web-presentation.event`。
 
-到达 Session Events 后：
+到达目标 Frame listener 后：
 
 ~~~text
-SessionEvent.channel = controls.state | controls.event
-SessionEvent.type    = input.state | input.event
-SessionEvent.payload = { domainId, targetKey, data }
+PresentationFrameEvent.channel = controls.state | controls.event
+PresentationFrameEvent.name    = input.state | input.event
+PresentationFrameEvent.data    = business data
+PresentationFrameEvent.source  = { subsystemKey, domainId, targetKey }
 ~~~
 
 订阅者按 `channel` 区分 State 和 Event。`input.state` / `input.event` 只说明这是整份状态还是一次边沿。
@@ -258,18 +259,29 @@ disconnectedCallback / stop
 ## 8. 订阅
 
 ~~~ts
-const subscription = await scope.events.subscribe(
-  ["controls.state", "controls.event"],
-  (event) => {
-    const data = event.payload.data;
-    if (event.channel === "controls.state" && event.type === "input.state") {
+const listener = scope.presentationEvents.createListener({
+  frame,
+  channels: ["controls.state", "controls.event"],
+});
+
+const unsubscribeState = listener.on("controls.state", (event) => {
+    const data = event.data;
+    if (event.name === "input.state") {
       // data.down
     }
-    if (event.channel === "controls.event" && event.type === "input.event") {
+});
+
+const unsubscribeEvent = listener.on("controls.event", (event) => {
+    const data = event.data;
+    if (event.name === "input.event") {
       // data.action, data.button, data.repeat
     }
-  },
-);
+});
+
+// Frame teardown also closes its listeners automatically.
+unsubscribeState();
+unsubscribeEvent();
+listener.close();
 ~~~
 
 只关心边沿的调用方可以只订阅 `controls.event`。需要在迟到订阅或刷新中断后回到空档的调用方，同时订阅 `controls.state`，并把 State 交给 fresh-state tracker。
@@ -280,7 +292,7 @@ const subscription = await scope.events.subscribe(
 
 采集可以复用包内的键盘源和手柄源作为本地采样器。复用时，它们的 `keyboard.*` / `gamepad.*` 只留在组件内部，外发前换成第 6 节的载荷。摇杆轴在合并前丢掉。
 
-本组件不进入 Main，不读取 Frame、Activation、InputTarget 或 Input Interest，也不发送 `input.reset`。
+本组件不进入 Main，不读取或指定 Frame/Activation，也不发送 `input.reset`。Renderer 从 current Control v2 stack 派生 Top Frame lease；Subsystem listener 才显式绑定业务持有的真实 `Frame` object。
 
 ## 10. v1 不做的事
 

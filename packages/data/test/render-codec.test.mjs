@@ -16,7 +16,7 @@ function outboundHarness() {
     async close() { finish({ kind: "closed" }); },
   };
   const peer = createSubsystemDataPeer({
-    binding: { carrier, subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/2" },
+    binding: { carrier, subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
     handlers: {
       onViewportState: () => ({ kind: "accepted" }),
     },
@@ -103,7 +103,7 @@ test("invalid Render representation retires inbound Data before handler delivery
   })();
   const { createRendererDataPeer } = await import("../dist/index.js");
   const peer = createRendererDataPeer({
-    binding: { carrier, subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/2" },
+    binding: { carrier, subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
     handlers: {
       onRenderDomains: () => ({ kind: "accepted" }),
       onRenderSnapshot: () => ({ kind: "accepted" }),

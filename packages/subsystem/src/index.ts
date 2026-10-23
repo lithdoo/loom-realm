@@ -38,6 +38,12 @@ export type {
   ViewportListener,
   ViewportSize,
 } from "./viewport.js";
+export type {
+  PresentationFrameEvent,
+  PresentationEventHandler,
+  PresentationEventListener,
+  PresentationEventClient,
+} from "./presentation-events.js";
 export type { SharedStateClient } from "@loomrealm/shared-state";
 export {
   SessionEventError,

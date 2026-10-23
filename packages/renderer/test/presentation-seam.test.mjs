@@ -6,7 +6,7 @@ import { createMainRendererControlPeer, prepareRendererHelloResultV2 } from "@lo
 import { createRendererControlHolder } from "../dist/index.js";
 import { attachRendererPresentation } from "../dist/internal/presentation-seam.js";
 
-const authority = (subsystemKey) => ({ subsystemKey, generation: 1, dataProfile: "loomrealm.renderer-data/2" });
+const authority = (subsystemKey) => ({ subsystemKey, generation: 1, dataProfile: "loomrealm.renderer-data/3" });
 const snapshot = (revision) => ({
   sessionId: "S",
   revision,
@@ -76,5 +76,101 @@ test("Web Presentation events preserve channel, type, payload, owner, and broadc
   ]);
   assert.deepEqual(publications[1].payload, { domainId: "domain", targetKey: "node", data: { code: "Enter" } });
   assert.equal(publications[1].ownerSubsystemKey, "owner");
+  publisher.retire();
+});
+
+test("top-frame branches inside Renderer and crosses the target Data peer with trusted source provenance", async (t) => {
+  const peers = new Map();
+  const events = [];
+  const publications = [];
+  const holder = createRendererControlHolder({
+    async acquire(subsystemKey, generation, dataProfile) {
+      const pair = createMemoryCarrierPair();
+      const peer = createSubsystemDataPeer({
+        binding: { carrier: pair.left, subsystemKey, generation, dataProfile },
+        handlers: {
+          onViewportState: () => ({ kind: "accepted" }),
+          onPresentationEvent(message) { events.push([subsystemKey, structuredClone(message)]); return { kind: "accepted" }; },
+        },
+      });
+      peers.set(subsystemKey, peer);
+      return pair.right;
+    },
+  }, undefined, { async publish(event) { publications.push(event); } });
+  t.after(async () => Promise.allSettled([...peers.values()].map((peer) => peer.close())));
+
+  let emitNodeEvent;
+  const detach = attachRendererPresentation(holder, {
+    reevaluate(_source, emit) { emitNodeEvent = emit; },
+  });
+  t.after(detach);
+
+  const initial = {
+    sessionId: "S",
+    revision: 1,
+    runtimes: [
+      { subsystemKey: "owner", state: "ready" },
+      { subsystemKey: "battle", state: "ready" },
+    ],
+    stack: [{ frameId: "battle-frame", subsystemKey: "battle", lifecycle: "active", activationId: "battle-a1" }],
+    dataAuthorities: [authority("owner"), authority("battle")],
+  };
+  const control = createMemoryCarrierPair();
+  const publisher = createMainRendererControlPeer({
+    carrier: control.left,
+    acceptHello() {
+      return { kind: "accepted", snapshot: initial, preparedHelloText: prepareRendererHelloResultV2(initial) };
+    },
+  });
+  await holder.connect({ carrier: control.right, rendererControlToken: "token" });
+  await waitFor(() => peers.size === 2, "both Data peers");
+  await peers.get("battle").presentation.sendInterest({
+    type: "presentation.interest",
+    frames: [{ frameId: "battle-frame", channels: ["controls.event"] }],
+  });
+  await peers.get("owner").render.sendDomains({ type: "render.domains", domains: ["domain"] });
+  await peers.get("owner").render.sendSnapshot({
+    type: "render.snapshot", domainId: "domain", revision: 1, zIndex: 0,
+    roots: [{ key: "node", tag: "lr-node", attrs: {}, data: {}, children: [] }],
+  });
+  await waitFor(() => typeof emitNodeEvent === "function", "presentation callback");
+  await turn();
+
+  const source = {
+    sessionId: "S", subsystemKey: "owner", generation: 1,
+    domainId: "domain", targetKey: "node",
+  };
+  emitNodeEvent({
+    ...source,
+    name: "input.event",
+    data: { action: "down", button: "south" },
+    options: { broadcast: "top-frame", channel: "controls.event" },
+  });
+  await waitFor(() => events.length === 1, "top-frame Data event");
+  assert.equal(publications.length, 0, "top-frame must not enter the Platform publication path");
+  assert.equal(events[0][0], "battle");
+  assert.deepEqual(events[0][1], {
+    type: "presentation.event",
+    sourceSubsystemKey: "owner",
+    domainId: "domain",
+    targetKey: "node",
+    frameId: "battle-frame",
+    activationId: "battle-a1",
+    channel: "controls.event",
+    name: "input.event",
+    data: { action: "down", button: "south" },
+  });
+
+  publisher.publish({ ...initial, revision: 2, stack: [] });
+  await turn();
+  emitNodeEvent({
+    ...source,
+    name: "input.event",
+    data: { action: "up" },
+    options: { broadcast: "top-frame", channel: "controls.event" },
+  });
+  await turn();
+  assert.equal(events.length, 1, "no active top silently drops");
+  assert.throws(() => emitNodeEvent({ ...source, name: "x", data: {}, options: { broadcast: "bad" } }), TypeError);
   publisher.retire();
 });

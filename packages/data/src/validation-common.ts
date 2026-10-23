@@ -158,9 +158,10 @@ export function assertBoundedJson(
 export function assertPayload(
   payload: unknown,
   protocol: DataProtocolFamily,
+  maxDepth = MAX_PAYLOAD_DEPTH,
 ): JsonObject {
   const result = object(payload, protocol, "payload");
-  assertBoundedJson(result, protocol);
+  assertBoundedJson(result, protocol, maxDepth);
   if (utf8ByteLength(stringifyJson(result)) > MAX_PAYLOAD_BYTES) {
     fail(protocol, "payload byte limit exceeded");
   }

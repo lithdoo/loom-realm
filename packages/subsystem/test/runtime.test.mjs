@@ -263,7 +263,7 @@ function rendererDataPeer(carrier) {
       carrier,
       subsystemKey: "demo",
       generation: 1,
-      dataProfile: "loomrealm.renderer-data/2",
+      dataProfile: "loomrealm.renderer-data/3",
     },
     handlers: {
       onRenderDomains: accept,
@@ -295,7 +295,7 @@ test("ready Data acquisition is non-blocking and terminal reacquires a fresh pee
   requests[0].gate.resolve({
     carrier: firstPair.right,
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/2",
+    dataProfile: "loomrealm.renderer-data/3",
   });
   const firstRenderer = rendererDataPeer(firstPair.left);
   await tick();
@@ -305,6 +305,85 @@ test("ready Data acquisition is non-blocking and terminal reacquires a fresh pee
 
   await shutdown(session);
   assert.equal(requests[1].signal.aborted, true);
+});
+
+test("Runtime wires Presentation listeners through the actual Data carrier to the exact Frame", async () => {
+  const pair = createMemoryCarrierPair();
+  const interests = [];
+  const delivered = [];
+  const never = new Promise(() => {});
+  let listenerCount = 0;
+  const session = await createSession(
+    defineSubsystem((scope) => ({
+      async frame(frame) {
+        const listener = scope.presentationEvents.createListener({
+          frame,
+          channels: ["controls.event"],
+        });
+        listener.on("controls.event", (event) => delivered.push([frame.id, event]));
+        listenerCount += 1;
+        return never;
+      },
+    })),
+    {},
+    defaultPolicy,
+    {
+      async acquire() {
+        return { carrier: pair.right, generation: 1, dataProfile: "loomrealm.renderer-data/3" };
+      },
+    },
+  );
+  const renderer = createRendererDataPeer({
+    binding: { carrier: pair.left, subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
+    handlers: {
+      onRenderDomains: () => ({ kind: "accepted" }),
+      onRenderSnapshot: () => ({ kind: "accepted" }),
+      onRenderPatch: () => ({ kind: "accepted" }),
+      onRenderEvent: () => ({ kind: "accepted" }),
+      onPresentationInterest(message) { interests.push(structuredClone(message)); return { kind: "accepted" }; },
+    },
+  });
+
+  await session.main.frame.initialize({ frameId: "parent", input: null });
+  await session.main.frame.initialize({ frameId: "child", input: null });
+  await session.main.frame.activate({ frameId: "parent", activationId: "parent-a1" });
+  await session.main.frame.activate({ frameId: "child", activationId: "child-a1" });
+  await waitFor(() => listenerCount === 2 && interests.at(-1)?.frames.length === 2, "Presentation Interest union");
+
+  await renderer.presentation.sendEvent({
+    type: "presentation.event",
+    sourceSubsystemKey: "world",
+    domainId: "hud",
+    targetKey: "controls",
+    frameId: "child",
+    activationId: "child-a1",
+    channel: "controls.event",
+    name: "input.event",
+    data: { action: "down" },
+  });
+  await waitFor(() => delivered.length === 1, "exact Frame Presentation callback");
+  assert.equal(delivered[0][0], "child");
+  assert.deepEqual(delivered[0][1].source, { subsystemKey: "world", domainId: "hud", targetKey: "controls" });
+
+  await renderer.presentation.sendEvent({
+    type: "presentation.event",
+    sourceSubsystemKey: "world",
+    domainId: "hud",
+    targetKey: "controls",
+    frameId: "parent",
+    activationId: "stale",
+    channel: "controls.event",
+    name: "input.event",
+    data: { action: "down" },
+  });
+  await tick();
+  assert.equal(delivered.length, 1);
+
+  await session.main.frame.closeFrame({ frameId: "child" });
+  await waitFor(() => interests.at(-1)?.frames.every(({ frameId }) => frameId !== "child"), "Frame Interest cleanup");
+  await session.main.frame.closeFrame({ frameId: "parent" });
+  await shutdown(session);
+  await renderer.close();
 });
 
 test("shutdown aborts pending Data and closes a late carrier without changing Runtime result", async () => {
@@ -329,7 +408,7 @@ test("shutdown aborts pending Data and closes a late carrier without changing Ru
   request.resolve({
     carrier: late.right,
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/2",
+    dataProfile: "loomrealm.renderer-data/3",
   });
   assert.deepEqual(await late.left.closed, { kind: "closed" });
 });
@@ -370,7 +449,7 @@ test("throwing carrier close getter stays isolated during Subsystem construction
             },
           },
           generation: 1,
-          dataProfile: "loomrealm.renderer-data/2",
+          dataProfile: "loomrealm.renderer-data/3",
         };
       },
     },
@@ -427,7 +506,7 @@ test("hanging Data close shares the Runtime cleanup deadline and cannot replace 
         return {
           carrier,
           generation: 1,
-          dataProfile: "loomrealm.renderer-data/2",
+          dataProfile: "loomrealm.renderer-data/3",
         };
       },
     },

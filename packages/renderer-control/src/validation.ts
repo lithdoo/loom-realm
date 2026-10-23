@@ -106,7 +106,7 @@ function dataAuthority(raw: unknown): RendererDataAuthorityV2 {
   const value = plain(raw, "dataAuthority");
   exact(value, ["subsystemKey", "generation", "dataProfile"]);
   const dataProfile = text(value.dataProfile, "dataProfile", 256, true);
-  if (dataProfile !== "loomrealm.renderer-data/2") fail("Unsupported dataProfile");
+  if (dataProfile !== "loomrealm.renderer-data/3") fail("Unsupported dataProfile");
   return frozen({
     subsystemKey: text(value.subsystemKey, "subsystemKey", 256),
     generation: positiveSafe(value.generation, "generation"),

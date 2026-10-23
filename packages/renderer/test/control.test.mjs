@@ -46,7 +46,7 @@ async function waitFor(predicate, message) {
 const authority = (subsystemKey) => ({
   subsystemKey,
   generation: 1,
-  dataProfile: "loomrealm.renderer-data/2",
+  dataProfile: "loomrealm.renderer-data/3",
 });
 
 function renderDataHarness() {

@@ -102,7 +102,7 @@ export const registryEvidence = new Map([
     const blocked = new Promise((resolve) => { unblock = resolve; });
     const trace = [];
     fresh.setDataPeer({
-      binding: { subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/2" },
+      binding: { subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
       render: Object.fromEntries(["sendDomains", "sendSnapshot", "sendPatch", "sendEvent"].map((name) => [name, async (message) => {
         trace.push(message); if (trace.length === 1) await blocked; return { kind: "sent" };
       }])),

@@ -97,7 +97,7 @@ export function expectInboundRejected(raw, pattern) {
 export function senderHarness(generation = 1, hook = async () => {}) {
   const messages = [];
   const peer = {
-    binding: { subsystemKey: "demo", generation, dataProfile: "loomrealm.renderer-data/2" },
+    binding: { subsystemKey: "demo", generation, dataProfile: "loomrealm.renderer-data/3" },
     render: Object.fromEntries(["sendDomains", "sendSnapshot", "sendPatch", "sendEvent"].map((name) => [name, async (message) => {
       messages.push(message);
       await hook(message, messages.length - 1);
@@ -132,7 +132,7 @@ export function inboundCarrier(units) {
 
 export async function terminalForRaw(raw, handlers = {}) {
   const renderer = createRendererDataPeer({
-    binding: { carrier: inboundCarrier([raw]), subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/2" },
+    binding: { carrier: inboundCarrier([raw]), subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
     handlers: {
       onRenderDomains: handlers.onRenderDomains ?? (() => ({ kind: "accepted" })),
       onRenderSnapshot: handlers.onRenderSnapshot ?? (() => ({ kind: "accepted" })),
@@ -145,7 +145,7 @@ export async function terminalForRaw(raw, handlers = {}) {
 
 export async function realSenderPeer(carrier, generation = 1) {
   return createSubsystemDataPeer({
-    binding: { carrier, subsystemKey: "demo", generation, dataProfile: "loomrealm.renderer-data/2" },
+    binding: { carrier, subsystemKey: "demo", generation, dataProfile: "loomrealm.renderer-data/3" },
     handlers: {
       onViewportState: () => ({ kind: "accepted" }),
     },

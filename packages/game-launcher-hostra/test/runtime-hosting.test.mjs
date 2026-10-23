@@ -137,7 +137,7 @@ test("RuntimeHosting hands off an exact child-bound Data provisioner before laun
     candidateId: "candidate-a",
     endpoint: `ws://127.0.0.1:${address.port}${dataPath}`,
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/2",
+    dataProfile: "loomrealm.renderer-data/3",
   }, new AbortController().signal);
   const socket = await connected.promise;
   await prepare;
@@ -146,7 +146,7 @@ test("RuntimeHosting hands off an exact child-bound Data provisioner before laun
     candidateId: "candidate-b",
     endpoint: `ws://127.0.0.1:${address.port}${dataPath}`,
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/2",
+    dataProfile: "loomrealm.renderer-data/3",
   }, new AbortController().signal), /already prepared/);
   await handoff.provisioner.commit("candidate-a", new AbortController().signal);
   const overflowClosed = new Promise((resolve) => socket.once("close", resolve));

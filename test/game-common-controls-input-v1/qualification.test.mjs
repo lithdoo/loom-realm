@@ -4,7 +4,7 @@ import test from "node:test";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import {
   createSubsystemDataPeer,
-  RENDERER_DATA_PROFILE_V2,
+  RENDERER_DATA_PROFILE_V3,
 } from "@loomrealm/data";
 import { prepareRendererHelloResultV2 } from "@loomrealm/renderer-control";
 import { DEVICE_INPUT_CHANNELS } from "@loomrealm-game/common-controls";
@@ -21,11 +21,11 @@ test("the game-lib owns exactly six isolated device channels", () => {
   assert.equal(new Set(DEVICE_INPUT_CHANNELS).size, 6);
 });
 
-test("Renderer Data v2 contains Render and Viewport but rejects retired input messages", async () => {
-  assert.equal(RENDERER_DATA_PROFILE_V2, "loomrealm.renderer-data/2");
+test("Renderer Data v3 contains active families but rejects retired input messages", async () => {
+  assert.equal(RENDERER_DATA_PROFILE_V3, "loomrealm.renderer-data/3");
   const pair = createMemoryCarrierPair();
   const peer = createSubsystemDataPeer({
-    binding: { carrier: pair.left, subsystemKey: "game", generation: 1, dataProfile: RENDERER_DATA_PROFILE_V2 },
+    binding: { carrier: pair.left, subsystemKey: "game", generation: 1, dataProfile: RENDERER_DATA_PROFILE_V3 },
     handlers: { onViewportState: () => ({ kind: "accepted" }) },
   });
   await pair.right.send(JSON.stringify({ type: "input.state", frameId: "f", activationId: "a", channel: "keyboard.state", payload: { down: [] } }));

@@ -28,6 +28,7 @@ import type {
   RuntimeFailure,
   SubsystemDefinition,
 } from "../model.js";
+import type { FrameDeliveryView, PresentationRuntimeFacts } from "./presentation-event-manager.js";
 
 type FrameHandlers = Omit<SubsystemRuntimeControlHandlers, "onShutdown">;
 type EmptyReply = RuntimeControlHandlerReply<Record<string, never>, FrameRpcErrorData>;
@@ -104,7 +105,7 @@ function runtimeFailure(code: string, message: string): RuntimeFailure {
   return Object.freeze({ code, message });
 }
 
-export class FrameRuntime {
+export class FrameRuntime implements PresentationRuntimeFacts {
   private readonly contexts = new Map<string, FrameContext>();
   private readonly ownedFrames = new WeakMap<Frame, FrameContext>();
 
@@ -113,7 +114,19 @@ export class FrameRuntime {
     private readonly getPeer: () => SubsystemRuntimeControlPeer | null,
     private readonly canAcceptFrames: () => boolean,
     private readonly failRuntime: (failure: RuntimeFailure) => void,
+    private readonly onFrameClosed: (frameId: string) => void = () => {},
   ) {}
+
+  inspect(frame: Frame): FrameDeliveryView {
+    const context = this.ownedFrames.get(frame);
+    if (context === undefined) return Object.freeze({ kind: "foreign" });
+    return this.deliveryView(context);
+  }
+
+  inspectById(frameId: string): Exclude<FrameDeliveryView, { readonly kind: "foreign" }> | null {
+    const context = this.contexts.get(frameId);
+    return context === undefined ? null : this.deliveryView(context);
+  }
 
   handlers(): FrameHandlers {
     return {
@@ -139,6 +152,7 @@ export class FrameRuntime {
       context.state = "closed";
       context.activationId = undefined;
       context.pendingCall = undefined;
+      this.onFrameClosed(context.id);
     }
     this.contexts.clear();
   }
@@ -263,6 +277,7 @@ export class FrameRuntime {
       context.pendingCall = undefined;
       context.state = "closed";
       this.contexts.delete(frameId);
+      this.onFrameClosed(frameId);
     });
   }
 
@@ -363,6 +378,16 @@ export class FrameRuntime {
       ),
     );
     return NEVER;
+  }
+
+  private deliveryView(context: FrameContext): Exclude<FrameDeliveryView, { readonly kind: "foreign" }> {
+    if (context.state === "closed") return Object.freeze({ kind: "closed" });
+    return Object.freeze({
+      kind: "live",
+      frameId: context.id,
+      activationId: context.activationId ?? null,
+      deliveryOpen: context.state === "active",
+    });
   }
 
   private async runHandler(context: FrameContext): Promise<void> {

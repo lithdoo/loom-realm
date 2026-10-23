@@ -163,7 +163,7 @@ async function setup(page, origin) {
       launch: { subsystemKey: "dialogue", bootstrapToken: "secret", controlProtocolVersions: [1] },
       data: {
         async acquire() {
-          return { carrier: dataPair.left, generation: 1, dataProfile: "loomrealm.renderer-data/2" };
+          return { carrier: dataPair.left, generation: 1, dataProfile: "loomrealm.renderer-data/3" };
         },
       },
       state: (() => {
@@ -178,7 +178,7 @@ async function setup(page, origin) {
 
     const holder = renderer.createRendererControlHolder({
       async acquire(subsystemKey, generation, dataProfile) {
-        if (subsystemKey !== "dialogue" || generation !== 1 || dataProfile !== "loomrealm.renderer-data/2") {
+        if (subsystemKey !== "dialogue" || generation !== 1 || dataProfile !== "loomrealm.renderer-data/3") {
           throw new Error("Unexpected Data authority");
         }
         return dataPair.right;
@@ -211,7 +211,7 @@ async function setup(page, origin) {
       revision: 1,
       runtimes: [{ subsystemKey: "dialogue", state: "ready" }],
       stack: [{ frameId: "dialogue-frame", subsystemKey: "dialogue", lifecycle: "active", activationId: "dialogue-activation" }],
-      dataAuthorities: [{ subsystemKey: "dialogue", generation: 1, dataProfile: "loomrealm.renderer-data/2" }],
+      dataAuthorities: [{ subsystemKey: "dialogue", generation: 1, dataProfile: "loomrealm.renderer-data/3" }],
     };
     const publisher = rendererControl.createMainRendererControlPeer({
       carrier: rendererPair.left,

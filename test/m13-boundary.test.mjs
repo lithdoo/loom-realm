@@ -53,7 +53,7 @@ test("Render Event delta adds only the optional transient seam and no retained o
   assert.doesNotMatch(control, /(instanceof WebProjector|new WebProjector|EventStore|retry|timeout|NACK|\bACK\b|\bResult\b)/);
   assert.doesNotMatch(projector, /(eventId|sequenceNumber|pendingEvents|replay|retry|timeout|NACK|\bACK\b|\bResult\b)/);
   assert.match(dataModel, /type RenderUpdateMessageV1 = RenderDomainsV1 \| RenderSnapshotV1 \| RenderPatchV1 \| RenderEventV1/);
-  assert.match(dataModel, /RENDERER_DATA_PROFILE_V2 = "loomrealm\.renderer-data\/2"/);
+  assert.match(dataModel, /RENDERER_DATA_PROFILE_V3 = "loomrealm\.renderer-data\/3"/);
   assert.match(publicDeclaration, /type RenderEventReceiver/);
   assert.match(publicDeclaration, /type WebPresentationRenderEvent/);
   assert.match(publicDeclaration, /RendererPresentationRenderEvent/);

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createSubsystemDataPeer,
-  RENDERER_DATA_PROFILE_V2,
+  RENDERER_DATA_PROFILE_V3,
 } from "../dist/index.js";
 
 const accepted = () => ({ kind: "accepted" });
@@ -10,7 +10,7 @@ const binding = (carrier) => ({
   carrier,
   subsystemKey: "map",
   generation: 1,
-  dataProfile: RENDERER_DATA_PROFILE_V2,
+  dataProfile: RENDERER_DATA_PROFILE_V3,
 });
 const handlers = {
   onViewportState: accepted,

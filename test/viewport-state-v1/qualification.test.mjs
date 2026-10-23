@@ -3,7 +3,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import {
   createRendererDataPeer,
   createSubsystemDataPeer,
-  RENDERER_DATA_PROFILE_V2,
+  RENDERER_DATA_PROFILE_V3,
 } from "../../packages/data/dist/index.js";
 import { ViewportManager } from "../../packages/subsystem/dist/internal/viewport-manager.js";
 import {
@@ -19,7 +19,7 @@ const binding = (carrier, generation = 1) => ({
   carrier,
   subsystemKey: "demo",
   generation,
-  dataProfile: RENDERER_DATA_PROFILE_V2,
+  dataProfile: RENDERER_DATA_PROFILE_V3,
 });
 const subsystemHandlers = {
   onViewportState: accepted,
@@ -70,7 +70,7 @@ function createWriterCarrier() {
 const authority = {
   subsystemKey: "demo",
   generation: 1,
-  dataProfile: RENDERER_DATA_PROFILE_V2,
+  dataProfile: RENDERER_DATA_PROFILE_V3,
 };
 const snapshot = (sessionId, revision, generation = 1) => ({
   sessionId,
