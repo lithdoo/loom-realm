@@ -30,6 +30,28 @@ Subsystem RenderDomain
 
 组件内部自己监听键盘、自己轮询手柄。它不挂载 `game-keyboard-input` 或 `game-gamepad-input`，也不把采集结果转发到 `keyboard.*` 或 `gamepad.*`。同一 Window 上如果再挂那两个原始设备组件，同一下物理输入会进入两套频道；这个互斥由游戏的 RenderDomain 保证。
 
+推荐把这些组件理解为两层不同抽象，而不是四个都应默认挂载的输入源：
+
+~~~text
+普通数字操控
+    -> game-controls-input
+    -> controls.state / controls.event
+
+需要原始键盘 code
+    -> game-keyboard-input
+    -> keyboard.*
+
+需要原始手柄 id / 摇杆 / 压力
+    -> game-gamepad-input
+    -> gamepad.*
+
+需要坐标或 Pointer identity
+    -> game-pointer-input
+    -> pointer.*
+~~~
+
+`game-controls-input` 可以与 Pointer 同时使用。只有业务明确需要两套语义时，才同时挂载 `game-controls-input` 与原始 Keyboard/Gamepad 组件；否则同一次物理操作会分别进入统一频道和原始频道，消费方若同时监听两边就会得到两份逻辑输入。这属于游戏 composition 责任，Framework 不额外建立互斥 authority。
+
 ## 2. 对外只有一套按键
 
 对外词汇是手柄按键。键盘是这套按键的别名，订阅者看不到 `KeyboardCode`、手柄序号、轴值或压力。
@@ -83,6 +105,26 @@ v1 是一名本地玩家。所有已连接的 standard 手柄先按按键做 OR�
 ## 4. 键盘别名
 
 键盘只接受第 2 节那 14 个 `code`，并且必须是 `isTrusted` 的 `keydown` / `keyup`。一颗统一按键只对应一个键，表以外的键忽略。对应关系在 v1 写死，组件不读取属性或配置。
+
+键盘采集还必须服从浏览器已有的编辑和焦点语义。组件统一维护一条 keyboard capture policy，而不是让 Map、Dialogue、Battle 各自判断：
+
+~~~text
+事件来自可编辑或浏览器交互控件
+    -> 浏览器优先
+    -> 不改变 keyboard held
+    -> 不发送 controls.state / controls.event
+    -> 不调用 preventDefault()
+
+事件来自普通游戏展示区域，且 code 命中第 2 节映射
+    -> 游戏 controls 优先
+    -> 更新 keyboard held
+    -> 发送对应 State / Event
+    -> 对会触发滚动、焦点移动等浏览器默认行为的键调用 preventDefault()
+~~~
+
+实现时至少把 `input`、`textarea`、`select`、`button`、可导航链接和 `contenteditable` 视为浏览器拥有键盘语义的区域；从这些元素或其可编辑后代产生的按键不进入 controls。这样在表单里输入 `Z` 不会同时触发 `south`，在浏览器控件上使用方向键或 `Tab` 也不会同时改变游戏状态。
+
+`Tab -> select` 因此只在当前按键属于游戏 capture 范围时成立；一旦焦点进入浏览器交互控件，`Tab` 保持原生焦点导航，不发送 `select`。具体的 blocked-target 判定必须集中在本组件实现和 Qualification 中，不能由各业务 Subsystem 自行复制。
 
 键盘自动重复只产生 Event，不重复 State。`repeat: true` 只在下面三件事同时成立时发送：
 
@@ -222,6 +264,33 @@ PresentationFrameEvent.source  = { subsystemKey, domainId, targetKey }
 
 非空 State 的 1000ms 刷新重复当前 `down`，不重复 Event。变为空 State 时立即发送并停止刷新。订阅侧 2500ms 没有新的 `controls.state`，本地退回 `{ down: [] }`。实现时把 `controls.state` 纳入 `createFreshDeviceStateTracker` 能识别的 State 频道。Event 不刷新、不重放。
 
+### 6.1 Activation 边界
+
+State 和 Event 在 Frame 切换时承担不同职责：
+
+~~~text
+controls.state
+    = “现在仍然按着什么”
+    可以在后续刷新中被新的 Top Active Frame 重新观察到
+
+controls.event
+    = “刚刚发生了一次按下 / 松开”
+    只属于接受该 Event 时绑定的 exact Frame + Activation
+    不跨 Activation 继承、不重定向、不重放
+~~~
+
+新的 Activation 在业务本地必须先从 neutral `{ down: [] }` 开始，不能把旧 Activation 缓存的 held 状态直接带进来。如果玩家在 Frame 切换后仍然真实按着某颗键，后续 `controls.state` 刷新可以让新 Activation 再次观察到这份“当前事实”；这不是旧 State replay，而是一条在新 Top Frame lease 下重新接受的新 State publication。
+
+因此持续行为应以 State 为依据，例如移动或 held modifier；一次性行为应以 Event 为依据，例如 confirm、cancel、menu。业务不能把旧 Activation 记录的 `down` Event 当成新 Activation 的首个输入。
+
+### 6.2 Interest 建立窗口
+
+`broadcast: "top-frame"` 继续服从 Frame-targeted Presentation Event 的 fail-closed sender gate。Frame 刚切换时，如果目标 listener 的 exact channel Interest 尚未到达 Renderer，这段窗口内的瞬时 Event 可以被丢弃；Framework 不缓存、不重放，也不在 Interest 后补投。
+
+实现和业务组合应尽量在一次 Frame activation 开始时先创建所需 listener，再进入依赖这些输入的交互逻辑。v1 不引入 Interest-ready ACK，也不把短暂 tap 存进 Renderer 队列等待未来 Interest。State 可由后续刷新恢复当前 held 事实，Event 则保持纯 transient。
+
+Qualification 必须覆盖“新 Frame 刚激活时立即产生完整 down/up tap”的场景，并把 fail-closed 丢弃作为显式协议行为，而不是偶发现象。若未来某类 UI 要求切换瞬间的首个 tap 也保证必达，应另行设计可交互 readiness，而不是偷偷给本组件增加 replay。
+
 失焦、页面隐藏和组件卸下时的收尾见第 7 节。窗口仍可用而手柄断开，使某颗键的有效值从有到无时，按本节先发 State，再按规范顺序发 `up`。
 
 本组件不发送：
@@ -259,6 +328,7 @@ disconnectedCallback / stop
 ## 8. 订阅
 
 ~~~ts
+// 在本次 Frame activation 开始时尽早建立 listener。
 const listener = scope.presentationEvents.createListener({
   frame,
   channels: ["controls.state", "controls.event"],
@@ -286,6 +356,8 @@ listener.close();
 
 只关心边沿的调用方可以只订阅 `controls.event`。需要在迟到订阅或刷新中断后回到空档的调用方，同时订阅 `controls.state`，并把 State 交给 fresh-state tracker。
 
+每次新的 Frame Activation 都必须重新建立自己的 listener 和本地消费状态；旧 Activation 的 listener 随 Frame teardown 关闭。消费方的 held/down 缓存从 neutral 开始，随后只接受该 Activation 实际收到的 `controls.state`。
+
 ## 9. 实现时落在哪里
 
 仍放在 `@loomrealm-game/common-controls`，并打进现有的 `device-input.browser.js`，这样加载这一份浏览器脚本就会注册第四个元素。运行时根导出增加 `ControlsButtonV1`、两个频道名，以及 `controls.state` 的空 State。
@@ -294,7 +366,18 @@ listener.close();
 
 本组件不进入 Main，不读取或指定 Frame/Activation，也不发送 `input.reset`。Renderer 从 current Control v2 stack 派生 Top Frame lease；Subsystem listener 才显式绑定业务持有的真实 `Frame` object。
 
-## 10. v1 不做的事
+## 10. Qualification 重点
+
+实现前至少固定下面这些边界用例：
+
+- Keyboard 和 Gamepad 同时按住同一统一按键，只产生一个 effective `down`；任一侧先松开不产生 `up`，最后一侧松开才产生 `up`。
+- Frame 切换时旧 Activation 的 Event 不进入新 Activation；玩家持续按住的键可以通过后续 State publication 被新 Activation 重新观察到。
+- 新 Frame 的 Interest 尚未被 Renderer 观察到时，瞬时 Event fail closed 丢弃，不缓存、不重放、不改投后来的 Frame。
+- `input`、`textarea`、`select`、`button`、可导航链接和 `contenteditable` 获得键盘语义时，映射键不进入 controls；普通游戏区域中的方向键和 `Tab` 等被 capture 后不再同时触发对应浏览器默认行为。
+- `game-controls-input` 与原始 Keyboard/Gamepad 组件同时挂载时，两套频道彼此独立；Framework 不去重，测试明确把它视为游戏 composition 选择。
+- 非空 State 刷新、2500ms freshness fallback、失焦清空、重新可用 baseline 和 disconnect 不补 Event 的规则继续成立。
+
+## 11. v1 不做的事
 
 - 不读取左右摇杆，也不提供摇杆死区、八向量化或摇杆按下。
 - 不输出模拟量、手柄 id、原始 `code` 或设备来源。
