@@ -118,7 +118,7 @@ keyboardCaptureAvailable
       && 当前焦点不属于浏览器交互区域
 ~~~
 
-浏览器交互区域至少包括 `input`、`textarea`、`select`、`button`、可导航链接和 `contenteditable`。实现必须按实际焦点所在的 composed tree 判断，不能只看某次 keyboard event 的 target；否则“游戏区按下 -> 点击输入框 -> 在输入框里松开”会漏掉释放，留下卡住的 held。
+浏览器交互区域至少包括 `input`、`textarea`、`select`、`button`、可导航链接和 `contenteditable`。实现必须按实际焦点所在的 composed tree 判断，不能只看某次 keyboard event 的 target；否则“游戏区按下 -> 点击输入框 -> 在输入框里松开”会漏掉释放，留下卡住的 held。至少在 `focusin` / `focusout`、Window focus / blur 和 `visibilitychange` 后重新计算 availability。
 
 capture 状态转换定义为：
 
@@ -225,7 +225,7 @@ context.emitCustomEvent(
 
 | 频道 | 事件名 | data | 何时发送 |
 | --- | --- | --- | --- |
-| `controls.state` | `input.state` | `{ down: readonly ControlsButtonV1[] }` | 有效集合变化；窗口失焦或隐藏时发 `{ down: [] }`；重新可用时发当前快照；非空时每 1000ms 再发同一份 |
+| `controls.state` | `input.state` | `{ down: readonly ControlsButtonV1[] }` | 有效集合变化（含 keyboard capture loss）；Window 不可用时发 neutral；重新可用时发当前快照；非空时每 1000ms 再发同一份 |
 | `controls.event` | `input.event` | `{ action: "down" \| "up"; button: ControlsButtonV1; repeat: boolean }` | 某一颗键的有效值从无到有，或从有到无 |
 
 `down` 按第 2 节的规范顺序排列，同一按键只出现一次。空 State 是 `{ down: [] }`。`button` 使用同一套位置名。`domainId`、`targetKey` 和 source 仍由 Framework 按当前 live RenderNode 填写。组件必须带上 `options.channel`，避免落到 `x.loomrealm.web-presentation.event`。
