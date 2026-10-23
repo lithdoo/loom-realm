@@ -362,7 +362,7 @@ already in-flight Event → cannot retract；目标 Frame/Activation 变化由 r
 - 每个 current target Data peer 有**一个 Presentation 逻辑队列**，最多一个 presentation send in flight；**物理发送只能调用该 peer 已有的 `DataRuntime.send()`**，与 Render/Viewport 共用同一个 DataRuntime writer/carrier，不创建第二 reader/writer；
 - 统一队列 FIFO：无论 `name` 是 `input.state` 还是 `input.event`，按照同一来源的 `emitCustomEvent` 接受顺序入队/发送，不因两个 Channel 分队列而逆序；
 - **固定上限：每 target Data peer 至多 256 个尚未开始的 Presentation Event**；队列满时 drop 新事件，保留已入队顺序；不等待或 unbounded retry，不把正常 Presentation 溢出上抛成整个 Data peer terminal。Drop 不承诺送达；
-- 仅在取出队头、准备调用 `peer.presentation.sendEvent(...)` 前执行完整 `Effective(E)` 检查；若不通过直接 drop 并继续队列，避免过期事件进入 DataRuntime writer；
+- 接受新 Event 时先验证该 Event 的 `Effective(E)`，再用同一 predicate 清理队列中已经失效的 pending Event，最后才检查 256 上限；取出队头、准备调用 `peer.presentation.sendEvent(...)` 前再次执行完整检查。这样 source RenderNode 删除等不伴随 Control/Interest 变化的失效事实，也不会继续占用后来合法 Event 的容量；
 - `DataRuntime` 已有 `MAX_PENDING_SENDS=1024` 的共享上限，Presentation 一次只向它提交一个在途消息；Render/Viewport 本身仍可能独立触发 terminal，但新 Presentation burst 不得单独把其 1024 队列耗尽；
 - lease 改变时丢弃尚未开始的旧 lease Event；
 - Interest 缩小时丢弃对应尚未开始的 channel Event；
@@ -976,12 +976,12 @@ Framework input.* / InputGate / InputManager restoration
 | F20 | top-frame listener exists, ordinary Session Event same channel | Presentation listener 不收到普通 Session Event |
 | F21 | `render.event` forward path | 完全保持既有行为 |
 | F22 | Renderer Data `/2` old message set historical contract | 不篡改历史 contract；current runtime 明确使用 `/3` |
-| F23 | Desktop actual Data carrier end-to-end | browser source → exact Frame callback |
-| F24 | PWA actual Data carrier end-to-end | browser source → exact Frame callback |
+| F23 | Desktop actual Data carrier end-to-end | World browser source → Hostra → Battle exact Frame callback；World listener 不执行 |
+| F24 | PWA actual Data carrier end-to-end | World browser source → Workers → Battle exact Frame callback；World listener 不执行 |
 | F25 | Control v2 snapshot / Data /3 整体升级；旧 /2 peer 与 /3 profile 错配 | wire Control v2 不变；/3 端到端成功；混搭 fail-closed；文档无 Active profile 矛盾 |
 | F26 | 短时洪峰 > 256 个 Presentation Event，Viewport 同时发送 | 新事件按定义 drop；Presentation FIFO；同一个 DataRuntime writer；无 Presentation 引发的队列 1024 overflow/local-fatal |
 | F27 | Frame 尚未构造时访问 capability；随后 exactly-once bindRuntime；foreign/closed Frame | 初始化、拒绝和 Frame close/terminal 清理确定，不出现双绑或无效 Interest |
-| F28 | source WC 删除、source Data carrier/Session/generation 轮换，事件已接受但尚未物理发送 | 队列旧事件丢弃，不能因为 target Frame 仍 active 就继续发送 |
+| F28 | 1 个 Event in-flight、source WC A 有 256 个 pending，A 删除但 source Data peer 仍 current，随后 sibling WC B 发 Event；另覆盖 source Data carrier/Session/generation 轮换 | A 的 pending 立即从容量计算中剔除，B 可入队；所有失效旧事件均不得因为 target Frame 仍 active 就继续发送 |
 | F29 | 一个 listener 触发 frame.call，另一个同 Channel listener 尚未执行；handler throw/reject | 后者因 local delivery gate 不执行；异常隔离，不使 Data peer fatal |
 | F30 | A1 → B1 → A2，消费端此前 held 非空；随后周期刷新 State | Framework 不重放旧 State/Event；消费方在 Activation 变化时主动清空其业务 held/down，再仅按新 State 更新，无 edge replay |
 
