@@ -119,7 +119,7 @@ switch (options.broadcast) {
 | Subsystem Presentation manager | 建议新增 `packages/subsystem/src/internal/presentation-event-manager.ts` 与 public type 文件 | Frame-scoped listeners、Interest registry、本地 Frame/Activation/deliveryOpen gate；按 bindRuntime(facts) 接线 |
 | Subsystem FrameRuntime | `packages/subsystem/src/internal/frame-runtime.ts` | 提供只读 Frame delivery facts；Frame close/Activation 切换通知 manager |
 | SubsystemScope | `packages/subsystem/src/model.ts`、`host/run-subsystem.ts` | 暴露 Presentation-specific Frame listener capability；不复用 `scope.events` |
-| Main Data profile selection | `packages/main/src/internal/main-session.ts` 及相关测试 | current Renderer Data profile 从 `/2` 升到 `/3`；按 `9.3` 一次性配套升级；**不改 Frame authority 逻辑与 Control v2 wire** |
+| Main Data profile selection | `packages/main/src/internal/main-session.ts` 及相关测试 | current Renderer Data profile 从 `/2` 升到 `/3`；按 `5.4` 一次性配套升级；**不改 Frame authority 逻辑与 Control v2 wire** |
 | Data provisioning expectations | Desktop/PWA/Hostra 的 Data Broker / fixtures / tests（仅实际硬编码 profile 时） | 仅适配 `loomrealm.renderer-data/3`，不加入 Top Frame 路由逻辑 |
 | Contracts | 新 Web Presentation API v3、Renderer Data Profile v3、Frame-targeted Presentation Event contract | 冻结新 schema / ordering / lifecycle / limits |
 | Game common-controls draft | `game-libs/game-common-controls/game-controls-input.md` | 新组件未来使用 `broadcast:"top-frame"` 和 Presentation Frame listener |
