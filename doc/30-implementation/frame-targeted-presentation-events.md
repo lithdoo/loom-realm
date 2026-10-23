@@ -6,6 +6,7 @@
 > 历史参照：PR #102 之前 `d8578e0855a35407dc42d3980bbdf7e22afdde25` 的 User Input v1 精确 Frame 投递
 > 当前基线：Web Presentation API v2、Renderer Control v2、Renderer Data Profile v2
 > 边界：**本功能不修改 Session Events、SessionEventHub、Session Events Carrier 或其 Subsystem↔Subsystem 业务语义**
+> 落地决策：保留 Input v1 的 Lease / Interest / Sender Gate / Receiver Gate；不恢复设备 Producer 与 Framework State；采用一次性 Renderer Data /3 联动升级，复用 DataRuntime 单 writer，不新增 Main Frame authority。
 
 ## 0. 先锁定边界
 
@@ -113,12 +114,12 @@ switch (options.broadcast) {
 | --- | --- | --- |
 | Web Presentation public ABI | `packages/renderer/src/internal/web-projector.ts`、`packages/renderer/src/control.ts` | `broadcast?: boolean \| "top-frame"`；currentness-first；新增 top-frame 分支 |
 | Renderer Frame Gate | 建议新增 `packages/renderer/src/internal/presentation-frame-gate.ts` | 复用 InputGate 的 lease / interest / queue 思路，按 Top Frame 精确投递 |
-| Renderer Data model/profile | `packages/data/src/model.ts`、`peers.ts`、`runtime.ts`、exports/tests | 新 Renderer Data Profile `/3`；新增 `presentation.interest` / `presentation.event` |
+| Renderer Data model/profile | `packages/data/src/model.ts`、`peers.ts`、`runtime.ts`、`profile-codec.ts`、exports/tests | 新 Renderer Data Profile `/3`；新增 `presentation.interest` / `presentation.event`；沿用同一 DataRuntime writer |
 | Renderer Data ingress | `packages/renderer/src/control.ts` | 接收目标 Runtime 的 `presentation.interest`；把 target Data peer 安装到 Frame Gate |
-| Subsystem Presentation manager | 建议新增 `packages/subsystem/src/internal/presentation-event-manager.ts` 与 public type 文件 | Frame-scoped listeners、Interest registry、本地 Frame/Activation/deliveryOpen gate |
+| Subsystem Presentation manager | 建议新增 `packages/subsystem/src/internal/presentation-event-manager.ts` 与 public type 文件 | Frame-scoped listeners、Interest registry、本地 Frame/Activation/deliveryOpen gate；按 bindRuntime(facts) 接线 |
 | Subsystem FrameRuntime | `packages/subsystem/src/internal/frame-runtime.ts` | 提供只读 Frame delivery facts；Frame close/Activation 切换通知 manager |
 | SubsystemScope | `packages/subsystem/src/model.ts`、`host/run-subsystem.ts` | 暴露 Presentation-specific Frame listener capability；不复用 `scope.events` |
-| Main Data profile selection | `packages/main/src/internal/main-session.ts` 及相关测试 | current Renderer Data profile 从 `/2` 升到 `/3`；**不改 Frame authority 逻辑** |
+| Main Data profile selection | `packages/main/src/internal/main-session.ts` 及相关测试 | current Renderer Data profile 从 `/2` 升到 `/3`；按 `9.3` 一次性配套升级；**不改 Frame authority 逻辑与 Control v2 wire** |
 | Data provisioning expectations | Desktop/PWA/Hostra 的 Data Broker / fixtures / tests（仅实际硬编码 profile 时） | 仅适配 `loomrealm.renderer-data/3`，不加入 Top Frame 路由逻辑 |
 | Contracts | 新 Web Presentation API v3、Renderer Data Profile v3、Frame-targeted Presentation Event contract | 冻结新 schema / ordering / lifecycle / limits |
 | Game common-controls draft | `game-libs/game-common-controls/game-controls-input.md` | 新组件未来使用 `broadcast:"top-frame"` 和 Presentation Frame listener |
@@ -309,6 +310,7 @@ AND RenderNode(domainId,targetKey) current
 
 ```ts
 interface AcceptedTopFramePresentationEvent {
+  readonly sourceSessionId: string;
   readonly sourceSubsystemKey: string;
   readonly sourceGeneration: number; // Renderer internal currentness/fencing fact
   readonly frameId: string;
@@ -322,7 +324,7 @@ interface AcceptedTopFramePresentationEvent {
 }
 ```
 
-`sourceGeneration` 可以只用于 Renderer 内部 queue/currentness bookkeeping；business wire 是否暴露 generation 由新 contract 决定，默认不需要业务可见。
+`sourceSessionId/sourceGeneration` 属于 Renderer 内部 currentness/fencing；同时应在队列项关联被接受时的 **source Data peer identity**（对象身份或等价 epoch，不能仅靠 generation 数值），业务 wire 不必暴露此字段。进入待发送队列并不自动给予来源永久授权，见 `4.3`。
 
 ### 4.3 Effective Gate
 
@@ -331,7 +333,9 @@ interface AcceptedTopFramePresentationEvent {
 ```text
 Effective(E)
 =
-current Control still belongs to same Session
+current Control/session still matches the accepted sourceSessionId
+AND source subsystem Data authority/generation/carrier is still the accepted binding
+AND source RenderNode(domainId,targetKey) is still live/current
 AND current target Data Connection for S
 AND current Top Frame == (S,F,A)
 AND mirrored F exists
@@ -345,22 +349,28 @@ AND C ∈ published PresentationInterest[S][F]
 如果任何条件失效：
 
 ```text
-not-yet-started Event → discard
-already in-flight Event → cannot retract; receiver local gate drops if stale
+not-yet-started Event → discard；不得重新绑定来源或 target F/A
+already in-flight Event → cannot retract；目标 Frame/Activation 变化由 receiver gate drop
 ```
+
+**明确采用 source-retirement fail-closed 策略**：事件接受后、尚未进入物理 Data send 前，如果来源 RenderNode 删除/更换、source Data peer 退役、source generation/session 更换，即使目标 Frame 仍 active，也丢弃该事件。不要把“已接受”解释为来源可以永久离线后继续发队列。已启动物理发送不能回滚；receiver 必须验证目标 F/A，但无须重新查询一个已退役的远端来源 RenderNode。对上述过期事件采取 silent drop，不把它升级为 Data protocol fatal。
 
 ### 4.4 队列语义复用旧 InputGate
 
 `PresentationFrameGate` 应复用旧 `BoundedInputPublisher` 的关键行为：
 
-- 每个 current target Data peer 单 writer / one send in flight；
-- Event FIFO；
-- queue bounded；
+- 每个 current target Data peer 有**一个 Presentation 逻辑队列**，最多一个 presentation send in flight；**物理发送只能调用该 peer 已有的 `DataRuntime.send()`**，与 Render/Viewport 共用同一个 DataRuntime writer/carrier，不创建第二 reader/writer；
+- 统一队列 FIFO：无论 `name` 是 `input.state` 还是 `input.event`，按照同一来源的 `emitCustomEvent` 接受顺序入队/发送，不因两个 Channel 分队列而逆序；
+- **固定上限：每 target Data peer 至多 256 个尚未开始的 Presentation Event**；队列满时 drop 新事件，保留已入队顺序；不等待或 unbounded retry，不把正常 Presentation 溢出上抛成整个 Data peer terminal。Drop 不承诺送达；
+- 仅在取出队头、准备调用 `peer.presentation.sendEvent(...)` 前执行完整 `Effective(E)` 检查；若不通过直接 drop 并继续队列，避免过期事件进入 DataRuntime writer；
+- `DataRuntime` 已有 `MAX_PENDING_SENDS=1024` 的共享上限，Presentation 一次只向它提交一个在途消息；Render/Viewport 本身仍可能独立触发 terminal，但新 Presentation burst 不得单独把其 1024 队列耗尽；
 - lease 改变时丢弃尚未开始的旧 lease Event；
 - Interest 缩小时丢弃对应尚未开始的 channel Event；
 - Data peer retired 时清空未开始 work；
 - already-started physical send 不尝试回滚；
 - fresh Data carrier 从 empty remote Interest 开始，Subsystem 自动 republish full registry。
+- 已交给 `DataRuntime.send` 的消息不再属于 Gate 的“尚未开始”队列，不能回滚；Target Runtime 的 Frame/Activation gate 是最后一道防线。发送结果为 terminal 时停止当前 peer 的 queue，并按既有 Data peer replacement 机制恢复，**不自动重放旧事件**。
+- 新旧 owner Data peer 及新旧 target Data peer 都应进入事件的 currentness 校验；两者可能属于不同 Subsystem。Target 缺失、Interest 缺失只是 drop，不在业务 event 路径主动 acquire 新 Data Connection。
 
 本任务没有 Framework-retained State，因此：
 
@@ -504,6 +514,13 @@ top Frame owner  = battle
 
 业务不能提供或覆盖 `sourceSubsystemKey/frameId/activationId/domainId/targetKey`；这些字段由 Renderer 可信绑定。`channel/name/data` 来自 current Web Component 调用并经过验证。
 
+### 5.4 版本关系及升级决策
+
+- **本任务选择仓库内一次性整体切换 /2 → /3，不实现 /2、/3 双模式协商**。在一次实施提交中同步更新 Main authority、Renderer、Subsystem、Data codec/peers、Desktop/PWA/Hostra 的实际 profile expectations，以及构建/qualification fixtures。不得出现 Main 宣告 /3、某一端仍只识别 /2 的半升级版本。
+- `Renderer Control v2` 的 **wire schema 与 protocolVersion 仍是 2**，因为 `RendererDataAuthorityV2.dataProfile` 本来就是字符串字段，里面发布新的 profile identity 不构成 Control wire 改版。`Main ⇄ Renderer Control v2` 冻结文档记录了旧运行时`/2`默认值；**不能在其 frozen text 中直接改成 /3**。由新增 `renderer-data-profile-v3.md` 和版本化 compatibility/deployment 说明声明：新版本仓库的生产配置改为 /3，并明确取代该文档的旧“current /2”部署事实；文档导航也应标明“wire v2 / active Data Profile /3”，避免两份 Active 文档自相矛盾。
+- 新 `/3` closed codec 必须明确对旧 `render.*`、`viewport.state` 的相同校验、权限方向、terminal/ordering 保证。`/2` 和 User Input /1 历史契约不改写。新生产二进制只运行 /3；与旧二进制混搭不声称兼容，双方的 profile mismatch 按既有 fail-closed 规则处理。
+- 先升级包常量、codec、peer，再升级 Main advertised profile 与 Desktop/PWA/Hostra expectations；最后由自动测试证明新 profile 的两端互通及错配拒绝。升级阶段的顺序是本地 Agent 工作顺序，**不是可以部署半升级版本的运行期迁移方案**。
+
 ## 6. Subsystem：PresentationEventManager
 
 ### 6.1 不使用 `scope.events`
@@ -555,6 +572,21 @@ interface SubsystemScope {
 - listener close 幂等；
 - Frame close 自动关闭其 listeners；
 - Runtime terminal 自动全部关闭。
+
+### 6.1.1 Manager 初始化、Frame 绑定与清理（采用旧 InputManager 顺序）
+
+当前 Subsystem Host 先创建 `SubsystemScope`，执行 `definition(scope)`，**之后**才构造 `FrameRuntime`。因此不能让 `scope.presentationEvents` 构造时就强依赖一个尚未创建的 FrameRuntime。按旧 Input v1 `InputManager.bindRuntime(facts)` 结构接线：
+
+```text
+create PresentationEventManager (unbound)
+  → expose scope.presentationEvents
+  → call definition(scope)
+  → construct FrameRuntime
+  → manager.bindRuntime(frameFacts) exactly once
+  → start serving Frame Control operations / Data ingress
+```
+
+`definition(scope)` 可以保存 client 引用，但不能在 FrameRuntime 绑定前用伪造 Frame 创建监听器。`createListener` 验证真实 Frame object/ownership，未绑定或 foreign Frame 抛 `TypeError`，closed Frame 保持现有 `FrameClosedError` 语义。重复 `bindRuntime` 必须拒绝。要通过 FrameRuntime close hook 或同等确定性通知调用 `manager.closeFrame(frameId)`，并在 `abortAll` / Runtime terminal 时先停止 listener、撤销 Interest、清理 peer epochs；**不能只依赖 Frame.signal abort**（正常 suspended 不会 abort）。Peer 安装后立即 publish full desired Interest；retire peer 清空 remote state，fresh carrier 自动重发，不复用旧 peer 的在途 publication。
 
 ### 6.2 Frame delivery facts
 
@@ -615,7 +647,9 @@ deliverToExactFrame(
 );
 ```
 
-`deliverToExactFrame` 只扫描绑定同 `frameId`、同 channel、仍 active 的 registrations。
+`deliverToExactFrame` 只扫描绑定同 `frameId`、同 channel、仍 active 的 registrations，**并在每个 handler 真正开始执行之前**重新检查其 registration 仍 open、当前 Frame 的 `deliveryOpen` 和 `activationId`。不能只在 `onEvent` 开头验证一次，因为第一个同步 handler 可能触发 `frame.call()` 并立即把本地 Frame 状态改成 `calling`；同条消息的后续 handler 不得因此继续执行。
+
+同步异常和 Promise rejection 一律隔离在该业务 handler 边界内，不能穿透 `DataRuntime.readLoop()` 导致 `local-fatal`，也不得阻止其他仍具备资格的 sibling registration。Frame Gate 保证**开始执行时**的资格；已经开始的 async handler 跨 `await` 后不承诺自动中断，业务续体自行重新检查 Activation 或取消条件。
 
 这一步是**同 Subsystem 多 Frame 精确隔离的最终保证**。
 
@@ -665,6 +699,12 @@ both listen controls.event
 如果当前 top = F2/A2，只能 F2 listener 执行。
 
 F1 的 listener 即使仍注册、Interest 仍保留，也因为 wire target `frameId=F2` 不匹配而完全不会被调用。
+
+### 7.4 控件 State 与新 Activation 的边界（不恢复 Framework State）
+
+`controls.state` 和 `controls.event` 在本 Data lane 都只是 transient Presentation Event。Frame 第一次激活或以新 `activationId` 恢复时，消费方必须**从 neutral/empty state 开始**，撤销前一 Activation 的 held/down 状态和基于它的游戏副作用；不能继承旧 State。不会重放上一 Frame 的边沿事件，也没有 `input.reset`、Framework retained State 或新 Frame 的即时 State baseline。
+
+未来 `game-controls-input` 按其 Draft 周期性发送非空 State（1000ms），消费端以 fresh-state tracker 的 2500ms expiry 收敛；新 Frame 的首个 State 可能延迟到下一次采样/周期刷新。这个延迟是明确接受的产品行为，不得把它当成“新 Frame 自动获得按键快照”。空 State 的语义仍来自业务组件，框架只透明转发。
 
 ## 8. 与现有 Presentation `false/true` 路径的隔离
 
@@ -735,7 +775,7 @@ Main 的：
 - `validateFrameSource`；
 - call/return/suspend/resume；
 
-全部保持原语义。
+全部保持原语义。Main 只更新被发布的 current Data profile identity；与冻结 Control v2 文档的“`/2` 当前运行配置”表述之间的版本关系，必须按 `5.4` 的**新 profile deployment compatibility 说明**处理，不静默改写旧冻结文档。
 
 ### 9.2 Desktop/PWA/Hostra Data Broker
 
@@ -849,8 +889,10 @@ Framework input.* / InputGate / InputManager restoration
 - TopFrameLease / Effective Gate；
 - receiver delivery gate；
 - queue / replacement / stale drop；
-- source provenance；
-- profile upgrade compatibility。
+- source provenance/queue source-retirement fail-closed；
+- profile upgrade compatibility（只运行 /3 的一次性协调部署、Control wire 仍 v2）；
+- 共享 DataRuntime writer、单 Presentation in-flight、256 待发送上限与丢弃策略；
+- Subsystem Manager bindRuntime 顺序、逐 handler Gate/异常隔离、Activation neutral State。
 
 先加入至少以下 failing tests：
 
@@ -869,7 +911,9 @@ Framework input.* / InputGate / InputManager restoration
 - listener registry union；
 - fresh carrier Interest republish；
 - receiver F/A/deliveryOpen gate；
-- frame close / runtime terminal cleanup。
+- frame close / runtime terminal cleanup；
+- 在 SubsystemScope 构造后、FrameRuntime 创建后进行 exactly-once `bindRuntime`；
+- 每个 handler 执行前二次校验 + async throw/reject 隔离。
 
 此阶段可用 synthetic Renderer Data peer 验证，不涉及 Session Events。
 
@@ -884,7 +928,9 @@ Framework input.* / InputGate / InputManager restoration
 - lease replacement discard；
 - Data retirement fencing；
 - source provenance；
-- accepted top-frame Event 不 retarget。
+- accepted top-frame Event 不 retarget；
+- source RenderNode/generation/peer 退役时丢弃尚未实际发送的事件；
+- 共享 DataRuntime 单 writer、256 queued/1 in-flight 与正常 overflow drop；不同 Channel 同来源 FIFO。
 
 ### P3：接入 `emitCustomEvent`
 
@@ -897,7 +943,8 @@ Framework input.* / InputGate / InputManager restoration
 
 ### P4：Profile rollout、业务草案与端到端
 
-- Main 切 Data Profile `/3`；
+- Main、Renderer、Subsystem、Data、平台接线在同一次落地中切 Data Profile `/3`，明确不支持混搭运行；
+- 新 profile compatibility/deployment 文档替代旧 `/2` 的生产配置描述，但不改旧冻结 wire 规范；
 - 更新必要 Data Broker fixture/expectation；
 - 更新 `game-controls-input.md`；
 - Desktop 与 PWA 各做真实 Renderer→Data→Runtime Frame callback 闭环；
@@ -931,6 +978,12 @@ Framework input.* / InputGate / InputManager restoration
 | F22 | Renderer Data `/2` old message set historical contract | 不篡改历史 contract；current runtime 明确使用 `/3` |
 | F23 | Desktop actual Data carrier end-to-end | browser source → exact Frame callback |
 | F24 | PWA actual Data carrier end-to-end | browser source → exact Frame callback |
+| F25 | Control v2 snapshot / Data /3 整体升级；旧 /2 peer 与 /3 profile 错配 | wire Control v2 不变；/3 端到端成功；混搭 fail-closed；文档无 Active profile 矛盾 |
+| F26 | 短时洪峰 > 256 个 Presentation Event，Viewport 同时发送 | 新事件按定义 drop；Presentation FIFO；同一个 DataRuntime writer；无 Presentation 引发的队列 1024 overflow/local-fatal |
+| F27 | Frame 尚未构造时访问 capability；随后 exactly-once bindRuntime；foreign/closed Frame | 初始化、拒绝和 Frame close/terminal 清理确定，不出现双绑或无效 Interest |
+| F28 | source WC 删除、source Data carrier/Session/generation 轮换，事件已接受但尚未物理发送 | 队列旧事件丢弃，不能因为 target Frame 仍 active 就继续发送 |
+| F29 | 一个 listener 触发 frame.call，另一个同 Channel listener 尚未执行；handler throw/reject | 后者因 local delivery gate 不执行；异常隔离，不使 Data peer fatal |
+| F30 | A1 → B1 → A2，消费端此前 held 非空；随后周期刷新 State | 新 Activation 首次进入 neutral，不继承旧 down；仅收到新的 State 后更新，无 edge replay |
 
 ## 13. Qualification 与回归
 
@@ -995,22 +1048,25 @@ npm run docs:build
 - [ ] top-frame Event 不进入 Platform Presentation Event endpoint，不进入 SessionEventHub。
 - [ ] Renderer 只从 current Control v2 `stack.at(-1)` 派生 `S/F/A`，没有第二套 Frame authority。
 - [ ] Event 在 acceptance 时绑定 F/A；之后永不 retarget。
-- [ ] Renderer sender-side gate 包含 current target Data + current top F/A + exact Interest channel。
-- [ ] Data Profile `/3` 有 closed `presentation.interest` / `presentation.event` 双向 schema。
+- [ ] Renderer sender-side gate 包含 current **source** Session/RenderNode/generation/peer + current target Data + current top F/A + exact Interest channel，source 退役后未发送事件立即失效。
+- [ ] Data Profile `/3` 有 closed `presentation.interest` / `presentation.event` 双向 schema；Control wire v2 保持，新增 profile/deployment 兼容说明并一次性升级所有两端。
 - [ ] fresh Data carrier 从 empty Interest 开始并自动 republish full desired registry。
+- [ ] Presentation Gate 通过既有 DataRuntime 单 writer 提交，最多 256 pending/1 in-flight；满队列 drop 新事件，不因常规输入洪峰造成 Data local-fatal。
 - [ ] Subsystem listener 绑定真实 Frame object，foreign Frame 被拒绝。
-- [ ] receiver 在 callback 前检查 exact frameId、activationId、deliveryOpen、local Interest。
+- [ ] Manager 在定义工厂之后与 FrameRuntime exactly-once bindRuntime，Frame close/Runtime terminal 全面清理。
+- [ ] receiver 在**每个 callback 开始前**检查 exact frameId、activationId、deliveryOpen、local Interest；异步异常隔离。
 - [ ] 同 Subsystem parent/child 同 Channel 测试证明仅 target Frame 执行。
 - [ ] A1→B1、A1→A2 delayed Event 测试证明旧 Event 不改投、不复活。
+- [ ] 新 Activation 的 controls state 从 neutral 起步；周期 State 同步、旧 Activation State 清除与不重放 Event 的语义有测试。
 - [ ] owner 与 target 不同 Subsystem 时 source provenance 正确。
 - [ ] `render.event`、Viewport、Session Events 全部保持原契约。
 - [ ] Session Events 源码无本功能性修改；没有 Hub/Carrier Frame routing。
 - [ ] Main 无 TopFrame sink、Renderer Control v2 无 schema 扩展、无 `inputTarget` 回流。
 - [ ] Desktop/PWA 只承担既有 Data profile provisioning，不承担 Frame 决策。
 - [ ] 新 contracts、qualification、docs navigation 与代码一致。
-- [ ] F01–F24 均有自动化证据或明确记录的环境阻断。
+- [ ] F01–F30 均有自动化证据或明确记录的环境阻断。
 - [ ] regression / docs checks 有实际结果。
 
 ## 16. 交给本地 Agent 的实施指令
 
-> 以本文为实施主线。先用历史 `d8578e0` 的 `currentInputTarget`、`RendererInputGate.currentLease/recompute`、`InputManager.onEvent/deliver`、`FrameRuntime.inspectById` 校准行为，然后把这一精确 Frame 投递模式泛化为 Presentation Event。新增 `broadcast:"top-frame"` 时必须在 Renderer 内与现有 boolean publication 分叉：`false/true` 保持现有 Session Events 路径，`"top-frame"` 通过 Renderer Data Profile `/3` 的 `presentation.interest/event` 直接投递到目标 Runtime，再由本地 Frame/Activation/deliveryOpen gate 精确执行。不得修改 Session Events、Hub、Carrier、Hostra Session Events，不得新增 Main→Platform TopFrame authority，不得只做 target Subsystem 定向，也不得恢复 Framework User Input。按 P0→P4 完成代码、自动测试、Desktop/PWA Data vertical、contracts、qualification 与回归，并以实际运行结果闭环。
+> 以本文为实施主线。先用历史 `d8578e0` 的 `currentInputTarget`、`RendererInputGate.currentLease/recompute`、`InputManager.onEvent/deliver`、`FrameRuntime.inspectById` 校准行为，然后把这一精确 Frame 投递模式泛化为 Presentation Event。新增 `broadcast:"top-frame"` 时必须在 Renderer 内与现有 boolean publication 分叉：`false/true` 保持现有 Session Events 路径，`"top-frame"` 通过 Renderer Data Profile `/3` 的 `presentation.interest/event` 直接投递到目标 Runtime，再由本地 Frame/Activation/deliveryOpen gate 精确执行。不得修改 Session Events、Hub、Carrier、Hostra Session Events，不得新增 Main→Platform TopFrame authority，不得只做 target Subsystem 定向，也不得恢复 Framework User Input。按 P0→P4 完成代码、自动测试、Desktop/PWA Data vertical、contracts、qualification 与回归。特别落实 `5.4` 的一致升级、`4.3–4.4` 的 source-retirement 与共享 writer 边界、`6.1.1` 的 bindRuntime 接线、`6.3` 的逐 callback 校验、`7.4` 的 neutral State。不得以模拟测试代替 Desktop/PWA 真正的 Data 路径，也不得把未运行的验证标为 PASS；以实际运行结果闭环。
