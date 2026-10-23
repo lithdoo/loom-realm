@@ -65,14 +65,6 @@ leftBumper rightBumper leftTrigger rightTrigger
 start select
 ~~~
 
-~~~ts
-type ControlsButtonV1 =
-  | "up" | "down" | "left" | "right"
-  | "south" | "east" | "west" | "north"
-  | "leftBumper" | "rightBumper" | "leftTrigger" | "rightTrigger"
-  | "start" | "select";
-~~~
-
 右侧四个面键按菱形位置命名，肩键和扳机按上下位置命名。A/B/X/Y、L1/L2 以及各厂商丝印只出现在下表的对照列里，不进入载荷。键盘一键对应一键。
 
 | 统一按键 | 位置 | 常见丝印 | 键盘 | standard 下标 |
@@ -236,15 +228,7 @@ keyup，keyboardDown=false
 
 因此 capture 丢失后即使物理键仍按着，焦点回到游戏后收到的第一个 repeat-keydown 也会重新建立本地 held，并在需要时作为新的 `repeat=false` 逻辑按下；不会因为浏览器的 repeat 标志留下灰区。
 
-键盘自动重复只产生 Event，不重复 State。`repeat: true` 只在下面三件事同时成立时发送：
-
-~~~text
-这次 keydown 的 repeat === true
-该统一按键的有效状态已经是按下
-当前按住它的是键盘，手柄侧这颗键是松开的
-~~~
-
-手柄轮询不制造 `repeat`。
+手柄轮询不制造 `repeat`；`repeat:true` 只来自上面的 Keyboard held-repeat 分支。
 
 ## 5. 有效状态机
 
@@ -337,9 +321,9 @@ Gamepad south up / 该已跟踪 Gamepad 断开
     不补 up Event
 ~~~
 
-## 6. 发送## 6. 发送
+## 6. 发送
 
-组件拥有一对精确频道，用 `emitCustomEvent(..., { broadcast: "top-frame" })` 投递给接受时的 Top Active Frame。同一次变化先发整份 State，再发对应边沿 Event。指针不进入这里，也不转发 `keyboard.*` 或 `gamepad.*`。
+组件拥有一对精确频道，用 `emitCustomEvent(..., { broadcast: "top-frame" })` 投递给接受时的 Top Active Frame。physical edge 按第 5 节保持 State-before-Event；reconciliation/baseline 只发 State。指针不进入这里，也不转发 `keyboard.*` 或 `gamepad.*`。
 
 ~~~text
 controls.state
@@ -515,7 +499,7 @@ scripts/build-browser.mjs
 
 `game-controls-input` 不进入 Main，不读取或指定 Frame/Activation，不发送 `input.reset`。Renderer 从 current Control v2 stack 派生 Top Frame lease；Subsystem listener 显式绑定业务持有的真实 `Frame` object。
 
-## 10. Qualification 重点## 10. Qualification 重点
+## 10. Qualification 重点
 
 实现完成必须至少覆盖下面这些边界用例；这些不是建议，而是 acceptance criteria：
 
@@ -529,7 +513,7 @@ scripts/build-browser.mjs
 - capture loss 后物理键持续按住，重新 available 后收到的第一个 mapped repeat-keydown 在本地未 held 时必须按新的 `repeat=false` logical down 处理。
 - Frame 切换时旧 Activation Event 不进入新 Activation；持续 held 可以通过新的 State publication 被新 Activation 重新观察。
 - exact Interest 尚未建立时 Event fail closed，不缓存、不重放、不改投后来的 Frame。
-- 非空 State 1000ms refresh、`createFreshControlsStateTracker` 默认 2500ms fallback、empty State 停止 refresh、disconnect 不补消息都成立。
+- 非空 State 1000ms refresh、`createFreshControlsStateTracker` 默认 2500ms fallback、empty State 停止 refresh、component `disconnectedCallback / stop` 不补消息都成立。
 - `game-controls-input` 与 raw Keyboard/Gamepad 组件同时挂载时，两套频道独立；Framework 不去重。
 - browser bundle 的 collision guard 包含第四个 tag，且现有三个 raw device 组件回归测试保持通过。
 
@@ -541,11 +525,12 @@ npm test -w @loomrealm-game/common-controls
 node --test test/game-controls-input-v1/qualification.test.mjs
 npm run test:frame-targeted-presentation:qualification
 npm run docs:check-links
+npm run docs:build
 ~~~
 
 只有上述 acceptance criteria 和命令全部通过，才把本文状态从 `Draft / Freeze candidate` 改为 `Active / Normative / Frozen / Implemented`。
 
-## 11. v1 不做的事## 11. v1 不做的事
+## 11. v1 不做的事
 
 - 不读取左右摇杆，也不提供摇杆死区、八向量化或摇杆按下。
 - 不输出模拟量、手柄 id、原始 `code` 或设备来源。
