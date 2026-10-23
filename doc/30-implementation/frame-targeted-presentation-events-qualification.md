@@ -26,7 +26,7 @@ boolean `false/true` 继续走既有 Platform → Session Events publication。`
 | F02 | 同上：`broadcast:true` Session-wide publication regression |
 | F03 | 同上：no active top silent drop，Platform publication 计数保持 0 |
 | F04 | 同上：owner 与 Battle target 不同，wire source provenance 保持 owner |
-| F05 | `packages/renderer/test/presentation-frame-gate.test.mjs`：A1 queue 在切 B1 后丢弃 |
+| F05 | `packages/renderer/test/presentation-frame-gate.test.mjs`：A1 有 1 in-flight + 256 pending 时切 B1，旧 pending 立即丢弃并为 B1 Event 释放容量 |
 | F06 | `packages/subsystem/test/presentation-events.test.mjs`：in-flight stale Activation receiver drop |
 | F07 | Renderer Gate + Subsystem manager：A1→B1→A2 不执行旧 Event |
 | F08 | Subsystem manager + Runtime carrier vertical：同 Subsystem parent/child 只调用 exact Frame |
@@ -44,18 +44,18 @@ boolean `false/true` 继续走既有 Platform → Session Events publication。`
 | F20 | 独立 Presentation client 不接收 Session Events；boolean regression 保持原路由 |
 | F21 | Renderer、Data、Subsystem 全包 `render.event` regression |
 | F22 | Data `/2` binding 在 claim reader 前拒绝；历史 v2 contract 未改写 |
-| F23 | `apps/desktop/test/m9-vertical.test.mjs`：Renderer → Desktop Broker/WebSocket → Hostra process → Frame listener |
-| F24 | `apps/pwa/test/frame-targeted-presentation.test.mjs`：Renderer → PWA Broker/MessagePort → Runtime → Frame listener |
+| F23 | `apps/desktop/test/m9-vertical.test.mjs` 覆盖 Data vertical；`test/m15-hostra-product.test.mjs` 从真实 Chromium Custom Element 经 WebProjector、Desktop Broker/WebSocket、Hostra Runner 投递到 exact Frame listener |
+| F24 | `apps/pwa/test/frame-targeted-presentation.test.mjs` 覆盖 MessagePort Data vertical；`apps/pwa/test/frame-targeted-presentation.e2e.test.mjs` 从真实 Chromium Custom Element 经 WebProjector、Session/Runtime Worker 投递到 exact Frame listener |
 | F25 | Main/Renderer Control/Data/Subsystem `/3` cohort tests与 `/2` mismatch fail-closed |
 | F26 | Gate 300 Event burst：1 in-flight + 256 pending、FIFO、overflow drop、无 Data local-fatal |
 | F27 | manager unbound/foreign/closed/rebind rejection；Runtime close/terminal cleanup |
 | F28 | Gate source current predicate与 target/source peer identity fencing |
 | F29 | 第一个 handler 关闭 delivery 后 sibling 不执行；异常隔离 |
-| F30 | 新 Activation 无 retained state/edge replay，仅新 State 更新 |
+| F30 | manager 测试证明旧 State/Event message 不重放；Framework 不改写业务 held/down，消费方必须在 Activation 变化时自行清空 |
 
 ## 3. Qualification commands
 
-qualified implementation subject：`ca3a3cd2`
+qualified implementation subject：`7d8d58d0`
 
 ```text
 npm run test:frame-targeted-presentation:qualification
@@ -69,13 +69,13 @@ npm run docs:build
 
 | 命令 | 结果 |
 | --- | --- |
-| `npm run test:frame-targeted-presentation:qualification` | PASS，48/48；包含 Desktop Hostra 跨进程与 PWA MessagePort 实际 Data/Runtime/Frame vertical |
-| `npm run test:game-common-controls-input:qualification` | PASS（LF-only clean checkout）；common-controls 6/6、Hub/Presentation/bridge 35/35、Map 106/106、Dialogue 30/30、Schema Form 22/22、Desktop 29/29、PWA unit 39/39、Chromium E2E 16/16 |
+| `npm run test:frame-targeted-presentation:qualification` | PASS：核心/集成 49/49、Desktop Hostra Chromium 1/1、PWA Chromium/Worker 1/1；两端浏览器测试均从真实 Custom Element 入口闭环到 exact Frame listener |
+| `npm run test:game-common-controls-input:qualification` | 当前 Windows `core.autocrlf=true` checkout 中，common-controls 6/6、Hub/Presentation/bridge 35/35、Map 106/106、Dialogue 30/30、Schema Form 22/22、Desktop 29/29、PWA unit 39/39 均 PASS；Chromium 15/17，两个既有 map/PokeMan case 因下述 CRLF fixture identity 问题失败。LF-only detached rerun确认这两个受影响 case 与新增 top-frame case 均 PASS；完整 clean-Linux 结果以本 PR hosted CI 为准。 |
 | `npm run test:regression` | PASS；全 workspace regression 完成，Hostra 仅保留仓库既有的权限/平台 skip |
 | `npm run docs:check-links` | PASS，782 个相对链接 / 167 个 Markdown 文件 |
 | `npm run docs:build` | PASS，VitePress client/server build 与 page rendering 完成 |
 
-Windows `core.autocrlf=true` 的普通 checkout 会把两个已提交 Presentation JS fixture 写成 CRLF，而 esbuild 产物为 LF；按精确 bytes 计算 Content Version 时，既有 PWA M17/PokeMan 测试会把它识别为第二份脚本并触发 Custom Element collision。未修改 fixture 或产品语义；在与 Git blob 一致的 LF-only clean checkout 中完整命令通过。
+Windows `core.autocrlf=true` 的普通 checkout 会把两个已提交 Presentation JS fixture 写成 CRLF，而 esbuild 产物为 LF；按精确 bytes 计算 Content Version 时，既有 PWA M17/PokeMan 测试会把它识别为第二份脚本并触发 Custom Element collision。未修改 fixture 或产品语义；本次 LF-only detached rerun中，两个受影响 case 均通过，证明失败来自 checkout bytes，而不是 Frame-targeted Event 实现。
 
 ## 4. Independent diff review
 
@@ -84,6 +84,8 @@ Bugbot 对完整 branch diff 给出 3 项 correctness finding，均在 qualified
 - Presentation Data wire 允许公开 API 的完整 64 层业务深度，不再落入 generic 32 层 payload default；
 - Interest shrink 立即清除失去资格的 queued Event，之后重新添加 channel 也不会复活旧 Event；
 - source peer replacement 会主动清除所有 cross-Subsystem target queue 中引用旧 source 的 pending Event，避免占满有效容量。
+
+后续复核发现 Control Lease 切换只更新 snapshot、未立即清理旧 pending queue。subject `7d8d58d0` 将 Control/Interest 变化统一收敛到同一个 Effective predicate 做主动清理，并补充“1 in-flight + 256 pending 后切换 Activation”的容量回归；已进入物理 send 的 Event 仍按契约交给 receiver gate 最终裁决。
 
 ## 5. Compatibility conclusion
 

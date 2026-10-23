@@ -53,4 +53,4 @@ listener 必须绑定 Runtime 拥有的真实 `Frame` object。每个 handler �
 
 同步 throw 和 Promise rejection 在 registration 边界隔离。已开始的 async handler 跨 `await` 后由业务自行处理取消/currentness。
 
-Event 全部 transient。新 Activation 从 neutral/empty state 开始；旧 Activation 的 State 或 Event不继承、不重放，也没有 Framework `input.reset` 或 retained State。
+Event 全部 transient。Framework 保证旧 Activation 的 State/Event message 不继承、不重放，也不提供 `input.reset` 或 retained State；Framework 不观察或改写消费方业务对象中保存的 held/down 状态。新 Activation 必须由消费方主动清空这类本地状态，从 neutral/empty state 开始。
