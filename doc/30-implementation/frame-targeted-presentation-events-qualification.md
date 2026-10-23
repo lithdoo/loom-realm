@@ -33,12 +33,12 @@ boolean `false/true` 继续走既有 Platform → Session Events publication。`
 | F09 | manager `deliveryOpen=false` gate |
 | F10 | manager closeFrame cleanup 与 Interest shrink |
 | F11 | Interest 安装前 drop、安装后 Effective；Runtime fresh publish |
-| F12 | Gate Interest shrink fences queued work |
+| F12 | Gate Interest shrink fences queued work，即使同 channel 在 in-flight 完成前恢复也不复活旧 Event |
 | F13 | manager fresh peer 自动 full Interest republish |
 | F14 | Gate target peer replacement 清旧 queue |
-| F15 | 既有 Web Projector stale-currentness regression；source retirement Gate test |
+| F15 | 既有 Web Projector stale-currentness regression；source replacement 跨 target queue 主动清理 |
 | F16 | Renderer seam invalid current `broadcast:"bad"` 同步 TypeError |
-| F17 | Data presentation closed schema 与 wrong-direction protocol-fatal |
+| F17 | Data presentation closed schema、wrong-direction protocol-fatal 与 Web Presentation 64 层 data 边界 |
 | F18 | manager sync throw / Promise rejection local isolation |
 | F19 | Renderer top-frame Platform publication 0；manager 与 `scope.events` 独立 |
 | F20 | 独立 Presentation client 不接收 Session Events；boolean regression 保持原路由 |
@@ -46,7 +46,7 @@ boolean `false/true` 继续走既有 Platform → Session Events publication。`
 | F22 | Data `/2` binding 在 claim reader 前拒绝；历史 v2 contract 未改写 |
 | F23 | `apps/desktop/test/m9-vertical.test.mjs`：Renderer → Desktop Broker/WebSocket → Hostra process → Frame listener |
 | F24 | `apps/pwa/test/frame-targeted-presentation.test.mjs`：Renderer → PWA Broker/MessagePort → Runtime → Frame listener |
-| F25 | Main/Renderer Control/Data/Subystem `/3` cohort tests与 `/2` mismatch fail-closed |
+| F25 | Main/Renderer Control/Data/Subsystem `/3` cohort tests与 `/2` mismatch fail-closed |
 | F26 | Gate 300 Event burst：1 in-flight + 256 pending、FIFO、overflow drop、无 Data local-fatal |
 | F27 | manager unbound/foreign/closed/rebind rejection；Runtime close/terminal cleanup |
 | F28 | Gate source current predicate与 target/source peer identity fencing |
@@ -55,7 +55,7 @@ boolean `false/true` 继续走既有 Platform → Session Events publication。`
 
 ## 3. Qualification commands
 
-最终 PR subject 上执行并记录：
+qualified implementation subject：`ca3a3cd2`
 
 ```text
 npm run test:frame-targeted-presentation:qualification
@@ -65,9 +65,27 @@ npm run docs:check-links
 npm run docs:build
 ```
 
-实际结果在提交前的 final qualification pass 后补充；任何未运行命令不得标记为 PASS。
+实际结果：
 
-## 4. Compatibility conclusion
+| 命令 | 结果 |
+| --- | --- |
+| `npm run test:frame-targeted-presentation:qualification` | PASS，48/48；包含 Desktop Hostra 跨进程与 PWA MessagePort 实际 Data/Runtime/Frame vertical |
+| `npm run test:game-common-controls-input:qualification` | PASS（LF-only clean checkout）；common-controls 6/6、Hub/Presentation/bridge 35/35、Map 106/106、Dialogue 30/30、Schema Form 22/22、Desktop 29/29、PWA unit 39/39、Chromium E2E 16/16 |
+| `npm run test:regression` | PASS；全 workspace regression 完成，Hostra 仅保留仓库既有的权限/平台 skip |
+| `npm run docs:check-links` | PASS，782 个相对链接 / 167 个 Markdown 文件 |
+| `npm run docs:build` | PASS，VitePress client/server build 与 page rendering 完成 |
+
+Windows `core.autocrlf=true` 的普通 checkout 会把两个已提交 Presentation JS fixture 写成 CRLF，而 esbuild 产物为 LF；按精确 bytes 计算 Content Version 时，既有 PWA M17/PokeMan 测试会把它识别为第二份脚本并触发 Custom Element collision。未修改 fixture 或产品语义；在与 Git blob 一致的 LF-only clean checkout 中完整命令通过。
+
+## 4. Independent diff review
+
+Bugbot 对完整 branch diff 给出 3 项 correctness finding，均在 qualified subject 中修复并补回归：
+
+- Presentation Data wire 允许公开 API 的完整 64 层业务深度，不再落入 generic 32 层 payload default；
+- Interest shrink 立即清除失去资格的 queued Event，之后重新添加 channel 也不会复活旧 Event；
+- source peer replacement 会主动清除所有 cross-Subsystem target queue 中引用旧 source 的 pending Event，避免占满有效容量。
+
+## 5. Compatibility conclusion
 
 - current runtime cohort 是一次性 `/3` 升级，不支持 `/2`/`/3` 混搭；
 - Control protocolVersion 保持 2；
