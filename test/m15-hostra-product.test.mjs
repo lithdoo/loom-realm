@@ -11,12 +11,13 @@ import { chromium } from "playwright";
 import WebSocket from "ws";
 import { syncMapPresentation } from "../examples/essentials-v21.1-local/scripts/sync-map-presentation.mjs";
 import {
-  executable as frameEventExecutable,
+  battleExecutable as frameEventBattleExecutable,
   expectedPresentationEvent,
   gameEntryText as frameEventGameEntry,
   launchManifestText as frameEventLaunchManifest,
   presentation as frameEventPresentation,
   presentationSource as frameEventPresentationSource,
+  worldExecutable as frameEventWorldExecutable,
 } from "./frame-targeted-presentation-v1/browser-fixture.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -331,7 +332,8 @@ async function prepareFrameTargetedPresentationInstallation() {
     writeFile(path.join(exampleRoot, "game.json"), frameEventGameEntry),
     writeFile(path.join(exampleRoot, "launch.hostra.json"), frameEventLaunchManifest),
     writeFile(path.join(exampleRoot, "presentation.json"), JSON.stringify(frameEventPresentation)),
-    writeFile(path.join(subsystemRoot, "game.mjs"), frameEventExecutable),
+    writeFile(path.join(subsystemRoot, "world.mjs"), frameEventWorldExecutable),
+    writeFile(path.join(subsystemRoot, "battle.mjs"), frameEventBattleExecutable),
     writeFile(path.join(presentationRoot, ".desc.meta"), "Frame-targeted Presentation Event qualification resources.\n"),
     writeFile(path.join(presentationRoot, "frame-event-probe.browser.js.js"), frameEventPresentationSource),
   ]);
@@ -595,7 +597,7 @@ test("Local Presentation fills six real Hostra viewports and keeps the footer vi
   }
 });
 
-test("M15 real Custom Element delivers top-frame through Hostra to its exact Frame", { timeout: 90_000 }, async (t) => {
+test("M15 real Custom Element delivers top-frame from World through Hostra only to the Battle Frame", { timeout: 90_000 }, async (t) => {
   const installation = await prepareFrameTargetedPresentationInstallation();
   const eventLog = path.join(installation.temporary, "events.jsonl");
   await writeFile(eventLog, "");
@@ -627,13 +629,14 @@ test("M15 real Custom Element delivers top-frame through Hostra to its exact Fra
 
   try {
     await page.waitForFunction(() => {
-      const element = document.querySelector("#frame-event-probe");
+      const element = document.querySelector("#frame-event-source");
       return document.documentElement.dataset.loomrealmRenderer === "installed" &&
         element?.dataset.contextReady === "true" &&
+        document.querySelector("#frame-event-target") !== null &&
         typeof element.sendTopFrameEvent === "function";
     }, null, { timeout: 30_000 });
-    await page.locator("#frame-event-probe").evaluate((element) => element.sendTopFrameEvent());
-    await page.waitForFunction(() => document.querySelector("#frame-event-probe")?.hasAttribute("data-delivered"), null, { timeout: 20_000 });
+    await page.locator("#frame-event-source").evaluate((element) => element.sendTopFrameEvent());
+    await page.waitForFunction(() => document.querySelector("#frame-event-target")?.hasAttribute("data-delivered"), null, { timeout: 20_000 });
   } catch (cause) {
     const state = await page.evaluate(() => ({
       dataset: { ...document.documentElement.dataset },
@@ -642,16 +645,17 @@ test("M15 real Custom Element delivers top-frame through Hostra to its exact Fra
     throw new Error(`${cause.message}\n${JSON.stringify(state)}\n${diagnostics.join("\n")}\n${hostra.output()}\n${JSON.stringify(await events(eventLog))}`);
   }
 
-  const delivered = JSON.parse(await page.locator("#frame-event-probe").getAttribute("data-delivered"));
+  const delivered = JSON.parse(await page.locator("#frame-event-target").getAttribute("data-delivered"));
   assert.deepEqual(delivered, {
     ...expectedPresentationEvent,
     source: {
-      subsystemKey: "game",
+      subsystemKey: "world",
       domainId: delivered.source.domainId,
-      targetKey: "probe",
+      targetKey: "source",
     },
   });
   assert.match(delivered.source.domainId, /^d[0-9a-z]+$/u);
+  assert.equal(await page.locator("#frame-event-source").getAttribute("data-world-delivered"), null);
 });
 
 test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_000 }, async (t) => {

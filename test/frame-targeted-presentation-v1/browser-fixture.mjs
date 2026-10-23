@@ -1,12 +1,15 @@
 export const gameEntryText = JSON.stringify({
   formatVersion: 1,
-  initial: { subsystem: "game", input: null },
-  subsystems: [{ key: "game" }],
+  initial: { subsystem: "world", input: null },
+  subsystems: [{ key: "world" }, { key: "battle" }],
 });
 
 export const launchManifestText = JSON.stringify({
   formatVersion: 1,
-  subsystems: [{ key: "game", module: "subsystems/game.mjs" }],
+  subsystems: [
+    { key: "world", module: "subsystems/world.mjs" },
+    { key: "battle", module: "subsystems/battle.mjs" },
+  ],
 });
 
 export const presentation = Object.freeze({
@@ -15,7 +18,7 @@ export const presentation = Object.freeze({
   styles: Object.freeze([]),
 });
 
-export const executable = `
+export const worldExecutable = `
 export default (scope) => ({
   async frame(frame) {
     let domain;
@@ -26,17 +29,51 @@ export default (scope) => ({
     listener.on("controls.event", (event) => {
       domain.update({
         nodes: [{
-          key: "probe",
-          attrs: { set: { "data-delivered": JSON.stringify(event) } }
+          key: "source",
+          attrs: { set: { "data-world-delivered": JSON.stringify(event) } }
         }]
       });
     });
     domain = scope.createRenderDomain({
       zIndex: 0,
       roots: [{
-        key: "probe",
-        tag: "lr-frame-event-probe",
-        attrs: { id: "frame-event-probe" },
+        key: "source",
+        tag: "lr-frame-event-source",
+        attrs: { id: "frame-event-source" },
+        data: {},
+        children: []
+      }]
+    });
+    await frame.call("battle", {});
+    listener.close();
+    domain.close();
+    return { type: "cancelled" };
+  }
+});
+`.trim();
+
+export const battleExecutable = `
+export default (scope) => ({
+  async frame(frame) {
+    let domain;
+    const listener = scope.presentationEvents.createListener({
+      frame,
+      channels: ["controls.event"]
+    });
+    listener.on("controls.event", (event) => {
+      domain.update({
+        nodes: [{
+          key: "target",
+          attrs: { set: { "data-delivered": JSON.stringify(event) } }
+        }]
+      });
+    });
+    domain = scope.createRenderDomain({
+      zIndex: 1,
+      roots: [{
+        key: "target",
+        tag: "lr-frame-event-target",
+        attrs: { id: "frame-event-target" },
         data: {},
         children: []
       }]
@@ -50,7 +87,7 @@ export default (scope) => ({
 `.trim();
 
 export const presentationSource = `
-class FrameEventProbe extends HTMLElement {
+class FrameEventSource extends HTMLElement {
   receiveRenderContext(context) {
     this.renderContext = context;
     this.dataset.contextReady = "true";
@@ -64,7 +101,8 @@ class FrameEventProbe extends HTMLElement {
     );
   }
 }
-customElements.define("lr-frame-event-probe", FrameEventProbe);
+customElements.define("lr-frame-event-source", FrameEventSource);
+customElements.define("lr-frame-event-target", class extends HTMLElement {});
 `.trim();
 
 export const expectedPresentationEvent = Object.freeze({

@@ -103,6 +103,7 @@ export class PresentationFrameGate {
     const slot = this.slots.get(event.targetSubsystemKey);
     if (slot === undefined || slot.peer !== event.targetPeer || slot.retired) return;
     if (!this.effective(event.targetSubsystemKey, slot, event)) return;
+    this.pruneIneffective(event.targetSubsystemKey, slot);
     if (slot.queue.length >= MAX_PENDING_EVENTS) return;
     slot.queue.push(event);
     this.pump(event.targetSubsystemKey, slot);

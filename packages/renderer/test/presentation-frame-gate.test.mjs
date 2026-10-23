@@ -206,6 +206,31 @@ test("source replacement eagerly frees capacity in every cross-Subsystem target 
   assert.deepEqual(sent, [0, 999]);
 });
 
+test("a retired source RenderNode cannot occupy pending capacity for a current sibling", async () => {
+  const first = deferred();
+  const sent = [];
+  const target = peer(async (message) => {
+    sent.push(message.data.sequence);
+    if (message.data.sequence === 0) await first.promise;
+    return { kind: "sent" };
+  });
+  const liveTargets = new Set(["source-a", "source-b"]);
+  const gate = new PresentationFrameGate((candidate) => liveTargets.has(candidate.targetKey));
+  gate.setControl(snapshot());
+  gate.installData("game", target);
+  gate.replaceInterest("game", target, interest());
+  for (let sequence = 0; sequence <= 256; sequence += 1) {
+    gate.offer(event(target, { targetKey: "source-a", sequence }));
+  }
+  assert.deepEqual(sent, [0]);
+
+  liveTargets.delete("source-a");
+  gate.offer(event(target, { targetKey: "source-b", sequence: 999 }));
+  first.resolve();
+  await turn();
+  assert.deepEqual(sent, [0, 999]);
+});
+
 test("Presentation queue is FIFO, capped at 256 pending, and uses one in-flight send", async () => {
   const first = deferred();
   const sent = [];
