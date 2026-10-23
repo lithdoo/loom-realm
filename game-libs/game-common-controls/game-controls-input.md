@@ -1,12 +1,12 @@
 # 统一操控输入 Web Component
 
-> 状态：**Draft / Freeze candidate**
+> 状态：**Active / Normative / Frozen / Implemented**
 > 位置：`game-libs/game-common-controls/game-controls-input.md`
 > 所属包：`@loomrealm-game/common-controls`
 > 发送路径：[emitCustomEvent 扩展](./emit-custom-event.md)、[Web Presentation API v3](../../doc/15-contracts/web-presentation-api-v3.md)、[Frame-targeted Presentation Event v1](../../doc/15-contracts/frame-targeted-presentation-event-v1.md)
 > 相邻实现：[设备输入 Web Components](./device-input-components.md)、[Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)
 
-本文定义一个新的业务 Web Component：把键盘和手柄收成同一套数字按键，再以一对 Frame-targeted Presentation 频道发给当前 Top Active Frame。现行六个设备频道保持不变。本文还不是正式契约；实现前不改写已冻结的 Game Common Controls Input v1。
+本文定义业务 Web Component：把键盘和手柄收成同一套数字按键，再以一对 Frame-targeted Presentation 频道发给当前 Top Active Frame。现行六个设备频道保持不变。本文不改写已冻结的 Game Common Controls Input v1。
 
 ## 1. 组件
 
@@ -482,6 +482,9 @@ src/fresh-state.ts
     增加 createFreshControlsStateTracker
     不改变 createFreshDeviceStateTracker 的既有六频道语义
 
+src/controls-machine.ts
+    内部纯状态机；不从 `@loomrealm-game/common-controls` 根导出
+
 browser/controls-source.ts
     新增 controls-specific Keyboard + Gamepad sampler/state machine
 
@@ -528,7 +531,7 @@ npm run docs:check-links
 npm run docs:build
 ~~~
 
-只有上述 acceptance criteria 和命令全部通过，才把本文状态从 `Draft / Freeze candidate` 改为 `Active / Normative / Frozen / Implemented`。
+只有上述 acceptance criteria 和命令全部通过，才把本文状态从 `Draft / Freeze candidate` 改为 `Active / Normative / Frozen / Implemented`。该条件已经满足，记录见第 12 节。`Frozen != Implemented != Qualified`：本文状态停在 Implemented；qualification 证据单独记录，不把本文改写成 Qualified。
 
 ## 11. v1 不做的事
 
@@ -538,3 +541,42 @@ npm run docs:build
 - 不按游戏改键盘表，也不在载荷里提供厂商丝印别名。
 - 不把多名玩家拆成多套频道。
 - 不替换现有 `game-keyboard-input`、`game-pointer-input`、`game-gamepad-input`。
+
+## 12. 实现与 qualification subject
+
+qualified implementation subject：`feb28074`（`feb280747fcf0ab1c37b0a93c19c8741eeda3b4a`）
+
+实现位置：
+
+~~~text
+src/model.ts
+    CONTROLS_INPUT_CHANNELS、14 键、EMPTY_CONTROLS_STATE_V1、1000/2500 常量
+src/fresh-state.ts
+    createFreshControlsStateTracker
+src/controls-machine.ts
+    Keyboard / Gamepad effective reducer；不是包的 public ABI
+browser/controls-source.ts
+    capture、preventDefault、Gamepad polling
+browser/device-input.browser.ts
+    <game-controls-input>、duplicate key "controls"、broadcast: "top-frame"
+scripts/build-browser.mjs
+    collision banner 包含 game-controls-input
+test/game-controls-input-v1/qualification.test.mjs
+    仓库级 qualification
+~~~
+
+2026-10-24，在 frozen Hostra pin `d863beab`（`1.0.1-beta.1`）上执行：
+
+~~~text
+HOSTRA_SOURCE_DIR=<frozen pin> npm run test:game-controls-input:qualification
+~~~
+
+| 命令阶段 | 结果 |
+| --- | --- |
+| `@loomrealm-game/common-controls` 包测试 | PASS，20/20 |
+| `node --test test/game-controls-input-v1/qualification.test.mjs` | PASS，7/7 |
+| `npm run test:frame-targeted-presentation:qualification` | PASS：核心/集成 50/50、Desktop Hostra Chromium 1/1、PWA Chromium 1/1 |
+| `npm run docs:check-links` | PASS，782 个相对链接 / 167 个 Markdown 文件 |
+| `npm run docs:build` | PASS，VitePress client/server build 与 page rendering 完成 |
+
+同一脚本在未设置 `HOSTRA_SOURCE_DIR`、因而落到 sibling Hostra `1.0.0` 时，Desktop 阶段因 `HOSTRA_RPC_PORT=0` 未被改写成实际端口而失败。这与本次 controls 实现无关；使用 CI 同一 freeze pin 后该阶段为 1/1。证据文件：`doc/30-implementation/game-controls-input-qualification.md`。
