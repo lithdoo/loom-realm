@@ -62,3 +62,33 @@ export function isNonEmptyDeviceState(channel: DeviceStateChannel, payload: Json
   const value = channel === "keyboard.state" ? payload.down : channel === "pointer.state" ? payload.pointers : payload.gamepads;
   return Array.isArray(value) && value.length > 0;
 }
+
+export const CONTROLS_INPUT_CHANNELS = Object.freeze([
+  "controls.state",
+  "controls.event",
+] as const);
+export type ControlsInputChannel = typeof CONTROLS_INPUT_CHANNELS[number];
+
+export const CONTROLS_BUTTONS_V1 = Object.freeze([
+  "up", "down", "left", "right",
+  "south", "east", "west", "north",
+  "leftBumper", "rightBumper", "leftTrigger", "rightTrigger",
+  "start", "select",
+] as const);
+export type ControlsButtonV1 = typeof CONTROLS_BUTTONS_V1[number];
+
+export interface ControlsStatePayloadV1 extends JsonObject {
+  readonly down: readonly ControlsButtonV1[];
+}
+
+export interface ControlsEventPayloadV1 extends JsonObject {
+  readonly action: "down" | "up";
+  readonly button: ControlsButtonV1;
+  readonly repeat: boolean;
+}
+
+export const EMPTY_CONTROLS_STATE_V1: ControlsStatePayloadV1 = Object.freeze({
+  down: Object.freeze([]),
+});
+export const CONTROLS_STATE_REFRESH_MS = 1_000;
+export const CONTROLS_STATE_STALE_MS = 2_500;
