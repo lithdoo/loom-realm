@@ -1,8 +1,8 @@
 # RPG Dialogue v1 Qualification
 
 > 状态：**Implemented / Qualified / Frozen**
-> 日期：2026-10-24
-> Executable / qualification-input subject：`3bdf9dbc3db43d1daa68cba0f7a54a76e9bb61b5`
+> 日期：2026-10-25
+> Executable / qualification-input subject：`5017fde181f8c8f3abe2b0c6d65edb2d6e4bced1`
 > Historical v0 subject：`9cf5f92d52e365ac868d2dbb0004d765e09140ba`
 > Frozen contract deviations：**None**
 
@@ -18,7 +18,9 @@ PASS
   real Chromium v1 qualification 1/1
 
 npm run test:game-control-ports:qualification
-PASS 2/2
+PASS
+  Node composition lifecycle 1/1
+  real Chromium closed loops 2/2
 ```
 
 Package tests prove stable `dialogue.controls` identity, READY/CLOSED no-op behavior, ACTIVE semantic routing, no queue/replay/retained command state, v0 Conversation/History/result preservation, and absence of physical/unified input ownership.
