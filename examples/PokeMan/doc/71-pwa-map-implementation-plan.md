@@ -24,7 +24,7 @@
 ### PokeMan 当前已有
 
 - `examples/PokeMan/game.json`：当前基线仍是单 `map`；controls landing 将按 [72-controls-composition.md](./72-controls-composition.md) 改为 `base + map`，initial params 仍是 Map 3、坐标 `(3,8)`、玩家资源 `Characters/Player`。
-- `examples/PokeMan/launch.hostra.json`：`map` 绑定 `subsystems/map.mjs`。Desktop 已跑通，**保留原配置和 `play.bat` 的行为**。
+- `examples/PokeMan/launch.hostra.json`：当前基线仍是单 `map`；controls landing 将与 `game.json` 一起迁为 `base + map`。保留 Desktop 启动能力与 `play.bat` 行为目标，但不保留旧单-map manifest shape。
 - `examples/PokeMan/subsystems/map.mjs`：`RPGMapBuilder`、`onMapEntering`、`setNPC` 提供静态 NPC；不要在 PWA 创建第二份游戏逻辑。
 - `examples/PokeMan/[FSDB]PokeMan/`：Map、MapTransfer、Tileset、NPC、Graphics、Presentation 等内容。已有 `scripts/sync-map-presentation.mjs` 解决 Desktop 的 Map browser JS/CSS 与 FSDB 资源同步。
 - `examples/PokeMan/presentation.json`：引用 `Presentation/map/map.css`、`Presentation/page.css`、`Presentation/map/map.browser.js`。
@@ -57,7 +57,8 @@
 examples/PokeMan/game.json --------------------┐
 examples/PokeMan/launch.pwa.json ---------------┤
 examples/PokeMan/[FSDB]PokeMan/ ----------------┼─ Node 端资格/打包工具
-examples/PokeMan/subsystems/map.mjs -- esbuild -┘
+examples/PokeMan/subsystems/base.mjs -- esbuild --┐
+examples/PokeMan/subsystems/map.mjs  -- esbuild --┘
                                                 ↓
                                PwaInstallationBundleV1
                                ├── gameEntryText
@@ -71,7 +72,7 @@ examples/PokeMan/subsystems/map.mjs -- esbuild -┘
                                                 ↓
                           existing PWA Launcher + Session Worker
                                                 ↓
-                          existing Subsystem Worker (only map)
+                          existing Subsystem Workers (base + map; only map is gameplay)
                                                 ↓
                             existing Renderer/Input/Viewport
 ```
@@ -147,8 +148,9 @@ examples/PokeMan/subsystems/map.mjs -- esbuild -┘
 4. PWA Executable Graph 必须不含 bare npm imports、绝对/跨源 import、未枚举的 dynamic imports；通过现有 `buildPwaExecutableIndexV1` / PREPARE 校验。不要靠运行时 import map 或为 PWA Worker 安装 npm resolver。
 5. 不能修改 `game-libs/map` 的公共 API 或拆一份 `map.pwa.mjs` 业务副本以规避构建问题。
 6. 验证生成产物与当前源/依赖构建一致，并避免提交 `apps/pwa/dist` 一类生成物。
+7. 同步把 PokeMan staging/qualification fixture 从单一 `executable` 改为 plural executable collection；`pokeman-window-entry.ts`、bundle identity、bundle unit test 与 Chromium E2E 必须共同消费 `base + map`，不得在不同路径保留单-map特例。
 
-**门槛：** 用真实 `subsystems/map.mjs` 打包所得 ESM 可被 PWA Launcher 完整校验并作为唯一 Map Runtime 加载。
+**门槛：** 用真实 `subsystems/base.mjs` 与 `subsystems/map.mjs` 打包所得两个 ESM 都可被 PWA Launcher 完整校验；Base 负责 product controls producer，Map 仍是唯一 gameplay Runtime。
 
 ### P4 — PokeMan Chromium 真实 E2E（本次主要验收）
 
@@ -167,6 +169,34 @@ examples/PokeMan/subsystems/map.mjs -- esbuild -┘
 11. 将新 E2E 纳入 `apps/pwa/scripts/run-e2e.mjs` 的 `m17/all` 运行列表及相关 CI 的 PWA qualification 路径；避免只在单机手动运行，而 CI 后续完全不覆盖。
 
 **门槛：** 真实 Chromium Playwright E2E 可重复通过，能够证明 Map 3 初始展示、玩家输入移动、跨地图转场、NPC 可见与重启保持可用。
+
+### P4.5 — Clean build orchestration
+
+Controls migration 会删除 `@loomrealm-game/map` 当前通过 `prebuild` 隐式构建 `@loomrealm-game/common-controls` 的耦合。删除后必须由顶层 build lane 显式保证依赖顺序：
+
+```text
+build:m14
+→ build common-controls
+→ build tile-presentation / map / Essentials
+
+build:m15
+→ inherit corrected m14 graph
+
+build:m17 / @loomrealm/pwa build:qualification
+→ common-controls built before:
+   - reading dist/browser/device-input.browser.js
+   - bundling example map.mjs imports from common-controls/subsystem
+```
+
+必须至少做一次 clean-dist 验证，证明没有依赖旧 workspace `dist/`：
+
+```text
+remove affected generated dist outputs
+run canonical build / qualification commands
+→ PASS
+```
+
+不得通过恢复 Map package `prebuild` 来修复构建顺序；build dependency 属于 root/product orchestration。
 
 ### P5 — 回归、报告与 PR
 
@@ -263,7 +293,7 @@ PokeMan PWA Map-only 实施报告
    - Session restart：
    - 已安装 Content 离线读取：
 5. 边界检查
-   - 是否仍只有 map：是/否
+   - topology 是否精确为 base + map，且只有 map 是 gameplay subsystem：是/否
    - 是否改动 Map Library / PWA Platform 内核：是/否及原因
    - 是否保持 Desktop 启动：是/否
    - 是否触及正式 UI/离线冷启动：否（应为非目标）
@@ -276,7 +306,7 @@ PokeMan PWA Map-only 实施报告
 
 ## 8. 停止条件
 
-- **达到本次目标：** P1–P4 的自动化与真实 Chromium Map 游戏 E2E 通过，P5 的适用回归通过，PR 创建完成；可以报告「PokeMan Map-only 已通过 PWA qualification」。
+- **达到本次目标：** P1–P4 的自动化与真实 Chromium Map 游戏 E2E 通过，P5 的适用回归通过，且安装的 executable index 精确为 `base + map`；PR 创建完成后，可以报告「PokeMan Map-only gameplay 已通过 base+map PWA qualification」。
 - **不能据此报告：** 「PokeMan 正式 PWA 已上线」「可安装到主屏幕」「断网后可冷启动」，因为正式用户入口、Web App Manifest、Shell 缓存等不在本次范围。
 - **环境不满足：** 实现并提交可以验证的部分，明确标记 Browser/Hostra 等实际未完成的验收；不可伪称全部通过。
 
