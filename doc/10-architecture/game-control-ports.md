@@ -620,7 +620,7 @@ create exact Frame Presentation listener
 根据 handlers 只订阅需要的 controls channels
 验证 event.name / payload
 controls.state → createFreshControlsStateTracker
-2500ms silence → local EMPTY_CONTROLS_STATE_V1
+CONTROLS_STATE_STALE_MS silence → local EMPTY_CONTROLS_STATE_V1
 Frame terminal abort / explicit close → cleanup listener + freshness timer
 Event 不 replay
 ```
