@@ -1,15 +1,17 @@
 # Game Control Ports 与 Activation-scoped Common Controls Consumer 设计
 
-> 状态：**Draft / Ready for implementation**
+> 状态：**Implemented / Qualified / Frozen**
+> Executable subject：runtime `8346d15d033f93dfbb38d8d12812cdd29c90d691`；clean build graph `f051ae8eecb08a59ccf018f8afa000baeca32fe2`
+> Evidence：[Game Control Ports v1 Qualification](../30-implementation/game-control-ports-v1-qualification.md)
 > 适用范围：`game-libs/map`、`game-libs/rpg-dialogue`、`game-libs/game-common-controls`
 > 目标：把“物理输入 / unified controls”与 Map、Dialogue 业务 Runtime 解耦，同时不新增独立 binding package
 > 上游输入：[统一操控输入 Web Component](../../game-libs/game-common-controls/game-controls-input.md)
 > Frame 投递：[Frame-targeted Presentation Event v1](../15-contracts/frame-targeted-presentation-event-v1.md)
-> Map Control Port：[RPGMap Control Port v1 candidate](../20-modules/loom-map/control-port-v1.md)
-> Dialogue Control Port：[RPG Dialogue v1 API candidate](../../game-libs/rpg-dialogue/RPG_DIALOGUE_V1_API.md)
+> Map Control Port：[RPGMap Control Port v1](../20-modules/loom-map/control-port-v1.md)
+> Dialogue Control Port：[RPG Dialogue v1 API](../../game-libs/rpg-dialogue/RPG_DIALOGUE_V1_API.md)
 > Qualification 规则：[Qualification 与 Subject](../30-development/qualification.md)
 
-本文定义下一阶段的 game-library control-port 改造。它是实现设计，不修改现有 Frozen contract 的历史事实；实现 PR 必须按本文的版本/兼容规则更新对应正式契约和 qualification evidence。
+本文是已落地的 game-library control-port 设计。它不修改已有 Frozen contract 的历史事实。Exact executable subject 与命令结果见 qualification evidence；后续 docs-only commit 不改变该 subject。
 
 本文只拥有 control-port 及其消费边界，不拥有相邻系统的全部策略。以下事项仍由各自 owner 决定：
 

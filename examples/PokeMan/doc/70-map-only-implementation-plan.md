@@ -24,8 +24,8 @@
 
 ### 当前 PokeMan 状态
 
-- `game.json`：唯一 `map` Subsystem，初始 `mapId: 3, x: 3, y: 8, characterName: "Player"`。
-- `launch.hostra.json`：`map` 绑定 `subsystems/map.mjs`。
+- `game.json`：`base + map`。initial subsystem 是 `base`，Map params 仍是 `mapId: 3, x: 3, y: 8, characterName: "Player"`。
+- `launch.hostra.json`：`base` 绑定 `subsystems/base.mjs`，`map` 绑定 `subsystems/map.mjs`。
 - `subsystems/map.mjs`：通过 `defineSubsystem` + `RPGMapBuilder` 创建 Map Frame；`onMapEntering` 通过 `context.setNPC(...)` 提供静态 NPC placement；`handler.run(...)` 启动地图。
 - `[FSDB]PokeMan/`：已有 Map、MapTransfer、Tileset、NPC、Graphics 与 Presentation 数据；单个直接 FSDB 根目录。
 - `presentation.json`：当前已引用 controls device-input JS、Map CSS/JS 与 page CSS；controls migration 继续复用这条 Presentation artifact。
@@ -33,7 +33,7 @@
 - `presentation.css` 当前已作为 page CSS source，保持全窗口地图样式。
 - `play.bat` 与 `scripts/sync-map-presentation.mjs` 当前已形成 Desktop 启动前 Presentation 同步链；controls migration 需要保证 controls artifact 继续在同步集合中。
 - `test/map-smoke.test.mjs` 已覆盖当前 Map-only 静态入口/资源约束；真实 controls closed loop 仍由本次 control-port qualification 补齐。
-- `examples/PokeMan/package.json` 已存在；controls landing 需要补 `@loomrealm-game/common-controls` dependency。根 `package.json` 已有 `"examples/*"` workspace glob。
+- `examples/PokeMan/package.json` 已依赖 `@loomrealm-game/common-controls`。根 `package.json` 已有 `"examples/*"` workspace glob。
 
 ### 必须参考的已实现文件
 

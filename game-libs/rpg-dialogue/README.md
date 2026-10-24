@@ -96,10 +96,11 @@ Dialogue-owned semantic facts 进入对应 `RenderNode.attrs`。Conversation / C
 
 - [RPG Dialogue v0 API](./RPG_DIALOGUE_V0_API.md) — **Active / Normative / Frozen**；public TypeScript API、生命周期、History 与 authority。
 - [RPG Dialogue v0 Presentation](./RPG_DIALOGUE_V0_PRESENTATION.md) — **Active / Normative / Frozen**；canonical Render Tree、attrs/data、WebComponent 与 interaction ABI。
-- [RPG Dialogue v1 API candidate](./RPG_DIALOGUE_V1_API.md) — **Normative Candidate / Ready for implementation**；v0 business surface + additive semantic `controls`，并移除 Runtime raw physical input ownership。
+- [RPG Dialogue v1 API](./RPG_DIALOGUE_V1_API.md) — **Implemented / Qualified / Frozen**；v0 business surface + additive semantic `controls`。Current Runtime 不再订阅 raw Keyboard/Gamepad。
 - [Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md) — LoomRealm 通用 Web Presentation contract。
 - [Render Update v1](../../doc/15-contracts/render-update-v1.md) — retained Render state 与 transient Render Event wire contract。
-- [RPG Dialogue v0 Qualification](../../doc/30-implementation/rpg-dialogue-v0-qualification.md) — executable subject、命令、PASS 结果与 Frozen contract matrix。
-- [Game Control Ports 与 Activation-scoped Common Controls Consumer](../../doc/10-architecture/game-control-ports.md) — **Draft / Ready for implementation**；定义下一版 controls port / binding 迁移，v0 Frozen contract 在实现落地前保持不变。
+- [RPG Dialogue v0 Qualification](../../doc/30-implementation/rpg-dialogue-v0-qualification.md) — 历史 executable subject。它不覆盖 current v1 controls。
+- [RPG Dialogue v1 Qualification](../../doc/30-implementation/game-control-ports-v1-qualification.md) — current v1 executable subject。
+- [Game Control Ports 与 Activation-scoped Common Controls Consumer](../../doc/10-architecture/game-control-ports.md) — **Implemented / Qualified / Frozen**。
 
-README 只作为模块入口。当前已实现 subject 的 observable v0 语义仍以上述 Frozen v0 API / Presentation contract 为准；下一轮 control-port implementation 以 v1 candidate + Game Control Ports landing profile 为依据。不得回写 v0 历史 contract，也不得让 current v1 Runtime继续拥有 raw Keyboard/Gamepad mapping。
+README 只作为模块入口。v0 Frozen API / Presentation 继续描述历史 contract。Current implementation 的 interaction entrance 是 v1 `dialogue.controls`。Root `test:rpg-dialogue:qualification` 指向 v1。不得回写 v0 历史 contract。
