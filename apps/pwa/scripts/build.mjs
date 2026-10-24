@@ -2,7 +2,6 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { createPokeManPwaFixture } from "../../../examples/PokeMan/scripts/prepare-pwa-content.mjs";
 import { deriveProductGeneration, emitProductArtifacts } from "./build-identity.mjs";
 import { pokeManBundleId } from "./pokeman-bundle-id.mjs";
 
@@ -95,6 +94,7 @@ async function buildStaging() {
   await rm(stagingRoot, { recursive: true, force: true });
   await mkdir(stagingRoot, { recursive: true });
   await emitProductArtifacts(stagingEntries, stagingRoot, root, generation);
+  const { createPokeManPwaFixture } = await import("../../../examples/PokeMan/scripts/prepare-pwa-content.mjs");
   const fixture = await createPokeManPwaFixture({ executablePaths: { base: baseExecutable, map: mapExecutable } });
   const payload = {
     gameEntryText: fixture.gameEntryText,
