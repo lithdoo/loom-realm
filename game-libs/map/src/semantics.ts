@@ -165,13 +165,6 @@ export function tileVisualDepth(y: number, priority: number, tag: number = TERRA
   return (y + priority + 1) * TILE_SIZE;
 }
 
-const directions = Object.freeze({
-  ArrowDown: { direction: 2 as const, dx: 0, dy: 1 },
-  ArrowLeft: { direction: 4 as const, dx: -1, dy: 0 },
-  ArrowRight: { direction: 6 as const, dx: 1, dy: 0 },
-  ArrowUp: { direction: 8 as const, dx: 0, dy: -1 },
-});
-
 const passageBits: Record<Direction, number> = { 2: 0x01, 4: 0x02, 6: 0x04, 8: 0x08 };
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -380,8 +373,6 @@ export function tableAt(table: ProjectedTable, x: number, y = 0, z = 0): number 
   }
   return table.values[x + y * table.xSize + z * table.xSize * table.ySize]!;
 }
-
-export function directionForCode(code: string) { return directions[code as keyof typeof directions]; }
 
 export function mapTilePassable(map: MapRecord, tileset: TilesetRecord, x: number, y: number, direction: Direction): boolean {
   if (x < 0 || y < 0 || x >= map.width || y >= map.height) return false;

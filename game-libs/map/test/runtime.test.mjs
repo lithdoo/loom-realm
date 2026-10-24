@@ -72,6 +72,46 @@ function secondMap() {
   };
 }
 
+const CODE_DIRECTION = Object.freeze({ ArrowDown: 2, ArrowLeft: 4, ArrowRight: 6, ArrowUp: 8 });
+const DIRECTION_CODE = Object.freeze({ 2: "ArrowDown", 4: "ArrowLeft", 6: "ArrowRight", 8: "ArrowUp" });
+const FALLBACK_CODES = Object.freeze(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+
+function createMoveIntentDriver(controls) {
+  const held = [];
+  const publish = () => controls.setMoveIntent(held.at(-1) ?? null);
+  return {
+    emitEvent(payload) {
+      const direction = CODE_DIRECTION[payload?.code];
+      if (direction === undefined) return;
+      if (payload.action === "down") {
+        if (payload.repeat === true) return;
+        const index = held.indexOf(direction);
+        if (index >= 0) held.splice(index, 1);
+        held.push(direction);
+        publish();
+        return;
+      }
+      if (payload.action !== "up") return;
+      const index = held.indexOf(direction);
+      if (index >= 0) held.splice(index, 1);
+      publish();
+    },
+    emitState(payload) {
+      const down = new Set(Array.isArray(payload?.down) ? payload.down : []);
+      const next = held.filter((direction) => down.has(DIRECTION_CODE[direction]));
+      for (const code of FALLBACK_CODES) {
+        const direction = CODE_DIRECTION[code];
+        if (down.has(code) && !next.includes(direction)) next.push(direction);
+      }
+      const previous = held.at(-1) ?? null;
+      held.length = 0;
+      held.push(...next);
+      const latest = held.at(-1) ?? null;
+      if (latest !== previous) controls.setMoveIntent(latest);
+    },
+  };
+}
+
 async function flush(times = 40) {
   for (let attempt = 0; attempt < times; attempt += 1) await new Promise((resolve) => setImmediate(resolve));
 }
@@ -184,7 +224,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     if (options.omitTransfer) delete records["struct.MapTransfer/1"];
     const gates = options.gates ?? {};
     const reads = [];
-    const handlers = new Map();
+    const subscriptions = [];
     const states = [];
     const updates = [];
     const replaces = [];
@@ -225,15 +265,9 @@ describe("map runtime walking", { concurrency: false }, () => {
           return { bytes: new Uint8Array([1]), mime: "image/png", contentVersion: "v-image" };
         },
       },
-      events: { async subscribe(channels, listener) {
-        assert.deepEqual([...channels], ["keyboard.event", "keyboard.state"]);
-        for (const channel of channels) handlers.set(channel, (payload) => listener({
-          channel, type: channel.endsWith(".state") ? "input.state" : "input.event",
-          payload: { domainId: "map", targetKey: "map-input-keyboard", data: payload },
-          source: { subsystemKey: "map" },
-        }));
-        if (options.baseline) handlers.get("keyboard.state")(options.baseline);
-        return { closed: new Promise(() => {}), close() { listenerClosed = true; handlers.clear(); } };
+      events: { async subscribe(channels) {
+        subscriptions.push([...channels]);
+        throw new Error(`Map runtime must not subscribe to ${channels.join(",")}`);
       } },
       createRenderDomain(initial) {
         states.push(structuredClone(initial));
@@ -261,20 +295,23 @@ describe("map runtime walking", { concurrency: false }, () => {
       async call() { throw new Error("unused"); },
     };
     const handler = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
+    const movement = createMoveIntentDriver(handler.controls);
     handler.onMapEntering((context) => { context.setNPC([]); });
+    if (options.intent !== undefined) handler.controls.setMoveIntent(options.intent);
     const pending = handler.run({ mapId: input.mapId, x: input.x, y: input.y, ...(input.direction === undefined ? {} : { direction: input.direction }) });
     if (options.expectActivationFailure) {
-      return { pending, reads, states, updates, replaces, listenerClosed: () => listenerClosed, domainClosed: () => domainClosed };
+      return { pending, reads, states, updates, replaces, subscriptions, listenerClosed: () => listenerClosed, domainClosed: () => domainClosed };
     }
     const ready = async () => {
-      for (let attempt = 0; attempt < 40 && (states.length === 0 || !handlers.has("keyboard.event") || !handlers.has("keyboard.state")); attempt += 1) {
+      for (let attempt = 0; attempt < 40 && states.length === 0; attempt += 1) {
         await new Promise((resolve) => setImmediate(resolve));
       }
       assert.ok(states.length >= 1, "expected initial standing RenderDomain");
     };
     const attached = {
-      emitEvent(payload) { return handlers.get("keyboard.event")(payload); },
-      emitState(payload) { return handlers.get("keyboard.state")(payload); },
+      emitEvent(payload) { return movement.emitEvent(payload); },
+      emitState(payload) { return movement.emitState(payload); },
+      handler,
       states,
       updates,
       replaces,
@@ -287,6 +324,7 @@ describe("map runtime walking", { concurrency: false }, () => {
       fireTimer: timers.fireTimer,
       lastCallback: timers.lastCallback,
       queued: timers.queued,
+      subscriptions,
       listenerClosed: () => listenerClosed,
       domainClosed: () => domainClosed,
       ready,
@@ -436,7 +474,8 @@ describe("map runtime walking", { concurrency: false }, () => {
     const late = frame.lastCallback();
     frame.abort();
     assert.deepEqual(await frame.pending, { type: "cancelled" });
-    assert.equal(frame.listenerClosed(), true);
+    assert.deepEqual(frame.subscriptions, []);
+    assert.equal(frame.listenerClosed(), false);
     assert.equal(frame.domainClosed(), true);
     const count = frame.states.length;
     late();
@@ -467,8 +506,8 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.pending;
   });
 
-  test("retained keyboard.state baseline uses fallback order and can start after domain exists", async (t) => {
-    const frame = await startFrame(t, { baseline: { down: ["ArrowRight", "ArrowDown"] } });
+  test("pre-run move intent is retained until the first scene is ready", async (t) => {
+    const frame = await startFrame(t, { intent: 6 });
     assert.ok(frame.states.length >= 2);
     const walked = frame.latestState();
     assert.equal(player(walked).direction, 6);
@@ -494,7 +533,8 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(view(frame.latestState()).cameraX, 48);
     frame.abort();
     assert.deepEqual(await frame.pending, { type: "cancelled" });
-    assert.equal(frame.listenerClosed(), true);
+    assert.deepEqual(frame.subscriptions, []);
+    assert.equal(frame.listenerClosed(), false);
     assert.equal(frame.domainClosed(), true);
   });
 
@@ -1361,6 +1401,60 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.match(outcome.error.message, /outside Map bounds/u);
     assert.equal(frame.states.length, 0);
   });
+
+  test("control port keeps a stable identity, rejects illegal directions, and does not own input roots", async (t) => {
+    const frame = await startFrame(t);
+    assert.equal(frame.handler.controls, frame.handler.controls);
+    assert.deepEqual(frame.latestState().roots.map((root) => root.tag), ["lr-map-view"]);
+    assert.throws(() => frame.handler.controls.setMoveIntent(1), TypeError);
+    assert.throws(() => frame.handler.controls.setMoveIntent("6"), TypeError);
+    frame.abort();
+    await frame.pending;
+    assert.throws(() => frame.handler.controls.setMoveIntent(3), TypeError);
+    const states = frame.states.length;
+    frame.handler.controls.setMoveIntent(8);
+    frame.handler.controls.setMoveIntent(null);
+    assert.equal(frame.states.length, states);
+  });
+
+  test("blocked movement keeps intent without a retry timer until a real transition", async (t) => {
+    const frame = await startFrame(t);
+    frame.handler.controls.setMoveIntent(6);
+    frame.fireNextTimer();
+    const blocked = player(frame.latestState());
+    assert.equal(blocked.x, 11);
+    assert.equal(blocked.motion, null);
+    assert.equal(frame.queued.length, 0);
+    const count = frame.states.length;
+    frame.handler.controls.setMoveIntent(6);
+    assert.equal(frame.states.length, count);
+    frame.handler.controls.setMoveIntent(null);
+    frame.handler.controls.setMoveIntent(6);
+    assert.equal(player(frame.latestState()).x, 11);
+    assert.equal(player(frame.latestState()).motion, null);
+    assert.equal(frame.queued.length, 0);
+    frame.handler.controls.setMoveIntent(null);
+    frame.handler.controls.setMoveIntent(2);
+    assert.equal(player(frame.latestState()).direction, 2);
+    assert.equal(player(frame.latestState()).y, 9);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("map movement source does not own physical or unified input", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("../src/runtime.ts", import.meta.url), "utf8");
+    assert.equal(source.includes("keyboard."), false);
+    assert.equal(source.includes("gamepad."), false);
+    assert.equal(source.includes("controls.state"), false);
+    assert.equal(source.includes("controls.event"), false);
+    assert.equal(source.includes("map-input-"), false);
+    assert.equal(source.includes(".getSnapshot()"), false);
+    assert.equal(source.includes("@loomrealm-game/common-controls"), false);
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    assert.equal(pkg.dependencies["@loomrealm-game/common-controls"], undefined);
+    assert.equal(pkg.scripts.prebuild, undefined);
+  });
 });
 
 describe("map runtime transfer", { concurrency: false }, () => {
@@ -1418,7 +1512,7 @@ describe("map runtime transfer", { concurrency: false }, () => {
     if (options.omitTransfer) delete records["struct.MapTransfer/1"];
     const gates = options.gates ?? {};
     const reads = [];
-    const handlers = new Map();
+    const subscriptions = [];
     const states = [];
     const updates = [];
     const replaces = [];
@@ -1458,15 +1552,9 @@ describe("map runtime transfer", { concurrency: false }, () => {
           return { bytes: new Uint8Array([1]), mime: "image/png", contentVersion: "v-image" };
         },
       },
-      events: { async subscribe(channels, listener) {
-        assert.deepEqual([...channels], ["keyboard.event", "keyboard.state"]);
-        for (const channel of channels) handlers.set(channel, (payload) => listener({
-          channel, type: channel.endsWith(".state") ? "input.state" : "input.event",
-          payload: { domainId: "map", targetKey: "map-input-keyboard", data: payload },
-          source: { subsystemKey: "map" },
-        }));
-        if (options.baseline) handlers.get("keyboard.state")(options.baseline);
-        return { closed: new Promise(() => {}), close() { listenerClosed = true; handlers.clear(); } };
+      events: { async subscribe(channels) {
+        subscriptions.push([...channels]);
+        throw new Error(`Map runtime must not subscribe to ${channels.join(",")}`);
       } },
       createRenderDomain(initial) {
         states.push(structuredClone(initial));
@@ -1489,18 +1577,21 @@ describe("map runtime transfer", { concurrency: false }, () => {
       async call() { throw new Error("unused"); },
     };
     const handler = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
+    const movement = createMoveIntentDriver(handler.controls);
     handler.onMapEntering((context) => { context.setNPC([]); });
+    if (options.intent !== undefined) handler.controls.setMoveIntent(options.intent);
     const pending = handler.run({ mapId: input.mapId, x: input.x, y: input.y, ...(input.direction === undefined ? {} : { direction: input.direction }) });
     if (options.expectActivationFailure) {
-      return { pending, reads, states, updates, replaces, listenerClosed: () => listenerClosed, domainClosed: () => domainClosed };
+      return { pending, reads, states, updates, replaces, subscriptions, listenerClosed: () => listenerClosed, domainClosed: () => domainClosed };
     }
-    for (let attempt = 0; attempt < 40 && (states.length === 0 || !handlers.has("keyboard.event") || !handlers.has("keyboard.state")); attempt += 1) {
+    for (let attempt = 0; attempt < 40 && states.length === 0; attempt += 1) {
       await new Promise((resolve) => setImmediate(resolve));
     }
     assert.ok(states.length >= 1, "expected initial standing RenderDomain");
     return {
-      emitEvent(payload) { return handlers.get("keyboard.event")(payload); },
-      emitState(payload) { return handlers.get("keyboard.state")(payload); },
+      emitEvent(payload) { return movement.emitEvent(payload); },
+      emitState(payload) { return movement.emitState(payload); },
+      handler,
       states,
       updates,
       replaces,
@@ -1513,6 +1604,7 @@ describe("map runtime transfer", { concurrency: false }, () => {
       fireTimer: timers.fireTimer,
       lastCallback: timers.lastCallback,
       queued: timers.queued,
+      subscriptions,
       listenerClosed: () => listenerClosed,
       domainClosed: () => domainClosed,
     };
