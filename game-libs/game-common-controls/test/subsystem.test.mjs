@@ -40,6 +40,14 @@ function fixture() {
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
+function structuralSignal(controller) {
+  return {
+    get aborted() { return controller.signal.aborted; },
+    addEventListener: controller.signal.addEventListener.bind(controller.signal),
+    removeEventListener: controller.signal.removeEventListener.bind(controller.signal),
+  };
+}
+
 test("package root ABI stays exact and subsystem is a separate exact public surface", async () => {
   assert.deepEqual(Object.keys(rootApi), [
     "CONTROLS_BUTTONS_V1",
@@ -83,6 +91,25 @@ test("consumer subscribes only requested channels and delivers an activation-loc
   const both = fixture();
   createControlsConsumer(both.presentationEvents, both.frame, { onState() {}, onEvent() {} });
   assert.deepEqual(both.listeners[0].channels, ["controls.state", "controls.event"]);
+});
+
+test("consumer accepts structural AbortSignal capability and rejects incomplete Frame signals", () => {
+  const target = fixture();
+  target.frame.signal = structuralSignal(target.controller);
+  assert.equal(target.frame.signal instanceof AbortSignal, false);
+  const consumer = createControlsConsumer(target.presentationEvents, target.frame, { onState() {} });
+  target.controller.abort();
+  assert.equal(target.listeners[0].closed, true);
+  consumer.close();
+
+  for (const signal of [null, {}, { aborted: false }, { aborted: false, addEventListener() {} }]) {
+    const malformed = fixture();
+    malformed.frame.signal = signal;
+    assert.throws(
+      () => createControlsConsumer(malformed.presentationEvents, malformed.frame, {}),
+      TypeError,
+    );
+  }
 });
 
 test("consumer validates canonical State/Event payloads and fails malformed delivery closed", () => {

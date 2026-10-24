@@ -31,6 +31,14 @@ function controlsButton(value: unknown): value is ControlsButtonV1 {
   return typeof value === "string" && controlsButtons.has(value);
 }
 
+function isAbortSignalLike(value: unknown): value is AbortSignal {
+  if (value === null || typeof value !== "object") return false;
+  const signal = value as Partial<AbortSignal>;
+  return typeof signal.aborted === "boolean"
+    && typeof signal.addEventListener === "function"
+    && typeof signal.removeEventListener === "function";
+}
+
 function validState(value: unknown): ControlsStatePayloadV1 | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Readonly<Record<string, unknown>>;
@@ -74,7 +82,7 @@ export function createControlsConsumer(
   if (presentationEvents === null || typeof presentationEvents !== "object" || typeof presentationEvents.createListener !== "function") {
     throw new TypeError("Invalid Presentation Event client");
   }
-  if (frame === null || typeof frame !== "object" || !(frame.signal instanceof AbortSignal)) {
+  if (frame === null || typeof frame !== "object" || !isAbortSignalLike(frame.signal)) {
     throw new TypeError("Invalid Frame");
   }
   if (handlers === null || typeof handlers !== "object" || Array.isArray(handlers)) {
