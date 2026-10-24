@@ -2,7 +2,7 @@
 
 > 状态：**Implemented / Qualified / Frozen**
 > 日期：2026-10-24
-> Executable / qualification-input subject：`c3d41a96f457fadcb278fd082bcb030b90558767`
+> Executable / qualification-input subject：`3bdf9dbc3db43d1daa68cba0f7a54a76e9bb61b5`
 > Frozen contract deviations：**None**
 
 本记录验证 [Game Control Ports](../10-architecture/game-control-ports.md)、[RPGMap Control Port v1](../20-modules/loom-map/control-port-v1.md) 和 product-private `base + map` composition。后续 docs-only evidence commit 不改变上述 executable subject。

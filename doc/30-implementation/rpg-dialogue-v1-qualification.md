@@ -2,7 +2,7 @@
 
 > 状态：**Implemented / Qualified / Frozen**
 > 日期：2026-10-24
-> Executable / qualification-input subject：`c3d41a96f457fadcb278fd082bcb030b90558767`
+> Executable / qualification-input subject：`3bdf9dbc3db43d1daa68cba0f7a54a76e9bb61b5`
 > Historical v0 subject：`9cf5f92d52e365ac868d2dbb0004d765e09140ba`
 > Frozen contract deviations：**None**
 
