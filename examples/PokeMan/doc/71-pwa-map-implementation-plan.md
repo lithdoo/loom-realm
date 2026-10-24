@@ -23,7 +23,7 @@
 
 ### PokeMan 当前已有
 
-- `examples/PokeMan/game.json`：唯一 `map`，初始 Map 3、坐标 `(3,8)`，玩家资源 `Characters/Player`。
+- `examples/PokeMan/game.json`：当前基线仍是单 `map`；controls landing 将按 [72-controls-composition.md](./72-controls-composition.md) 改为 `base + map`，initial params 仍是 Map 3、坐标 `(3,8)`、玩家资源 `Characters/Player`。
 - `examples/PokeMan/launch.hostra.json`：`map` 绑定 `subsystems/map.mjs`。Desktop 已跑通，**保留原配置和 `play.bat` 的行为**。
 - `examples/PokeMan/subsystems/map.mjs`：`RPGMapBuilder`、`onMapEntering`、`setNPC` 提供静态 NPC；不要在 PWA 创建第二份游戏逻辑。
 - `examples/PokeMan/[FSDB]PokeMan/`：Map、MapTransfer、Tileset、NPC、Graphics、Presentation 等内容。已有 `scripts/sync-map-presentation.mjs` 解决 Desktop 的 Map browser JS/CSS 与 FSDB 资源同步。
@@ -104,15 +104,16 @@ examples/PokeMan/subsystems/map.mjs -- esbuild -┘
 {
   "formatVersion": 1,
   "subsystems": [
+    { "key": "base", "module": "subsystems/base.mjs" },
     { "key": "map", "module": "subsystems/map.mjs" }
   ]
 }
 ```
 
 1. 使用 `@loomrealm/game-launcher-pwa` 已有 parser 校验该清单，不仅比较 JSON 文本。
-2. 校验 `game.json` 的 Subsystem key 集合与 `launch.pwa.json` 精确一致；两个平台清单都只声明 `map`。
+2. 校验 `game.json` 的 Subsystem key 集合与 `launch.pwa.json` 精确一致；Desktop/PWA 都声明 `base + map`，且只有 `map` 是 gameplay subsystem。
 3. `module` 是 **PWA 安装内的逻辑路径**，不是 URL、Desktop 绝对路径或外部 Worker Entry。
-4. 不改 `game.json`、`launch.hostra.json`、`presentation.json` 或 `map.mjs`，除非有明确的可复现缺陷。
+4. Controls landing 允许并要求同步修改 `game.json`、`launch.hostra.json`、新增 `base.mjs`、修改 `map.mjs`；除这组已批准 composition 变更外，不扩大 gameplay scope。
 
 **门槛：** 桌面与 PWA 入口共享同一逻辑游戏定义，物理绑定正确且平台无关。
 
@@ -138,11 +139,11 @@ examples/PokeMan/subsystems/map.mjs -- esbuild -┘
 
 **门槛：** 真实 FSDB 能稳定转化成 PWA Content entries；安装器能正确验证、存储并通过 PWA Content API 找回所需身份。
 
-### P3 — 构建 PokeMan 浏览器 Map ESM
+### P3 — 构建 PokeMan 浏览器 Base + Map ESM
 
-1. 使用仓库已安装的 esbuild，通过 **`examples/PokeMan/subsystems/map.mjs`** 作为唯一业务入口，目标 `bundle:true`、`platform:"browser"`、`format:"esm"`，与现有 PWA Qualification 目标浏览器版本保持一致。
-2. 建议扩展 `apps/pwa/scripts/build.mjs` 的 `--qualification` 分支，除 Essentials 外再生成一个命名明确的产物（例如 `dist/qualification/pokeman-map.mjs`）。如封装为独立 Node 构建脚本，必须无缝接入既有构建命令，不要求测试人员手工执行 `npx esbuild`。
-3. `executables` 仅含与 `launch.pwa.json` 绑定的 `logicalModule:"subsystems/map.mjs"`，MIME `text/javascript`。
+1. 使用仓库已安装的 esbuild，分别以 **`examples/PokeMan/subsystems/base.mjs`** 与 **`examples/PokeMan/subsystems/map.mjs`** 为两个 logical executable entry，目标 `bundle:true`、`platform:"browser"`、`format:"esm"`。Base 只包含 product controls producer composition；Map 仍是唯一 gameplay entry。
+2. 建议扩展 `apps/pwa/scripts/build.mjs` 的 `--qualification` 分支，为 PokeMan 生成命名明确的 base/map 两个产物（例如 `pokeman-base.mjs`、`pokeman-map.mjs`）。如封装为独立 Node 构建脚本，必须无缝接入既有构建命令，不要求测试人员手工执行 `npx esbuild`。
+3. `executables` 精确包含与 `launch.pwa.json` 绑定的 `subsystems/base.mjs` 与 `subsystems/map.mjs` 两个 logical module，MIME 均为 `text/javascript`。
 4. PWA Executable Graph 必须不含 bare npm imports、绝对/跨源 import、未枚举的 dynamic imports；通过现有 `buildPwaExecutableIndexV1` / PREPARE 校验。不要靠运行时 import map 或为 PWA Worker 安装 npm resolver。
 5. 不能修改 `game-libs/map` 的公共 API 或拆一份 `map.pwa.mjs` 业务副本以规避构建问题。
 6. 验证生成产物与当前源/依赖构建一致，并避免提交 `apps/pwa/dist` 一类生成物。
@@ -189,11 +190,13 @@ examples/PokeMan/subsystems/map.mjs -- esbuild -┘
 
 ```text
 examples/PokeMan/
-├── launch.pwa.json                   # 新增：PWA 物理启动绑定
-├── game.json                         # 不改：唯一 map Subsystem
-├── launch.hostra.json                # 不改：Desktop 物理绑定
-├── subsystems/map.mjs                # 不改：共享业务入口
-├── presentation.json                 # 不改：共享显示定义
+├── launch.pwa.json                   # PWA 绑定 base + map
+├── game.json                         # initial=base，注册 base + map
+├── launch.hostra.json                # Desktop 同样绑定 base + map
+├── subsystems/
+│   ├── base.mjs                      # product-private controls producer
+│   └── map.mjs                       # shared Map gameplay + controls adapter
+├── presentation.json                 # 保持 controls/map/page shared display definition
 ├── scripts/
 │   ├── sync-map-presentation.mjs     # 继续复用
 │   └── <PWA 内容准备工具>.mjs        # 视实际实现新增
@@ -217,7 +220,7 @@ package-lock.json                     # 仅在依赖声明发生变化时更新
 
 | 验证层级 | 必须验证 | 不可混淆为 |
 | --- | --- | --- |
-| 静态 | `game.json` 与两个平台 manifest 都仅注册 `map` | Runtime 已启动 |
+| 静态 | `game.json` 与两个平台 manifest 都精确注册 `base + map`，initial 为 `base` | Runtime 已启动 |
 | 构建 | PokeMan ESM 无 bare imports，Executable Graph 校验通过 | 浏览器显示正确 |
 | Bundle/Installer | 真实 Map/Graphics/Presentation 身份可安装和读取 | 正式游戏安装 UI |
 | Browser E2E | Map 3 → Map 2 → Map 4 等路线，NPC、移动、碰撞、重启 | 仅文件存在 |
