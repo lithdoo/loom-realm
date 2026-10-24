@@ -64,7 +64,7 @@
     "test:rpg-dialogue:qualification:run": "npm run test:rpg-dialogue-v1:qualification:run",
     "test:rpg-dialogue:qualification": "npm run test:rpg-dialogue-v1:qualification",
     "test:rpg-dialogue": "npm run build:rpg-dialogue && npm test -w @loomrealm-game/rpg-dialogue && npm run test:rpg-dialogue-v1:qualification:run",
-    "test:game-control-ports:qualification:run": "node apps/pwa/scripts/run-e2e.mjs m17 ../../test/game-control-ports-v1/qualification.test.mjs",
+    "test:game-control-ports:qualification:run": "node --test test/game-control-ports-v1/composition.test.mjs && node apps/pwa/scripts/run-e2e.mjs m17 ../../test/game-control-ports-v1/qualification.test.mjs",
     "test:game-control-ports:qualification": "npm run build:qualification -w @loomrealm/pwa && npm run build:rpg-dialogue && npm run test:game-control-ports:qualification:run",
     "build:m15": "npm run build:m14",
     "test:m15:desktop": "node --test apps/desktop/test/renderer-viewport-source.test.mjs apps/desktop/test/product-viewport-composition.test.mjs apps/desktop/test/loopback-renderer-control.test.mjs apps/desktop/test/product-lifecycle.test.mjs test/m15-boundary.test.mjs",
