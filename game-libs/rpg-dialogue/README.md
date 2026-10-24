@@ -94,6 +94,6 @@ Dialogue-owned semantic facts 进入对应 `RenderNode.attrs`。Conversation / C
 - [RPG Dialogue v0 Presentation](./RPG_DIALOGUE_V0_PRESENTATION.md) — **Active / Normative / Frozen**；canonical Render Tree、attrs/data、WebComponent 与 interaction ABI。
 - [Web Presentation API v1](../../doc/15-contracts/web-presentation-api-v1.md) — LoomRealm 通用 Web Presentation contract。
 - [Render Update v1](../../doc/15-contracts/render-update-v1.md) — retained Render state 与 transient Render Event wire contract。
-- [RPG Dialogue v0 Qualification](../../doc/30-implementation/rpg-dialogue-v0-qualification.md) — executable subject、命令、PASS 结果与 Frozen contract matrix。\n- [Game Control Ports 与 Controls Binding](../../doc/10-architecture/game-control-ports.md) — **Draft / Ready for implementation**；定义下一版 controls port / binding 迁移，v0 Frozen contract 在实现落地前保持不变。
+- [RPG Dialogue v0 Qualification](../../doc/30-implementation/rpg-dialogue-v0-qualification.md) — executable subject、命令、PASS 结果与 Frozen contract matrix。\n- [Game Control Ports 与 Common Controls Consumer](../../doc/10-architecture/game-control-ports.md) — **Draft / Ready for implementation**；定义下一版 controls port / binding 迁移，v0 Frozen contract 在实现落地前保持不变。
 
 README 只作为模块入口；observable v0 语义以上述 Frozen API / Presentation contract 为准。实现应直接以这些 contract 为依据完成 package、runtime、default Browser Presentation、tests 与 qualification，不应在实现过程中重新设计 v0 observable surface。
