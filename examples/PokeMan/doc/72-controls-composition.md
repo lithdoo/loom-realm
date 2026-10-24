@@ -53,6 +53,15 @@ base -> subsystems/base.mjs
 map  -> subsystems/map.mjs
 ```
 
+`launch.pwa.json` 使用相同逻辑 topology：
+
+```text
+base -> subsystems/base.mjs
+map  -> subsystems/map.mjs
+```
+
+PWA bundle / staging / qualification 必须安装两个 executable；不得保留只安装 `subsystems/map.mjs` 的旧特例。
+
 新增 `subsystems/base.mjs`：
 
 ```ts
@@ -113,6 +122,8 @@ blocked
 - Base 的 producer 在 Base suspend、Map active 时仍 live；
 - one Window 只有一个 active `game-controls-input`;
 - keyboard input 经 top-frame 到 Map Consumer 后产生真实 movement；
+- Desktop Hostra 与 PWA 的 Game Entry / launch manifest 都精确为 `base + map`；
+- PWA installed executable index 精确包含 `subsystems/base.mjs` + `subsystems/map.mjs`；
 - Map transfer 后输入继续工作；
 - teardown 后无 retained movement / duplicate producer。
 
