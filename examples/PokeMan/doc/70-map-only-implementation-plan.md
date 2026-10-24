@@ -2,7 +2,7 @@
 
 > 路径：`examples/PokeMan/doc/70-map-only-implementation-plan.md`
 >
-> 状态：**待实施**。本文件是交给本地 Agent 的执行任务书，并非已经实现或测试通过的记录。
+> 状态：**Historical execution plan / 部分内容已实现**。本文件保留早期 Map-only 落地过程；不要把其中“新增 package / 新建 sync script”等历史步骤当作当前 controls migration 待办。当前 controls topology 与 exact landing 以 [72-controls-composition.md](./72-controls-composition.md) 和 [Game Control Ports](../../../doc/10-architecture/game-control-ports.md) 为准。
 >
 > 目标平台：**Windows Desktop / Hostra**。本阶段保持 **Map-only gameplay**，但 controls landing 允许并要求新增一个 product-private `base` infrastructure Subsystem；不得扩展到 World、Dialogue、Battle 等游戏业务。
 >
@@ -28,11 +28,11 @@
 - `launch.hostra.json`：`map` 绑定 `subsystems/map.mjs`。
 - `subsystems/map.mjs`：通过 `defineSubsystem` + `RPGMapBuilder` 创建 Map Frame；`onMapEntering` 通过 `context.setNPC(...)` 提供静态 NPC placement；`handler.run(...)` 启动地图。
 - `[FSDB]PokeMan/`：已有 Map、MapTransfer、Tileset、NPC、Graphics 与 Presentation 数据；单个直接 FSDB 根目录。
-- `presentation.json`：引用 `Presentation/map/map.css`、`Presentation/page.css` 和 `Presentation/map/map.browser.js`。
-- `[FSDB]PokeMan/[resource]Presentation/`：已存在 `map/map.css.css`、`map/map.browser.js.js`、`page.css.css`。
-- `presentation.css` 当前只有占位注释，实际 FSDB 的 `page.css.css` 已有全窗口地图样式。
-- `play.bat` 已有 Desktop / Hostra 启动链，但只在 Desktop dist 不存在时构建，缺少可靠的 Map Presentation 构建产物同步。
-- `test/map-smoke.test.mjs` 只覆盖部分静态资源和入口约束，尚不能证明可操作的游戏已启动。
+- `presentation.json`：当前已引用 controls device-input JS、Map CSS/JS 与 page CSS；controls migration 继续复用这条 Presentation artifact。
+- `[FSDB]PokeMan/[resource]Presentation/`：当前已存在 controls device-input、Map CSS/JS 与 page CSS 同步产物。
+- `presentation.css` 当前已作为 page CSS source，保持全窗口地图样式。
+- `play.bat` 与 `scripts/sync-map-presentation.mjs` 当前已形成 Desktop 启动前 Presentation 同步链；controls migration 需要保证 controls artifact 继续在同步集合中。
+- `test/map-smoke.test.mjs` 已覆盖当前 Map-only 静态入口/资源约束；真实 controls closed loop 仍由本次 control-port qualification 补齐。
 - `examples/PokeMan/package.json` 已存在；controls landing 需要补 `@loomrealm-game/common-controls` dependency。根 `package.json` 已有 `"examples/*"` workspace glob。
 
 ### 必须参考的已实现文件
@@ -66,9 +66,9 @@
 
 **门槛：** 提交简短基线诊断，列明已有失败与外部依赖；不得先动业务逻辑来掩盖启动环境问题。
 
-### P1 — PokeMan workspace 与可重复依赖
+### P1 — Historical workspace step / current controls dependency amendment
 
-1. 新增 `examples/PokeMan/package.json`，沿用现有 Essentials 示例的包版本：
+1. `examples/PokeMan/package.json` 已存在；当前 controls landing 只需保证依赖集合包含：
    ```json
    {
      "name": "@loomrealm-example/pokeman",
@@ -105,7 +105,7 @@
 
 ### P3 — 构建并同步 Presentation 资源（主要工程缺口）
 
-1. 参考 `examples/essentials-v21.1-local/scripts/sync-map-presentation.mjs`，为 PokeMan 提供 `examples/PokeMan/scripts/sync-map-presentation.mjs`。可抽取可复用帮助函数，但不应为了本任务大规模改动其他示例。
+1. 继续使用当前 `examples/PokeMan/scripts/sync-map-presentation.mjs`；controls landing 只需确保 `controls/device-input.browser.js` 与 Map/page artifacts 一起被构建、校验和同步，不重新发明第二套同步脚本。
 2. 保留既有的关键安全性质：定位唯一的直接 `[FSDB]*` 根目录、拒绝意外符号链接/非普通文件、比较 source/dist/FSDB 资源哈希、原子替换、失败恢复与中断遗留备份处理、重复执行幂等、支持 `--check`。
 3. 对应关系必须是：
    ```text
