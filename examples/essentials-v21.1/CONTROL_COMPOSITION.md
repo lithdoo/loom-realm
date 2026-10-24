@@ -1,6 +1,8 @@
 # Essentials v21.1 Controls Composition
 
-> 状态：**Draft / Ready for implementation**
+> 状态：**Implemented / Qualified**
+> Runtime subject：`8346d15d033f93dfbb38d8d12812cdd29c90d691`
+> Evidence：[Game Control Ports v1 Qualification](../../doc/30-implementation/game-control-ports-v1-qualification.md)
 > 范围：`examples/essentials-v21.1` 私有 product composition
 > 上游设计：[`game-control-ports.md`](../../doc/10-architecture/game-control-ports.md)
 

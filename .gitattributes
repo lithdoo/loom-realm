@@ -1,1 +1,4 @@
 *.bat text eol=crlf
+# Generated browser bundles stay LF so installed Presentation bytes match esbuild output.
+**/device-input.browser.js.js text eol=lf
+**/map.browser.js.js text eol=lf

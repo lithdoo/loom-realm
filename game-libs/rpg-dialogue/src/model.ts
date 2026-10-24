@@ -3,6 +3,14 @@ import type { JsonObject } from "@loomrealm/wire";
 
 export const DEFAULT_RPG_DIALOGUE_Z_INDEX = 2_147_483_646;
 
+export interface RPGDialogueControls {
+  confirm(): void;
+  previous(): void;
+  next(): void;
+  history(): void;
+  cancel(): void;
+}
+
 export interface RPGDialogueOptionsV0 {
   readonly cancelable?: boolean;
   readonly zIndex?: number;

@@ -1,7 +1,9 @@
 # RPG Dialogue v1 API
 
-> 层级：`@loomrealm-game/rpg-dialogue` public module contract candidate
-> 状态：**Normative Candidate / Ready for implementation**
+> 层级：`@loomrealm-game/rpg-dialogue` public module contract
+> 状态：**Implemented / Qualified / Frozen**
+> Runtime subject：`8346d15d033f93dfbb38d8d12812cdd29c90d691`
+> Evidence：[Game Control Ports v1 Qualification](../../doc/30-implementation/game-control-ports-v1-qualification.md)
 > 兼容基线：[RPG Dialogue v0 API](./RPG_DIALOGUE_V0_API.md)
 > Control-port architecture：[Game Control Ports](../../doc/10-architecture/game-control-ports.md)
 
@@ -141,6 +143,4 @@ test/game-control-ports-v1/qualification.test.mjs
 → unified controls product composition -> dialogue.controls -> observable effect
 ```
 
-Current root Dialogue qualification scripts target v1. The current-tree v0 raw-input closed-loop executable test is retired; Git history and the v0 evidence record retain the old proof.
-
-Before v1 is marked Frozen/Qualified, the implementation and executable evidence must match this exact candidate surface.
+Current root Dialogue qualification scripts target v1. The current-tree v0 raw-input closed-loop executable test is retired; Git history and the v0 evidence record retain the old proof. v0 evidence does not qualify this v1 surface.

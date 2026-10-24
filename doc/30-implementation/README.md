@@ -9,6 +9,7 @@
 - 当前 performance profile：[性能资格](../30-development/performance.md)
 - Session Events v1 exact-subject evidence：[session-events-v1-qualification.md](./session-events-v1-qualification.md)
 - Unified controls input exact-subject evidence：[game-controls-input-qualification.md](./game-controls-input-qualification.md)
+- Game Control Ports v1 exact-subject evidence：[game-control-ports-v1-qualification.md](./game-control-ports-v1-qualification.md)
 - 历史最终关闭快照：[final-qualification-closure.md](./final-qualification-closure.md)
 
 **本目录不再新增 roadmap、M18/M19、阶段计划或 live status dashboard。**

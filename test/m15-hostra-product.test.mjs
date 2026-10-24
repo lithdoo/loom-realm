@@ -714,7 +714,8 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
   const loomProcess = rows.find(({ pid }) => pid === hostState.subprocess.pid);
   assert.equal(loomProcess?.ppid, ready.data.pid);
   const runners = rows.filter(({ ppid, command }) => ppid === loomProcess.pid && /game-launcher-hostra[\\/]dist[\\/]runner[\\/]entry\.js/u.test(command));
-  assert.equal(runners.length, 1, JSON.stringify(rows.filter(({ ppid }) => ppid === loomProcess.pid)));
+  // Main bootstraps one Runner for each Game Entry subsystem. Essentials is base + map.
+  assert.equal(runners.length, 2, JSON.stringify(rows.filter(({ ppid }) => ppid === loomProcess.pid)));
   const firstIdentity = await page.evaluate(() => document.documentElement.dataset.loomrealmRendererIdentity);
   const firstDocuments = (await events(eventLog)).filter(({ type }) => type === "document-bootstrap").length;
   assert.equal(typeof firstIdentity, "string");

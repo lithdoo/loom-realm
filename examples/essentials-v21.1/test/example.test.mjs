@@ -6,13 +6,18 @@ import { prepareExamplePresentation } from "./prepare.mjs";
 
 const root = new URL("../", import.meta.url);
 
-test("checked-in Game Entry has the frozen M14 topology and initial input", async () => {
+test("checked-in Game Entry boots base and keeps the M14 map input", async () => {
   const game = parseGameEntryV1(await readFile(new URL("game.json", root), "utf8"));
   assert.deepEqual(game, {
     formatVersion: 1,
-    initial: { subsystem: "map", input: { mapId: 1, x: 10, y: 8, characterName: "m14_player" } },
-    subsystems: [{ key: "map" }],
+    initial: { subsystem: "base", input: { mapId: 1, x: 10, y: 8, characterName: "m14_player" } },
+    subsystems: [{ key: "base" }, { key: "map" }],
   });
+  const launch = JSON.parse(await readFile(new URL("launch.hostra.json", root), "utf8"));
+  assert.deepEqual(launch.subsystems, [
+    { key: "base", module: "subsystems/base.mjs" },
+    { key: "map", module: "subsystems/map.mjs" },
+  ]);
 });
 
 test("checked-in presentation config resolves map artifacts only through package subpaths", async () => {

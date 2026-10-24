@@ -6,8 +6,8 @@ Current developer references：
 
 - [公开 API 与生命周期](./api.md)
 - [Runtime / 数据 / Presentation 语义](./runtime-and-presentation.md)
-- [Control Port v1 candidate](./control-port-v1.md) — **Normative Candidate / Ready for implementation**
-- [Control Port / Activation-scoped Common Controls Consumer 改造设计](../../10-architecture/game-control-ports.md) — 跨模块 wiring / landing 设计；落地前不覆盖当前 Map Runtime
+- [Control Port v1](./control-port-v1.md) — **Implemented / Qualified / Frozen**；当前 Map Runtime 只消费 `RPGMapControls`
+- [Game Control Ports](../../10-architecture/game-control-ports.md) — **Implemented / Qualified / Frozen**；跨模块 wiring。当前 Map Runtime 不再订阅 physical/unified input
 - [Terrain Behavior Contract v1](../../../game-libs/map/TERRAIN_BEHAVIOR_CONTRACT_V1.md)
 - [Terrain provenance / legal boundary](../../../game-libs/map/TERRAIN_BEHAVIOR_EVIDENCE.md)
 

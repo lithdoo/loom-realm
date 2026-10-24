@@ -86,6 +86,7 @@ async function setup(page, origin) {
       import("@loomrealm/renderer/web-presentation"),
       import("@loomrealm-game/rpg-dialogue"),
     ]);
+    let activeDialogue = null;
     const waitFor = async (predicate, label) => {
       const deadline = performance.now() + 10_000;
       while (performance.now() < deadline) {
@@ -127,6 +128,7 @@ async function setup(page, origin) {
       definition: subsystem.defineSubsystem((scope) => ({
         async frame(frame) {
           const dialogue = new dialogueModule.RPGDialogue(scope, frame, { cancelable: false, zIndex: 123 });
+          activeDialogue = dialogue;
           try {
             dialogue.setHistory([{ entryId: "intro", speakerName: "Guide", text: "Welcome" }]);
             const first = await dialogue.openConversation({
@@ -228,7 +230,10 @@ async function setup(page, origin) {
     globalThis.dialogueQualification = {
       mainRuntime, runtime, returns, observations, renderEvents, nodeEvents, statuses, publisher, projector, detach,
       projectorFailures, waitFor,
-      press(code) {
+      command(name) {
+        activeDialogue.controls[name]();
+      },
+      ignoredKeyboard(code) {
         return presentationPublisher.publish("keyboard.event", "input.event", {
           domainId: "keyboard-device", targetKey: "keyboard-device",
           data: { action: "down", code, repeat: false },
@@ -249,11 +254,11 @@ async function setup(page, origin) {
   });
 }
 
-async function press(page, code) {
-  await page.evaluate((value) => globalThis.dialogueQualification.press(value), code);
+async function command(page, name) {
+  await page.evaluate((value) => globalThis.dialogueQualification.command(value), name);
 }
 
-test("real Chromium closes Session Event → WC → Presentation Event → Promise loop", { timeout: TIMEOUT }, async (t) => {
+test("dialogue.controls reaches semantic routing, Render Events, Web Presentation, and Conversation result", { timeout: TIMEOUT }, async (t) => {
   const server = await fixture(t);
   const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
   t.after(() => browser.close());
@@ -266,12 +271,15 @@ test("real Chromium closes Session Event → WC → Presentation Event → Promi
   assert.deepEqual(await page.evaluate(() => document.querySelector("lr-dialogue-character")._data), { portrait: "guide" });
   assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("lr-dialogue-choice")].map((choice) => choice._data)), [{ icon: "lock" }, { icon: "confirm" }]);
 
-  await press(page, "Enter");
+  assert.equal(await page.evaluate(() => document.querySelector("lr-dialogue-conversation")?._revealComplete), false);
+  await page.evaluate(() => globalThis.dialogueQualification.ignoredKeyboard("Enter"));
+  assert.equal(await page.evaluate(() => document.querySelector("lr-dialogue-conversation")?._revealComplete), false, "raw keyboard must not enter the Dialogue runtime");
+  await command(page, "confirm");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true);
   assert.equal(await page.evaluate(() => globalThis.dialogueQualification.nodeEvents.length), 0, "reveal-first commit must not submit");
-  await press(page, "ArrowDown");
+  await command(page, "next");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._selectedChoiceId === "yes");
-  await press(page, "Enter");
+  await command(page, "confirm");
   await page.waitForFunction((oldId) => {
     const conversation = document.querySelector("lr-dialogue-conversation");
     return conversation !== null && conversation.getAttribute("conversation-id") !== oldId;
@@ -279,19 +287,19 @@ test("real Chromium closes Session Event → WC → Presentation Event → Promi
 
   const secondId = await page.locator("lr-dialogue-conversation").getAttribute("conversation-id");
   assert.notEqual(secondId, firstId);
-  await press(page, "Tab");
+  await command(page, "history");
   await page.waitForFunction(() => {
     const history = document.querySelector("lr-dialogue-history");
     return history?.getAttribute("visible") === "true" && history._events.includes("scroll-to-latest");
   });
   assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("lr-dialogue-history-entry")].map((entry) => entry.getAttribute("entry-id"))), ["intro", "first"]);
-  await press(page, "Escape");
+  await command(page, "cancel");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-history")?.getAttribute("visible") === "false");
   assert.equal(await page.evaluate(() => globalThis.dialogueQualification.nodeEvents.length), 1, "History cancel must not submit the second Conversation");
 
-  await press(page, "Enter");
+  await command(page, "confirm");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true);
-  await press(page, "Enter");
+  await command(page, "confirm");
   const result = await page.evaluate(() => globalThis.dialogueQualification.finish());
 
   assert.deepEqual(result.returned, {

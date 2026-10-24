@@ -6,31 +6,53 @@ import { buildPwaExecutableIndexV1, parsePwaLaunchManifestV1 } from "@loomrealm/
 import { parseGameEntryV1 } from "@loomrealm/game-package";
 import { createPokeManPwaFixture } from "../../../examples/PokeMan/scripts/prepare-pwa-content.mjs";
 
-const executablePath = join(import.meta.dirname, "..", "dist", "qualification", "pokeman-map-subsystem.mjs");
+const qualification = join(import.meta.dirname, "..", "dist", "qualification");
+const executablePaths = {
+  base: join(qualification, "pokeman-base-subsystem.mjs"),
+  map: join(qualification, "pokeman-map-subsystem.mjs"),
+};
 
-test("PokeMan qualification bundle uses real Content and one closed browser ESM graph", async () => {
-  const fixture = await createPokeManPwaFixture({ executablePath });
+test("PokeMan qualification bundle installs base and map as closed browser ESM graphs", async () => {
+  const fixture = await createPokeManPwaFixture({ executablePaths });
   const game = parseGameEntryV1(fixture.gameEntryText);
   const manifest = parsePwaLaunchManifestV1(fixture.launchManifestText);
-  assert.deepEqual(game.subsystems.map(({ key }) => key), ["map"]);
-  assert.deepEqual(manifest.subsystems, [{ key: "map", module: "subsystems/map.mjs" }]);
+  assert.equal(game.initial.subsystem, "base");
+  assert.deepEqual(game.subsystems.map(({ key }) => key), ["base", "map"]);
+  assert.deepEqual(manifest.subsystems, [
+    { key: "base", module: "subsystems/base.mjs" },
+    { key: "map", module: "subsystems/map.mjs" },
+  ]);
   assert.ok(fixture.content.length > 0);
+  assert.deepEqual(fixture.executables.map((executable) => executable.logicalModule), [
+    "subsystems/base.mjs",
+    "subsystems/map.mjs",
+  ]);
 
-  const contentVersion = `sha256:${createHash("sha256").update(fixture.executable).digest("hex")}`;
-  const graph = await buildPwaExecutableIndexV1([{
-    logicalModule: "subsystems/map.mjs",
-    source: fixture.executable,
-    contentVersion,
-  }]);
-  assert.deepEqual(graph, [{
-    logicalModule: "subsystems/map.mjs",
-    contentVersion,
+  const graph = await buildPwaExecutableIndexV1(fixture.executables.map((executable) => ({
+    logicalModule: executable.logicalModule,
+    source: executable.source,
+    contentVersion: executable.contentVersion,
+  })));
+  assert.deepEqual(graph, fixture.executables.map((executable) => ({
+    logicalModule: executable.logicalModule,
+    contentVersion: executable.contentVersion,
     imports: [],
-  }]);
-  assert.match(fixture.executable, /RPGMapBuilder/);
-  assert.match(fixture.executable, /home-family/);
-  assert.doesNotMatch(fixture.executable, /from\s*["']@loomrealm/u);
-  assert.doesNotMatch(fixture.executable, /import\s*\(\s*[^"']/u);
+  })));
+
+  const [base, map] = fixture.executables;
+  assert.equal(base.mime, "text/javascript");
+  assert.equal(map.mime, "text/javascript");
+  assert.match(base.source, /game-controls-input/);
+  assert.match(base.source, /frame\.call/);
+  assert.doesNotMatch(base.source, /createControlsConsumer/);
+  assert.match(map.source, /RPGMapBuilder/);
+  assert.match(map.source, /home-family/);
+  assert.match(map.source, /createControlsConsumer/);
+  for (const executable of fixture.executables) {
+    assert.equal(executable.contentVersion, `sha256:${createHash("sha256").update(executable.source).digest("hex")}`);
+    assert.doesNotMatch(executable.source, /from\s*["']@loomrealm/u);
+    assert.doesNotMatch(executable.source, /import\s*\(\s*[^"']/u);
+  }
 
   const identities = new Set(fixture.content.map((entry) => `${entry.kind}\0${entry.namespace}\0${entry.key}`));
   assert.equal(identities.size, fixture.content.length);

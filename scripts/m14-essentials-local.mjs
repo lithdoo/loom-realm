@@ -15,6 +15,7 @@ import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
 import { createBoundContentClient, runSubsystem } from "@loomrealm/subsystem/host";
 import { createDesktopContentService, prepareDesktopContentView } from "../apps/desktop/dist/index.js";
+import { createControlsConsumer, createDirectionalControlsTracker } from "@loomrealm-game/common-controls/subsystem";
 import { RPGMapBuilder } from "@loomrealm-game/map";
 import { attachRendererPresentation } from "../packages/renderer/dist/internal/presentation-seam.js";
 import { run as runImporter } from "../tools/fixtures/essentials-v21.1/import.mjs";
@@ -28,14 +29,44 @@ const scheduler = Object.freeze({ schedule(ms, callback) { const timer = setTime
 const runtimePolicy = Object.freeze({ scheduler, helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 100 });
 const mainPolicy = Object.freeze({ runtimeBootstrapDeadlineMs: 5_000, frameDeadlineMs: 5_000, shutdownDeadlineMs: 5_000, terminationDeadlineMs: 1_000 });
 const runnerPolicy = Object.freeze({ helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 1_000, terminationGraceMs: 100 });
+const MAP_DIRECTIONS = Object.freeze({ up: 8, down: 2, left: 4, right: 6 });
+const toMapDirection = (direction) => (direction === null ? null : MAP_DIRECTIONS[direction]);
+const baseSubsystem = defineSubsystem((scope) => ({
+  async frame(frame) {
+    const inputHost = scope.createRenderDomain({
+      zIndex: 0,
+      roots: [{ key: "game-controls-input", tag: "game-controls-input", attrs: {}, data: {}, children: [] }],
+    });
+    try { return await frame.call("map", frame.params); }
+    finally { inputHost.close(); }
+  },
+}));
 const mapSubsystem = defineSubsystem((scope) => ({
-  frame(frame) {
+  async frame(frame) {
     const input = frame.params;
     const map = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
     map.onMapEntering((context) => { context.setNPC([]); });
-    return map.run({ mapId: input.mapId, x: input.x, y: input.y });
+    const directions = createDirectionalControlsTracker();
+    const apply = () => map.controls.setMoveIntent(toMapDirection(directions.direction));
+    const consumer = createControlsConsumer(scope.presentationEvents, frame, {
+      onState(state) { directions.acceptState(state); apply(); },
+      onEvent(event) { directions.acceptEvent(event); apply(); },
+    });
+    try { return await map.run({ mapId: input.mapId, x: input.x, y: input.y }); }
+    finally { map.controls.setMoveIntent(null); directions.reset(); consumer.close(); }
   },
 }));
+const subsystemDefinitions = Object.freeze({ base: baseSubsystem, map: mapSubsystem });
+
+function domainRoot(view, tag) {
+  for (const subsystem of view?.subsystems ?? []) {
+    for (const domain of subsystem.domains ?? []) {
+      const root = domain.roots?.find((item) => item.tag === tag);
+      if (root) return { subsystem, domain, root };
+    }
+  }
+  return null;
+}
 
 function argumentsOf(argv) {
   if (argv.length === 5 && argv.every((value) => !value.startsWith("--"))) {
@@ -106,10 +137,11 @@ async function prepareProductionContent(options) {
   await Promise.all([
     writeFile(path.join(installationRoot, "game.json"), `${JSON.stringify({
       formatVersion: 1,
-      initial: { subsystem: "map", input: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] } },
-      subsystems: [{ key: "map" }],
+      initial: { subsystem: "base", input: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] } },
+      subsystems: [{ key: "base" }, { key: "map" }],
     }, null, 2)}\n`),
-    writeFile(path.join(installationRoot, "launch.hostra.json"), '{"formatVersion":1,"subsystems":[{"key":"map","module":"subsystems/map.mjs"}]}\n'),
+    writeFile(path.join(installationRoot, "launch.hostra.json"), '{"formatVersion":1,"subsystems":[{"key":"base","module":"subsystems/base.mjs"},{"key":"map","module":"subsystems/map.mjs"}]}\n'),
+    writeFile(path.join(subsystems, "base.mjs"), "export default () => ({ frame() {} });\n"),
     writeFile(path.join(subsystems, "map.mjs"), "export default () => ({ frame() {} });\n"),
   ]);
   const fsdbRoot = await runImporter(["--source", options.source, "--output", installationRoot]);
@@ -222,11 +254,11 @@ try {
   });
   const runtimeHosting = Object.freeze({
     async launch(request) {
-      assert.equal(request.subsystemKey, "map");
+      assert.ok(subsystemDefinitions[request.subsystemKey], request.subsystemKey);
       const pair = createMemoryCarrierPair();
       let acquired = false;
       const runtime = runSubsystem({
-        definition: mapSubsystem,
+        definition: subsystemDefinitions[request.subsystemKey],
         runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
         runtimePolicy,
         launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] },
@@ -265,32 +297,34 @@ try {
       emitNodeEvent = emit;
     },
   });
-  await waitFor(() => typeof emitNodeEvent === "function" && latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 2, "initial exact-source Render state");
-  const subsystem = latestView.subsystems[0];
-  const initialDomain = subsystem.domains[0];
-  const before = initialDomain.roots[0].children[0].data;
-  emitNodeEvent({
+  await waitFor(() => typeof emitNodeEvent === "function" && domainRoot(latestView, "lr-map-view")?.root?.children[0]?.data?.direction === 2 && domainRoot(latestView, "game-controls-input") !== null, "initial exact-source Render state");
+  const initialMap = domainRoot(latestView, "lr-map-view");
+  const before = initialMap.root.children[0].data;
+  const controls = domainRoot(latestView, "game-controls-input");
+  const emitControls = (name, data, channel) => emitNodeEvent({
     sessionId: latestView.sessionId,
-    subsystemKey: subsystem.subsystemKey,
-    generation: subsystem.generation,
-    domainId: initialDomain.domainId,
-    targetKey: "map-input-keyboard",
-    name: "input.event",
-    data: { action: "down", code: "ArrowRight", repeat: false },
-    options: { broadcast: true, channel: "keyboard.event" },
+    subsystemKey: controls.subsystem.subsystemKey,
+    generation: controls.subsystem.generation,
+    domainId: controls.domain.domainId,
+    targetKey: controls.root.key,
+    name,
+    data,
+    options: { broadcast: "top-frame", channel },
   });
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 6, "ArrowRight through Game Common Controls input");
-  const domain = latestView.subsystems[0].domains[0];
-  const after = domain.roots[0].children[0].data;
-  const browser = await browserQualification(domain, resources);
+  emitControls("input.state", { down: ["right"] }, "controls.state");
+  emitControls("input.event", { action: "down", button: "right", repeat: false }, "controls.event");
+  await waitFor(() => domainRoot(latestView, "lr-map-view")?.root?.children[0]?.data?.direction === 6, "ArrowRight through top-frame controls");
+  const mapView = domainRoot(latestView, "lr-map-view");
+  const after = mapView.root.children[0].data;
+  const browser = await browserQualification(mapView.domain, resources);
   const record = {
     sourceFingerprint: `sha256:${fingerprint}`,
     fsdbRoot: production.fsdbRoot,
     content: { seam: "Desktop FSDB HTTP -> Bound ContentClient", mapVersion: mapResult.contentVersion, tilesetVersion: tilesetResult.contentVersion, tilesetMime: tilesetResource.mime, playerMime: playerResource.mime },
-    input: { seam: "Game Common Controls -> Presentation Event -> Session Events", action: "down", code: "ArrowRight", repeat: false },
+    input: { seam: "game-controls-input -> top-frame -> ControlsConsumer -> RPGMapControls", action: "down", button: "right", repeat: false },
     selection: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] },
     tileset: tileset.tileset_name,
-    movement: { code: "ArrowRight", before: { x: before.x, y: before.y }, after: { x: after.x, y: after.y }, direction: after.direction },
+    movement: { button: "right", before: { x: before.x, y: before.y }, after: { x: after.x, y: after.y }, direction: after.direction },
     browser,
     pass: true,
   };

@@ -1,5 +1,6 @@
 export { RPGDialogue } from "./runtime.js";
 export type {
+  RPGDialogueControls,
   RPGDialogueOptionsV0,
   ConversationChoiceV0,
   ConversationContentV0,

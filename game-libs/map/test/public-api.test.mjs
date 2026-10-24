@@ -23,7 +23,6 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
     ["struct.NPC/huge", { name: "Huge", sprite: { namespace: "resource.Graphics", key: `Characters/${"x".repeat(1_000_000)}` } }],
   ]);
   const states = [];
-  const inputHandlers = new Map();
   let closed = false;
   const scope = {
     signal: aborter.signal,
@@ -35,13 +34,7 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
         return { bytes: png(), mime: "image/png", contentVersion: "image" };
       },
     },
-    events: { async subscribe(channels, listener) {
-      for (const channel of channels) inputHandlers.set(channel, (data) => listener({
-        channel, type: channel.endsWith(".state") ? "input.state" : "input.event",
-        payload: { domainId: "map", targetKey: "map-input-keyboard", data }, source: { subsystemKey: "map" },
-      }));
-      return { closed: new Promise(() => {}), close() { inputHandlers.clear(); } };
-    } },
+    events: { async subscribe() { throw new Error("Map runtime must not subscribe to Session Events"); } },
     createRenderDomain(initial) {
       states.push(structuredClone(initial));
       return { replace(state) { states.push(structuredClone(state)); }, update() {}, emit() {}, close() { closed = true; } };
@@ -56,7 +49,7 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
   return {
     aborter,
     closed: () => closed,
-    emit(channel, value) { inputHandlers.get(channel)?.(value); },
+    move(direction) { handler.controls.setMoveIntent(direction); },
     enteredUnsubscribers,
     handler,
     pending,
@@ -108,7 +101,7 @@ test("setNPC preparation excludes movement and revalidates the stable player cel
   });
   const setting = harness.handler.setNPC([{ instanceId: "guard", npcId: "guide", x: 2, y: 1, direction: 4, pattern: 2 }]);
   await guideRequested;
-  harness.emit("keyboard.event", { code: "ArrowRight", action: "down", repeat: false });
+  harness.move(6);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(harness.handler.getSnapshot().player, { x: 1, y: 1, direction: 2 });
   assert.equal(harness.states.length, 1, "movement and NPC commit must both wait for preparation");
@@ -144,14 +137,14 @@ test("failed delayed setNPC restores operability without changing NPCs, snapshot
   guideRequested = new Promise((resolve) => { guideRequestedResolve = resolve; });
   const setting = harness.handler.setNPC([{ instanceId: "new", npcId: "guide", x: 2, y: 1, direction: 6 }]);
   await guideRequested;
-  harness.emit("keyboard.event", { code: "ArrowRight", action: "down", repeat: false });
+  harness.move(6);
   assert.deepEqual(harness.handler.getSnapshot(), oldSnapshot);
   rejectGuide(new Error("injected NPC resource failure"));
   await assert.rejects(setting, (error) => error instanceof RPGMapError && error.code === "MAP_CONTENT_FAILED");
   assert.deepEqual(harness.handler.getSnapshot(), oldSnapshot);
   assert.equal(harness.states.length, oldStateCount);
-  harness.emit("keyboard.event", { code: "ArrowRight", action: "up", repeat: false });
-  harness.emit("keyboard.event", { code: "ArrowRight", action: "down", repeat: false });
+  harness.move(null);
+  harness.move(6);
   assert.equal(harness.handler.getSnapshot().player.x, 2, "movement must be available after preparation failure");
   harness.aborter.abort();
   await harness.pending;

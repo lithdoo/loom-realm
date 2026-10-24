@@ -1,7 +1,9 @@
 # RPGMap Control Port v1
 
-> 层级：`@loomrealm-game/map` gameplay contract candidate
-> 状态：**Normative Candidate / Ready for implementation**
+> 层级：`@loomrealm-game/map` gameplay contract
+> 状态：**Implemented / Qualified / Frozen**
+> Runtime subject：`8346d15d033f93dfbb38d8d12812cdd29c90d691`
+> Evidence：[Game Control Ports v1 Qualification](../../30-implementation/game-control-ports-v1-qualification.md)
 > 上游架构：[Game Control Ports](../../10-architecture/game-control-ports.md)
 
 本文件只拥有 Map-specific control semantics。它不定义 Keyboard/Gamepad/unified-controls protocol，也不定义 product input composition。

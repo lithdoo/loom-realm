@@ -17,7 +17,8 @@ async function realMapFixture() {
     gameEntryText: await text(example, "game.json"),
     launchManifestText: await text(example, "launch.hostra.json"),
     presentation: JSON.parse(await text(example, "presentation.json")),
-    executable: await text(repository, "apps", "pwa", "dist", "qualification", "map-subsystem.mjs"),
+    baseExecutable: await text(repository, "apps", "pwa", "dist", "qualification", "base-subsystem.mjs"),
+    mapExecutable: await text(repository, "apps", "pwa", "dist", "qualification", "map-subsystem.mjs"),
     content: [
       { kind: "record", namespace: "struct.Map", key: "1", mime: "application/json; charset=utf-8", encoding: "text", body: await text(fsdb, "[struct]Map", "1.json") },
       { kind: "record", namespace: "struct.MapTransfer", key: "1", mime: "application/json; charset=utf-8", encoding: "text", body: await text(fsdb, "[struct]MapTransfer", "1.json") },
@@ -87,7 +88,10 @@ test("M17 installs and runs the existing essentials map game-lib artifact throug
           mime: entry.mime,
           body: new Blob([decode(entry)], { type: entry.mime }),
         })),
-        executables: [{ logicalModule: "subsystems/map.mjs", mime: "text/javascript", body: new Blob([value.executable], { type: "text/javascript" }) }],
+        executables: [
+          { logicalModule: "subsystems/base.mjs", mime: "text/javascript", body: new Blob([value.baseExecutable], { type: "text/javascript" }) },
+          { logicalModule: "subsystems/map.mjs", mime: "text/javascript", body: new Blob([value.mapExecutable], { type: "text/javascript" }) },
+        ],
       });
       await window.__loomrealmPwaQualification.launch(installed.installationId, value.presentation);
       return installed.installationId;
@@ -106,6 +110,9 @@ test("M17 installs and runs the existing essentials map game-lib artifact throug
         runtimeCreated: window.__loomrealmPwa.statuses.some((entry) => entry?.event?.type === "runtime-created"),
       };
     });
+    assert.equal(JSON.parse(fixture.gameEntryText).initial.subsystem, "base");
+    assert.deepEqual(JSON.parse(fixture.launchManifestText).subsystems.map((entry) => entry.module), ["subsystems/base.mjs", "subsystems/map.mjs"]);
+    assert.equal(await page.locator("game-controls-input").count(), 1);
     assert.deepEqual(initial, {
       mapId: 1,
       visual: "ready",
@@ -122,13 +129,19 @@ test("M17 installs and runs the existing essentials map game-lib artifact throug
     });
     assert.deepEqual(moved, { x: 11, y: 8, direction: 6 });
     const executable = await page.evaluate(async (id) => {
-      const response = await fetch(`/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/map.mjs`);
-      return { status: response.status, mime: response.headers.get("content-type"), source: await response.text() };
+      const read = async (logicalModule) => {
+        const response = await fetch(`/_lr/internal/executables/${encodeURIComponent(id)}/${logicalModule}`);
+        return { status: response.status, mime: response.headers.get("content-type"), source: await response.text() };
+      };
+      return { base: await read("subsystems/base.mjs"), map: await read("subsystems/map.mjs") };
     }, installationId);
-    assert.equal(executable.status, 200);
-    assert.match(executable.mime, /^text\/javascript/);
-    assert.match(executable.source, /RPGMapBuilder/);
-    assert.doesNotMatch(executable.source, /from\s+["']@loomrealm/);
+    assert.equal(executable.map.status, 200);
+    assert.match(executable.map.mime, /^text\/javascript/);
+    assert.match(executable.map.source, /RPGMapBuilder/);
+    assert.doesNotMatch(executable.map.source, /from\s+["']@loomrealm/);
+    assert.equal(executable.base.status, 200);
+    assert.match(executable.base.source, /game-controls-input/);
+    assert.doesNotMatch(executable.base.source, /createControlsConsumer/);
 
     // A fresh Session in the same Window (the BFCache shape) must reuse the
     // document bootstrap capability rather than evaluating one-shot custom
@@ -137,7 +150,14 @@ test("M17 installs and runs the existing essentials map game-lib artifact throug
     await page.evaluate(() => window.__loomrealmPwaQualification.restart());
     await page.waitForFunction((epoch) => window.__loomrealmPwa.sessionEpoch !== epoch && document.documentElement.dataset.loomrealmProduct === "ready", previousEpoch, { timeout: 20_000 });
     await page.locator("lr-map-view").waitFor({ state: "attached", timeout: 20_000 });
-    await page.waitForFunction(() => document.querySelector("lr-map-view")?.dataset.mapVisualState === "ready", null, { timeout: 20_000 });
+    await page.waitForFunction(() => {
+      const player = document.querySelector("lr-map-sprite")?._latestData;
+      return document.querySelector("lr-map-view")?.dataset.mapVisualState === "ready"
+        && document.querySelectorAll("game-controls-input").length === 1
+        && player?.x === 10
+        && player?.y === 8
+        && player?.motion === null;
+    }, null, { timeout: 20_000 });
     assert.equal(await page.evaluate(() => window.__loomrealmPwa.failure), null);
   } finally { await product.close(); }
 });

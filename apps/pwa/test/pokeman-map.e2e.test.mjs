@@ -6,7 +6,11 @@ import { createPokeManPwaFixture } from "../../../examples/PokeMan/scripts/prepa
 import { openProduct } from "./helpers/browser.mjs";
 import { createPokeManRoutePlanner } from "./helpers/pokeman.mjs";
 
-const executablePath = join(import.meta.dirname, "..", "dist", "qualification", "pokeman-map-subsystem.mjs");
+const qualification = join(import.meta.dirname, "..", "dist", "qualification");
+const executablePaths = {
+  base: join(qualification, "pokeman-base-subsystem.mjs"),
+  map: join(qualification, "pokeman-map-subsystem.mjs"),
+};
 
 async function mapSnapshot(page) {
   return page.evaluate(() => {
@@ -23,6 +27,7 @@ async function mapSnapshot(page) {
       renderer: document.documentElement.dataset.loomrealmRenderer ?? null,
       failure: window.__loomrealmPwa.failure,
       sessionEpoch: window.__loomrealmPwa.sessionEpoch,
+      producers: document.querySelectorAll("game-controls-input").length,
     };
   });
 }
@@ -61,7 +66,7 @@ async function assertNpcProjection(page, mapId) {
 }
 
 test("PokeMan installs and runs its map-only route in real Chromium", { timeout: 180_000 }, async () => {
-  const fixture = await createPokeManPwaFixture({ executablePath });
+  const fixture = await createPokeManPwaFixture({ executablePaths });
   const planner = createPokeManRoutePlanner(fixture);
   const product = await openProduct({ viewport: { width: 960, height: 720 } });
   const history = [];
@@ -80,11 +85,11 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
           mime: entry.mime,
           body: new Blob([decode(entry)], { type: entry.mime }),
         })),
-        executables: [{
-          logicalModule: "subsystems/map.mjs",
-          mime: "text/javascript",
-          body: new Blob([value.executable], { type: "text/javascript" }),
-        }],
+        executables: value.executables.map((executable) => ({
+          logicalModule: executable.logicalModule,
+          mime: executable.mime,
+          body: new Blob([executable.source], { type: executable.mime }),
+        })),
       });
       await window.__loomrealmPwaQualification.launch(installed.installationId, value.presentation);
       return installed.installationId;
@@ -103,6 +108,7 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
       renderer: "installed",
       failure: null,
       sessionEpoch: (await mapSnapshot(page)).sessionEpoch,
+      producers: 1,
     });
     await assertNpcProjection(page, 3);
 
@@ -146,6 +152,7 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
       const requests = {
         map: `/_lr/v1/games/${encodeURIComponent(id)}/records/struct.Map/3`,
         presentation: `/_lr/v1/games/${encodeURIComponent(id)}/resources/resource.Presentation/map/map.browser.js`,
+        base: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/base.mjs`,
         executable: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/map.mjs`,
       };
       const output = {};
@@ -167,6 +174,11 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
     assert.equal(routes.presentation.status, 200);
     assert.match(routes.presentation.mime, /^text\/javascript/);
     assert.match(routes.presentation.version, /^sha256:[0-9a-f]{64}$/);
+    assert.equal(routes.base.status, 200);
+    assert.match(routes.base.mime, /^text\/javascript/);
+    assert.match(routes.base.version, /^sha256:[0-9a-f]{64}$/);
+    assert.match(routes.base.body, /game-controls-input/);
+    assert.doesNotMatch(routes.base.body, /from\s*["']@loomrealm/u);
     assert.equal(routes.executable.status, 200);
     assert.match(routes.executable.mime, /^text\/javascript/);
     assert.match(routes.executable.version, /^sha256:[0-9a-f]{64}$/);
@@ -206,6 +218,8 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
     assert.equal(restarted.failure, null);
     assert.equal(restarted.presentation, "ready");
     assert.equal(restarted.renderer, "installed");
+    assert.equal(restarted.producers, 1);
+    assert.deepEqual(restarted.player, { x: 3, y: 8, direction: 2, motion: null });
     assert.deepEqual(diagnostics.filter((entry) => entry.startsWith("pageerror:")), []);
     assert.equal(await page.evaluate(() => window.__loomrealmPwa.statuses.some((entry) => entry?.status === "failed")), false);
   } catch (cause) {
