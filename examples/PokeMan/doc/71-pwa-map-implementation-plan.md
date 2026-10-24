@@ -2,7 +2,7 @@
 
 > 路径：`examples/PokeMan/doc/71-pwa-map-implementation-plan.md`
 >
-> 状态：**待实施**。本文件是下一次本地 Agent 开发任务书，不代表 PWA 适配已经完成。
+> 状态：**Implemented / Qualified**。本文件保留实施约束与验收范围；当前 landing evidence 见 [Game Control Ports v1 qualification](../../../doc/30-implementation/game-control-ports-v1-qualification.md)。
 >
 > 基线：以执行时最新 `origin/main` 为准；此前 Map-only Desktop 工作已由 PR #93 合并。
 >
@@ -12,7 +12,7 @@
 
 1. **先检查工作区，再获取最新 `main`**。不要丢弃、覆盖、混入未提交的用户改动；创建一个新分支，例如 `feat/pokeman-pwa-map-only`，不要直接开发或推送到 `main`。名称冲突时使用新名字，不覆盖既有远端。
 2. 完整阅读本计划与第 1 节列出的实际代码。以当前仓库契约和可复现测试为准；若仓库 HEAD 与本文不一致，查明差异后按最小改动实现目标，并在报告说明。
-3. **游戏运行拓扑必须始终只有 `map` Subsystem**。不实现 World、Dialogue、Battle、Message、System Menu、Story Resolver、Encounter、Relationship、Contract 或 LLM；不得为“跨平台”复制 Map Library。
+3. **游戏 gameplay 范围必须始终只有 `map`**；运行拓扑是 product-private `base + map`，其中 Base 只拥有 controls producer。不实现 World、Dialogue、Battle、Message、System Menu、Story Resolver、Encounter、Relationship、Contract 或 LLM；不得为“跨平台”复制 Map Library。
 4. Desktop 与 PWA 共用 `examples/PokeMan/game.json`、`subsystems/map.mjs`、FSDB 数据和 Presentation 定义。平台差异限定在物理启动清单、构建/安装/宿主适配，不给游戏业务代码加入 `window`、`document`、`Worker`、OPFS、Service Worker 或平台分支。
 5. 优先修改 `examples/PokeMan/**` 及完成 PWA 浏览器验证所需的 `apps/pwa/scripts/**`、`apps/pwa/test/**`、必要测试调度。`packages/**`、`game-libs/**`、PWA Platform 核心默认只读；发现真实框架缺陷时单独复现并限制修复范围，不顺带重构。
 6. 不改写大批 FSDB 原始资源、产品/剧情文档或已有 Windows 启动行为。`[FSDB]PokeMan/` 的物理位置保持在安装根目录。禁止把测试用的 Qualification 全局 API 作为正式产品 API。
@@ -23,8 +23,8 @@
 
 ### PokeMan 当前已有
 
-- `examples/PokeMan/game.json`：当前基线仍是单 `map`；controls landing 将按 [72-controls-composition.md](./72-controls-composition.md) 改为 `base + map`，initial params 仍是 Map 3、坐标 `(3,8)`、玩家资源 `Characters/Player`。
-- `examples/PokeMan/launch.hostra.json`：当前基线仍是单 `map`；controls landing 将与 `game.json` 一起迁为 `base + map`。保留 Desktop 启动能力与 `play.bat` 行为目标，但不保留旧单-map manifest shape。
+- `examples/PokeMan/game.json`：当前 topology 是 `base + map`；initial params 仍是 Map 3、坐标 `(3,8)`、玩家资源 `Characters/Player`。
+- `examples/PokeMan/launch.hostra.json`：当前 Desktop manifest 精确绑定 `base + map`，保留 Desktop 启动能力与 `play.bat` 行为目标。
 - `examples/PokeMan/subsystems/map.mjs`：`RPGMapBuilder`、`onMapEntering`、`setNPC` 提供静态 NPC；不要在 PWA 创建第二份游戏逻辑。
 - `examples/PokeMan/[FSDB]PokeMan/`：Map、MapTransfer、Tileset、NPC、Graphics、Presentation 等内容。已有 `scripts/sync-map-presentation.mjs` 解决 Desktop 的 Map browser JS/CSS 与 FSDB 资源同步。
 - `examples/PokeMan/presentation.json`：引用 `Presentation/map/map.css`、`Presentation/page.css`、`Presentation/map/map.browser.js`。
@@ -172,7 +172,7 @@ examples/PokeMan/subsystems/map.mjs  -- esbuild --┘
 
 ### P4.5 — Clean build orchestration
 
-Controls migration 会删除 `@loomrealm-game/map` 当前通过 `prebuild` 隐式构建 `@loomrealm-game/common-controls` 的耦合。删除后必须由顶层 build lane 显式保证依赖顺序：
+Controls migration 已删除 `@loomrealm-game/map` 通过 `prebuild` 隐式构建 `@loomrealm-game/common-controls` 的耦合。顶层 build lane 显式保证依赖顺序：
 
 ```text
 build:m14

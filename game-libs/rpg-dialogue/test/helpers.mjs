@@ -92,14 +92,12 @@ export function harness(options = {}) {
     viewport: {},
     events: { async subscribe(channels, listener) {
       listenerCreates += 1;
-      if (options.inputCreateError) throw options.inputCreateError;
+      if (options.subscriptionCreateError) throw options.subscriptionCreateError;
       operations.push({ type: "listener.create", channels: [...channels] });
       for (const channel of channels) handlers.set(channel, (payload) => listener({
         channel,
-        type: channel === "x.loomrealm.web-presentation.event" ? payload.name : "input.event",
-        payload: channel === "x.loomrealm.web-presentation.event"
-          ? { domainId: payload.domainId, targetKey: payload.targetKey, data: payload.data }
-          : { domainId: "map", targetKey: `map-input-${channel.split(".")[0]}`, data: payload },
+        type: payload.name,
+        payload: { domainId: payload.domainId, targetKey: payload.targetKey, data: payload.data },
         source: { subsystemKey: "game" },
       }));
       return { closed: new Promise(() => {}), close() { listenerCloses += 1; operations.push({ type: "listener.close" }); handlers.clear(); } };

@@ -1,10 +1,8 @@
-import { cancelled, failed, type Frame, type FrameOutcome, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SessionEvent, type SessionEventSubscription, type SubsystemScope } from "@loomrealm/subsystem";
-import { createFreshDeviceStateTracker, type FreshDeviceStateTracker, type JsonObject } from "@loomrealm-game/common-controls";
+import { cancelled, failed, type Frame, type FrameOutcome, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SubsystemScope } from "@loomrealm/subsystem";
 import {
   assertProjectable,
   boundsContain,
   computeCamera,
-  directionForCode,
   evaluatePassability,
   expandTileBounds,
   JUMP_DURATION_MS,
@@ -129,14 +127,6 @@ const stepDelta: Record<Direction, { readonly dx: number; readonly dy: number }>
   6: { dx: 1, dy: 0 },
   8: { dx: 0, dy: -1 },
 };
-const codeByDirection: Record<Direction, string> = {
-  2: "ArrowDown",
-  4: "ArrowLeft",
-  6: "ArrowRight",
-  8: "ArrowUp",
-};
-const fallbackCodes = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"] as const;
-
 function mapEntry(value: MapEntry, defaultDirection: Direction): Required<MapEntry> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new RPGMapError("MAP_INVALID_ARGUMENT");
   if (!Number.isSafeInteger(value.mapId) || value.mapId <= 0 || !Number.isSafeInteger(value.x) || value.x < 0 || !Number.isSafeInteger(value.y) || value.y < 0) throw new RPGMapError("MAP_INVALID_ARGUMENT");
@@ -368,18 +358,12 @@ function renderState(facts: RenderFacts): RenderDomainState {
         data: npcPayload(npc, facts, camera.cameraX, camera.cameraY),
         children: [],
       }))],
-    }, {
-      key: "map-input-keyboard", tag: "game-keyboard-input", attrs: {}, data: {}, children: [],
-    }, {
-      key: "map-input-pointer", tag: "game-pointer-input", attrs: {}, data: {}, children: [],
-    }, {
-      key: "map-input-gamepad", tag: "game-gamepad-input", attrs: {}, data: {}, children: [],
     }],
   };
 }
 
 function assertRenderCapacity(state: RenderDomainState, npcOwned: boolean): void {
-  const nodeCount = 4 + (state.roots[0]?.children.length ?? 0);
+  const nodeCount = 1 + (state.roots[0]?.children.length ?? 0);
   if (nodeCount > 16_384) throw new RPGMapError(npcOwned ? "MAP_NPC_INVALID" : "MAP_CONTENT_FAILED", "Render node limit exceeded");
   const bytes = new TextEncoder().encode(JSON.stringify(state)).byteLength;
   if (bytes > 1_000_000) throw new RPGMapError(npcOwned ? "MAP_NPC_INVALID" : "MAP_CONTENT_FAILED", "Render message limit exceeded");
@@ -388,14 +372,21 @@ function assertRenderCapacity(state: RenderDomainState, npcOwned: boolean): void
 interface RuntimeBridge {
   readonly initial: Required<MapEntry>;
   readonly characterName: string;
+  readonly moveIntent: Direction | null;
   prepareNPC(mapId: number, fromMapId: number | null, signal: AbortSignal): Promise<readonly NPCPlacement[]>;
   entered(event: MapEnteredEvent, snapshot: MapSnapshot): void;
   updateSnapshot(snapshot: MapSnapshot): void;
   setCommands(commands: { enter(entry: MapEntry): Promise<void>; setNPC(npcs: readonly NPCPlacement[]): Promise<void> }): void;
+  setMoveIntentSink(sink: ((intent: Direction | null) => void) | undefined): void;
   clear(): void;
 }
 
+export interface RPGMapControls {
+  setMoveIntent(direction: Direction | null): void;
+}
+
 export interface RPGMapHandler {
+  readonly controls: RPGMapControls;
   onMapEntering(listener: (context: MapEnteringContext) => void | Promise<void>): () => void;
   onMapEntered(listener: (event: MapEnteredEvent) => void): () => void;
   run(initial: MapEntry): Promise<FrameOutcome>;
@@ -407,8 +398,12 @@ export interface RPGMapHandler {
 class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
   initial!: Required<MapEntry>;
   readonly characterName: string;
+  readonly controls: RPGMapControls;
   private runCalled = false;
   private running = false;
+  private terminal = false;
+  private currentMoveIntent: Direction | null = null;
+  private moveIntentSink?: (intent: Direction | null) => void;
   private entering?: (context: MapEnteringContext) => void | Promise<void>;
   private readonly enteredListeners = new Set<(event: MapEnteredEvent) => void>();
   private commands?: { enter(entry: MapEntry): Promise<void>; setNPC(npcs: readonly NPCPlacement[]): Promise<void> };
@@ -417,6 +412,21 @@ class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
   constructor(private readonly scope: SubsystemScope, private readonly frame: Frame, characterName: string) {
     if (typeof characterName !== "string" || characterName.length === 0) throw new RPGMapError("MAP_INVALID_ARGUMENT");
     this.characterName = characterName;
+    this.controls = Object.freeze({
+      setMoveIntent: (direction: Direction | null) => this.setMoveIntent(direction),
+    });
+  }
+  get moveIntent(): Direction | null { return this.currentMoveIntent; }
+  private setMoveIntent(direction: Direction | null): void {
+    if (direction !== null && direction !== 2 && direction !== 4 && direction !== 6 && direction !== 8) {
+      throw new TypeError("Invalid RPGMap movement direction");
+    }
+    if (this.terminal || direction === this.currentMoveIntent) return;
+    this.currentMoveIntent = direction;
+    this.moveIntentSink?.(direction);
+  }
+  setMoveIntentSink(sink: ((intent: Direction | null) => void) | undefined): void {
+    this.moveIntentSink = sink;
   }
   onMapEntering(listener: (context: MapEnteringContext) => void | Promise<void>): () => void {
     if (this.runCalled || typeof listener !== "function" || this.entering) throw new RPGMapError("MAP_INVALID_STATE");
@@ -452,7 +462,14 @@ class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
   }
   updateSnapshot(snapshot: MapSnapshot): void { this.snapshot = snapshot; }
   setCommands(commands: { enter(entry: MapEntry): Promise<void>; setNPC(npcs: readonly NPCPlacement[]): Promise<void> }): void { this.commands = commands; }
-  clear(): void { this.running = false; this.commands = undefined; this.snapshot = null; }
+  clear(): void {
+    this.running = false;
+    this.commands = undefined;
+    this.snapshot = null;
+    this.currentMoveIntent = null;
+    this.moveIntentSink = undefined;
+    this.terminal = true;
+  }
   async run(initial: MapEntry): Promise<FrameOutcome> {
     if (this.runCalled) throw new RPGMapError("MAP_ALREADY_RUN");
     this.runCalled = true; this.running = true; this.initial = mapEntry(initial, 2);
@@ -483,8 +500,6 @@ export class RPGMapBuilder {
 }
 
 async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBridge): Promise<FrameOutcome> {
-    let inputSubscription: SessionEventSubscription | undefined;
-    let keyboardState: FreshDeviceStateTracker | undefined;
     let domain: RenderDomain | undefined;
     let stepTimer: ReturnType<typeof setTimeout> | null = null;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -501,8 +516,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         clearTimeout(resizeTimer);
         resizeTimer = null;
       }
-      inputSubscription?.close();
-      keyboardState?.close();
+      api.setMoveIntentSink(undefined);
       if (stepTimer !== null) {
         clearTimeout(stepTimer);
         stepTimer = null;
@@ -567,7 +581,6 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       let direction: Direction = 2;
       let nextMoveId = 1;
       let nextStartPattern: 1 | 3 = 1;
-      let heldDirections: Direction[] = [];
       let playerRef!: ResourceRef;
       let sceneEpoch = 1;
       let visualEpoch = 1;
@@ -844,7 +857,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
           transitioning = false;
           publishSnapshot(fromMapId);
           if (frame.signal.aborted) return;
-          if (heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
+          pumpMoveIntent();
         } catch (error) {
           transitioning = false;
           throw error;
@@ -1066,7 +1079,6 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       };
 
       const attemptUnsafe = (next: Direction) => {
-        if (runtimeEnded() || operationBusy()) return;
         const { dx, dy } = stepDelta[next];
         const nx = x + dx;
         const ny = y + dy;
@@ -1119,6 +1131,12 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         }
       };
 
+      const pumpMoveIntent = (): boolean => {
+        if (runtimeEnded() || operationBusy() || api.moveIntent === null) return false;
+        attempt(api.moveIntent);
+        return true;
+      };
+
       const finishStep = (moveId: number) => {
         if (frame.signal.aborted || activeMove?.id !== moveId) return;
         stepTimer = null;
@@ -1133,9 +1151,9 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         activeMove = null;
         startHere(x, y);
         if (terminalSettled) return;
-        if (heldDirections.length > 0) {
+        if (api.moveIntent !== null) {
           nextStartPattern = nextStartPattern === 1 ? 3 : 1;
-          attempt(heldDirections[heldDirections.length - 1]!);
+          pumpMoveIntent();
           return;
         }
         nextStartPattern = 1;
@@ -1188,52 +1206,14 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       visualEpoch = 1;
       nextMoveId = 1;
       nextStartPattern = 1;
-      heldDirections = [];
       transitioning = false;
       activeMove = null;
       bridgeLevel = 0;
       lastStarted = null;
       eventBusy = false;
       publishSnapshot(null);
-      const receiveKeyboardEvent = (event: Record<string, unknown>) => {
-        if (typeof event.code !== "string") return;
-        const movement = directionForCode(event.code);
-        if (!movement) return;
-        if (event.action === "down") {
-          if (event.repeat) return;
-          heldDirections = heldDirections.filter((item) => item !== movement.direction);
-          heldDirections.push(movement.direction);
-          if (!operationBusy()) attempt(heldDirections[heldDirections.length - 1]!);
-          return;
-        }
-        if (event.action !== "up") return;
-        heldDirections = heldDirections.filter((item) => item !== movement.direction);
-        if (!operationBusy() && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
-      };
-      const receiveKeyboardState = (state: Record<string, unknown>) => {
-        const down = new Set(Array.isArray(state?.down) ? state.down : []);
-        heldDirections = heldDirections.filter((item) => down.has(codeByDirection[item]));
-        for (const code of fallbackCodes) {
-          if (!down.has(code)) continue;
-          const movement = directionForCode(code);
-          if (!movement || heldDirections.includes(movement.direction)) continue;
-          heldDirections.push(movement.direction);
-        }
-        if (!operationBusy() && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
-      };
-      keyboardState = createFreshDeviceStateTracker("keyboard.state", (payload) => receiveKeyboardState(payload));
-      inputSubscription = await scope.events.subscribe(["keyboard.event", "keyboard.state"], (event: SessionEvent) => {
-        if (event.type !== (event.channel === "keyboard.state" ? "input.state" : "input.event")) return;
-        const envelope = event.payload;
-        if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope)) return;
-        const record = envelope as Readonly<Record<string, unknown>>;
-        const targetKey = record.targetKey;
-        const data = record.data;
-        if (targetKey !== "map-input-keyboard" || data === null || typeof data !== "object" || Array.isArray(data)) return;
-        const deviceData = data as JsonObject;
-        if (event.channel === "keyboard.state") keyboardState?.accept(deviceData);
-        else receiveKeyboardEvent(deviceData);
-      });
+      api.setMoveIntentSink(() => { pumpMoveIntent(); });
+      pumpMoveIntent();
       const outcome = await Promise.race([
         terminal,
         waitForAbort(frame.signal).then(() => cancelled()),

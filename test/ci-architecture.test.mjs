@@ -4,7 +4,7 @@ import test from "node:test";
 import { classifyPaths, requiresBrowser } from "../scripts/ci/impact.mjs";
 
 const root = new URL("../", import.meta.url);
-const read = (relative) => readFile(new URL(relative, root), "utf8");
+const read = async (relative) => (await readFile(new URL(relative, root), "utf8")).replaceAll("\r\n", "\n");
 
 test("active workflow surface is compact and milestone-free", async () => {
   const files = (await readdir(new URL(".github/workflows/", root))).sort();
@@ -72,6 +72,37 @@ test("impact routing is selective for docs, routes Battle to Browser, and fails 
   assert.equal(dialogue.dialogue, true);
   assert.equal(dialogue.presentation, true);
   assert.equal(requiresBrowser(dialogue), true);
+
+  const dialogueQualification = classifyPaths(["test/rpg-dialogue-v1/qualification.test.mjs"]);
+  assert.deepEqual(dialogueQualification, {
+    code: true,
+    content: false,
+    presentation: true,
+    map: false,
+    schema: false,
+    pwa: false,
+    battle: false,
+    dialogue: true,
+    desktop: false,
+    windows: false,
+    docs: false,
+  });
+
+  const controlPortsQualification = classifyPaths(["test/game-control-ports-v1/composition.test.mjs"]);
+  assert.deepEqual(controlPortsQualification, {
+    code: true,
+    content: false,
+    presentation: true,
+    map: true,
+    schema: false,
+    pwa: true,
+    battle: false,
+    dialogue: true,
+    desktop: false,
+    windows: false,
+    docs: false,
+  });
+  assert.equal(requiresBrowser(controlPortsQualification), true);
 
   const commonControlsQualification = classifyPaths(["test/game-common-controls-input-v1/qualification.test.mjs"]);
   assert.equal(commonControlsQualification.code, true);

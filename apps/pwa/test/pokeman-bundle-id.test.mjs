@@ -6,7 +6,10 @@ const fixture = () => ({
   gameEntryText: '{"initial":{"input":{"mapId":3}}}',
   launchManifestText: '{"subsystems":[{"key":"map"}]}',
   presentation: { scripts: ["map.browser.js"] },
-  executable: "export default () => ({ frame() {} });",
+  executables: [
+    { logicalModule: "subsystems/base.mjs", mime: "text/javascript", source: "export default () => ({ frame() {} });", contentVersion: "sha256:base" },
+    { logicalModule: "subsystems/map.mjs", mime: "text/javascript", source: "export default () => ({ frame() {} });", contentVersion: "sha256:map" },
+  ],
   content: [{ kind: "record", namespace: "struct.Map", key: "3", mime: "application/json", body: "eyJ4IjozfQ==" }],
 });
 
@@ -25,8 +28,13 @@ test("changing only PokeMan Map data creates a new installation identity", () =>
   assert.notEqual(pokeManBundleId("same-shell", original), pokeManBundleId("same-shell", changed));
 });
 
-test("changing only the executable or presentation changes the PokeMan bundle ID", () => {
+test("changing either executable or presentation changes the PokeMan bundle ID", () => {
   const original = fixture();
-  assert.notEqual(pokeManBundleId("same-shell", original), pokeManBundleId("same-shell", { ...fixture(), executable: "export default () => null" }));
+  const changedBase = fixture();
+  changedBase.executables = changedBase.executables.map((entry, index) => index === 0 ? { ...entry, source: "export default () => null" } : entry);
+  const changedMap = fixture();
+  changedMap.executables = changedMap.executables.map((entry, index) => index === 1 ? { ...entry, source: "export default () => null" } : entry);
+  assert.notEqual(pokeManBundleId("same-shell", original), pokeManBundleId("same-shell", changedBase));
+  assert.notEqual(pokeManBundleId("same-shell", original), pokeManBundleId("same-shell", changedMap));
   assert.notEqual(pokeManBundleId("same-shell", original), pokeManBundleId("same-shell", { ...fixture(), presentation: { scripts: ["new-map-browser.js"] } }));
 });

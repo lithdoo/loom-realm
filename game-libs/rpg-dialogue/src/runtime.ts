@@ -11,6 +11,7 @@ import type {
   ConversationRequestV0,
   ConversationResultV0,
   DialogueHistoryEntryV0,
+  RPGDialogueControls,
   RPGDialogueOptionsV0,
 } from "./model.js";
 import {
@@ -78,6 +79,7 @@ function exactKeys(value: Record<string, unknown>, required: readonly string[], 
 }
 
 export class RPGDialogue {
+  readonly controls: RPGDialogueControls;
   private readonly scope: SubsystemScope;
   private readonly frame: Frame;
   private readonly cancelable: boolean;
@@ -106,6 +108,13 @@ export class RPGDialogue {
     this.frame = validated.frame;
     this.cancelable = validated.cancelable;
     this.zIndex = validated.zIndex;
+    this.controls = Object.freeze({
+      confirm: () => this.routeSafely("confirm"),
+      previous: () => this.routeSafely("previous"),
+      next: () => this.routeSafely("next"),
+      history: () => this.routeSafely("history"),
+      cancel: () => this.routeSafely("cancel"),
+    });
     this.frame.signal.addEventListener("abort", this.frameAbort, { once: true });
     this.scope.signal.addEventListener("abort", this.scopeAbort, { once: true });
     if (this.frame.signal.aborted || this.scope.signal.aborted) this.terminate(abortError());
@@ -271,31 +280,9 @@ export class RPGDialogue {
 
   private async createSessionResources(): Promise<SessionResources> {
     const subscription = await this.scope.events.subscribe(
-      ["keyboard.event", "gamepad.event", WEB_PRESENTATION_EVENT_CHANNEL],
+      [WEB_PRESENTATION_EVENT_CHANNEL],
       (event: SessionEvent) => {
-        if (event.channel === WEB_PRESENTATION_EVENT_CHANNEL) { this.receivePresentationEvent(event); return; }
-        if (event.type !== "input.event" || !plainDataObject(event.payload) || !plainDataObject(event.payload.data)) return;
-        const data = event.payload.data;
-        if (event.channel === "keyboard.event") {
-          const input = data;
-          if (input.action !== "down" || input.repeat) return;
-          const action = input.code === "Enter" || input.code === "Space" ? "confirm"
-          : input.code === "ArrowUp" ? "previous"
-          : input.code === "ArrowDown" ? "next"
-          : input.code === "Tab" ? "history"
-          : input.code === "Escape" ? "cancel"
-          : undefined;
-          if (action !== undefined) this.routeSafely(action);
-          return;
-        }
-        if (event.channel !== "gamepad.event" || data.action !== "down") return;
-        const action = data.button === "south" ? "confirm"
-          : data.button === "dpadUp" ? "previous"
-          : data.button === "dpadDown" ? "next"
-          : data.button === "select" ? "history"
-          : data.button === "east" ? "cancel"
-          : undefined;
-        if (action !== undefined) this.routeSafely(action);
+        if (event.channel === WEB_PRESENTATION_EVENT_CHANNEL) this.receivePresentationEvent(event);
       },
     );
     return { subscription };

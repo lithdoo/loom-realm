@@ -36,6 +36,8 @@ test("staging PokeMan boots from /pwa/pokeman, moves, blocks NPC, transfers, and
   try {
     const { page, context, diagnostics } = product;
     await waitForMap(page, initial);
+    assert.equal(await page.locator("game-controls-input").count(), 1);
+    assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
     assert.equal(await page.evaluate(() => typeof window.__loomrealmPwaQualification), "undefined", "Staging must not expose qualification controls");
 
     const scope = await page.evaluate(async () => {
@@ -69,6 +71,8 @@ test("staging PokeMan boots from /pwa/pokeman, moves, blocks NPC, transfers, and
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await waitForMap(page, initial);
+    assert.equal(await page.locator("game-controls-input").count(), 1);
+    assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
     assert.equal(await page.evaluate(() => window.__loomrealmPwa.installationId), installationId, "Refresh must reuse installed content");
     assert.equal(await page.evaluate(() => window.__loomrealmPwa.failure), null);
     const forbidden = await context.request.get(new URL("/service-worker.js", page.url()).href);

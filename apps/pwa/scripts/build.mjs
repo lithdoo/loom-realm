@@ -2,7 +2,6 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { createPokeManPwaFixture } from "../../../examples/PokeMan/scripts/prepare-pwa-content.mjs";
 import { deriveProductGeneration, emitProductArtifacts } from "./build-identity.mjs";
 import { pokeManBundleId } from "./pokeman-bundle-id.mjs";
 
@@ -46,26 +45,22 @@ async function buildRoot() {
       `${generation}-qualification-update`,
       definitions,
     );
-    await build({
-      absWorkingDir: join(root, "..", ".."),
-      entryPoints: [join(root, "..", "..", "examples", "essentials-v21.1", "subsystems", "map.mjs")],
-      outfile: join(output, "qualification", "map-subsystem.mjs"),
-      bundle: true,
-      format: "esm",
-      platform: "browser",
-      target: "chrome140",
-      sourcemap: false,
-    });
-    await build({
-      absWorkingDir: join(root, "..", ".."),
-      entryPoints: [join(root, "..", "..", "examples", "PokeMan", "subsystems", "map.mjs")],
-      outfile: join(output, "qualification", "pokeman-map-subsystem.mjs"),
-      bundle: true,
-      format: "esm",
-      platform: "browser",
-      target: "chrome140",
-      sourcemap: false,
-    });
+    await bundleSubsystem(
+      join(root, "..", "..", "examples", "essentials-v21.1", "subsystems", "base.mjs"),
+      join(output, "qualification", "base-subsystem.mjs"),
+    );
+    await bundleSubsystem(
+      join(root, "..", "..", "examples", "essentials-v21.1", "subsystems", "map.mjs"),
+      join(output, "qualification", "map-subsystem.mjs"),
+    );
+    await bundleSubsystem(
+      join(root, "..", "..", "examples", "PokeMan", "subsystems", "base.mjs"),
+      join(output, "qualification", "pokeman-base-subsystem.mjs"),
+    );
+    await bundleSubsystem(
+      join(root, "..", "..", "examples", "PokeMan", "subsystems", "map.mjs"),
+      join(output, "qualification", "pokeman-map-subsystem.mjs"),
+    );
   }
   await writeFile(join(output, "index.html"), indexHtml("/window.js"), "utf8");
   await writeFile(join(output, "generation.json"), `${JSON.stringify({ version: 1, generation })}\n`, "utf8");
@@ -73,35 +68,37 @@ async function buildRoot() {
 }
 
 async function buildStaging() {
+  const { createPokeManPwaFixture } = await import(
+    "../../../examples/PokeMan/scripts/prepare-pwa-content.mjs"
+  );
   const stagingRoot = join(output, "staging", "pwa", "pokeman");
-  const executable = join(output, "staging", "pokeman-map-subsystem.mjs");
+  const executablePaths = Object.freeze({
+    base: join(output, "staging", "pokeman-base-subsystem.mjs"),
+    map: join(output, "staging", "pokeman-map-subsystem.mjs"),
+  });
   const stagingEntries = Object.freeze([
     { input: join(sourceRoot, "pokeman-window-entry.ts"), output: "window.js" },
     { input: join(sourceRoot, "session-worker-entry.ts"), output: "session-worker.js" },
     { input: join(sourceRoot, "worker-runner-entry.ts"), output: "worker-runner.js" },
     { input: join(sourceRoot, "service-worker.ts"), output: "service-worker.js" },
   ]);
-  await mkdir(dirname(executable), { recursive: true });
-  await build({
-    absWorkingDir: join(root, "..", ".."),
-    entryPoints: [join(root, "..", "..", "examples", "PokeMan", "subsystems", "map.mjs")],
-    outfile: executable,
-    bundle: true,
-    format: "esm",
-    platform: "browser",
-    target: "chrome140",
-    sourcemap: false,
-  });
+  await mkdir(dirname(executablePaths.base), { recursive: true });
+  for (const [name, executable] of Object.entries(executablePaths)) {
+    await bundleSubsystem(
+      join(root, "..", "..", "examples", "PokeMan", "subsystems", `${name}.mjs`),
+      executable,
+    );
+  }
   const generation = await deriveProductGeneration(stagingEntries, root);
   await rm(stagingRoot, { recursive: true, force: true });
   await mkdir(stagingRoot, { recursive: true });
   await emitProductArtifacts(stagingEntries, stagingRoot, root, generation);
-  const fixture = await createPokeManPwaFixture({ executablePath: executable });
+  const fixture = await createPokeManPwaFixture({ executablePaths });
   const payload = {
     gameEntryText: fixture.gameEntryText,
     launchManifestText: fixture.launchManifestText,
     presentation: fixture.presentation,
-    executable: fixture.executable,
+    executables: fixture.executables,
     content: fixture.content,
   };
   // The shell generation does not cover Map/FSDB changes. A content-addressed
@@ -110,7 +107,20 @@ async function buildStaging() {
   await writeFile(join(stagingRoot, "pokeman-bundle.json"), `${JSON.stringify({ bundleId, ...payload })}\n`, "utf8");
   await writeFile(join(stagingRoot, "index.html"), indexHtml("./window.js"), "utf8");
   await writeFile(join(stagingRoot, "generation.json"), `${JSON.stringify({ version: 1, generation, basePath: "/pwa/pokeman/" })}\n`, "utf8");
-  await rm(executable, { force: true });
+  await Promise.all(Object.values(executablePaths).map((executable) => rm(executable, { force: true })));
+}
+
+async function bundleSubsystem(entryPoint, outfile) {
+  await build({
+    absWorkingDir: join(root, "..", ".."),
+    entryPoints: [entryPoint],
+    outfile,
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    target: "chrome140",
+    sourcemap: false,
+  });
 }
 
 if (staging) await buildStaging();

@@ -1,15 +1,16 @@
 # Game Control Ports 与 Activation-scoped Common Controls Consumer 设计
 
-> 状态：**Draft / Ready for implementation**
+> 状态：**Implemented / Qualified / Frozen**
 > 适用范围：`game-libs/map`、`game-libs/rpg-dialogue`、`game-libs/game-common-controls`
 > 目标：把“物理输入 / unified controls”与 Map、Dialogue 业务 Runtime 解耦，同时不新增独立 binding package
 > 上游输入：[统一操控输入 Web Component](../../game-libs/game-common-controls/game-controls-input.md)
 > Frame 投递：[Frame-targeted Presentation Event v1](../15-contracts/frame-targeted-presentation-event-v1.md)
-> Map Control Port：[RPGMap Control Port v1 candidate](../20-modules/loom-map/control-port-v1.md)
-> Dialogue Control Port：[RPG Dialogue v1 API candidate](../../game-libs/rpg-dialogue/RPG_DIALOGUE_V1_API.md)
+> Map Control Port：[RPGMap Control Port v1](../20-modules/loom-map/control-port-v1.md)
+> Dialogue Control Port：[RPG Dialogue v1 API](../../game-libs/rpg-dialogue/RPG_DIALOGUE_V1_API.md)
 > Qualification 规则：[Qualification 与 Subject](../30-development/qualification.md)
+> Qualification evidence：[Game Control Ports v1](../30-implementation/game-control-ports-v1-qualification.md)
 
-本文定义下一阶段的 game-library control-port 改造。它是实现设计，不修改现有 Frozen contract 的历史事实；实现 PR 必须按本文的版本/兼容规则更新对应正式契约和 qualification evidence。
+本文定义已经落地的 game-library control-port 架构。它不修改既有 Frozen contract 的历史事实；当前实现与 qualification evidence 按本文的版本/兼容规则闭环。
 
 本文只拥有 control-port 及其消费边界，不拥有相邻系统的全部策略。以下事项仍由各自 owner 决定：
 
@@ -1826,7 +1827,7 @@ session restart
 → no stale retained input
 ```
 
-不得保留以下 current single-map assumptions：
+以下旧 single-map assumptions 已从 current implementation 删除：
 
 ```text
 PokeManBundleFile.executable: string
@@ -1842,7 +1843,7 @@ report/check says "仍只有 map subsystem"
 
 ## 17. Freeze / landing criteria
 
-本设计可以直接进入 implementation PR，但在标记 Implemented 前必须满足：
+本设计的 landing 已满足以下 freeze criteria；exact subject 与命令记录见 qualification evidence：
 
 1. Map / Dialogue core Runtime 不再直接消费 physical/unified input channel；
 2. 两个 public Control Port 的 observable semantics 已由版本化 contract 固定；

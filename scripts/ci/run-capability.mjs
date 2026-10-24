@@ -68,6 +68,7 @@ function buildMapStack() {
     "-w", "@loomrealm/main",
     "-w", "@loomrealm/game-launcher-hostra",
     "-w", "@loomrealm/desktop",
+    "-w", "@loomrealm-game/common-controls",
     "-w", "@loomrealm-game/tile-presentation",
     "-w", "@loomrealm-game/map",
   );

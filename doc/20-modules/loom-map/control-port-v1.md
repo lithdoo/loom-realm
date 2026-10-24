@@ -1,8 +1,9 @@
 # RPGMap Control Port v1
 
-> 层级：`@loomrealm-game/map` gameplay contract candidate
-> 状态：**Normative Candidate / Ready for implementation**
+> 层级：`@loomrealm-game/map` gameplay contract
+> 状态：**Implemented / Qualified / Frozen**
 > 上游架构：[Game Control Ports](../../10-architecture/game-control-ports.md)
+> Qualification evidence：[Game Control Ports v1](../../30-implementation/game-control-ports-v1-qualification.md)
 
 本文件只拥有 Map-specific control semantics。它不定义 Keyboard/Gamepad/unified-controls protocol，也不定义 product input composition。
 
@@ -52,7 +53,7 @@ pre-run 写入只保留最新 intent；首个 scene ready 后可以开始消费�
 
 successful movement step 完成后，如果 intent 仍是 direction，可以继续下一步；movement 中改方向只影响后续 attempt。
 
-## Blocked semantics — v1 candidate
+## Blocked semantics — v1
 
 本次 v1 明确冻结：
 
