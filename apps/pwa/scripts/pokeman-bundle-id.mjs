@@ -15,5 +15,5 @@ export function pokeManBundleId(shellGeneration, payload) {
     .update("\0")
     .update(JSON.stringify(payload))
     .digest("hex");
-  return `pokeman-map-sha256-${digest}`;
+  return `pokeman-base-map-sha256-${digest}`;
 }

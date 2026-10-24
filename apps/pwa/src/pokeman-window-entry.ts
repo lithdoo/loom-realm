@@ -3,12 +3,19 @@ import type { PwaInstallationBundleV1 } from "./installation-bundle.js";
 import { ensurePwaBundle } from "./installer.js";
 import { startPwaProduct } from "./window-product.js";
 
+interface PokeManExecutableFile {
+  readonly logicalModule: string;
+  readonly mime: "text/javascript";
+  readonly source: string;
+  readonly contentVersion: string;
+}
+
 interface PokeManBundleFile {
   readonly bundleId: string;
   readonly gameEntryText: string;
   readonly launchManifestText: string;
   readonly presentation: unknown;
-  readonly executable: string;
+  readonly executables: readonly PokeManExecutableFile[];
   readonly content: readonly {
     readonly kind: "record" | "group" | "resource";
     readonly namespace: string;
@@ -49,11 +56,11 @@ async function loadBundle(): Promise<{ readonly bundleId: string; readonly prese
         mime: entry.mime,
         body: decodeBlob(entry.body, entry.mime),
       }))),
-      executables: Object.freeze([Object.freeze({
-        logicalModule: "subsystems/map.mjs",
+      executables: Object.freeze(value.executables.map((executable) => Object.freeze({
+        logicalModule: executable.logicalModule,
         mime: "text/javascript" as const,
-        body: new Blob([value.executable], { type: "text/javascript" }),
-      })]),
+        body: new Blob([executable.source], { type: executable.mime }),
+      }))),
     }),
   });
 }
