@@ -50,6 +50,8 @@ function buildRegressionStack() {
 }
 
 function buildMapStack() {
+  // Product presentation and Desktop sync read the common-controls browser
+  // bundle. That build belongs to this stack, not to a Map package prebuild.
   npm(
     "run", "build",
     "-w", "@loomrealm/fsdb",
@@ -69,6 +71,7 @@ function buildMapStack() {
     "-w", "@loomrealm/game-launcher-hostra",
     "-w", "@loomrealm/desktop",
     "-w", "@loomrealm-game/tile-presentation",
+    "-w", "@loomrealm-game/common-controls",
     "-w", "@loomrealm-game/map",
   );
 }

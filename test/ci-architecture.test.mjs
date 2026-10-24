@@ -111,6 +111,11 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   assert.match(ci, /name: Session Events v1 qualification[\s\S]*run-capability\.mjs session-events/);
   assert.doesNotMatch(ci.match(/  linux:[\s\S]*?\n  node20:/)?.[0] ?? "", /run-capability\.mjs battle/);
   assert.match(runner, /runWithRetry\(process\.execPath, \["--test", "game-libs\/battle\/test\/browser-e2e\.test\.mjs"\]\)/);
+  const mapStack = runner.slice(runner.indexOf("function buildMapStack()"), runner.indexOf("function buildPwaStack()"));
+  const subsystem = mapStack.indexOf('"-w", "@loomrealm/subsystem"');
+  const controls = mapStack.indexOf('"-w", "@loomrealm-game/common-controls"');
+  const map = mapStack.indexOf('"-w", "@loomrealm-game/map"');
+  assert.ok(subsystem > 0 && subsystem < controls && controls < map, "map capability must build common-controls after subsystem and before map");
   assert.doesNotMatch(ci, /npm run (?:test|build):m\d+/);
   assert.doesNotMatch(runner, /npm\("run", "(?:test|build):m\d+/);
   assert.doesNotMatch(ci, /--no-sandbox|ELECTRON_DISABLE_SANDBOX/);
