@@ -1273,7 +1273,7 @@ child-Frame modal → close/neutralize before call, fresh create after resume
 - valid State delivery；
 - valid Event delivery；
 - malformed State/Event fail closed；
-- State 默认 2500ms fallback；
+- State 按 `CONTROLS_STATE_STALE_MS` fallback；
 - Event 不 replay；
 - close 幂等；
 - Frame terminal abort cleanup；
