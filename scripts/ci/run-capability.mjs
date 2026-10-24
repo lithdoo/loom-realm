@@ -11,14 +11,25 @@ const MAP_LAYERING_WITHOUT_TIMING_RACES = `^(?!(?:${MAP_LAYERING_TIMING_RACES.ma
 
 function spawn(command, args, options = {}) {
   const printable = [command, ...args].join(" ");
+  const started = process.hrtime.bigint();
   console.log(`\n> ${printable}`);
-  return spawnSync(command, args, {
-    cwd: new URL(".", root),
-    stdio: "inherit",
-    shell: process.platform === "win32",
-    env: process.env,
-    ...options,
-  });
+  console.log(`[ci-command] started=${new Date().toISOString()}`);
+  try {
+    const result = spawnSync(command, args, {
+      cwd: new URL(".", root),
+      stdio: "inherit",
+      shell: process.platform === "win32",
+      env: process.env,
+      ...options,
+    });
+    const seconds = Number(process.hrtime.bigint() - started) / 1e9;
+    console.log(`[ci-command] finished=${new Date().toISOString()} duration=${seconds.toFixed(1)}s exit=${result.status ?? "none"} signal=${result.signal ?? "none"}`);
+    if (result.error) console.error(`[ci-command] spawn error: ${result.error.message}`);
+    return result;
+  } catch (cause) {
+    console.error(`[ci-command] threw after ${(Number(process.hrtime.bigint() - started) / 1e9).toFixed(1)}s`);
+    throw cause;
+  }
 }
 
 function run(command, args, options = {}) {
@@ -187,7 +198,9 @@ const capabilities = {
       `--test-name-pattern=${MAP_LAYERING_WITHOUT_TIMING_RACES}`,
       "test/map-layering-browser.test.mjs",
     );
-    node("--test", "test/map-depth-boundary-browser.test.mjs");
+    // Node test timeouts do not guarantee teardown of Chromium child processes.
+    // Bound this individual browser test command as well as the hosted Map job.
+    run(process.execPath, ["--test", "test/map-depth-boundary-browser.test.mjs"], { timeout: 180_000, killSignal: "SIGTERM" });
   },
 
   "schema-form"() {

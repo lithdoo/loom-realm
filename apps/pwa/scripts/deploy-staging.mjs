@@ -113,6 +113,10 @@ export async function deployRelease(options) {
   await options.compose(options.candidateProject, releaseDir, options.candidatePort, ["down"]);
   try {
     await options.compose(options.officialProject, releaseDir, options.officialPort, ["up", "-d", "--force-recreate", "--wait"]);
+    if (!(await options.portPublished(options.officialPort))) {
+      throw new Error(`Official HTTP port ${options.officialPort} is not published by a running container`);
+    }
+    console.log(`Official HTTP port ${options.officialPort} is published by Docker`);
     await options.smoke(options.officialUrl, options.officialProject, releaseDir, options.officialPort);
     // Commit the new active identity only after the official endpoint passes.
     await writeActiveId(options.dataRoot, options.sha);

@@ -60,24 +60,26 @@ jobs:
     needs: impact
     if: needs.impact.outputs.code == 'true'
     runs-on: ubuntu-latest
+    # A stalled hosted Linux job must fail rather than block the trusted
+    # main -> PWA deploy dependency indefinitely.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-workspace
         with:
           node-version: 24
-      # This runs before any other workspace build in the hosted Linux job.
-      # The Docker self-hosted deploy starts from the same clean npm ci state.
-      - name: Clean PokeMan staging build
-        if: needs.impact.outputs.pwa == 'true'
-        run: |
-          npm run build:staging -w @loomrealm/pwa
-          test -s apps/pwa/dist/staging/pwa/pokeman/index.html
-          test -s apps/pwa/dist/staging/pwa/pokeman/pokeman-bundle.json
-          test -s apps/pwa/dist/staging/pwa/pokeman/service-worker.js
       - name: Canonical package and contract regression
         env:
           LOOMREALM_QUALIFICATION_REPORT: "1"
-        run: node scripts/ci/run-capability.mjs core
+        # GNU timeout forwards TERM to the entire child process group, then
+        # escalates to KILL. Keep the job-level deadline as an independent
+        # safety net for Runner or shell-level hangs.
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Canonical regression started at $(date -u +%FT%TZ)"
+          timeout --verbose --signal=TERM --kill-after=30s 12m node scripts/ci/run-capability.mjs core
+          echo "Canonical regression completed at $(date -u +%FT%TZ)"
       - name: Content/storage delta
         if: needs.impact.outputs.content == 'true'
         run: node scripts/ci/run-capability.mjs content
@@ -85,6 +87,26 @@ jobs:
         run: node scripts/ci/run-capability.mjs pack
       - name: Verify CI architecture
         run: node --test test/ci-architecture.test.mjs
+
+  pwa-staging:
+    name: PokeMan staging / clean Node 24
+    needs: impact
+    if: needs.impact.outputs.pwa == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      # Independent checkout: do not prime or mutate the canonical regression
+      # job's workspace. The staging build must stand on its own after npm ci.
+      - name: Clean PokeMan staging build
+        run: |
+          npm run build:staging -w @loomrealm/pwa
+          test -s apps/pwa/dist/staging/pwa/pokeman/index.html
+          test -s apps/pwa/dist/staging/pwa/pokeman/pokeman-bundle.json
+          test -s apps/pwa/dist/staging/pwa/pokeman/service-worker.js
 
   node20:
     name: Node 20 compatibility
@@ -122,7 +144,10 @@ jobs:
         run: node scripts/ci/run-capability.mjs presentation
       - name: Map and RPGMap
         if: needs.impact.outputs.map == 'true'
-        run: node scripts/ci/run-capability.mjs map
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --verbose --signal=TERM --kill-after=30s 8m node scripts/ci/run-capability.mjs map
       - name: Schema Form
         if: needs.impact.outputs.schema == 'true'
         run: node scripts/ci/run-capability.mjs schema-form
@@ -206,16 +231,18 @@ jobs:
 
   summary:
     name: CI / summary
-    needs: [impact, linux, node20, browser, desktop, windows, docs]
+    needs: [impact, linux, pwa-staging, node20, browser, desktop, windows, docs]
     if: always()
     runs-on: ubuntu-latest
     env:
       CODE: ${{ needs.impact.outputs.code }}
+      PWA_STAGING_REQUIRED: ${{ needs.impact.outputs.pwa }}
       BROWSER_REQUIRED: ${{ needs.impact.outputs.browser }}
       DESKTOP_REQUIRED: ${{ needs.impact.outputs.desktop }}
       WINDOWS_REQUIRED: ${{ needs.impact.outputs.windows }}
       DOCS_REQUIRED: ${{ needs.impact.outputs.docs }}
       LINUX_RESULT: ${{ needs.linux.result }}
+      PWA_STAGING_RESULT: ${{ needs.pwa-staging.result }}
       NODE20_RESULT: ${{ needs.node20.result }}
       BROWSER_RESULT: ${{ needs.browser.result }}
       DESKTOP_RESULT: ${{ needs.desktop.result }}
@@ -236,6 +263,7 @@ jobs:
           }
 
           require_success "$CODE" "$LINUX_RESULT" linux
+          require_success "$PWA_STAGING_REQUIRED" "$PWA_STAGING_RESULT" pwa-staging
           require_success "$CODE" "$NODE20_RESULT" node20
           require_success "$BROWSER_REQUIRED" "$BROWSER_RESULT" browser
           require_success "$DESKTOP_REQUIRED" "$DESKTOP_RESULT" desktop
@@ -250,6 +278,7 @@ jobs:
             "windows_required": "$WINDOWS_REQUIRED",
             "docs_required": "$DOCS_REQUIRED",
             "linux": "$LINUX_RESULT",
+            "pwa_staging": "$PWA_STAGING_RESULT",
             "node20": "$NODE20_RESULT",
             "browser": "$BROWSER_RESULT",
             "desktop": "$DESKTOP_RESULT",

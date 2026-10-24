@@ -1,9 +1,11 @@
 name: Deploy PokeMan staging
 
+# The staging server is updated directly from trusted main pushes.
+# Build and HTTP smoke are part of the deploy job itself; do not gate a test
+# environment on unrelated whole-repository CI (Hostra/Desktop/etc.).
+
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  push:
     branches: [main]
 
 permissions:
@@ -15,16 +17,13 @@ concurrency:
 
 jobs:
   deploy:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.event == 'push'
+    if: github.ref == 'refs/heads/main' && github.repository == 'lithdoo/loom-realm'
     runs-on: [self-hosted, pwa]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -36,7 +35,7 @@ jobs:
         run: npm run build:staging -w @loomrealm/pwa
       - name: Publish the checked commit
         env:
-          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          GITHUB_SHA: ${{ github.sha }}
           PWA_DATA_ROOT: /run/desktop/mnt/host/f/lab-data/pwa
           PWA_ENGINE_DATA_ROOT: /run/desktop/mnt/host/f/lab-data/pwa
           # HTTP smoke is performed in the Web container. Docker Desktop
