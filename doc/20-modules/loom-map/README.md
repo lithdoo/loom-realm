@@ -5,7 +5,7 @@
 Current developer references：
 
 - [公开 API 与生命周期](./api.md)
-- [Runtime / 数据 / Presentation 语义](./runtime-and-presentation.md)
+- [Runtime / 数据 / Presentation 语义](./runtime-and-presentation.md)\n- [Control Port / Binding 改造设计](../../10-architecture/game-control-ports.md) — **Draft / Ready for implementation**；落地前不覆盖当前 Map Runtime
 - [Terrain Behavior Contract v1](../../../game-libs/map/TERRAIN_BEHAVIOR_CONTRACT_V1.md)
 - [Terrain provenance / legal boundary](../../../game-libs/map/TERRAIN_BEHAVIOR_EVIDENCE.md)
 
