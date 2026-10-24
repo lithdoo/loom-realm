@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -195,22 +196,37 @@ export async function preparePokeManPwaContent(options = {}) {
   }
 }
 
+function executableIdentity(logicalModule, source) {
+  return Object.freeze({
+    logicalModule,
+    mime: "text/javascript",
+    source,
+    contentVersion: `sha256:${createHash("sha256").update(source).digest("hex")}`,
+  });
+}
+
 export async function createPokeManPwaFixture(options = {}) {
   const root = options.exampleRoot ?? exampleRoot;
-  const executablePath = options.executablePath;
-  if (typeof executablePath !== "string" || executablePath.length === 0) throw new TypeError("executablePath is required");
-  const [gameEntryText, launchManifestText, presentationText, executable, content] = await Promise.all([
+  const paths = options.executablePaths;
+  if (paths === null || typeof paths !== "object" || typeof paths.base !== "string" || typeof paths.map !== "string") {
+    throw new TypeError("executablePaths.base and executablePaths.map are required");
+  }
+  const [gameEntryText, launchManifestText, presentationText, baseSource, mapSource, content] = await Promise.all([
     readFile(join(root, "game.json"), "utf8"),
     readFile(join(root, "launch.pwa.json"), "utf8"),
     readFile(join(root, "presentation.json"), "utf8"),
-    readFile(executablePath, "utf8"),
+    readFile(paths.base, "utf8"),
+    readFile(paths.map, "utf8"),
     preparePokeManPwaContent(options),
   ]);
   return Object.freeze({
     gameEntryText,
     launchManifestText,
     presentation: JSON.parse(presentationText),
-    executable,
+    executables: Object.freeze([
+      executableIdentity("subsystems/base.mjs", baseSource),
+      executableIdentity("subsystems/map.mjs", mapSource),
+    ]),
     content: Object.freeze(content.map((entry) => Object.freeze({
       kind: entry.kind,
       namespace: entry.namespace,

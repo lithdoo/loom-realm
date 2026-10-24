@@ -1,4 +1,5 @@
 import { defineSubsystem } from "@loomrealm/subsystem";
+import { createControlsConsumer, createDirectionalControlsTracker } from "@loomrealm-game/common-controls/subsystem";
 import { RPGMapBuilder } from "@loomrealm-game/map";
 
 export const MAP_ONLY_NPC_PLACEMENTS = Object.freeze({
@@ -83,21 +84,45 @@ export function placementsForMap(mapId, placements = MAP_ONLY_NPC_PLACEMENTS) {
   return placements[String(mapId)] ?? Object.freeze([]);
 }
 
+const MAP_DIRECTIONS = Object.freeze({ up: 8, down: 2, left: 4, right: 6 });
+
+function toMapDirection(direction) {
+  return direction === null ? null : MAP_DIRECTIONS[direction];
+}
+
 export default defineSubsystem((scope) => ({
-  frame(frame) {
+  async frame(frame) {
     const input = frame.params;
-    const handler = new RPGMapBuilder(scope, frame).build({
+    const map = new RPGMapBuilder(scope, frame).build({
       player: { characterName: input.characterName },
     });
 
-    handler.onMapEntering((context) => {
+    map.onMapEntering((context) => {
       context.setNPC(placementsForMap(context.mapId));
     });
 
-    return handler.run({
-      mapId: input.mapId,
-      x: input.x,
-      y: input.y,
+    const directions = createDirectionalControlsTracker();
+    const apply = () => map.controls.setMoveIntent(toMapDirection(directions.direction));
+    const consumer = createControlsConsumer(scope.presentationEvents, frame, {
+      onState(state) {
+        directions.acceptState(state);
+        apply();
+      },
+      onEvent(event) {
+        directions.acceptEvent(event);
+        apply();
+      },
     });
+    try {
+      return await map.run({
+        mapId: input.mapId,
+        x: input.x,
+        y: input.y,
+      });
+    } finally {
+      map.controls.setMoveIntent(null);
+      directions.reset();
+      consumer.close();
+    }
   },
 }));

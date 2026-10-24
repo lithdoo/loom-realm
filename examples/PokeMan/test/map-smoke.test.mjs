@@ -13,12 +13,12 @@ async function json(path) {
   return JSON.parse(await readFile(new URL(path, root), "utf8"));
 }
 
-test("the parsed Game Entry boots exactly one Map subsystem from the player home", async () => {
+test("the parsed Game Entry boots base plus the Map-only gameplay subsystem from the player home", async () => {
   const game = parseGameEntryV1(await readFile(new URL("game.json", root), "utf8"));
   assert.deepEqual(game, {
     formatVersion: 1,
     initial: {
-      subsystem: "map",
+      subsystem: "base",
       input: {
         mapId: 3,
         x: 3,
@@ -26,12 +26,15 @@ test("the parsed Game Entry boots exactly one Map subsystem from the player home
         characterName: "Player",
       },
     },
-    subsystems: [{ key: "map" }],
+    subsystems: [{ key: "base" }, { key: "map" }],
   });
 
   assert.deepEqual(await json("launch.hostra.json"), {
     formatVersion: 1,
-    subsystems: [{ key: "map", module: "subsystems/map.mjs" }],
+    subsystems: [
+      { key: "base", module: "subsystems/base.mjs" },
+      { key: "map", module: "subsystems/map.mjs" },
+    ],
   });
 });
 
