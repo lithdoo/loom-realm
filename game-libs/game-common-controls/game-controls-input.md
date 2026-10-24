@@ -257,7 +257,7 @@ effective = keyboardDown || gamepadDown
 | 松开 | 按下 | 是 |
 | 按下 | 按下 | 是，只出现一次 |
 
-State 在 effective 集合发生变化时重发整份 `down`，顺序始终是第 2 节。effective 没变就不发 State。非空 State 每 1000ms 刷新同一份 effective 集合。
+State 在 effective 集合发生变化时重发整份 `down`，顺序始终是第 2 节。effective 没变就不发 State，但第 7 节的 Window 可用性切换除外：usable 与 unusable 互切时，即使 `down` 与上一份相同，也发送当前 `controls.state`。非空 State 每 1000ms 刷新同一份 effective 集合。
 
 Event 不等于“所有 effective 变化”。v1 把变化来源分成两类：
 
@@ -285,6 +285,10 @@ physical edge 造成 effective 改变
 
 reconciliation / baseline 造成 effective 改变
     -> 只发送 State
+    -> 不合成 down/up Event
+
+Window usable <-> unusable
+    -> 无论 effective 是否改变，都发送当前 State
     -> 不合成 down/up Event
 
 Keyboard repeat
@@ -407,14 +411,14 @@ Window 可用性是 `document.visibilityState === "visible" && document.hasFocus
 Window 变为不可用
     清空 keyboard held 和 gamepad 本地表
     重新计算 effective controls
-    发送当前 controls.state；通常为 { down: [] }
+    发送当前 controls.state；即使 down 与上一份相同，通常为 { down: [] }
     不为被清掉的按键补 up Event
 
 Window 重新可用
     keyboard held 从 empty 开始
     重扫 standard gamepad
     已经按下的支持键只进入 State，不补 down Event
-    发送当前 controls.state
+    发送当前 controls.state；即使 down 与上一份相同，包括 { down: [] }
     继续轮询
 
 Keyboard capture available -> unavailable
@@ -486,7 +490,7 @@ src/controls-machine.ts
     内部纯状态机；不从 `@loomrealm-game/common-controls` 根导出
 
 browser/controls-source.ts
-    新增 controls-specific Keyboard + Gamepad sampler/state machine
+    DOM focus、Keyboard 与 Gamepad sampling adapter；有效状态只交给 controls-machine
 
 browser/device-input.browser.ts
     PresentationContext.broadcast 扩展为 boolean | "top-frame"
@@ -498,7 +502,7 @@ scripts/build-browser.mjs
     collision banner 加入 game-controls-input
 ~~~
 
-现有 `browser/keyboard-source.ts`、`gamepad-source.ts`、`pointer-source.ts` 是已实现的 raw device 行为，**不得为了 unified controls 改写其对外语义**。`controls-source.ts` 可以复用纯常量、量化/standard mapping 等无状态 helper，但不能直接把 raw source 的 `keyboard.* / gamepad.*` 输出再转发，因为它必须独立实现 §4 的 capture availability、§5 的 reason 分类和多 Gamepad OR。
+现有 `browser/keyboard-source.ts`、`gamepad-source.ts`、`pointer-source.ts` 是已实现的 raw device 行为，**不得为了 unified controls 改写其对外语义**。`controls-source.ts` 只负责浏览器采集，并把变化交给 `controls-machine.ts`。capture 判定留在 adapter；effective、reason 分类和多 Gamepad OR 只有 reducer 一份。adapter 不能把 raw source 的 `keyboard.* / gamepad.*` 输出再转发。
 
 `game-controls-input` 不进入 Main，不读取或指定 Frame/Activation，不发送 `input.reset`。Renderer 从 current Control v2 stack 派生 Top Frame lease；Subsystem listener 显式绑定业务持有的真实 `Frame` object。
 
@@ -510,6 +514,7 @@ scripts/build-browser.mjs
 - Keyboard/Gamepad 同时按住同一统一按键，只产生一个 effective `down`；任一侧先松开不产生 `up`，最后一侧松开才产生 `up`。
 - 新 Gamepad baseline 已按住的键只进入 State；已跟踪 Gamepad 运行中断开导致最后一份有效按住消失时，先 State 再按规范顺序发 `up`。
 - Window unusable、Gamepad rescan baseline、Keyboard capture loss/regain 都属于 reconciliation：可以修正 State，但绝不合成 down/up Event。
+- Window usable 与 unusable 互切时，即使 effective 仍是 `{ down: [] }`，也发送当前 `controls.state`，且不合成 Event。这次空 State 不启动 1000ms refresh。
 - 游戏区按住映射键后把焦点移入 blocked focus target：capture loss 立即清 keyboard held，只按 effective 变化发 State；随后在控件中的 keyup 不得造成卡键。
 - blocked focus target 的判定严格按 §4 的封闭集合和 deep-active/composed-ancestor 算法；普通 `tabindex` 或 ARIA role 不得自行扩大 blocked 集合。
 - capture unavailable 时 mapped 键保持浏览器原生行为；capture available 时 trusted mapped keydown 在可取消时 `preventDefault()`。
@@ -531,6 +536,12 @@ npm run docs:check-links
 npm run docs:build
 ~~~
 
+`test:game-controls-input:qualification` 是本组件的精确门禁，至少执行上面的命令。
+
+`test:game-common-controls-input:qualification` 是产品兼容门禁。同一次执行覆盖 build、`test:game-common-controls-input:qualification:run`（common-controls、Hub/Presentation、Map、Dialogue、Schema Form）、`test/game-controls-input-v1/qualification.test.mjs`、Desktop、PWA M17、frame-targeted 与文档门禁。它不调用精确门禁脚本，避免两条 pipeline 嵌套后漂移。
+
+`npm run test:regression` 单独覆盖 framework 包回归，不并进上述两条脚本。
+
 只有上述 acceptance criteria 和命令全部通过，才把本文状态从 `Draft / Freeze candidate` 改为 `Active / Normative / Frozen / Implemented`。该条件已经满足，记录见第 12 节。`Frozen != Implemented != Qualified`：本文状态停在 Implemented；qualification 证据单独记录，不把本文改写成 Qualified。
 
 ## 11. v1 不做的事
@@ -544,7 +555,9 @@ npm run docs:build
 
 ## 12. 实现与 qualification subject
 
-qualified implementation subject：`feb28074`（`feb280747fcf0ab1c37b0a93c19c8741eeda3b4a`）
+qualified implementation subject：`2333fea8`（`2333fea85e353dd9a0f247d41d8112dc3fa2e048`）
+
+这个 SHA 是实际执行 qualification 的 executable subject。其后的文档 commit 只更新证据，不改变该 subject。
 
 实现位置：
 
@@ -556,7 +569,7 @@ src/fresh-state.ts
 src/controls-machine.ts
     Keyboard / Gamepad effective reducer；不是包的 public ABI
 browser/controls-source.ts
-    capture、preventDefault、Gamepad polling
+    DOM capture、preventDefault、Gamepad polling adapter
 browser/device-input.browser.ts
     <game-controls-input>、duplicate key "controls"、broadcast: "top-frame"
 scripts/build-browser.mjs
@@ -565,18 +578,4 @@ test/game-controls-input-v1/qualification.test.mjs
     仓库级 qualification
 ~~~
 
-2026-10-24，在 frozen Hostra pin `d863beab`（`1.0.1-beta.1`）上执行：
-
-~~~text
-HOSTRA_SOURCE_DIR=<frozen pin> npm run test:game-controls-input:qualification
-~~~
-
-| 命令阶段 | 结果 |
-| --- | --- |
-| `@loomrealm-game/common-controls` 包测试 | PASS，20/20 |
-| `node --test test/game-controls-input-v1/qualification.test.mjs` | PASS，7/7 |
-| `npm run test:frame-targeted-presentation:qualification` | PASS：核心/集成 50/50、Desktop Hostra Chromium 1/1、PWA Chromium 1/1 |
-| `npm run docs:check-links` | PASS，782 个相对链接 / 167 个 Markdown 文件 |
-| `npm run docs:build` | PASS，VitePress client/server build 与 page rendering 完成 |
-
-同一脚本在未设置 `HOSTRA_SOURCE_DIR`、因而落到 sibling Hostra `1.0.0` 时，Desktop 阶段因 `HOSTRA_RPC_PORT=0` 未被改写成实际端口而失败。这与本次 controls 实现无关；使用 CI 同一 freeze pin 后该阶段为 1/1。证据文件：`doc/30-implementation/game-controls-input-qualification.md`。
+执行命令、环境、Hostra pin 和实际通过数量见 [qualification evidence](../../doc/30-implementation/game-controls-input-qualification.md)。本文不记录 Qualified 状态。
