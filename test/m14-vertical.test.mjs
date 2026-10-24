@@ -15,6 +15,7 @@ import { createSessionEventClient, createSessionEventHub } from "@loomrealm/sess
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
 import { runSubsystem } from "@loomrealm/subsystem/host";
+import { createControlsConsumer, createDirectionalControlsTracker } from "@loomrealm-game/common-controls/subsystem";
 import { RPGMapBuilder } from "@loomrealm-game/map";
 import { attachRendererPresentation } from "../packages/renderer/dist/internal/presentation-seam.js";
 import { prepareExamplePresentation } from "../examples/essentials-v21.1/test/prepare.mjs";
@@ -25,14 +26,44 @@ const scheduler = Object.freeze({ schedule(ms, callback) { const timer = setTime
 const runtimePolicy = Object.freeze({ scheduler, helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 100 });
 const mainPolicy = Object.freeze({ runtimeBootstrapDeadlineMs: 5_000, frameDeadlineMs: 5_000, shutdownDeadlineMs: 5_000, terminationDeadlineMs: 1_000 });
 const hash = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+const MAP_DIRECTIONS = Object.freeze({ up: 8, down: 2, left: 4, right: 6 });
+const toMapDirection = (direction) => (direction === null ? null : MAP_DIRECTIONS[direction]);
+const baseSubsystem = defineSubsystem((scope) => ({
+  async frame(frame) {
+    const inputHost = scope.createRenderDomain({
+      zIndex: 0,
+      roots: [{ key: "game-controls-input", tag: "game-controls-input", attrs: {}, data: {}, children: [] }],
+    });
+    try { return await frame.call("map", frame.params); }
+    finally { inputHost.close(); }
+  },
+}));
 const mapSubsystem = defineSubsystem((scope) => ({
-  frame(frame) {
+  async frame(frame) {
     const input = frame.params;
     const map = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
     map.onMapEntering((context) => { context.setNPC([]); });
-    return map.run({ mapId: input.mapId, x: input.x, y: input.y });
+    const directions = createDirectionalControlsTracker();
+    const apply = () => map.controls.setMoveIntent(toMapDirection(directions.direction));
+    const consumer = createControlsConsumer(scope.presentationEvents, frame, {
+      onState(state) { directions.acceptState(state); apply(); },
+      onEvent(event) { directions.acceptEvent(event); apply(); },
+    });
+    try { return await map.run({ mapId: input.mapId, x: input.x, y: input.y }); }
+    finally { map.controls.setMoveIntent(null); directions.reset(); consumer.close(); }
   },
 }));
+const subsystemDefinitions = Object.freeze({ base: baseSubsystem, map: mapSubsystem });
+
+function domainRoot(view, tag) {
+  for (const subsystem of view?.subsystems ?? []) {
+    for (const domain of subsystem.domains ?? []) {
+      const root = domain.roots?.find((item) => item.tag === tag);
+      if (root) return { subsystem, domain, root };
+    }
+  }
+  return null;
+}
 
 function executablePath() {
   return [process.env.LOOMREALM_CHROMIUM_PATH, "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean).find(existsSync);
@@ -182,11 +213,11 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
   });
   const runtimeHosting = Object.freeze({
     async launch(request) {
-      assert.equal(request.subsystemKey, "map");
+      assert.ok(subsystemDefinitions[request.subsystemKey], request.subsystemKey);
       const pair = createMemoryCarrierPair();
       let acquired = false;
       const runtime = runSubsystem({
-        definition: mapSubsystem, runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
+        definition: subsystemDefinitions[request.subsystemKey], runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
         runtimePolicy, launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] }, data: hub.subsystemBinding, content,
         state: (() => { const client = createSharedStateClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
         events: (() => { const client = createSessionEventClient(sessionEventHub.createBinding(request.subsystemKey)); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
@@ -208,20 +239,23 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
   let browserDelivery = Promise.resolve(); let latestView; let emitNodeEvent;
   const detach = attachRendererPresentation(holder, { reevaluate(source, emit) { latestView = structuredClone(source.read()); emitNodeEvent = emit; browserDelivery = browserDelivery.then(() => page.evaluate((view) => globalThis.applyM14View(view), latestView)); } });
   t.after(detach);
-  await waitFor(() => typeof emitNodeEvent === "function" && latestView?.subsystems[0]?.domains[0]?.roots[0]?.data?.viewportWidth === 800, "initial map Render state");
-  const emitKeyboardDown = () => {
-    const subsystem = latestView.subsystems[0];
-    const domain = subsystem.domains[0];
+  await waitFor(() => typeof emitNodeEvent === "function" && domainRoot(latestView, "lr-map-view")?.root?.data?.viewportWidth === 800 && domainRoot(latestView, "game-controls-input") !== null, "initial map Render state");
+  const emitControls = (name, data, channel) => {
+    const controls = domainRoot(latestView, "game-controls-input");
     emitNodeEvent({
       sessionId: latestView.sessionId,
-      subsystemKey: subsystem.subsystemKey,
-      generation: subsystem.generation,
-      domainId: domain.domainId,
-      targetKey: "map-input-keyboard",
-      name: "input.event",
-      data: { action: "down", code: "ArrowRight", repeat: false },
-      options: { broadcast: true, channel: "keyboard.event" },
+      subsystemKey: controls.subsystem.subsystemKey,
+      generation: controls.subsystem.generation,
+      domainId: controls.domain.domainId,
+      targetKey: controls.root.key,
+      name,
+      data,
+      options: { broadcast: "top-frame", channel },
     });
+  };
+  const emitMoveRight = () => {
+    emitControls("input.state", { down: ["right"] }, "controls.state");
+    emitControls("input.event", { action: "down", button: "right", repeat: false }, "controls.event");
   };
   await browserDelivery;
   await waitFor(async () => (await sampleVisibleTilePixel(page, 400, 268))[3] === 255, "initial Canvas paint");
@@ -240,16 +274,16 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
     return [getComputedStyle(content).height, getComputedStyle(footer).height, footer.textContent];
   }), ["568px", "32px", "1"]);
 
-  emitKeyboardDown();
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.x === 11, "first movement commit"); await browserDelivery;
-  const moved = latestView.subsystems[0].domains[0].roots[0];
+  emitMoveRight();
+  await waitFor(() => domainRoot(latestView, "lr-map-view")?.root?.children[0]?.data?.x === 11, "first movement commit"); await browserDelivery;
+  const moved = domainRoot(latestView, "lr-map-view").root;
   assert.equal(moved.data.cameraX, 0); assert.deepEqual([moved.children[0].data.screenX, moved.children[0].data.screenY, moved.children[0].data.direction], [352, 256, 6]);
   await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data[2] === 240), "right-facing player crop");
   assert.deepEqual(await page.evaluate(() => [...document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data]), fixture.expectedPixels.playerRight);
   assert.deepEqual(await page.evaluate(() => [document.querySelector("lr-map-view").instance, document.querySelector("lr-map-sprite").instance]), [1, 2]);
-  emitKeyboardDown();
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 6, "blocked movement render"); await new Promise((resolve) => setTimeout(resolve, 20));
-  const blocked = latestView.subsystems[0].domains[0].roots[0];
+  emitMoveRight();
+  await waitFor(() => domainRoot(latestView, "lr-map-view")?.root?.children[0]?.data?.direction === 6, "blocked movement render"); await new Promise((resolve) => setTimeout(resolve, 20));
+  const blocked = domainRoot(latestView, "lr-map-view").root;
   assert.equal(blocked.children[0].data.x, 11); assert.equal(blocked.data.cameraX, 0);
   assert.equal(await page.evaluate(() => document.querySelectorAll("lr-map-view lr-map-sprite").length), 1);
   assert.equal(await page.evaluate(() => document.querySelectorAll("lr-map-tile").length), 0);
@@ -264,7 +298,7 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
     await page.setViewportSize({ width: expected.width, height: expected.height });
     viewportEmit({ width: expected.width, height: expected.height });
     await waitFor(() => {
-      const data = latestView?.subsystems[0]?.domains[0]?.roots[0]?.data;
+      const data = domainRoot(latestView, "lr-map-view")?.root?.data;
       return data?.viewportWidth === expected.width && data?.viewportHeight === expected.height;
     }, `responsive ${expected.width}x${expected.height} Render state`);
     await browserDelivery;
