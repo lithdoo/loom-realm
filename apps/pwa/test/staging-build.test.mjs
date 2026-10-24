@@ -38,7 +38,7 @@ test("PokeMan staging build is self-contained and dependency-ordered for fresh R
   assert.equal(new Set(order).size, order.length, "workspace should not be built twice");
   const position = new Map(order.map((name, index) => [name, index]));
 
-  // PokeMan staging also builds a Map executable from source and creates an
+  // PokeMan staging also builds Base and Map executables from source and creates an
   // FSDB fixture, neither of which is a declared app/pwa runtime dependency.
   const required = new Set();
   const visit = (name) => {
