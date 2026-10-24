@@ -8,6 +8,14 @@ export interface RPGDialogueOptionsV0 {
   readonly zIndex?: number;
 }
 
+export interface RPGDialogueControls {
+  confirm(): void;
+  previous(): void;
+  next(): void;
+  history(): void;
+  cancel(): void;
+}
+
 export interface ConversationChoiceV0 {
   readonly choiceId: string;
   readonly text: string;
