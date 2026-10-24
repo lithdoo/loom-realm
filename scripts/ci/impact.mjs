@@ -170,7 +170,7 @@ export function classifyPaths(paths) {
       continue;
     }
 
-    if (path.startsWith("game-libs/rpg-dialogue/") || path.startsWith("test/rpg-dialogue-v0/")) {
+    if (path.startsWith("game-libs/rpg-dialogue/") || path.startsWith("test/rpg-dialogue-v0/") || path.startsWith("test/rpg-dialogue-v1/")) {
       impact.code = true;
       impact.presentation = true;
       impact.dialogue = true;

@@ -2,7 +2,7 @@
   "name": "@loomrealm-game/rpg-dialogue",
   "version": "0.1.0-alpha.0",
   "type": "module",
-  "description": "Frozen v0 RPG dialogue interaction session and browser presentation",
+  "description": "RPG dialogue interaction session, semantic controls, and browser presentation",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
