@@ -19,13 +19,13 @@ Frame / Activation / top-frame wire semantics
 → existing game-common-controls contract
 
 Map blocked/retry gameplay cadence
-→ Map-specific movement contract / qualification
+→ Map-specific movement contract / qualification；本次 landing 的 exact 选择见 §16
 
 Dialogue/product concrete button mapping
 → Dialogue versioned contract or concrete product composition
 
 input component owner / RenderDomain topology / mount lifetime
-→ concrete product/example composition
+→ concrete product/example composition；本次两个 example 的 exact topology 见 §16
 ```
 
 本文可以规定这些 owner 之间必须满足的接口约束，但不得替它们重新定义完整语义。
@@ -361,7 +361,21 @@ same-value setMoveIntent(...)
 → 不能因为 transport 重复投递而改变业务含义
 ```
 
-如果落地实现需要改变现有 blocked/retry 的可观察行为，必须在 Map-specific contract / qualification 中明确记录和重新验证；不能把这种 gameplay change 隐藏成 input-decoupling refactor。
+本架构层不把 blocked/retry cadence 提升为跨产品 controls contract；但为了让本次 implementation 不再留实现选择，§16 的 canonical landing 明确采用：
+
+```text
+attempt(direction) → blocked
+→ 保留 moveIntent
+→ 不自动 retry
+→ 不创建 retry timer
+→ same-value setMoveIntent 不触发 retry
+→ controls.state refresh 不触发 retry
+
+只有 moveIntent 真正发生变化后，idle Map 才把它视为新的 movement intent。
+successful movement step 的 held continuation 不是 blocked retry，仍可继续消费当前 retained intent。
+```
+
+因此本次实现会有意移除“raw keyboard State refresh 偶然触发 blocked retry”的历史行为。该变化必须同时写入 Map-specific contract / tests / qualification，不能伪装成无行为变化的 private refactor。
 
 ### 3.4 Handler lifecycle
 
@@ -516,7 +530,11 @@ CLOSED
 - 不得直接把 v0 contract 文档改成“原来就有 controls”；
 - 必须新增明确的下一版 Dialogue API contract（建议 `RPG_DIALOGUE_V1_API.md`）；
 - v1 保持现有 class name、constructor、Conversation/History API 兼容，只 additive 增加 `readonly controls`；
-- v0 qualification evidence 继续只证明原 v0 subject；
+- v0 qualification evidence 继续只证明原 v0 executable subject；
+- current HEAD 不再要求继续执行旧 raw-keyboard v0 closed-loop qualification；
+- 旧 `test/rpg-dialogue-v0/qualification.test.mjs` 在 v1 landing 中删除；Git history + `doc/30-implementation/rpg-dialogue-v0-qualification.md` 保留历史 evidence；
+- 新增 `test/rpg-dialogue-v1/qualification.test.mjs`，以 `dialogue.controls` 为 module-level interaction entrance；
+- root `test:rpg-dialogue:qualification` / `test:rpg-dialogue` 改为 current v1 qualification；
 - v1 implementation 必须有新的 exact-subject qualification。
 
 ---
@@ -558,11 +576,11 @@ import type {
 export interface ControlsConsumerHandlers {
   readonly onState?: (
     state: ControlsStatePayloadV1,
-  ) => void;
+  ) => void | Promise<void>;
 
   readonly onEvent?: (
     event: ControlsEventPayloadV1,
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 export interface ControlsConsumer {
@@ -638,6 +656,26 @@ EMPTY_CONTROLS_STATE_V1
 这不是 wire replay，也不发送任何消息，只是 consumer-local 初始事实。
 
 如果没有 `onState`，不创建 freshness tracker。
+
+Callback failure policy 与现有 Presentation Event handler isolation 对齐：
+
+```text
+initial onState(EMPTY...)
+later onState(...)
+later onEvent(...)
+    ↓
+sync throw
+or returned Promise rejects
+    ↓
+failure stays local to this callback invocation
+    ↓
+Consumer remains live
+later deliveries continue
+```
+
+Consumer 不把 callback Promise 当作 flow control：调用顺序按 delivery 顺序发生，但不等待上一 callback Promise settle，也不因为 rejected Promise 终止 Consumer。实现必须为 returned thenable 安装 rejection sink，避免 unhandled rejection。
+
+因此 generic Consumer 只负责可靠地“交付并隔离 callback failure”；如果具体 gameplay 希望 callback failure 升级为 fatal，由 product/business callback 自己显式执行对应 fail-stop policy。
 
 `close()`：
 
@@ -1019,7 +1057,9 @@ provide a product-owned compatibility path
 
 Map / Dialogue core 不再拥有 physical/unified input component composition。Map 当前为输入而创建的 raw Keyboard/Gamepad roots 必须从 Map movement path 移出；Dialogue Runtime 也不再订阅 raw `keyboard.event / gamepad.event`。
 
-至于 `<game-controls-input>` 由哪个 subsystem / RenderDomain 挂载、是否跨 Frame call 持续存在、何时 mount/unmount，全部属于**具体 product/example composition**，本文不指定 topology。
+至于 `<game-controls-input>` 由哪个 subsystem / RenderDomain 挂载、是否跨 Frame call 持续存在、何时 mount/unmount，全部属于**具体 product/example composition**，通用架构不指定唯一 topology。
+
+为了让当前 implementation 可以一次闭环，§16 只对本次两个 canonical example 指定私有 `base` Subsystem landing；这不是新的 framework/game-library contract。
 
 本文只要求具体 composition 遵守现有 producer contract：
 
@@ -1163,7 +1203,8 @@ src/index.ts
 
 package.json
     remove @loomrealm-game/common-controls dependency
-    if no other Map core code still requires it
+    remove "prebuild": "npm run build -w @loomrealm-game/common-controls"
+    no residual build-time coupling to common-controls
 ```
 
 必须保持以下 authority 完全在 Map Runtime：
@@ -1204,21 +1245,18 @@ RPG_DIALOGUE_V1_API.md
 
 不新增 `control-bindings` package。
 
-实际 composition 直接：
+通用要求：
 
 ```text
-choose and document product-owned input component placement/lifetime
-mount game-controls-input when this product chooses unified controls
+product owns input component placement/lifetime
 respect one-active-producer-per-Window contract
-import consumer/tracker from @loomrealm-game/common-controls/subsystem
-create fresh consumer/tracker per active Activation
-translate generic controls to module Control Port
+business Frame owns its Activation-local consumer/tracker
+translate generic controls to module Control Port in product composition
 same-Frame overlay → local active flags
 child-Frame modal → close/neutralize before call, fresh create after resume
-neutralize Map before controls wiring teardown
 ```
 
-如果以后多个产品出现完全相同的业务 mapping，可以再抽 product-level helper；这不是本次架构要求，也不能反向污染 `common-controls`。
+本次 repository landing 的两个 concrete examples、文件结构与依赖变化由 §16 exact 指定。以后其他产品可以采用不同 product-owned topology，只要满足上述边界；不得把本次 `base` topology 反向提升成 framework/game-library mandatory shape。
 
 ---
 
@@ -1240,6 +1278,9 @@ neutralize Map before controls wiring teardown
 - Consumer 不尝试从 PresentationFrameEvent 推导 activationId；
 - A1 consumer close 后，fresh A2 consumer 从 EMPTY 开始；
 - old Activation Event 不进入 fresh Activation；
+- initial neutral callback sync throw isolated；
+- State/Event callback sync throw isolated，later delivery 继续；
+- returned rejected Promise isolated，不产生 unhandled rejection，不阻塞 later delivery；
 - root `@loomrealm-game/common-controls` export surface 保持原 Frozen ABI；
 - `@loomrealm-game/common-controls/subsystem` exact export surface 单独测试；
 - 不引入 Map / Dialogue package dependency。
@@ -1267,8 +1308,11 @@ Directional Tracker：
 - `setMoveIntent(null)` 在当前 step 完成后停止继续移动；
 - same-value `setMoveIntent` idempotent，不代表新的 movement command；
 - controls State refresh 不通过重复 setter 偷偷成为新的业务 command；
-- blocked movement 仍完全由 Map authority 决定；
-- 如果实现改变现有 blocked/retry 可观察行为，必须在 Map-specific contract / qualification 中明确记录；
+- blocked 后 retained intent 保留但不自动 retry；
+- blocked 后无 retry timer；
+- neutral/other direction 后再次写 direction 属于真实 intent change，可在 idle 时重新 attempt；
+- blocked movement 的碰撞/passability authority 仍完全由 Map Runtime 决定；
+- Map-specific contract / qualification 显式记录本次 blocked/retry 行为变化；
 - transfer / NPC / bridge semantics 不迁出 Runtime；
 - invalid direction runtime value throws `TypeError`；
 - terminal cleanup 后 controls 不产生 gameplay side effect；
@@ -1336,13 +1380,20 @@ World A1 controls live
 → only A2 controls.state may restore held movement
 ```
 
-Product input composition：
+Canonical example composition：
 
 ```text
-chosen product/example composition
-→ ownership/lifetime documented there
-→ when unified controls are active, no duplicate producer exists in one Window
-→ producer behavior otherwise follows existing Frozen game-controls-input contract
+Essentials base Frame
+PokeMan base Frame
+→ each owns exactly one product-private game-controls-input RenderNode
+→ base calls map as child Frame
+→ base suspension does not destroy its RenderDomain
+→ top-frame publication therefore reaches current Map child
+
+Map child Frame
+→ owns fresh ControlsConsumer + Directional Tracker
+→ maps generic direction to RPGMapControls
+→ teardown neutral + reset + close
 ```
 
 ### 14.5 Integration qualification
@@ -1371,8 +1422,8 @@ Browser trusted Keyboard/Gamepad
 - 独立 `@loomrealm-game/control-bindings` package；
 - `common-controls` import Map / Dialogue；
 - 修改已 Frozen 的 `@loomrealm-game/common-controls` root export surface；
-- 替 product/example 规定 Input Host subsystem / RenderDomain topology；
-- 在本文冻结 Map blocked/retry cadence；
+- 把本次 example-private `base` topology 提升为所有 product 的 mandatory topology；
+- 把本次 Map blocked landing policy 提升为 common-controls / Framework contract；
 - 在本文冻结某个 product 的 Dialogue button mapping；
 - Framework InputTarget / 新 input authority；
 - 修改 `game-controls-input` Frozen v1 vocabulary；
@@ -1389,7 +1440,329 @@ Browser trusted Keyboard/Gamepad
 
 ---
 
-## 16. Freeze / landing criteria
+## 16. Canonical implementation landing profile
+
+本节只回答“**当前 repository 这一轮到底怎么落**”。它不是新的跨产品 mandatory architecture；目的是让 coding agent 不再自行选择 product topology、blocked retry、Dialogue qualification 或 callback failure policy。
+
+### 16.1 Exact change set
+
+本次必须闭环以下位置：
+
+```text
+game-libs/game-common-controls
+game-libs/map
+game-libs/rpg-dialogue
+
+examples/essentials-v21.1
+examples/PokeMan
+
+root package.json / package-lock.json
+affected module docs / qualification evidence
+```
+
+不得只完成三个 library 而留下 canonical examples 继续依赖 Map-owned raw input roots。
+
+### 16.2 Example-private Base Subsystem
+
+Essentials 与 PokeMan 各自新增自己的 private infrastructure Subsystem：
+
+```text
+Game
+└─ base
+   ├─ owns one <game-controls-input> RenderNode
+   └─ frame.call("map", initialMapParams)
+          ↓
+        map Frame
+```
+
+这里的 `base`：
+
+- 是 example/product-private Subsystem；
+- 不是 `@loomrealm-game/*` library；
+- 不是 Framework authority；
+- 不消费 `controls.state/event`；
+- 不知道 `RPGMapControls` / `RPGDialogueControls`；
+- 只负责该 example 的长期 product infrastructure producer composition。
+
+Canonical Base Frame 结构：
+
+```ts
+export default defineSubsystem((scope) => ({
+  async frame(frame) {
+    const inputHost = scope.createRenderDomain({
+      zIndex: 0,
+      roots: [{
+        key: "game-controls-input",
+        tag: "game-controls-input",
+        attrs: {},
+        data: {},
+        children: [],
+      }],
+    });
+
+    try {
+      return await frame.call("map", frame.params);
+    } finally {
+      inputHost.close();
+    }
+  },
+}));
+```
+
+现有 Framework contract 已保证：
+
+```text
+base calls map
+→ base Frame suspends
+→ base RenderDomain is not automatically destroyed/hidden
+→ game-controls-input remains live
+→ broadcast:"top-frame" targets active Map child
+```
+
+Base 不得自己订阅 controls 再转发给 child；否则会变成第二个中央 Input Authority。
+
+两个 example 的 Game Entry / Hostra topology 固定改为：
+
+```text
+initial subsystem = base
+registered subsystems = base + map
+
+launch.hostra.json
+base -> subsystems/base.mjs
+map  -> subsystems/map.mjs
+```
+
+原来的 Map initial params 原样作为 Base Frame params，并由 Base 原样传给 child Map。
+
+### 16.3 Example Map composition
+
+两个 example 的 `subsystems/map.mjs` 都是 product composition seam。它们负责：
+
+```text
+construct RPGMapHandler
+create DirectionalControlsTracker
+create Activation-local ControlsConsumer
+ControlsDirection -> Direction mapping
+write handler.controls.setMoveIntent(...)
+run Map
+finally neutral + reset + close
+```
+
+概念结构：
+
+```ts
+const map = new RPGMapBuilder(scope, frame).build(...);
+const directions = createDirectionalControlsTracker();
+
+const apply = () => {
+  map.controls.setMoveIntent(toMapDirection(directions.direction));
+};
+
+const consumer = createControlsConsumer(
+  scope.presentationEvents,
+  frame,
+  {
+    onState(state) {
+      directions.acceptState(state);
+      apply();
+    },
+    onEvent(event) {
+      directions.acceptEvent(event);
+      apply();
+    },
+  },
+);
+
+try {
+  return await map.run(...);
+} finally {
+  map.controls.setMoveIntent(null);
+  directions.reset();
+  consumer.close();
+}
+```
+
+本次 Map-only child 不执行 nested `frame.call()`，所以一个 Map Frame Activation 使用一套 Consumer/Tracker 即可。未来 World/Dialogue/Battle composition 仍必须遵循本文 Activation-scoped close/fresh-create 规则。
+
+### 16.4 Exact package changes
+
+`@loomrealm-game/common-controls`：
+
+```text
+add dependency @loomrealm/subsystem
+add "./subsystem" package export
+root "." exact exports unchanged
+src/index.ts does not re-export subsystem consumer API
+```
+
+`@loomrealm-game/map`：
+
+```text
+remove @loomrealm-game/common-controls dependency
+remove common-controls prebuild script
+Map core has zero raw/unified controls dependency
+```
+
+`@loomrealm-example/essentials-v21.1`：
+
+```text
+already depends on @loomrealm-game/common-controls
+add subsystems/base.mjs
+change game.json / launch.hostra.json to base + map topology
+map.mjs imports @loomrealm-game/common-controls/subsystem
+```
+
+`@loomrealm-example/pokeman`：
+
+```text
+add @loomrealm-game/common-controls dependency
+add subsystems/base.mjs
+change game.json / launch.hostra.json to base + map topology
+map.mjs imports @loomrealm-game/common-controls/subsystem
+```
+
+两边 Presentation 必须继续加载 `controls/device-input.browser.js`，使 `game-controls-input` custom element 已注册；具体资源同步继续由各 example 现有 Presentation pipeline 拥有。
+
+### 16.5 Map blocked policy for this landing
+
+本次 Map-specific behavior 固定为：
+
+```text
+direction intent starts/changes while idle
+→ attempt latest direction
+
+successful step completes and intent still non-null
+→ continue with latest direction
+
+attempt → blocked
+→ update Map-owned blocked/facing facts as appropriate
+→ keep moveIntent
+→ STOP
+→ no automatic retry
+→ no timer
+→ no retry from controls State refresh
+→ no retry from same-value setMoveIntent
+
+player releases/changes direction, then supplies a direction again
+→ genuine intent change
+→ idle Map may attempt again
+```
+
+本次 `setNPC`、passability mutation 等 world changes **不隐式唤醒 blocked retained intent**。未来若 Map 需要这种“障碍消失后自动继续”的 gameplay，可由 Map-specific contract 新增明确 wake-up semantics；不得借 controls transport refresh 实现。
+
+### 16.6 Consumer callback failure policy
+
+所有 handler invocation 使用同一 isolation policy，包括 initial neutral：
+
+```text
+onState(EMPTY)
+onState(valid/fallback State)
+onEvent(valid Event)
+```
+
+固定：
+
+```text
+sync throw
+→ swallow locally
+
+returned Promise rejects
+→ attach rejection sink
+→ swallow locally
+
+callback is slow/pending
+→ does not block subsequent delivery
+
+callback failure
+→ does not close Consumer
+→ does not alter freshness truth
+→ does not synthesize Event
+```
+
+如果 gameplay 需要 fail-stop，callback 自己显式进入业务 failure path；generic Consumer 不拥有该 policy。
+
+### 16.7 Dialogue v1 migration and qualification
+
+当前 HEAD landing 将 `RPGDialogue` 作为 v1 implementation：
+
+```text
+RPG_DIALOGUE_V0_API.md
+RPG_DIALOGUE_V0_PRESENTATION.md
+doc/30-implementation/rpg-dialogue-v0-qualification.md
+→ historical Frozen/evidence, unchanged
+
+RPG_DIALOGUE_V1_API.md
+→ new current public contract
+→ v0 business/Presentation surface retained
+→ add readonly controls
+→ raw keyboard/gamepad mapping removed from Runtime
+```
+
+Qualification 文件：
+
+```text
+delete current-tree test/rpg-dialogue-v0/qualification.test.mjs
+add test/rpg-dialogue-v1/qualification.test.mjs
+add test/game-control-ports-v1/qualification.test.mjs
+```
+
+删除 current-tree v0 executable test 不删除历史 evidence；旧 commit 仍是 v0 exact executable subject。
+
+Root scripts 固定提供：
+
+```text
+test:rpg-dialogue-v1:qualification:run
+test:rpg-dialogue-v1:qualification
+
+test:rpg-dialogue:qualification
+→ alias/current lane for v1
+
+test:rpg-dialogue
+→ package tests + v1 qualification
+
+test:game-control-ports:qualification:run
+test:game-control-ports:qualification
+```
+
+`test/rpg-dialogue-v1/qualification.test.mjs` 必须证明 semantic Control Port：
+
+```text
+dialogue.controls.*
+→ existing semantic routing
+→ Render Event
+→ Web Presentation
+→ submit
+→ Conversation result
+```
+
+`test/game-control-ports-v1/qualification.test.mjs` 至少用真实 Browser keyboard path 证明一个 Map closed loop，并证明 Dialogue composition mapping 可经统一 controls 驱动 semantic port：
+
+```text
+Playwright keyboard
+→ game-controls-input
+→ broadcast:"top-frame"
+→ ControlsConsumer
+→ product mapping
+→ RPGMapControls / RPGDialogueControls
+→ observable effect
+```
+
+Gamepad physical mapping 继续由 Frozen producer qualification 覆盖；本次 control-port integration qualification 不要求伪造浏览器 Gamepad API 来重复证明 producer contract。
+
+### 16.8 Product-specific docs
+
+本次 landing 同步维护：
+
+```text
+examples/essentials-v21.1/CONTROL_COMPOSITION.md
+examples/PokeMan/doc/72-controls-composition.md
+```
+
+这些文档拥有各自 `base + map` topology。主设计只引用它们作为本次 canonical examples，不把该 topology 推广成所有 future product 的 mandatory shape。
+
+---
+
+## 17. Freeze / landing criteria
 
 本设计可以直接进入 implementation PR，但在标记 Implemented 前必须满足：
 
@@ -1399,17 +1772,20 @@ Browser trusted Keyboard/Gamepad
 4. 已 Frozen 的 `@loomrealm-game/common-controls` root export surface 保持 exact 不变；
 5. `common-controls` 不依赖 Map / Dialogue；
 6. 不存在独立 `control-bindings` package；
-7. 每个受影响 product/example 在自己的 composition 文档中拥有 input component placement/lifetime；本文不替它指定 topology；
-8. 选择 unified controls 的 composition 遵守一个 Window 最多一个 active producer 的既有 contract；
-9. same-Frame overlay 与 child-Frame modal 两种消费模式均按本文 Activation lifecycle 执行；
-10. child-call 前 retained Map intent 被 neutralize，fresh resume Activation 使用 fresh Consumer/Tracker；
-11. Map Control Port 的 retained/same-value 语义有 executable tests；任何 blocked/retry gameplay change 由 Map-specific contract/qualification 拥有；
-12. Map 普通 movement 不需要 `getSnapshot()`；
-13. Dialogue concrete button mapping 由 product 或 Dialogue versioned contract 拥有，不由本文冻结；
-14. existing Map terrain/transfer/NPC qualification 与 Dialogue Conversation/History qualification 的受影响部分重新通过；
-15. top-frame / common-controls qualification 保持通过；
-16. docs link/build 通过；
-17. exact executable subject 和 evidence 按 repository 规则记录。
+7. Essentials 与 PokeMan 都按 §16 建立 example-private `base + map` topology，且一个 Window 只有一个 active unified producer；
+8. Base 只拥有 producer，不消费/转发 controls；Map child 拥有自己的 Activation-local Consumer/Tracker；
+9. same-Frame overlay 与 child-Frame modal 的通用消费模式仍按本文 Activation lifecycle 执行；
+10. child-call 前 retained business intent 的 neutral/fresh-resume 规则有 executable evidence；
+11. Map Control Port retained/same-value/blocked-no-auto-retry 语义有 Map-specific executable tests；
+12. Consumer initial/later callback throw/rejection isolation 有 executable tests；
+13. Map 普通 movement 不需要 `getSnapshot()`；
+14. Dialogue v1 contract、v1 qualification 与 root current scripts 已替代 current-tree v0 raw-input lane；v0 evidence 保持历史不变；
+15. Dialogue concrete product button mapping 仍由 product 或 Dialogue versioned contract 拥有，不由本文冻结；
+16. existing Map terrain/transfer/NPC qualification 与 Dialogue Conversation/History semantic qualification 的受影响部分重新通过；
+17. top-frame / game-controls-input producer qualification 保持通过；
+18. Essentials / PokeMan product tests 与 control-port real-browser closed loop 通过；
+19. docs link/build 通过；
+20. exact executable subject 和 evidence 按 repository 规则记录。
 
 完成后的核心依赖关系：
 
