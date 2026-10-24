@@ -857,7 +857,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
           transitioning = false;
           publishSnapshot(fromMapId);
           if (frame.signal.aborted) return;
-          if (api.moveIntent !== null) attempt(api.moveIntent);
+          pumpMoveIntent();
         } catch (error) {
           transitioning = false;
           throw error;
@@ -1079,7 +1079,6 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       };
 
       const attemptUnsafe = (next: Direction) => {
-        if (runtimeEnded() || operationBusy()) return;
         const { dx, dy } = stepDelta[next];
         const nx = x + dx;
         const ny = y + dy;
@@ -1132,6 +1131,12 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         }
       };
 
+      const pumpMoveIntent = (): boolean => {
+        if (runtimeEnded() || operationBusy() || api.moveIntent === null) return false;
+        attempt(api.moveIntent);
+        return true;
+      };
+
       const finishStep = (moveId: number) => {
         if (frame.signal.aborted || activeMove?.id !== moveId) return;
         stepTimer = null;
@@ -1148,7 +1153,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         if (terminalSettled) return;
         if (api.moveIntent !== null) {
           nextStartPattern = nextStartPattern === 1 ? 3 : 1;
-          attempt(api.moveIntent);
+          pumpMoveIntent();
           return;
         }
         nextStartPattern = 1;
@@ -1207,10 +1212,8 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       lastStarted = null;
       eventBusy = false;
       publishSnapshot(null);
-      api.setMoveIntentSink((intent) => {
-        if (intent !== null && !operationBusy()) attempt(intent);
-      });
-      if (api.moveIntent !== null) attempt(api.moveIntent);
+      api.setMoveIntentSink(() => { pumpMoveIntent(); });
+      pumpMoveIntent();
       const outcome = await Promise.race([
         terminal,
         waitForAbort(frame.signal).then(() => cancelled()),
