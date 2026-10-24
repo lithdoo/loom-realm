@@ -1,4 +1,4 @@
-# Game Control Ports 与 Common Controls Consumer 设计
+# Game Control Ports 与 Activation-scoped Common Controls Consumer 设计
 
 > 状态：**Draft / Ready for implementation**
 > 适用范围：`game-libs/map`、`game-libs/rpg-dialogue`、`game-libs/game-common-controls`
@@ -58,7 +58,7 @@ Keyboard / standard Gamepad
 controls.state / controls.event
         ↓
 @loomrealm-game/common-controls
-Frame consumer / freshness / directional tracker
+Activation-scoped consumer / freshness / directional tracker
         ↓
 product / game composition
         ↓
@@ -99,6 +99,7 @@ top-frame publication
 
 ```text
 exact Frame presentation listener
+Activation-scoped local consumer lifetime
 controls payload validation
 Activation-local neutral start
 controls.state freshness
@@ -293,29 +294,33 @@ getSnapshot()
 → 读当前事实
 ```
 
-### 3.3 Runtime movement semantics
+### 3.3 Runtime movement pump
 
-Runtime 内部只保留当前 `moveIntent`。
+Runtime 内部只保留当前 `moveIntent`，并由一个私有 movement pump 统一决定何时调用 `attempt(...)`。Transport refresh 不是 gameplay clock。
 
-Runtime 已稳定且没有 movement / transfer / event operation 占用时：
-
-```text
-moveIntent != null
-→ attempt(moveIntent)
-```
-
-正在 movement 或其他互斥 operation 时：
+`setMoveIntent(next)` 的语义冻结为：
 
 ```text
-setMoveIntent(newDirection)
+next === current moveIntent
+→ idempotent
+→ 不触发新的 attempt
+
+null -> direction
+direction A -> direction B
+→ 替换 retained intent
+→ 如果 Runtime 已稳定且当前不 busy，触发一次 pump
+
+任何变化发生在 movement / transfer / event / NPC mutation busy 期间
 → 只替换 retained intent
 → 不排队旧 direction
+→ busy operation 到达明确业务完成边界后再读取最新 intent
 ```
 
-当前 operation 完成后重新读取**最新** `moveIntent`：
+成功 movement step 完成后：
 
 ```text
 latest moveIntent != null
+→ pump once
 → attempt(latest moveIntent)
 ```
 
@@ -337,6 +342,31 @@ during first walk change to left
 ```text
 queue(up, up, left, ...)
 ```
+
+blocked 语义必须单独固定：
+
+```text
+attempt(direction)
+→ blocked
+→ Map 可以更新朝向 / blocked presentation
+→ 保留 moveIntent
+→ 不立即递归重试
+→ 不创建 retry timer
+→ 不因为重复的 controls.state refresh 重试
+→ 不因为 setMoveIntent(same direction) 重试
+```
+
+同一 retained intent 只有在**新的 gameplay-relevant business boundary** 到来后才可以再次 pump，例如：
+
+```text
+成功 movement step 完成
+成功 map transfer / enterMap 完成
+成功 setNPC commit 可能改变占用
+Map-owned event / terrain / bridge mutation 可能改变 passability
+显式 moveIntent 发生变化
+```
+
+实现应把这些入口收敛到同一个私有 `pumpMoveIntent()`；不得让 `controls.state` 的 1000ms refresh、freshness timer 或其他 transport timing 成为 movement retry 机制。
 
 blocked / walk / jump、朝向更新、Transfer、Bridge、NPC collision 等仍全部由 Map Runtime 决定，不能移到 controls consumer 或 composition。
 
@@ -502,16 +532,29 @@ CLOSED
 
 不新增 `game-libs/control-bindings` package。
 
-消费侧能力直接进入：
+消费侧能力仍然进入同一个物理 package：
 
 ```text
 game-libs/game-common-controls
+```
+
+但**不得修改已经 Frozen 的 package-root ABI**。新增 API 使用独立 subpath：
+
+```text
+@loomrealm-game/common-controls/subsystem
+```
+
+现有：
+
+```text
 @loomrealm-game/common-controls
 ```
 
-### 5.1 Frame-scoped consumer
+继续保持 `game-controls-input.md` 已冻结的 root export surface；Consumer / Directional Tracker 不从 root re-export。
 
-建议新增 public API：
+### 5.1 Activation-scoped consumer
+
+建议新增 subpath public API：
 
 ```ts
 import type {
@@ -547,9 +590,33 @@ scope.presentationEvents
 frame
 ```
 
-而不是整个 `SubsystemScope`。这样 `common-controls` 只依赖公开 Presentation Event author API，不拥有其他 Subsystem 能力。
+而不是整个 `SubsystemScope`。这样 consumer 只依赖公开 Presentation Event author API，不拥有其他 Subsystem 能力。
 
 实现可以对 `@loomrealm/subsystem` 使用 type-only import；package metadata 仍必须声明正确依赖，不能依靠 workspace 偶然可见性。
+
+**Activation-scoped 是 caller/composition 的 lifecycle contract，不是 Consumer 自己从事件对象推导出来的事实。** 当前 `PresentationFrameEvent` 不暴露 `activationId`，Frame suspend / resume 也不会 abort `frame.signal`。因此 Consumer 不能自动检测“同一个 Frame 已从 A1 resume 到 fresh A2”。
+
+固定规则：
+
+```text
+current Activation begins
+→ create a fresh ControlsConsumer
+→ local State starts neutral
+
+before caller relinquishes current Activation
+例如 frame.call 导致 caller suspend
+→ neutralize retained business port where needed
+→ reset/discard local directional tracker
+→ close current ControlsConsumer
+
+frame.call resolves and caller resumes with fresh Activation
+→ create a fresh ControlsConsumer
+→ create/reset fresh local tracker
+→ start neutral
+→ only new controls.state may rebuild held truth
+```
+
+禁止让同一个 Consumer/local held cache 跨 fresh Activation 继续使用。
 
 ### 5.2 Consumer responsibilities
 
@@ -561,10 +628,11 @@ create exact Frame Presentation listener
 验证 event.name / payload
 controls.state → createFreshControlsStateTracker
 2500ms silence → local EMPTY_CONTROLS_STATE_V1
-Frame abort / close → cleanup listener + freshness timer
+Frame terminal abort / explicit close → cleanup listener + freshness timer
 Event 不 replay
-旧 Activation 不继承
 ```
+
+Framework 的 Presentation gate 已保证旧 Activation Event 不会投递到 fresh Activation；Consumer 额外负责的只是**当前创建实例内部**的 local State / freshness。Activation replacement 的 neutral reset 由上面的 caller lifecycle 通过 close + fresh create 保证。
 
 如果提供 `onState`，Consumer 创建后本地状态先从：
 
@@ -572,7 +640,7 @@ Event 不 replay
 EMPTY_CONTROLS_STATE_V1
 ```
 
-开始，并立即向 `onState` 交付一次 neutral local baseline；随后只接受本次 Activation 实际收到的 State publication。
+开始，并立即向 `onState` 交付一次 neutral local baseline；随后只接受该 Consumer lifetime 内实际收到的 State publication。
 
 这不是 wire replay，也不发送任何消息，只是 consumer-local 初始事实。
 
@@ -633,7 +701,7 @@ up / down / left / right
 controls State/Event semantics
 ```
 
-因此它也是 `common-controls` 的通用 helper，不属于 Map。
+因此它也是 `common-controls` 的通用 helper，不属于 Map，并与 Consumer 一起从 `@loomrealm-game/common-controls/subsystem` 导出。
 
 建议新增：
 
@@ -828,9 +896,13 @@ Default mapping：
 
 ---
 
-## 9. Composition active policy / Dialogue overlay
+## 9. Composition policy：same-Frame overlay 与 child-Frame modal
 
-哪个 semantic consumer 当前 active 是 product/game composition policy，不是 `common-controls` authority。
+必须区分两种不同 composition；两者不能混成同一套 active-switch 规则。
+
+### 9.1 Same-Frame overlay
+
+当 Map 与 Dialogue-like UI 真正在**同一个 active Frame** 内共存时，哪个 semantic consumer 当前 active 是 product/game composition policy，不是 `common-controls` authority。
 
 典型：
 
@@ -896,7 +968,52 @@ current Top Active Frame
 + exact presentation Interest
 ```
 
-composition 只决定同一业务场景中哪个 semantic port 当前接受控制。
+composition 只决定同一 active Frame 内哪个 semantic port 当前接受控制。
+
+### 9.2 Child-Frame modal
+
+如果业务使用 LoomRealm canonical Frame call：
+
+```text
+World / Map Frame A1
+→ frame.call(Dialogue)
+→ World suspended
+→ Dialogue child Frame becomes Top Active Frame
+→ Dialogue returns
+→ World resumes with fresh Activation A2
+```
+
+则**不使用 same-Frame 的 map/dialogue active flag 来模拟 Frame authority**。Main 的 Top Frame + exact Activation + Presentation Interest 已经决定 controls 的 destination。
+
+Caller 必须在 relinquish A1 前清理 retained/local control state：
+
+```ts
+map.controls.setMoveIntent(null);
+directions.reset();
+consumer.close();
+
+const result = await frame.call("dialogue", params);
+
+// code after await runs after caller resume with fresh Activation
+const nextDirections = createDirectionalControlsTracker();
+const nextConsumer = createControlsConsumer(
+  scope.presentationEvents,
+  frame,
+  nextHandlers,
+);
+```
+
+fresh A2 必须从 neutral 开始；不得把 A1 的 `directions`、fresh State timer 或 Consumer 实例带到 A2。玩家如果仍真实按住方向，后续在 A2 lease 下重新接受的 `controls.state` 会重建 current held truth。
+
+Child Dialogue Frame 自己创建属于它当前 Activation 的 Consumer；它结束时关闭自己的 Consumer。这样：
+
+```text
+Frame authority
+→ 决定“输入发给哪个 Frame”
+
+composition adapter
+→ 决定“这个 Frame 收到 controls 后映射成什么业务动作”
+```
 
 ---
 
@@ -947,7 +1064,29 @@ Product / example composition 必须保证一个 Window 中存在一份活动的
 <game-controls-input></game-controls-input>
 ```
 
-该节点由 product-owned、持续 live 的 RenderDomain / Presentation composition 挂载。
+该节点由 **product 明确指定的 Input Host owner** 挂载。Input Host owner 必须拥有一个在 gameplay Top Frame 切换期间持续 live 的 RenderDomain / Presentation composition；它不能依赖某个会因为 modal child call 而被销毁的 gameplay RenderDomain。
+
+每个 product/example 在自己的 composition 文档中必须明确：
+
+```text
+Input Host owner = 哪个 subsystem / session composition
+Input Host RenderDomain lifetime
+什么时候 mount
+什么时候 terminal close
+```
+
+允许实现方式包括长期存活的 session/root composition，或 product-private dedicated input-host subsystem；本设计不新增 framework-owned Input Host，也不新增独立 game-library package。
+
+关键约束：
+
+```text
+one Window
+→ at most one active <game-controls-input>
+
+Top Frame changes
+→ Input Host remains live
+→ producer continues publishing to newly accepted top-frame lease
+```
 
 Framework 不默认创建它。
 
@@ -983,22 +1122,28 @@ Dialogue
 
 ## 12. Activation / teardown
 
-`createControlsConsumer` 绑定 caller 持有的真实 `Frame` object。
+`createControlsConsumer` 通过真实 `Frame` object 建立 exact Presentation Interest，但**Consumer/local cache 的使用 lifetime 是当前 Activation**。
 
 必须保持：
 
 ```text
 new Activation
-→ Consumer local State starts neutral
-→ Directional Tracker starts / resets neutral
+→ fresh Consumer
+→ fresh/reset Directional Tracker
+→ local State starts neutral
 
-old Activation
-→ Event 不继承
+old Activation revoked / caller about to suspend
+→ neutralize retained business intent
+→ reset/discard tracker
+→ close Consumer
 
-later controls.state
+old Activation Event
+→ Framework gate rejects for fresh Activation
+
+later controls.state accepted under fresh Activation
 → rebuild current held truth
 
-Frame abort / Consumer close
+Frame terminal abort / Consumer close
 → listener + freshness cleanup
 → no replay / retarget
 ```
@@ -1006,15 +1151,17 @@ Frame abort / Consumer close
 禁止：
 
 ```text
+carry one Consumer across A1 -> suspend -> A2
 carry old heldOrder into new Activation
+use old freshness timer in new Activation
 replay old Dialogue Event
 retarget Event
 use old Activation cached State as new truth
 ```
 
-Map 的 Handler-level `moveIntent` 可以在同一 Handler 的 scene transfer 中持续，但不能靠旧 Activation consumer cache 跨 Activation 继承。
+Map 的 Handler-level `moveIntent` 可以在同一 Handler 的 scene transfer 中持续，因为 scene transfer 不等于 Frame Activation replacement；但一旦 caller relinquishes Activation，composition 必须先 neutralize它。
 
-当 composition 销毁 Map controls wiring 时，必须显式：
+销毁或结束当前 Activation controls wiring 时，Map 至少执行：
 
 ```ts
 map.controls.setMoveIntent(null);
@@ -1022,7 +1169,7 @@ directions.reset();
 consumer.close();
 ```
 
-保证 retained business intent 不泄漏。
+fresh Activation 再创建新的 Consumer/Tracker。
 
 ---
 
@@ -1036,7 +1183,7 @@ consumer.close();
 src/consumer.ts
     createControlsConsumer
     payload validation
-    Frame abort cleanup
+    Frame terminal abort cleanup
     State freshness integration
 
 src/directional-controls.ts
@@ -1044,11 +1191,14 @@ src/directional-controls.ts
     createDirectionalControlsTracker
     State truth + Event recency ordering
 
-src/index.ts
-    export consumer / directional public API
+src/subsystem.ts
+    exact public entry for Consumer / Directional Tracker
+    MUST NOT be re-exported from root src/index.ts
 
 package.json
-    declare @loomrealm/subsystem dependency required by public type surface
+    add "./subsystem" export -> dist/subsystem.js + dist/subsystem.d.ts
+    keep existing "." root export surface exact
+    declare @loomrealm/subsystem dependency required by subpath public type surface
     no dependency on Map / Dialogue
 ```
 
@@ -1126,13 +1276,14 @@ RPG_DIALOGUE_V1_API.md
 实际 composition 直接：
 
 ```text
+nominate one long-lived Input Host owner
 mount one game-controls-input
-create common-controls consumer
-create directional tracker where needed
+import consumer/tracker from @loomrealm-game/common-controls/subsystem
+create fresh consumer/tracker per active Activation
 translate generic controls to module Control Port
-switch local active flags around overlays
-neutralize Map before teardown
-close consumers at Frame/session teardown
+same-Frame overlay → local active flags
+child-Frame modal → close/neutralize before call, fresh create after resume
+neutralize Map before controls wiring teardown
 ```
 
 如果以后多个产品出现完全相同的业务 mapping，可以再抽 product-level helper；这不是本次架构要求，也不能反向污染 `common-controls`。
@@ -1153,8 +1304,12 @@ close consumers at Frame/session teardown
 - State 默认 2500ms fallback；
 - Event 不 replay；
 - close 幂等；
-- Frame abort cleanup；
-- old Activation 不进入新 consumer；
+- Frame terminal abort cleanup；
+- Consumer 不尝试从 PresentationFrameEvent 推导 activationId；
+- A1 consumer close 后，fresh A2 consumer 从 EMPTY 开始；
+- old Activation Event 不进入 fresh Activation；
+- root `@loomrealm-game/common-controls` export surface 保持原 Frozen ABI；
+- `@loomrealm-game/common-controls/subsystem` exact export surface 单独测试；
 - 不引入 Map / Dialogue package dependency。
 
 Directional Tracker：
@@ -1175,9 +1330,12 @@ Directional Tracker：
 - `controls` stable identity；
 - initial `moveIntent=null`；
 - pre-run `setMoveIntent(8)` retained，首 scene ready 后开始向上；
-- held intent 在 step 完成后继续；
+- held intent 在成功 step 完成后继续；
 - movement 中改方向只影响下一 attempt，不排队旧 direction；
 - `setMoveIntent(null)` 在当前 step 完成后停止继续移动；
+- same-value `setMoveIntent` idempotent，不触发 attempt；
+- blocked 保留 intent，但不 hot-loop、不建 retry timer、不因 controls State refresh 重试；
+- gameplay-relevant mutation 完成后只通过统一 movement pump 决定是否重试；
 - blocked movement 仍完全由 Map authority 决定；
 - transfer / NPC / bridge semantics 不迁出 Runtime；
 - invalid direction runtime value throws `TypeError`；
@@ -1221,7 +1379,7 @@ Dialogue：
 - reactivate不 replay；
 - close后不再产生 command。
 
-Overlay：
+Same-Frame overlay：
 
 ```text
 Map walking
@@ -1234,6 +1392,27 @@ Map walking
 → current tracker direction immediately restores movement intent
 ```
 
+Child-Frame modal：
+
+```text
+World A1 controls live
+→ before frame.call: Map neutral + tracker reset + consumer close
+→ child Dialogue Frame owns fresh consumer
+→ child returns
+→ World resumes as fresh A2
+→ fresh consumer/tracker start neutral
+→ only A2 controls.state may restore held movement
+```
+
+Input Host：
+
+```text
+Top Frame changes World -> Dialogue -> World
+→ the one Window-level game-controls-input remains mounted/live
+→ publication follows accepted top-frame lease
+→ no duplicate controls producer
+```
+
 ### 14.5 Integration qualification
 
 至少有一条真实闭环：
@@ -1242,7 +1421,8 @@ Map walking
 Browser trusted Keyboard/Gamepad
 → game-controls-input
 → broadcast:"top-frame"
-→ createControlsConsumer
+→ @loomrealm-game/common-controls/subsystem
+→ fresh Activation-scoped createControlsConsumer
 → composition mapping
 → Map / Dialogue Control Port
 → observable gameplay effect
@@ -1258,6 +1438,7 @@ Browser trusted Keyboard/Gamepad
 
 - 独立 `@loomrealm-game/control-bindings` package；
 - `common-controls` import Map / Dialogue；
+- 修改已 Frozen 的 `@loomrealm-game/common-controls` root export surface；
 - Framework InputTarget / 新 input authority；
 - 修改 `game-controls-input` Frozen v1 vocabulary；
 - retained Dialogue command；
@@ -1279,16 +1460,19 @@ Browser trusted Keyboard/Gamepad
 
 1. Map / Dialogue core Runtime 不再直接消费 physical/unified input channel；
 2. 两个 public Control Port 的 observable semantics 已由版本化 contract 固定；
-3. `@loomrealm-game/common-controls` 提供 Frame-scoped Consumer 与 Directional Tracker；
-4. `common-controls` 不依赖 Map / Dialogue；
-5. 不存在独立 `control-bindings` package；
-6. product/example 只挂一份 unified controls input host；
-7. Dialogue overlay 不再让 Map movement 穿透；
-8. Map 普通 movement 不需要 `getSnapshot()`；
-9. existing Map terrain/transfer/NPC qualification 与 Dialogue Conversation/History qualification 的受影响部分重新通过；
-10. top-frame / common-controls qualification 保持通过；
-11. docs link/build 通过；
-12. exact executable subject 和 evidence 按 repository 规则记录。
+3. `@loomrealm-game/common-controls/subsystem` 提供 Activation-scoped Consumer 与 Directional Tracker；
+4. 已 Frozen 的 `@loomrealm-game/common-controls` root export surface 保持 exact 不变；
+5. `common-controls` 不依赖 Map / Dialogue；
+6. 不存在独立 `control-bindings` package；
+7. product/example 明确指定一个长期 live 的 Input Host owner，并在一个 Window 中只挂一份 unified controls producer；
+8. same-Frame overlay 与 child-Frame modal 两种 composition 均按本文生命周期执行；
+9. child-call 前 retained Map intent 被 neutralize，fresh resume Activation 使用 fresh Consumer/Tracker；
+10. Map movement pump 的 same-intent / blocked / retry boundary 有 executable tests，且不依赖 controls refresh timing；
+11. Map 普通 movement 不需要 `getSnapshot()`；
+12. existing Map terrain/transfer/NPC qualification 与 Dialogue Conversation/History qualification 的受影响部分重新通过；
+13. top-frame / common-controls qualification 保持通过；
+14. docs link/build 通过；
+15. exact executable subject 和 evidence 按 repository 规则记录。
 
 完成后的核心依赖关系：
 
@@ -1296,7 +1480,10 @@ Browser trusted Keyboard/Gamepad
 Physical Devices
       ↓
 @loomrealm-game/common-controls
- producer + consumer + directional tracker
+ producer + frozen root ABI
+      │
+      └─ @loomrealm-game/common-controls/subsystem
+         Activation-scoped consumer + directional tracker
       ↓
 product / game composition
       ↓
