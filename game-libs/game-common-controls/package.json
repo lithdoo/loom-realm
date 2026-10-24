@@ -9,6 +9,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./subsystem": {
+      "types": "./dist/subsystem.d.ts",
+      "import": "./dist/subsystem.js"
+    },
     "./browser/device-input.browser.js": "./dist/browser/device-input.browser.js"
   },
   "files": ["dist/"],
@@ -18,6 +22,9 @@
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "engines": { "node": ">=20" },
+  "dependencies": {
+    "@loomrealm/subsystem": "0.1.0-alpha.0"
+  },
   "devDependencies": {
     "esbuild": "0.25.9",
     "typescript": "5.9.2"
