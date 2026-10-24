@@ -16,6 +16,6 @@
 
 依赖原则：`examples → game-libs → framework public author API`。Main 拥有 Control Authority，Shared State 拥有 session shared mutable business state，Subsystem 拥有 domain execution/local state/RenderDomain，Renderer 维护 readonly/current presentation replica，Content 拥有 readonly installation definitions。
 
-跨 game-library 的下一阶段实现设计见 [Game Control Ports 与 Common Controls Consumer](../10-architecture/game-control-ports.md)（**Draft / Ready for implementation**）。该文档描述 Map / Dialogue 从具体输入协议迁移到业务 Control Port，并把通用消费能力收敛进 `@loomrealm-game/common-controls`；在对应实现 PR 合并前，不覆盖本页列出的 Current realization。
+跨 game-library 的下一阶段实现设计见 [Game Control Ports 与 Activation-scoped Common Controls Consumer](../10-architecture/game-control-ports.md)（**Draft / Ready for implementation**）。该文档描述 Map / Dialogue 从具体输入协议迁移到业务 Control Port，并把通用消费能力收敛进 `@loomrealm-game/common-controls`；在对应实现 PR 合并前，不覆盖本页列出的 Current realization。
 
 本目录不复制 PASS dashboard。是否需要 requalification 由[subject/staleness 规则](../30-development/qualification.md)结合具体改动判断。
