@@ -18,6 +18,7 @@ import { runSubsystem } from "@loomrealm/subsystem/host";
 import { RPGMapBuilder } from "@loomrealm-game/map";
 import { attachRendererPresentation } from "../packages/renderer/dist/internal/presentation-seam.js";
 import { prepareExamplePresentation } from "../examples/essentials-v21.1/test/prepare.mjs";
+import baseSubsystem from "../examples/essentials-v21.1/subsystems/base.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const exampleRoot = path.join(root, "examples", "essentials-v21.1");
@@ -25,14 +26,24 @@ const scheduler = Object.freeze({ schedule(ms, callback) { const timer = setTime
 const runtimePolicy = Object.freeze({ scheduler, helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 100 });
 const mainPolicy = Object.freeze({ runtimeBootstrapDeadlineMs: 5_000, frameDeadlineMs: 5_000, shutdownDeadlineMs: 5_000, terminationDeadlineMs: 1_000 });
 const hash = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+let activeMapControls;
 const mapSubsystem = defineSubsystem((scope) => ({
-  frame(frame) {
+  async frame(frame) {
     const input = frame.params;
     const map = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
-    map.onMapEntering((context) => { context.setNPC([]); });
-    return map.run({ mapId: input.mapId, x: input.x, y: input.y });
+    map.onMapEntering((context) => {
+      context.setNPC([{ instanceId: "guide", npcId: "guide", x: 14, y: 8, direction: 4, pattern: 2 }]);
+    });
+    activeMapControls = map.controls;
+    try { return await map.run({ mapId: input.mapId, x: input.x, y: input.y }); }
+    finally { activeMapControls = undefined; }
   },
 }));
+const subsystemDefinitions = Object.freeze({ base: baseSubsystem, map: mapSubsystem });
+
+function mapRoot(view) {
+  return view?.subsystems.find(({ subsystemKey }) => subsystemKey === "map")?.domains[0]?.roots[0];
+}
 
 function executablePath() {
   return [process.env.LOOMREALM_CHROMIUM_PATH, "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean).find(existsSync);
@@ -62,26 +73,32 @@ async function waitFor(predicate, label, timeout = 10_000) {
 }
 
 function createDataHub() {
-  const waiting = [];
-  const pairs = [];
-  const take = () => {
-    while (waiting.length && pairs.length) waiting.shift().resolve(pairs.shift());
+  const waiting = new Map();
+  const pairs = new Map();
+  const take = (subsystemKey) => {
+    const pending = waiting.get(subsystemKey) ?? [];
+    const available = pairs.get(subsystemKey) ?? [];
+    while (pending.length && available.length) pending.shift().resolve(available.shift());
   };
   return {
-    subsystemBinding: Object.freeze({
+    subsystemBinding(subsystemKey) { return Object.freeze({
       acquire(signal) {
         if (signal.aborted) return Promise.reject(signal.reason);
         return new Promise((resolve, reject) => {
           const request = { resolve, reject };
-          waiting.push(request); take();
-          signal.addEventListener("abort", () => { const index = waiting.indexOf(request); if (index >= 0) waiting.splice(index, 1); reject(signal.reason); }, { once: true });
+          const pending = waiting.get(subsystemKey) ?? [];
+          waiting.set(subsystemKey, pending);
+          pending.push(request); take(subsystemKey);
+          signal.addEventListener("abort", () => { const index = pending.indexOf(request); if (index >= 0) pending.splice(index, 1); reject(signal.reason); }, { once: true });
         });
       },
-    }),
+    }); },
     rendererBinding: Object.freeze({
-      acquire(_key, generation, dataProfile) {
+      acquire(subsystemKey, generation, dataProfile) {
         const pair = createMemoryCarrierPair();
-        pairs.push({ carrier: pair.left, generation, dataProfile }); take();
+        const available = pairs.get(subsystemKey) ?? [];
+        pairs.set(subsystemKey, available);
+        available.push({ carrier: pair.left, generation, dataProfile }); take(subsystemKey);
         return Promise.resolve(pair.right);
       },
     }),
@@ -126,9 +143,11 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
   const fixture = JSON.parse(await readFile(path.join(exampleRoot, "fixtures", "semantic-content.json"), "utf8"));
   const tilesetBytes = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_tileset.png"));
   const playerBytes = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_player.png"));
+  const npcBytes = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_npc.png"));
   const resources = new Map([
     ["resource.Graphics/Tilesets/m14_tileset", { bytes: tilesetBytes, mime: "image/png", contentVersion: hash(tilesetBytes) }],
     ["resource.Graphics/Characters/m14_player", { bytes: playerBytes, mime: "image/png", contentVersion: hash(playerBytes) }],
+    ["resource.Graphics/Characters/m14_npc", { bytes: npcBytes, mime: "image/png", contentVersion: hash(npcBytes) }],
   ]);
   const server = await fixtureServer(t, resources);
   const game = parseGameEntryV1(await readFile(path.join(exampleRoot, "game.json"), "utf8"));
@@ -182,12 +201,12 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
   });
   const runtimeHosting = Object.freeze({
     async launch(request) {
-      assert.equal(request.subsystemKey, "map");
+      assert.ok(request.subsystemKey in subsystemDefinitions);
       const pair = createMemoryCarrierPair();
       let acquired = false;
       const runtime = runSubsystem({
-        definition: mapSubsystem, runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
-        runtimePolicy, launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] }, data: hub.subsystemBinding, content,
+        definition: subsystemDefinitions[request.subsystemKey], runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
+        runtimePolicy, launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] }, data: hub.subsystemBinding(request.subsystemKey), content,
         state: (() => { const client = createSharedStateClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
         events: (() => { const client = createSessionEventClient(sessionEventHub.createBinding(request.subsystemKey)); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
       });
@@ -205,24 +224,10 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
   void main.catch(() => {});
   await waitFor(() => holder?.current() !== null, "Renderer");
 
-  let browserDelivery = Promise.resolve(); let latestView; let emitNodeEvent;
-  const detach = attachRendererPresentation(holder, { reevaluate(source, emit) { latestView = structuredClone(source.read()); emitNodeEvent = emit; browserDelivery = browserDelivery.then(() => page.evaluate((view) => globalThis.applyM14View(view), latestView)); } });
+  let browserDelivery = Promise.resolve(); let latestView;
+  const detach = attachRendererPresentation(holder, { reevaluate(source) { latestView = structuredClone(source.read()); browserDelivery = browserDelivery.then(() => page.evaluate((view) => globalThis.applyM14View(view), latestView)); } });
   t.after(detach);
-  await waitFor(() => typeof emitNodeEvent === "function" && latestView?.subsystems[0]?.domains[0]?.roots[0]?.data?.viewportWidth === 800, "initial map Render state");
-  const emitKeyboardDown = () => {
-    const subsystem = latestView.subsystems[0];
-    const domain = subsystem.domains[0];
-    emitNodeEvent({
-      sessionId: latestView.sessionId,
-      subsystemKey: subsystem.subsystemKey,
-      generation: subsystem.generation,
-      domainId: domain.domainId,
-      targetKey: "map-input-keyboard",
-      name: "input.event",
-      data: { action: "down", code: "ArrowRight", repeat: false },
-      options: { broadcast: true, channel: "keyboard.event" },
-    });
-  };
+  await waitFor(() => activeMapControls && mapRoot(latestView)?.data?.viewportWidth === 800, "initial map Render state");
   await browserDelivery;
   await waitFor(async () => (await sampleVisibleTilePixel(page, 400, 268))[3] === 255, "initial Canvas paint");
   await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas")?.getContext("2d")?.getImageData(5, 5, 1, 1).data[3] === 255), "initial player paint");
@@ -232,7 +237,7 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
     return { size: [getComputedStyle(view).width, getComputedStyle(view).height], children: view.children.length, tags: [view.tagName, sprite.tagName], player: [...sprite.shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data] };
   });
   initial.tile = await sampleVisibleTilePixel(page, 400, 268);
-  assert.deepEqual(initial.size, ["800px", "600px"]); assert.equal(initial.children, 1); assert.deepEqual(initial.tags, ["LR-MAP-VIEW", "LR-MAP-SPRITE"]); assert.deepEqual(initial.tile, fixture.expectedPixels.tile385); assert.deepEqual(initial.player, fixture.expectedPixels.playerDown);
+  assert.deepEqual(initial.size, ["800px", "600px"]); assert.equal(initial.children, 2); assert.deepEqual(initial.tags, ["LR-MAP-VIEW", "LR-MAP-SPRITE"]); assert.deepEqual(initial.tile, fixture.expectedPixels.tile385); assert.deepEqual(initial.player, fixture.expectedPixels.playerDown);
   assert.deepEqual(await page.evaluate(() => {
     const root = document.querySelector("lr-map-view").shadowRoot;
     const footer = root.querySelector("footer");
@@ -240,18 +245,20 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
     return [getComputedStyle(content).height, getComputedStyle(footer).height, footer.textContent];
   }), ["568px", "32px", "1"]);
 
-  emitKeyboardDown();
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.x === 11, "first movement commit"); await browserDelivery;
-  const moved = latestView.subsystems[0].domains[0].roots[0];
+  assert.equal(await page.locator("game-controls-input").count(), 1);
+  activeMapControls.setMoveIntent(6);
+  await waitFor(() => mapRoot(latestView)?.children[0]?.data?.x === 11, "first movement commit"); await browserDelivery;
+  activeMapControls.setMoveIntent(null);
+  const moved = mapRoot(latestView);
   assert.equal(moved.data.cameraX, 0); assert.deepEqual([moved.children[0].data.screenX, moved.children[0].data.screenY, moved.children[0].data.direction], [352, 256, 6]);
   await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data[2] === 240), "right-facing player crop");
   assert.deepEqual(await page.evaluate(() => [...document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data]), fixture.expectedPixels.playerRight);
   assert.deepEqual(await page.evaluate(() => [document.querySelector("lr-map-view").instance, document.querySelector("lr-map-sprite").instance]), [1, 2]);
-  emitKeyboardDown();
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 6, "blocked movement render"); await new Promise((resolve) => setTimeout(resolve, 20));
-  const blocked = latestView.subsystems[0].domains[0].roots[0];
+  activeMapControls.setMoveIntent(6);
+  await waitFor(() => mapRoot(latestView)?.children[0]?.data?.direction === 6, "blocked movement render"); await new Promise((resolve) => setTimeout(resolve, 20));
+  const blocked = mapRoot(latestView);
   assert.equal(blocked.children[0].data.x, 11); assert.equal(blocked.data.cameraX, 0);
-  assert.equal(await page.evaluate(() => document.querySelectorAll("lr-map-view lr-map-sprite").length), 1);
+  assert.equal(await page.evaluate(() => document.querySelectorAll("lr-map-view lr-map-sprite").length), 2);
   assert.equal(await page.evaluate(() => document.querySelectorAll("lr-map-tile").length), 0);
 
   for (const expected of [
@@ -264,7 +271,7 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
     await page.setViewportSize({ width: expected.width, height: expected.height });
     viewportEmit({ width: expected.width, height: expected.height });
     await waitFor(() => {
-      const data = latestView?.subsystems[0]?.domains[0]?.roots[0]?.data;
+      const data = mapRoot(latestView)?.data;
       return data?.viewportWidth === expected.width && data?.viewportHeight === expected.height;
     }, `responsive ${expected.width}x${expected.height} Render state`);
     await browserDelivery;

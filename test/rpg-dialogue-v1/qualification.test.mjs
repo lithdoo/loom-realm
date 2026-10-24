@@ -127,6 +127,7 @@ async function setup(page, origin) {
       definition: subsystem.defineSubsystem((scope) => ({
         async frame(frame) {
           const dialogue = new dialogueModule.RPGDialogue(scope, frame, { cancelable: false, zIndex: 123 });
+          globalThis.dialogueControls = dialogue.controls;
           try {
             dialogue.setHistory([{ entryId: "intro", speakerName: "Guide", text: "Welcome" }]);
             const first = await dialogue.openConversation({
@@ -154,6 +155,7 @@ async function setup(page, origin) {
             observations.push({ first, second, history });
             return subsystem.completed({ first, second, history });
           } finally {
+            delete globalThis.dialogueControls;
             dialogue.close();
           }
         },
@@ -228,11 +230,8 @@ async function setup(page, origin) {
     globalThis.dialogueQualification = {
       mainRuntime, runtime, returns, observations, renderEvents, nodeEvents, statuses, publisher, projector, detach,
       projectorFailures, waitFor,
-      press(code) {
-        return presentationPublisher.publish("keyboard.event", "input.event", {
-          domainId: "keyboard-device", targetKey: "keyboard-device",
-          data: { action: "down", code, repeat: false },
-        });
+      control(action) {
+        globalThis.dialogueControls[action]();
       },
       async finish() {
         await waitFor(() => returns.length === 1, "Frame return");
@@ -249,11 +248,11 @@ async function setup(page, origin) {
   });
 }
 
-async function press(page, code) {
-  await page.evaluate((value) => globalThis.dialogueQualification.press(value), code);
+async function control(page, action) {
+  await page.evaluate((value) => globalThis.dialogueQualification.control(value), action);
 }
 
-test("real Chromium closes Session Event → WC → Presentation Event → Promise loop", { timeout: TIMEOUT }, async (t) => {
+test("real Chromium closes Dialogue controls → Render Event → Web Presentation → submit → result", { timeout: TIMEOUT }, async (t) => {
   const server = await fixture(t);
   const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
   t.after(() => browser.close());
@@ -266,12 +265,12 @@ test("real Chromium closes Session Event → WC → Presentation Event → Promi
   assert.deepEqual(await page.evaluate(() => document.querySelector("lr-dialogue-character")._data), { portrait: "guide" });
   assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("lr-dialogue-choice")].map((choice) => choice._data)), [{ icon: "lock" }, { icon: "confirm" }]);
 
-  await press(page, "Enter");
+  await control(page, "confirm");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true);
   assert.equal(await page.evaluate(() => globalThis.dialogueQualification.nodeEvents.length), 0, "reveal-first commit must not submit");
-  await press(page, "ArrowDown");
+  await control(page, "next");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._selectedChoiceId === "yes");
-  await press(page, "Enter");
+  await control(page, "confirm");
   await page.waitForFunction((oldId) => {
     const conversation = document.querySelector("lr-dialogue-conversation");
     return conversation !== null && conversation.getAttribute("conversation-id") !== oldId;
@@ -279,19 +278,19 @@ test("real Chromium closes Session Event → WC → Presentation Event → Promi
 
   const secondId = await page.locator("lr-dialogue-conversation").getAttribute("conversation-id");
   assert.notEqual(secondId, firstId);
-  await press(page, "Tab");
+  await control(page, "history");
   await page.waitForFunction(() => {
     const history = document.querySelector("lr-dialogue-history");
     return history?.getAttribute("visible") === "true" && history._events.includes("scroll-to-latest");
   });
   assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("lr-dialogue-history-entry")].map((entry) => entry.getAttribute("entry-id"))), ["intro", "first"]);
-  await press(page, "Escape");
+  await control(page, "cancel");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-history")?.getAttribute("visible") === "false");
   assert.equal(await page.evaluate(() => globalThis.dialogueQualification.nodeEvents.length), 1, "History cancel must not submit the second Conversation");
 
-  await press(page, "Enter");
+  await control(page, "confirm");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true);
-  await press(page, "Enter");
+  await control(page, "confirm");
   const result = await page.evaluate(() => globalThis.dialogueQualification.finish());
 
   assert.deepEqual(result.returned, {

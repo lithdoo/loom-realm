@@ -699,6 +699,8 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
     const state = await page.evaluate(() => ({ url: location.href, html: document.documentElement.outerHTML.slice(0, 4000), dataset: { ...document.documentElement.dataset } })).catch((error) => ({ error: error.message }));
     throw new Error(`${cause.message}\n${JSON.stringify(state)}\n${browserMessages.join("\n")}\n${hostra.output()}\n${JSON.stringify(await events(eventLog))}`);
   }
+  assert.equal(await page.locator("game-controls-input").count(), 1);
+  assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
   await setLogicalViewport(page, 640, 480);
   await waitFor(async () => (await events(eventLog)).some(({ type }) => type === "data-current"), "initial Data candidate");
   const rpc = await connectRpc(ready.data.rpcEndpoint, hostra.rpcToken);
@@ -714,7 +716,7 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
   const loomProcess = rows.find(({ pid }) => pid === hostState.subprocess.pid);
   assert.equal(loomProcess?.ppid, ready.data.pid);
   const runners = rows.filter(({ ppid, command }) => ppid === loomProcess.pid && /game-launcher-hostra[\\/]dist[\\/]runner[\\/]entry\.js/u.test(command));
-  assert.equal(runners.length, 1, JSON.stringify(rows.filter(({ ppid }) => ppid === loomProcess.pid)));
+  assert.equal(runners.length, 2, JSON.stringify(rows.filter(({ ppid }) => ppid === loomProcess.pid)));
   const firstIdentity = await page.evaluate(() => document.documentElement.dataset.loomrealmRendererIdentity);
   const firstDocuments = (await events(eventLog)).filter(({ type }) => type === "document-bootstrap").length;
   assert.equal(typeof firstIdentity, "string");
