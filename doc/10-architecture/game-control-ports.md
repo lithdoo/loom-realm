@@ -5,6 +5,8 @@
 > 目标：把“物理输入 / unified controls”与 Map、Dialogue 业务 Runtime 解耦，同时不新增独立 binding package
 > 上游输入：[统一操控输入 Web Component](../../game-libs/game-common-controls/game-controls-input.md)
 > Frame 投递：[Frame-targeted Presentation Event v1](../15-contracts/frame-targeted-presentation-event-v1.md)
+> Map Control Port：[RPGMap Control Port v1 candidate](../20-modules/loom-map/control-port-v1.md)
+> Dialogue Control Port：[RPG Dialogue v1 API candidate](../../game-libs/rpg-dialogue/RPG_DIALOGUE_V1_API.md)
 > Qualification 规则：[Qualification 与 Subject](../30-development/qualification.md)
 
 本文定义下一阶段的 game-library control-port 改造。它是实现设计，不修改现有 Frozen contract 的历史事实；实现 PR 必须按本文的版本/兼容规则更新对应正式契约和 qualification evidence。
@@ -1754,8 +1756,8 @@ Gamepad physical mapping 继续由 Frozen producer qualification 覆盖；本次
 本次 landing 同步维护：
 
 ```text
-examples/essentials-v21.1/CONTROL_COMPOSITION.md
-examples/PokeMan/doc/72-controls-composition.md
+[examples/essentials-v21.1/CONTROL_COMPOSITION.md](../../examples/essentials-v21.1/CONTROL_COMPOSITION.md)
+[examples/PokeMan/doc/72-controls-composition.md](../../examples/PokeMan/doc/72-controls-composition.md)
 ```
 
 这些文档拥有各自 `base + map` topology。主设计只引用它们作为本次 canonical examples，不把该 topology 推广成所有 future product 的 mandatory shape。
