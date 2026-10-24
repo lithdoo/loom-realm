@@ -1,6 +1,6 @@
 # Essentials v21.1 Controls Composition
 
-> 状态：**Draft / Ready for implementation**
+> 状态：**Implemented / Qualified**
 > 范围：`examples/essentials-v21.1` 私有 product composition
 > 上游设计：[`game-control-ports.md`](../../doc/10-architecture/game-control-ports.md)
 

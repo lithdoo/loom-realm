@@ -1,6 +1,6 @@
 # PokeMan Controls Composition
 
-> 状态：**Draft / Ready for implementation**
+> 状态：**Implemented / Qualified**
 > 范围：PokeMan 当前 Map-only gameplay 的 product-private controls topology
 > 上游设计：[`game-control-ports.md`](../../../doc/10-architecture/game-control-ports.md)
 
@@ -101,7 +101,7 @@ consumer.close()
 
 ## Blocked movement for this landing
 
-PokeMan 跟随 Map v1 candidate：
+PokeMan 跟随 Frozen Map Control Port v1：
 
 ```text
 blocked

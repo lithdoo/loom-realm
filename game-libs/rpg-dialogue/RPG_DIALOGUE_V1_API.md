@@ -1,9 +1,10 @@
 # RPG Dialogue v1 API
 
-> 层级：`@loomrealm-game/rpg-dialogue` public module contract candidate
-> 状态：**Normative Candidate / Ready for implementation**
+> 层级：`@loomrealm-game/rpg-dialogue` public module contract
+> 状态：**Implemented / Qualified / Frozen**
 > 兼容基线：[RPG Dialogue v0 API](./RPG_DIALOGUE_V0_API.md)
 > Control-port architecture：[Game Control Ports](../../doc/10-architecture/game-control-ports.md)
+> Qualification evidence：[RPG Dialogue v1](../../doc/30-implementation/rpg-dialogue-v1-qualification.md)
 
 v1 保留 v0 的 Conversation、History、constructor、result、validation、Render/Presentation semantics，并 additive 增加 semantic Control Port。v1 不把 physical Keyboard/Gamepad/unified-controls vocabulary 放进 Dialogue Runtime。
 
@@ -143,4 +144,4 @@ test/game-control-ports-v1/qualification.test.mjs
 
 Current root Dialogue qualification scripts target v1. The current-tree v0 raw-input closed-loop executable test is retired; Git history and the v0 evidence record retain the old proof.
 
-Before v1 is marked Frozen/Qualified, the implementation and executable evidence must match this exact candidate surface.
+The current v1 implementation and executable evidence match this exact Frozen surface.

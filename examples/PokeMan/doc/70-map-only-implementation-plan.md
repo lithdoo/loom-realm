@@ -24,16 +24,16 @@
 
 ### 当前 PokeMan 状态
 
-- `game.json`：唯一 `map` Subsystem，初始 `mapId: 3, x: 3, y: 8, characterName: "Player"`。
-- `launch.hostra.json`：`map` 绑定 `subsystems/map.mjs`。
-- `subsystems/map.mjs`：通过 `defineSubsystem` + `RPGMapBuilder` 创建 Map Frame；`onMapEntering` 通过 `context.setNPC(...)` 提供静态 NPC placement；`handler.run(...)` 启动地图。
+- `game.json`：注册 product-private `base + map`，初始 `mapId: 3, x: 3, y: 8, characterName: "Player"`。
+- `launch.hostra.json`：`base` / `map` 分别绑定 `subsystems/base.mjs` / `subsystems/map.mjs`。
+- `subsystems/base.mjs`：只持有统一 controls producer 并调用 Map；`subsystems/map.mjs` 通过 `RPGMapBuilder`、Consumer/Tracker 和 `RPGMapControls` 启动地图并保留静态 NPC placement。
 - `[FSDB]PokeMan/`：已有 Map、MapTransfer、Tileset、NPC、Graphics 与 Presentation 数据；单个直接 FSDB 根目录。
 - `presentation.json`：当前已引用 controls device-input JS、Map CSS/JS 与 page CSS；controls migration 继续复用这条 Presentation artifact。
 - `[FSDB]PokeMan/[resource]Presentation/`：当前已存在 controls device-input、Map CSS/JS 与 page CSS 同步产物。
 - `presentation.css` 当前已作为 page CSS source，保持全窗口地图样式。
 - `play.bat` 与 `scripts/sync-map-presentation.mjs` 当前已形成 Desktop 启动前 Presentation 同步链；controls migration 需要保证 controls artifact 继续在同步集合中。
-- `test/map-smoke.test.mjs` 已覆盖当前 Map-only 静态入口/资源约束；真实 controls closed loop 仍由本次 control-port qualification 补齐。
-- `examples/PokeMan/package.json` 已存在；controls landing 需要补 `@loomrealm-game/common-controls` dependency。根 `package.json` 已有 `"examples/*"` workspace glob。
+- `test/map-smoke.test.mjs` 已覆盖当前 Map-only gameplay / `base + map` 静态入口与资源约束；真实 controls closed loop 由 Game Control Ports qualification 覆盖。
+- `examples/PokeMan/package.json` 已包含 `@loomrealm-game/common-controls` dependency。根 `package.json` 使用 `"examples/*"` workspace glob。
 
 ### 必须参考的已实现文件
 
@@ -94,7 +94,7 @@
 
 ### P2 — Map-only gameplay + Base controls infrastructure
 
-1. 按 [72-controls-composition.md](./72-controls-composition.md) 将 `game.json` / `launch.hostra.json` 从当前单 `map` topology 改为 `base + map`；新增 `subsystems/base.mjs`。Base 只创建 `game-controls-input` RenderDomain 并 `frame.call("map", frame.params)`，不得承载 Map business mapping。
+1. 当前 `game.json` / `launch.hostra.json` 已按 [72-controls-composition.md](./72-controls-composition.md) 使用 `base + map`；`subsystems/base.mjs` 只创建 `game-controls-input` RenderDomain 并 `frame.call("map", frame.params)`，不承载 Map business mapping。
 2. 在 `subsystems/map.mjs` 中接入 `@loomrealm-game/common-controls/subsystem` 的 Consumer/Directional Tracker，并映射到 `RPGMapControls`；同时核实 `RPGMapBuilder`、`onMapEntering`、`setNPC` 与 `run` 的契约。
 3. 保留现有 `MAP_ONLY_NPC_PLACEMENTS`。NPC 不从 Event、StoryIndex、Encounter、Shared State 或 Relationship 动态计算；这份 placement 明确仅供 Map-only 验证。
 4. 验证主要地图绑定：`3` 玩家家、`2` 初始城镇、`4` 博士研究所、`5` 道路、`7` 第一个城镇、`8` 宿敌家；这些数字只用于地图链路，不接入剧情。
