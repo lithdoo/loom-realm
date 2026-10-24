@@ -1,7 +1,7 @@
 {
   "formatVersion": 1,
   "initial": {
-    "subsystem": "map",
+    "subsystem": "base",
     "input": {
       "mapId": 3,
       "x": 3,
@@ -10,6 +10,7 @@
     }
   },
   "subsystems": [
+    { "key": "base" },
     { "key": "map" }
   ]
 }
