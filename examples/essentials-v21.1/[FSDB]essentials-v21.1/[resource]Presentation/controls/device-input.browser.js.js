@@ -296,7 +296,6 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
       },
       setWindowUsable(usable, baseline = []) {
         if (usable === windowUsable2) return NONE;
-        const prev = effectiveDown();
         windowUsable2 = usable;
         keyboardCapture = false;
         keyboard.clear();
@@ -307,7 +306,7 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
             pads.set(sample2.index, pressedSet(sample2.pressed));
           }
         }
-        return publish(changedState(prev), []);
+        return publish(statePayload(effectiveDown()), []);
       },
       setKeyboardCapture(available) {
         const next = windowUsable2 && available;

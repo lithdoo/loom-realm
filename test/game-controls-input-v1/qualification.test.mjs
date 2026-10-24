@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { PresentationFrameGate } from "../../packages/renderer/dist/internal/presentation-frame-gate.js";
 import { PresentationEventManager } from "../../packages/subsystem/dist/internal/presentation-event-manager.js";
 import * as publicApi from "@loomrealm-game/common-controls";
@@ -13,7 +16,9 @@ import {
 } from "../../game-libs/game-common-controls/dist/controls-machine.js";
 
 const root = new URL("../../", import.meta.url);
-const source = (path) => readFile(new URL(path, root), "utf8");
+const rootDir = fileURLToPath(root);
+const source = (relativePath) => readFile(path.join(rootDir, relativePath), "utf8");
+const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
 test("unified controls ABI is exact and raw device channels stay closed", () => {
@@ -183,6 +188,10 @@ test("physical edges, baseline, and reconciliation stay distinct for the 14 cont
   assert.deepEqual(published(machine.setWindowUsable(true, [{ index: 0, pressed: ["east"] }])), {
     state: ["east"], events: [],
   });
+  const regain = createControlsMachine();
+  assert.deepEqual(published(regain.setWindowUsable(true, [])), { state: [], events: [] });
+  assert.deepEqual(published(regain.setWindowUsable(false)), { state: [], events: [] });
+  assert.deepEqual(published(regain.setWindowUsable(true, [])), { state: [], events: [] });
   machine.setKeyboardCapture(true);
   assert.deepEqual(published(machine.keydown("west", false)), { state: ["east", "west"], events: [["down", "west", false]] });
   assert.deepEqual(published(machine.setKeyboardCapture(false)), { state: ["east"], events: [] });
@@ -204,12 +213,65 @@ test("controls element publishes top-frame on its own duplicate key and keeps ca
   assert.match(element, /data-input-disabled", "duplicate"/);
   assert.match(element, /broadcast: "top-frame", channel: "controls\.state"/);
   assert.match(element, /broadcast: "top-frame", channel: "controls\.event"/);
-  assert.equal(element.includes("input.reset"), false);
+  const controlsElement = element.slice(element.indexOf("class GameControlsInputElement"));
+  assert.equal(controlsElement.includes("broadcast: true"), false);
+  assert.equal(controlsElement.includes("input.reset"), false);
+  assert.equal(controlsElement.includes("InputTarget"), false);
   assert.match(capture, /queueMicrotask\(reconcile\)/);
   assert.match(capture, /event\.isTrusted !== true/);
   assert.match(capture, /event\.preventDefault\(\)/);
   assert.match(capture, /mapping !== "standard"/);
   for (const token of ["HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement", "HTMLButtonElement", "HTMLAnchorElement", "isContentEditable"]) {
     assert.equal(capture.includes(token), true, token);
+  }
+  const framework = await Promise.all([
+    "packages/renderer/src/index.ts",
+    "packages/subsystem/src/index.ts",
+    "packages/main/src/index.ts",
+    "apps/desktop/src/renderer-entry.ts",
+    "apps/pwa/src/renderer-host.ts",
+  ].map((file) => source(file)));
+  for (const retired of ["InputTarget", "input.reset", "createInputListener"]) {
+    assert.equal(framework.some((text) => text.includes(retired)), false, retired);
+  }
+});
+
+test("precise and product qualification gates stay separate and complete", async () => {
+  const rootPackage = JSON.parse(await source("package.json"));
+  const precise = rootPackage.scripts["test:game-controls-input:qualification"];
+  const product = rootPackage.scripts["test:game-common-controls-input:qualification"];
+  for (const part of [
+    "build:game-common-controls-input",
+    "npm test -w @loomrealm-game/common-controls",
+    "test/game-controls-input-v1/qualification.test.mjs",
+    "test:frame-targeted-presentation:qualification",
+    "docs:check-links",
+    "docs:build",
+  ]) assert.equal(precise.includes(part), true, part);
+  for (const part of [
+    "build:game-common-controls-input",
+    "test:game-common-controls-input:qualification:run",
+    "test/game-controls-input-v1/qualification.test.mjs",
+    "npm test -w @loomrealm/desktop",
+    "test:m17",
+    "test:frame-targeted-presentation:qualification",
+    "docs:check-links",
+    "docs:build",
+  ]) assert.equal(product.includes(part), true, part);
+  assert.equal(precise.includes("test:m17"), false);
+  assert.equal(product.includes("test:game-controls-input:qualification"), false);
+});
+
+test("installed presentation fixtures carry the controls browser bundle", async () => {
+  const bundle = await source("game-libs/game-common-controls/dist/browser/device-input.browser.js");
+  assert.equal(bundle.includes("game-controls-input"), true);
+  const fixtures = [
+    "examples/essentials-v21.1/[FSDB]essentials-v21.1/[resource]Presentation/controls/device-input.browser.js.js",
+    "examples/PokeMan/[FSDB]PokeMan/[resource]Presentation/controls/device-input.browser.js.js",
+  ];
+  for (const fixture of fixtures) {
+    const installed = await source(fixture);
+    assert.equal(installed.includes("customElements.define(\"game-controls-input\""), true, fixture);
+    assert.equal(sha256(installed), sha256(bundle), fixture);
   }
 });

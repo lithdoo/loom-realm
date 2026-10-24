@@ -164,7 +164,6 @@ export function createControlsMachine(): ControlsMachine {
     },
     setWindowUsable(usable: boolean, baseline: readonly ControlsPadSample[] = []): ControlsPublication {
       if (usable === windowUsable) return NONE;
-      const prev = effectiveDown();
       windowUsable = usable;
       keyboardCapture = false;
       keyboard.clear();
@@ -175,7 +174,8 @@ export function createControlsMachine(): ControlsMachine {
           pads.set(sample.index, pressedSet(sample.pressed));
         }
       }
-      return publish(changedState(prev), []);
+      // mustPublishState: a Window transition publishes the current snapshot even when down is unchanged.
+      return publish(statePayload(effectiveDown()), []);
     },
     setKeyboardCapture(available: boolean): ControlsPublication {
       const next = windowUsable && available;

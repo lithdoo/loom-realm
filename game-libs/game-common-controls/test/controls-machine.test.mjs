@@ -140,6 +140,17 @@ test("multiple gamepads OR and a disconnect releases only the last effective hol
   });
 });
 
+test("window regain republishes the current State when effective stays empty", () => {
+  const machine = createControlsMachine();
+  assert.deepEqual(names(machine.setWindowUsable(false)), { state: null, events: [] });
+  assert.deepEqual(names(machine.setWindowUsable(true, [])), { state: [], events: [] });
+  assert.deepEqual(names(machine.setWindowUsable(false)), { state: [], events: [] });
+  assert.deepEqual(names(machine.setWindowUsable(true, [{ index: 0, pressed: ["south"] }])), {
+    state: ["south"],
+    events: [],
+  });
+});
+
 test("window and capture reconciliation never synthesize edges", () => {
   const machine = ready();
   machine.keydown("south", false);

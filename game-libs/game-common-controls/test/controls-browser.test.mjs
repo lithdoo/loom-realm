@@ -54,6 +54,7 @@ test("controls element publishes top-frame keyboard edges and prevents mapped de
   assert.equal(result.active, "surface");
   const published = controls(result.events);
   assert.deepEqual(published.map((event) => [event.options.channel, event.name, event.data.action, event.data.button, event.data.repeat, event.data.down]), [
+    ["controls.state", "input.state", undefined, undefined, undefined, []],
     ["controls.state", "input.state", undefined, undefined, undefined, ["south"]],
     ["controls.event", "input.event", "down", "south", false, undefined],
     ["controls.event", "input.event", "down", "south", true, undefined],
@@ -157,6 +158,7 @@ test("capture loss clears keyboard without an up, and the next repeat is a new l
   await page.keyboard.down("KeyZ");
   const duringField = await page.evaluate(() => deviceEvents.map((event) => [event.options.channel, event.data.down, event.data.action, event.data.repeat]));
   assert.deepEqual(duringField, [
+    ["controls.state", [], undefined, undefined],
     ["controls.state", ["south"], undefined, undefined],
     ["controls.event", undefined, "down", false],
     ["controls.state", [], undefined, undefined],
@@ -221,6 +223,27 @@ test("gamepad baseline, threshold, OR, disconnect, and keyboard sharing use one 
   assert.deepEqual(released, [["up", "up"], ["up", "start"]]);
   const held = await page.evaluate(() => deviceEvents.filter((event) => event.name === "input.state").at(-1).data.down);
   assert.deepEqual(held, ["south"]);
+});
+
+test("window regain with an empty baseline republishes controls.state and no event", async (t) => {
+  const page = await openPage(t, "<!doctype html><body></body>");
+  await page.evaluate(() => { document.hasFocus = () => false; });
+  await mount(page);
+  const stillUnusable = await page.evaluate(() => {
+    window.dispatchEvent(new Event("blur"));
+    return deviceEvents.length;
+  });
+  assert.equal(stillUnusable, 0);
+  await page.evaluate(() => {
+    document.hasFocus = () => true;
+    window.dispatchEvent(new Event("focus"));
+  });
+  const regained = await page.evaluate(() => deviceEvents);
+  assert.deepEqual(regained.map((event) => [event.name, event.options.channel, event.options.broadcast, event.data.down, event.data.action]), [
+    ["input.state", "controls.state", "top-frame", [], undefined],
+  ]);
+  await page.waitForTimeout(1100);
+  assert.equal(await page.evaluate(() => deviceEvents.length), 1, "empty regain must not start State refresh");
 });
 
 test("window blur publishes reconciliation State only, then a gamepad rescan baseline", async (t) => {
