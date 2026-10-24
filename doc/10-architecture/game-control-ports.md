@@ -1458,11 +1458,18 @@ game-libs/rpg-dialogue
 examples/essentials-v21.1
 examples/PokeMan
 
+examples/PokeMan/launch.pwa.json
+examples/PokeMan/scripts/prepare-pwa-content.mjs
+apps/pwa/scripts/build.mjs
+apps/pwa/src/pokeman-window-entry.ts
+apps/pwa/test/pokeman-bundle.test.mjs
+apps/pwa/test/pokeman-map.e2e.test.mjs
+
 root package.json / package-lock.json
 affected module docs / qualification evidence
 ```
 
-不得只完成三个 library 而留下 canonical examples 继续依赖 Map-owned raw input roots。
+不得只完成三个 library 而留下 canonical examples 继续依赖 Map-owned raw input roots；也不得把 PokeMan Desktop 改成 `base + map` 后，继续让其 PWA bundle / staging / qualification 假定只有一个 `map` executable。
 
 ### 16.2 Example-private Base Subsystem
 
@@ -1762,6 +1769,75 @@ Gamepad physical mapping 继续由 Frozen producer qualification 覆盖；本次
 
 这些文档拥有各自 `base + map` topology。主设计只引用它们作为本次 canonical examples，不把该 topology 推广成所有 future product 的 mandatory shape。
 
+### 16.9 PokeMan PWA dual-executable migration
+
+PokeMan 当前已经存在真实 PWA product/qualification，不能把它当作未来非目标。Desktop / Hostra topology 迁为 `base + map` 时，PWA 必须同一 PR 一起迁移。
+
+Canonical PWA executable set：
+
+```text
+subsystems/base.mjs
+subsystems/map.mjs
+```
+
+必须同步更新：
+
+```text
+examples/PokeMan/launch.pwa.json
+examples/PokeMan/scripts/prepare-pwa-content.mjs
+
+apps/pwa/scripts/build.mjs
+apps/pwa/src/pokeman-window-entry.ts
+apps/pwa/test/pokeman-bundle.test.mjs
+apps/pwa/test/pokeman-map.e2e.test.mjs
+```
+
+PWA fixture/bundle shape 应表达 plural executable collection，而不是继续使用单一 `executable` 字段作为 PokeMan product truth。两个 executable 都必须：
+
+```text
+logicalModule exact matches launch.pwa.json
+MIME = text/javascript
+closed browser ESM graph
+no bare npm imports in installed output
+content/version participates in product bundle identity
+```
+
+Qualification 至少证明：
+
+```text
+Game Entry initial = base
+PWA launch manifest = base + map
+installed executable index = base + map
+
+base starts
+→ owns live game-controls-input
+→ calls map child
+
+Browser keyboard
+→ game-controls-input
+→ top-frame
+→ Map Consumer
+→ RPGMapControls
+→ real movement / collision / transfer
+
+session restart
+→ base + map topology recreates cleanly
+→ no duplicate producer
+→ no stale retained input
+```
+
+不得保留以下 current single-map assumptions：
+
+```text
+PokeManBundleFile.executable: string
+executables = [ map only ]
+qualification build emits only pokeman-map-subsystem.mjs
+E2E install supplies only subsystems/map.mjs
+report/check says "仍只有 map subsystem"
+```
+
+这只是 PokeMan product composition 迁移，不修改 PWA Launcher / Installer 的通用多-executable contract。
+
 ---
 
 ## 17. Freeze / landing criteria
@@ -1785,9 +1861,11 @@ Gamepad physical mapping 继续由 Frozen producer qualification 覆盖；本次
 15. Dialogue concrete product button mapping 仍由 product 或 Dialogue versioned contract 拥有，不由本文冻结；
 16. existing Map terrain/transfer/NPC qualification 与 Dialogue Conversation/History semantic qualification 的受影响部分重新通过；
 17. top-frame / game-controls-input producer qualification 保持通过；
-18. Essentials / PokeMan product tests 与 control-port real-browser closed loop 通过；
-19. docs link/build 通过；
-20. exact executable subject 和 evidence 按 repository 规则记录。
+18. PokeMan Desktop/PWA 都已迁为 `base + map`；PWA bundle/install/index/staging/E2E 不再存在 single-map executable assumption；
+19. root `build:m14/m15/m17` 与相关 qualification lanes 在 clean dist 下显式构建所需 common-controls，不依赖 Map prebuild 或旧 dist；
+20. Essentials / PokeMan product tests 与 control-port real-browser closed loop 通过；
+21. docs link/build 通过；
+22. exact executable subject 和 evidence 按 repository 规则记录。
 
 完成后的核心依赖关系：
 
