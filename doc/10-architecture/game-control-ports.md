@@ -9,6 +9,27 @@
 
 本文定义下一阶段的 game-library control-port 改造。它是实现设计，不修改现有 Frozen contract 的历史事实；实现 PR 必须按本文的版本/兼容规则更新对应正式契约和 qualification evidence。
 
+本文只拥有 control-port 及其消费边界，不拥有相邻系统的全部策略。以下事项仍由各自 owner 决定：
+
+```text
+Frame / Activation / top-frame wire semantics
+→ existing framework contracts
+
+<game-controls-input> producer semantics
+→ existing game-common-controls contract
+
+Map blocked/retry gameplay cadence
+→ Map-specific movement contract / qualification
+
+Dialogue/product concrete button mapping
+→ Dialogue versioned contract or concrete product composition
+
+input component owner / RenderDomain topology / mount lifetime
+→ concrete product/example composition
+```
+
+本文可以规定这些 owner 之间必须满足的接口约束，但不得替它们重新定义完整语义。
+
 核心原则：
 
 > **输入系统表达“玩家怎样操作设备”；Control Port 表达“玩家想让业务模块做什么”。Map / Dialogue 只依赖后者。**
@@ -294,37 +315,27 @@ getSnapshot()
 → 读当前事实
 ```
 
-### 3.3 Runtime movement pump
+### 3.3 Retained movement semantics
 
-Runtime 内部只保留当前 `moveIntent`，并由一个私有 movement pump 统一决定何时调用 `attempt(...)`。Transport refresh 不是 gameplay clock。
+Runtime 内部只保留当前 `moveIntent`。Control Port 只冻结“意图是什么”，不重新定义完整的 Map movement scheduler。
 
-`setMoveIntent(next)` 的语义冻结为：
+`setMoveIntent(next)` 的语义：
 
 ```text
 next === current moveIntent
 → idempotent
-→ 不触发新的 attempt
+→ 不是一条新的 movement command
 
 null -> direction
 direction A -> direction B
 → 替换 retained intent
-→ 如果 Runtime 已稳定且当前不 busy，触发一次 pump
 
-任何变化发生在 movement / transfer / event / NPC mutation busy 期间
-→ 只替换 retained intent
+变化发生在 movement / transfer / event 等 busy 期间
+→ 只保留最新 intent
 → 不排队旧 direction
-→ busy operation 到达明确业务完成边界后再读取最新 intent
 ```
 
-成功 movement step 完成后：
-
-```text
-latest moveIntent != null
-→ pump once
-→ attempt(latest moveIntent)
-```
-
-因此：
+成功 movement step 完成后，如果 retained intent 仍非空，Map 可以继续按最新 intent 进入下一次 movement attempt，从而表达 held movement：
 
 ```text
 hold up
@@ -334,41 +345,23 @@ hold up
 
 during first walk change to left
 → 当前 walk 完成
-→ 下一次 attempt(left)
+→ 后续 movement 使用最新 left intent
 ```
 
-不是：
+但 **blocked 后何时再次 attempt 属于 Map gameplay policy**，不由本文冻结。本文只要求：
 
 ```text
-queue(up, up, left, ...)
+blocked / walk / jump / transfer 等 outcome
+→ 仍由 Map authority 决定
+
+重复的 controls.state refresh
+→ 不能被解释成“一条新的业务 movement command”
+
+same-value setMoveIntent(...)
+→ 不能因为 transport 重复投递而改变业务含义
 ```
 
-blocked 语义必须单独固定：
-
-```text
-attempt(direction)
-→ blocked
-→ Map 可以更新朝向 / blocked presentation
-→ 保留 moveIntent
-→ 不立即递归重试
-→ 不创建 retry timer
-→ 不因为重复的 controls.state refresh 重试
-→ 不因为 setMoveIntent(same direction) 重试
-```
-
-同一 retained intent 只有在**新的 gameplay-relevant business boundary** 到来后才可以再次 pump，例如：
-
-```text
-成功 movement step 完成
-成功 map transfer / enterMap 完成
-成功 setNPC commit 可能改变占用
-Map-owned event / terrain / bridge mutation 可能改变 passability
-显式 moveIntent 发生变化
-```
-
-实现应把这些入口收敛到同一个私有 `pumpMoveIntent()`；不得让 `controls.state` 的 1000ms refresh、freshness timer 或其他 transport timing 成为 movement retry 机制。
-
-blocked / walk / jump、朝向更新、Transfer、Bridge、NPC collision 等仍全部由 Map Runtime 决定，不能移到 controls consumer 或 composition。
+如果落地实现需要改变现有 blocked/retry 的可观察行为，必须在 Map-specific contract / qualification 中明确记录和重新验证；不能把这种 gameplay change 隐藏成 input-decoupling refactor。
 
 ### 3.4 Handler lifecycle
 
@@ -660,35 +653,23 @@ remove Frame abort listener
 
 ### 5.3 Payload gate
 
-Consumer 对 malformed payload fail closed。
+Consumer 对 malformed payload fail closed，但本文不复制定义 controls wire schema。
 
-`controls.state` 至少要求：
+Canonical payload / event-name / button-order 规则继续由现有 [统一操控输入 Web Component](../../game-libs/game-common-controls/game-controls-input.md) 与 [Game Common Controls Input v1](../15-contracts/game-common-controls-input-v1.md) 拥有。
 
-```text
-name === "input.state"
-data 是 plain object
-exact semantic field down
-down 是 ControlsButtonV1[]，无重复，规范顺序
-```
-
-`controls.event` 至少要求：
+Consumer 只负责：
 
 ```text
-name === "input.event"
-data 是 plain object
-action === "down" | "up"
-button ∈ CONTROLS_BUTTONS_V1
-repeat 是 boolean
+收到 controls.state / controls.event
+→ 按 canonical v1 contract 验证
+→ valid: 进入 local freshness / handler
+→ invalid: drop
+           不调用 handler
+           不污染 local State
+           不把 validation error 抛到 gameplay
 ```
 
-invalid input：
-
-```text
-drop
-不调用 handler
-不污染 fresh State
-不抛到 gameplay
-```
+未来 producer contract 版本变化时，应通过 versioned consumer surface 处理，而不是在本文维护第二份 wire schema。
 
 ---
 
@@ -841,7 +822,7 @@ Map Runtime 本身完全不知道 controls vocabulary。
 
 ## 8. Dialogue Composition Adapter
 
-Dialogue 同样只在 composition 做映射：
+Dialogue 同样只在 composition 做映射。下面只是一份**非规范示例**，用于说明边界，不冻结 product 的具体键位：
 
 ```ts
 const consumer = createControlsConsumer(
@@ -857,19 +838,15 @@ const consumer = createControlsConsumer(
         case "start":
           dialogue.controls.confirm();
           break;
-
         case "up":
           dialogue.controls.previous();
           break;
-
         case "down":
           dialogue.controls.next();
           break;
-
         case "select":
           dialogue.controls.history();
           break;
-
         case "east":
           dialogue.controls.cancel();
           break;
@@ -879,20 +856,15 @@ const consumer = createControlsConsumer(
 );
 ```
 
-Default mapping：
+这里真正由本文冻结的只有依赖方向：
 
-| Controls button | Dialogue command |
-| --- | --- |
-| `south` | `confirm()` |
-| `start` | `confirm()` |
-| `up` | `previous()` |
-| `down` | `next()` |
-| `select` | `history()` |
-| `east` | `cancel()` |
+```text
+controls vocabulary
+→ composition-owned mapping
+→ RPGDialogueControls semantic command
+```
 
-其他 button 不产生 Dialogue command。
-
-`repeat:true` 不产生 semantic command。
+具体 button mapping、是否接受 repeat、是否保留 legacy physical aliases，都由具体 product composition 决定；如果未来要成为 RPG Dialogue v1 的正式 default policy，应由 Dialogue 的 versioned contract 拥有并 qualification，而不是由本文拥有。
 
 ---
 
@@ -1017,104 +989,63 @@ composition adapter
 
 ---
 
-## 10. Physical compatibility
+## 10. Dialogue migration compatibility
 
-当前 Dialogue v0 shipped default physical mapping 包含：
+这是迁移约束，不是新的 default key-binding contract。
 
-```text
-Enter / Space → confirm
-Escape        → cancel
-```
+当前 Dialogue v0 的 shipped physical policy 包含 `Space` / `Escape`，而 unified controls v1 的固定 vocabulary / Keyboard aliases 并不能无损表达这两项。具体差异以现有 Dialogue v0 contract 与 `game-controls-input` Frozen contract 为准。
 
-unified controls v1 fixed Keyboard aliases 是：
+因此任何 product 从 raw Keyboard/Gamepad 迁到 unified controls 时，都必须显式选择：
 
 ```text
-Enter → start
-Z     → south
-X     → east
-Tab   → select
-Arrows → directions
+accept a new product-level mapping
+or
+provide a product-owned compatibility path
 ```
 
-因此新的 default unified Dialogue composition mapping 的物理体验是：
+不得：
 
 ```text
-Enter / Z → confirm
-X         → cancel
-Tab       → history
-ArrowUp   → previous
-ArrowDown → next
+为了兼容而把 raw Keyboard dependency 放回 Dialogue Runtime
+为了兼容而偷偷修改 Frozen game-controls-input v1 mapping
+在本文宣称某一套 product mapping 是全局默认
 ```
 
-`Space` / `Escape` 不属于 unified controls v1。
-
-这是 Dialogue v1 default control policy 的显式变化，不能伪装成 v0 无变化。
-
-如果某 product 必须保留 legacy `Space/Escape`，应在 product composition 提供独立 compatibility path；不得把 raw Keyboard 重新塞回 Dialogue Runtime，也不得偷偷扩写 Frozen `game-controls-input` v1 mapping。
+如果 RPG Dialogue v1 需要正式冻结新的 default control policy，应由 Dialogue v1 contract 单独定义。
 
 ---
 
 ## 11. Input Component Composition
 
-Map / Dialogue 不再负责创建 physical/unified input WebComponent。
+Map / Dialogue core 不再拥有 physical/unified input component composition。Map 当前为输入而创建的 raw Keyboard/Gamepad roots 必须从 Map movement path 移出；Dialogue Runtime 也不再订阅 raw `keyboard.event / gamepad.event`。
 
-Product / example composition 必须保证一个 Window 中存在一份活动的：
+至于 `<game-controls-input>` 由哪个 subsystem / RenderDomain 挂载、是否跨 Frame call 持续存在、何时 mount/unmount，全部属于**具体 product/example composition**，本文不指定 topology。
 
-```html
-<game-controls-input></game-controls-input>
-```
-
-该节点由 **product 明确指定的 Input Host owner** 挂载。Input Host owner 必须拥有一个在 gameplay Top Frame 切换期间持续 live 的 RenderDomain / Presentation composition；它不能依赖某个会因为 modal child call 而被销毁的 gameplay RenderDomain。
-
-每个 product/example 在自己的 composition 文档中必须明确：
+本文只要求具体 composition 遵守现有 producer contract：
 
 ```text
-Input Host owner = 哪个 subsystem / session composition
-Input Host RenderDomain lifetime
-什么时候 mount
-什么时候 terminal close
-```
+需要 unified controls 时
+→ product 自己提供可用的 <game-controls-input>
 
-允许实现方式包括长期存活的 session/root composition，或 product-private dedicated input-host subsystem；本设计不新增 framework-owned Input Host，也不新增独立 game-library package。
-
-关键约束：
-
-```text
 one Window
 → at most one active <game-controls-input>
 
-Top Frame changes
-→ Input Host remains live
-→ producer continues publishing to newly accepted top-frame lease
+Framework
+→ 不默认创建 producer
 ```
 
-Framework 不默认创建它。
+Pointer 仍是独立能力；是否需要 `game-pointer-input` 由具体业务决定，不因 Map 历史上存在 pointer root 就自动保留或删除。
 
-Map RenderDomain 必须删除当前 input-owned roots：
-
-```text
-game-keyboard-input
-game-pointer-input
-game-gamepad-input
-```
-
-除非 Pointer 后续有独立 Map public interaction contract；Pointer 不得因为历史节点存在而继续与 movement control 绑定。
-
-Dialogue Runtime 也不再订阅 raw `keyboard.event / gamepad.event`。
-
-最终：
+最终依赖边界是：
 
 ```text
-Product Input Host
-    → game-controls-input
+product-owned input composition
+    → game-controls-input (when chosen)
 
-common-controls
-    → producer + Frame consumer + directional helper
+common-controls/subsystem
+    → Activation-local consumer primitives
 
-Map
-    → business / presentation only
-
-Dialogue
+Map / Dialogue
     → business / presentation only
 ```
 
@@ -1276,8 +1207,9 @@ RPG_DIALOGUE_V1_API.md
 实际 composition 直接：
 
 ```text
-nominate one long-lived Input Host owner
-mount one game-controls-input
+choose and document product-owned input component placement/lifetime
+mount game-controls-input when this product chooses unified controls
+respect one-active-producer-per-Window contract
 import consumer/tracker from @loomrealm-game/common-controls/subsystem
 create fresh consumer/tracker per active Activation
 translate generic controls to module Control Port
@@ -1333,10 +1265,10 @@ Directional Tracker：
 - held intent 在成功 step 完成后继续；
 - movement 中改方向只影响下一 attempt，不排队旧 direction；
 - `setMoveIntent(null)` 在当前 step 完成后停止继续移动；
-- same-value `setMoveIntent` idempotent，不触发 attempt；
-- blocked 保留 intent，但不 hot-loop、不建 retry timer、不因 controls State refresh 重试；
-- gameplay-relevant mutation 完成后只通过统一 movement pump 决定是否重试；
+- same-value `setMoveIntent` idempotent，不代表新的 movement command；
+- controls State refresh 不通过重复 setter 偷偷成为新的业务 command；
 - blocked movement 仍完全由 Map authority 决定；
+- 如果实现改变现有 blocked/retry 可观察行为，必须在 Map-specific contract / qualification 中明确记录；
 - transfer / NPC / bridge semantics 不迁出 Runtime；
 - invalid direction runtime value throws `TypeError`；
 - terminal cleanup 后 controls 不产生 gameplay side effect；
@@ -1373,8 +1305,8 @@ Map：
 
 Dialogue：
 
-- exact mapping table；
-- only down / repeat=false；
+- composition-selected mapping 能驱动对应 semantic command；
+- architecture qualification 不冻结具体 button table；
 - inactive drop；
 - reactivate不 replay；
 - close后不再产生 command。
@@ -1404,13 +1336,13 @@ World A1 controls live
 → only A2 controls.state may restore held movement
 ```
 
-Input Host：
+Product input composition：
 
 ```text
-Top Frame changes World -> Dialogue -> World
-→ the one Window-level game-controls-input remains mounted/live
-→ publication follows accepted top-frame lease
-→ no duplicate controls producer
+chosen product/example composition
+→ ownership/lifetime documented there
+→ when unified controls are active, no duplicate producer exists in one Window
+→ producer behavior otherwise follows existing Frozen game-controls-input contract
 ```
 
 ### 14.5 Integration qualification
@@ -1439,6 +1371,9 @@ Browser trusted Keyboard/Gamepad
 - 独立 `@loomrealm-game/control-bindings` package；
 - `common-controls` import Map / Dialogue；
 - 修改已 Frozen 的 `@loomrealm-game/common-controls` root export surface；
+- 替 product/example 规定 Input Host subsystem / RenderDomain topology；
+- 在本文冻结 Map blocked/retry cadence；
+- 在本文冻结某个 product 的 Dialogue button mapping；
 - Framework InputTarget / 新 input authority；
 - 修改 `game-controls-input` Frozen v1 vocabulary；
 - retained Dialogue command；
@@ -1464,15 +1399,17 @@ Browser trusted Keyboard/Gamepad
 4. 已 Frozen 的 `@loomrealm-game/common-controls` root export surface 保持 exact 不变；
 5. `common-controls` 不依赖 Map / Dialogue；
 6. 不存在独立 `control-bindings` package；
-7. product/example 明确指定一个长期 live 的 Input Host owner，并在一个 Window 中只挂一份 unified controls producer；
-8. same-Frame overlay 与 child-Frame modal 两种 composition 均按本文生命周期执行；
-9. child-call 前 retained Map intent 被 neutralize，fresh resume Activation 使用 fresh Consumer/Tracker；
-10. Map movement pump 的 same-intent / blocked / retry boundary 有 executable tests，且不依赖 controls refresh timing；
-11. Map 普通 movement 不需要 `getSnapshot()`；
-12. existing Map terrain/transfer/NPC qualification 与 Dialogue Conversation/History qualification 的受影响部分重新通过；
-13. top-frame / common-controls qualification 保持通过；
-14. docs link/build 通过；
-15. exact executable subject 和 evidence 按 repository 规则记录。
+7. 每个受影响 product/example 在自己的 composition 文档中拥有 input component placement/lifetime；本文不替它指定 topology；
+8. 选择 unified controls 的 composition 遵守一个 Window 最多一个 active producer 的既有 contract；
+9. same-Frame overlay 与 child-Frame modal 两种消费模式均按本文 Activation lifecycle 执行；
+10. child-call 前 retained Map intent 被 neutralize，fresh resume Activation 使用 fresh Consumer/Tracker；
+11. Map Control Port 的 retained/same-value 语义有 executable tests；任何 blocked/retry gameplay change 由 Map-specific contract/qualification 拥有；
+12. Map 普通 movement 不需要 `getSnapshot()`；
+13. Dialogue concrete button mapping 由 product 或 Dialogue versioned contract 拥有，不由本文冻结；
+14. existing Map terrain/transfer/NPC qualification 与 Dialogue Conversation/History qualification 的受影响部分重新通过；
+15. top-frame / common-controls qualification 保持通过；
+16. docs link/build 通过；
+17. exact executable subject 和 evidence 按 repository 规则记录。
 
 完成后的核心依赖关系：
 
