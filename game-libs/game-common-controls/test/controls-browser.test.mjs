@@ -269,10 +269,12 @@ test("Pocket Block unmapped AYANEO pad publishes all four canonical D-pad direct
     }
   }
 
+  const beforeFinalPress = await page.evaluate(() => deviceEvents.length);
   await page.evaluate(() => { pocketPad.buttons[12].value = 1; });
-  await page.waitForFunction(() => deviceEvents.some((event) =>
-    event.options.channel === "controls.state" && event.data.down.includes("up")
-  ));
+  await page.waitForFunction((from) => deviceEvents.slice(from).some((event) =>
+    event.options.channel === "controls.event"
+    && event.data.action === "down" && event.data.button === "up"
+  ), beforeFinalPress);
   const beforeDisconnect = await page.evaluate(() => {
     const from = deviceEvents.length;
     pocketPad.connected = false;
