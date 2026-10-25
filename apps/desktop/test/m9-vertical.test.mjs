@@ -63,7 +63,7 @@ async function installation(t) {
     subsystems: [{ key: "root", module: "subsystems/root.mjs" }],
   }));
   const marker = path.join(root, "presentation-event.json");
-  const markerPublishing = path.join(root, "presentation-event.json.publishing");
+  const markerPublishingPath = path.join(root, "presentation-event.json.publishing");
   await writeFile(path.join(root, "subsystems", "root.mjs"), `
     import { rename, writeFile } from "node:fs/promises";
     export default (scope) => {
@@ -80,8 +80,8 @@ async function installation(t) {
           if (markerPublished || markerPublishing) return;
           markerPublishing = true;
           try {
-            await writeFile(${JSON.stringify(markerPublishing)}, JSON.stringify(event));
-            await rename(${JSON.stringify(markerPublishing)}, ${JSON.stringify(marker)});
+            await writeFile(${JSON.stringify(markerPublishingPath)}, JSON.stringify(event));
+            await rename(${JSON.stringify(markerPublishingPath)}, ${JSON.stringify(marker)});
             markerPublished = true;
           } finally {
             markerPublishing = false;
