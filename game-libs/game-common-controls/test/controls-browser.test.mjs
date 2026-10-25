@@ -225,6 +225,68 @@ test("gamepad baseline, threshold, OR, disconnect, and keyboard sharing use one 
   assert.deepEqual(held, ["south"]);
 });
 
+test("Pocket Block unmapped AYANEO pad publishes all four canonical D-pad directions", async (t) => {
+  const page = await openPage(t);
+  await page.evaluate(() => {
+    globalThis.pocketPad = {
+      index: 2, connected: true, id: "AYANEO Controller (Vendor: 4001 Product: 0428)",
+      mapping: "", axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ value: 0 })),
+    };
+    Object.defineProperty(navigator, "getGamepads", {
+      configurable: true, value: () => [globalThis.pocketPad],
+    });
+  });
+  await mount(page);
+  await page.waitForFunction(() => deviceEvents.some((event) => event.options.channel === "controls.state"));
+  assert.deepEqual(
+    await page.evaluate(() => deviceEvents.find((event) => event.options.channel === "controls.state").data.down),
+    [],
+  );
+
+  for (const [index, direction] of [[12, "up"], [13, "down"], [14, "left"], [15, "right"]]) {
+    for (const [value, action] of [[1, "down"], [0, "up"]]) {
+      const before = await page.evaluate(() => deviceEvents.length);
+      await page.evaluate(({ index, value }) => { pocketPad.buttons[index].value = value; }, { index, value });
+      await page.waitForFunction(({ before, direction, action }) =>
+        deviceEvents.slice(before).some((event) =>
+          event.options.channel === "controls.event"
+          && event.data.action === action
+          && event.data.button === direction
+        ), { before, direction, action });
+      const batch = await page.evaluate((from) => deviceEvents.slice(from), before);
+      const edgeIndex = batch.findIndex((event) =>
+        event.options.channel === "controls.event"
+        && event.data.action === action
+        && event.data.button === direction
+      );
+      assert.ok(edgeIndex > 0, direction + " " + action + " must follow controls.state");
+      const state = batch[edgeIndex - 1];
+      assert.equal(state.options.channel, "controls.state");
+      assert.equal(state.options.broadcast, "top-frame");
+      assert.deepEqual(state.data.down, action === "down" ? [direction] : []);
+      assert.equal(batch[edgeIndex].data.repeat, false);
+    }
+  }
+
+  await page.evaluate(() => { pocketPad.buttons[12].value = 1; });
+  await page.waitForFunction(() => deviceEvents.some((event) =>
+    event.options.channel === "controls.state" && event.data.down.includes("up")
+  ));
+  const beforeDisconnect = await page.evaluate(() => {
+    const from = deviceEvents.length;
+    pocketPad.connected = false;
+    return from;
+  });
+  await page.waitForFunction((from) => deviceEvents.slice(from).some((event) =>
+    event.options.channel === "controls.event" && event.data.action === "up" && event.data.button === "up"
+  ), beforeDisconnect);
+  assert.deepEqual(
+    await page.evaluate(() => deviceEvents.filter((event) => event.options.channel === "controls.state").at(-1).data.down),
+    [],
+  );
+});
+
 test("window regain with an empty baseline republishes controls.state and no event", async (t) => {
   const page = await openPage(t, "<!doctype html><body></body>");
   await page.evaluate(() => { document.hasFocus = () => false; });

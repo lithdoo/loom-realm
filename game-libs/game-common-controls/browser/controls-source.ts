@@ -4,6 +4,7 @@ import {
   type ControlsMachine, type ControlsPadSample, type ControlsPublication,
 } from "../src/controls-machine.js";
 import type { ControlsButtonV1 } from "../src/model.js";
+import { supportsCanonicalGamepadButtons } from "./gamepad-layout.js";
 import { windowUsable } from "./source-types.js";
 
 export interface ControlsInputSource {
@@ -56,7 +57,7 @@ function readPads(target: Window): ControlsPadSample[] {
   const samples: ControlsPadSample[] = [];
   const seen = new Set<number>();
   for (const pad of read.call(target.navigator)) {
-    if (pad === null || !pad.connected || pad.mapping !== "standard" || seen.has(pad.index)) continue;
+    if (pad === null || !supportsCanonicalGamepadButtons(pad) || seen.has(pad.index)) continue;
     seen.add(pad.index);
     const pressed: ControlsButtonV1[] = [];
     for (let index = 0; index < pad.buttons.length; index += 1) {

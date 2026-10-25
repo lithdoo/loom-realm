@@ -1,6 +1,7 @@
 import type {
   DeviceInputChange, GamepadButtonNameV1, GamepadButtonsV1, GamepadSampleV1,
 } from "../src/model.js";
+import { supportsCanonicalGamepadButtons } from "./gamepad-layout.js";
 import { windowUsable, type DeviceInputSource } from "./source-types.js";
 
 const buttonNames: readonly GamepadButtonNameV1[] = Object.freeze([
@@ -54,7 +55,7 @@ export function createGamepadInputSource(target: Window): DeviceInputSource {
         gamepads.clear();
         if (read === null) return;
         for (const pad of read()) {
-          if (!pad || !pad.connected || pad.mapping !== "standard" || gamepads.size >= 16) continue;
+          if (!pad || !supportsCanonicalGamepadButtons(pad) || gamepads.size >= 16) continue;
           const value = sample(pad, nextId++);
           gamepads.set(pad.index, { canonicalId: value.gamepadId, sample: value, pressed: pressedOf(value) });
         }
@@ -65,7 +66,7 @@ export function createGamepadInputSource(target: Window): DeviceInputSource {
         let changed = false;
         const crossings: Array<{ tracked: TrackedGamepad; button: GamepadButtonNameV1; action: "down" | "up" }> = [];
         for (const pad of read()) {
-          if (!pad || !pad.connected || pad.mapping !== "standard") continue;
+          if (!pad || !supportsCanonicalGamepadButtons(pad)) continue;
           let tracked = gamepads.get(pad.index);
           if (tracked === undefined && gamepads.size >= 16) continue;
           seen.add(pad.index);
