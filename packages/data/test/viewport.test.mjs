@@ -25,6 +25,17 @@ const rendererHandlers = {
 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const viewport = (width, height) => ({ type: "viewport.state", width, height });
+const presentationEvent = () => ({
+  type: "presentation.event",
+  sourceSubsystemKey: "map",
+  domainId: "map",
+  targetKey: "root",
+  frameId: "root",
+  activationId: "a1",
+  channel: "x.viewport.concurrent",
+  name: "viewport-concurrent",
+  data: {},
+});
 
 async function waitFor(predicate) {
   for (let i = 0; i < 80; i += 1) {
@@ -189,6 +200,176 @@ test("fractional viewport dimensions are local-fatal and emit zero bytes", async
   await renderer.close();
 });
 
+test("same-size invalid viewport input is validated before idle deduplication", async () => {
+  const carrier = createWriterCarrier();
+  const renderer = createRendererDataPeer({
+    binding: binding(carrier),
+    handlers: rendererHandlers,
+  });
+  assert.deepEqual(await renderer.viewport.sendState(viewport(640, 480)), { kind: "sent" });
+
+  const result = await renderer.viewport.sendState({
+    type: "viewport.state",
+    width: 640,
+    height: 480,
+    extra: true,
+  });
+  assert.equal(result.kind, "terminal");
+  assert.equal(result.terminal.kind, "local-fatal");
+  assert.equal(await renderer.terminal, result.terminal);
+  assert.deepEqual(carrier.sent.map((text) => JSON.parse(text)), [viewport(640, 480)]);
+  await renderer.close();
+});
+
+test("invalid viewport input terminates instead of being swallowed by pending-latest", async () => {
+  const carrier = createWriterCarrier();
+  carrier.holdSend();
+  const renderer = createRendererDataPeer({
+    binding: binding(carrier),
+    handlers: rendererHandlers,
+  });
+  const first = renderer.viewport.sendState(viewport(640, 480));
+  await waitFor(() => carrier.maxActive === 1);
+  const pending = renderer.viewport.sendState(viewport(800, 600));
+
+  let invalid;
+  assert.doesNotThrow(() => {
+    invalid = renderer.viewport.sendState({
+      type: "viewport.state",
+      width: 640,
+      height: 480,
+      extra: true,
+    });
+  });
+  const [invalidResult, pendingResult] = await Promise.all([invalid, pending]);
+  assert.equal(invalidResult.kind, "terminal");
+  assert.equal(invalidResult.terminal.kind, "local-fatal");
+  assert.equal(pendingResult.kind, "terminal");
+  assert.equal(pendingResult.terminal, invalidResult.terminal);
+  assert.deepEqual(carrier.sent, []);
+
+  carrier.releaseSend();
+  const firstResult = await first;
+  assert.ok(firstResult.kind === "sent" || firstResult.kind === "terminal");
+  assert.deepEqual(carrier.sent.map((text) => JSON.parse(text)), [viewport(640, 480)]);
+  await renderer.close();
+});
+
+test("sendState contains exotic invalid objects without synchronous escape or wire bytes", async (t) => {
+  const cases = [
+    {
+      name: "throwing getter",
+      create() {
+        let getterHits = 0;
+        const message = { type: "viewport.state", height: 480 };
+        Object.defineProperty(message, "width", {
+          enumerable: true,
+          get() {
+            getterHits += 1;
+            throw new Error("width getter boom");
+          },
+        });
+        return { message, verify: () => assert.equal(getterHits, 0) };
+      },
+    },
+    {
+      name: "throwing Proxy ownKeys trap",
+      create() {
+        const message = new Proxy(viewport(640, 480), {
+          ownKeys() {
+            throw new Error("ownKeys boom");
+          },
+        });
+        return { message, verify: () => {} };
+      },
+    },
+    {
+      name: "inherited dimensions",
+      create() {
+        const message = Object.create({ width: 640, height: 480 });
+        message.type = "viewport.state";
+        return { message, verify: () => {} };
+      },
+    },
+    {
+      name: "symbol own property",
+      create() {
+        const message = viewport(640, 480);
+        message[Symbol("extra")] = true;
+        return { message, verify: () => {} };
+      },
+    },
+  ];
+
+  for (const entry of cases) {
+    await t.test(entry.name, async () => {
+      const carrier = createWriterCarrier();
+      const renderer = createRendererDataPeer({
+        binding: binding(carrier),
+        handlers: rendererHandlers,
+      });
+      const { message, verify } = entry.create();
+      let outcome;
+      assert.doesNotThrow(() => {
+        outcome = renderer.viewport.sendState(message);
+      });
+      const result = await outcome;
+      assert.equal(result.kind, "terminal");
+      assert.equal(result.terminal.kind, "local-fatal");
+      assert.equal(carrier.sent.length, 0);
+      verify();
+      await renderer.close();
+    });
+  }
+
+  await t.test("throwing Proxy get trap becomes local-fatal without synchronous escape", async () => {
+    let getHits = 0;
+    const message = new Proxy(viewport(640, 480), {
+      get(target, property, receiver) {
+        if (property === "width") {
+          getHits += 1;
+          throw new Error("get boom");
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const carrier = createWriterCarrier();
+    const renderer = createRendererDataPeer({
+      binding: binding(carrier),
+      handlers: rendererHandlers,
+    });
+    let outcome;
+    assert.doesNotThrow(() => {
+      outcome = renderer.viewport.sendState(message);
+    });
+    const result = await outcome;
+    assert.equal(result.kind, "terminal");
+    assert.equal(result.terminal.kind, "local-fatal");
+    assert.ok(getHits >= 1);
+    assert.deepEqual(carrier.sent, []);
+    await renderer.close();
+  });
+});
+
+test("blocked writer converges A to B to A without emitting the canceled B", async () => {
+  const carrier = createWriterCarrier();
+  carrier.holdSend();
+  const renderer = createRendererDataPeer({
+    binding: binding(carrier),
+    handlers: rendererHandlers,
+  });
+  const a = renderer.viewport.sendState(viewport(640, 480));
+  await waitFor(() => carrier.maxActive === 1);
+  const b = renderer.viewport.sendState(viewport(800, 600));
+  const backToA = renderer.viewport.sendState(viewport(640, 480));
+  carrier.releaseSend();
+
+  const outcomes = await Promise.all([a, b, backToA]);
+  assert.ok(outcomes.every((outcome) => outcome.kind === "sent"));
+  assert.deepEqual(carrier.sent.map((text) => JSON.parse(text)), [viewport(640, 480)]);
+  await renderer.close();
+});
+
 test("blocked writer coalesces a resize burst to one in-flight and one pending latest", async () => {
   const carrier = createWriterCarrier();
   carrier.holdSend();
@@ -202,11 +383,17 @@ test("blocked writer coalesces a resize burst to one in-flight and one pending l
   for (let width = 1; width <= 1200; width += 1) {
     burst.push(renderer.viewport.sendState(viewport(width, 480)));
   }
+  const concurrent = renderer.presentation.sendEvent(presentationEvent());
   await tick();
   assert.equal(carrier.maxActive, 1);
   carrier.releaseSend();
-  const [firstResult, ...burstResults] = await Promise.all([first, ...burst]);
+  const [firstResult, concurrentResult, ...burstResults] = await Promise.all([
+    first,
+    concurrent,
+    ...burst,
+  ]);
   assert.equal(firstResult.kind, "sent");
+  assert.equal(concurrentResult.kind, "sent");
   assert.ok(burstResults.every((result) => result.kind === "sent"));
   const parsed = carrier.sent.map((text) => JSON.parse(text));
   const types = parsed.map((message) => message.type);
@@ -214,6 +401,7 @@ test("blocked writer coalesces a resize burst to one in-flight and one pending l
   const viewports = parsed.filter((message) => message.type === "viewport.state");
   assert.deepEqual(viewports[0], viewport(320, 240));
   assert.deepEqual(viewports[1], viewport(1200, 480));
+  assert.equal(types.filter((type) => type === "presentation.event").length, 1);
   await renderer.close();
 });
 
