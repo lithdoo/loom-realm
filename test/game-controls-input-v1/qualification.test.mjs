@@ -204,9 +204,11 @@ test("physical edges, baseline, and reconciliation stay distinct for the 14 cont
 });
 
 test("controls element publishes top-frame on its own duplicate key and keeps capture local", async () => {
-  const [element, capture] = await Promise.all([
+  const [element, capture, raw, layout] = await Promise.all([
     source("game-libs/game-common-controls/browser/device-input.browser.ts"),
     source("game-libs/game-common-controls/browser/controls-source.ts"),
+    source("game-libs/game-common-controls/browser/gamepad-source.ts"),
+    source("game-libs/game-common-controls/browser/gamepad-layout.ts"),
   ]);
   assert.match(element, /customElements\.define\("game-controls-input"/);
   assert.match(element, /registry\.get\("controls"\)/);
@@ -220,7 +222,13 @@ test("controls element publishes top-frame on its own duplicate key and keeps ca
   assert.match(capture, /queueMicrotask\(reconcile\)/);
   assert.match(capture, /event\.isTrusted !== true/);
   assert.match(capture, /event\.preventDefault\(\)/);
-  assert.match(capture, /mapping !== "standard"/);
+  assert.equal((capture.match(/supportsCanonicalGamepadButtons\(pad\)/g) ?? []).length, 1);
+  assert.equal((raw.match(/supportsCanonicalGamepadButtons\(pad\)/g) ?? []).length, 2, "raw baseline and poll must share the layout gate");
+  assert.equal(layout.includes('if (pad.mapping === "standard") return true;'), true);
+  assert.equal(layout.includes('pad.mapping === ""'), true);
+  assert.equal(layout.includes("Vendor:\\s*4001\\s+Product:\\s*0428"), true);
+  assert.equal(layout.includes("pad.buttons.length >= 17"), true);
+  assert.equal(layout.includes("pad.axes.length >= 4"), true);
   for (const token of ["HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement", "HTMLButtonElement", "HTMLAnchorElement", "isContentEditable"]) {
     assert.equal(capture.includes(token), true, token);
   }
