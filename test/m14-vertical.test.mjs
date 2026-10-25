@@ -365,6 +365,7 @@ test("map view clears full state and delayed same-resource decode paints only la
       }
       return [0, 0, 0, 0];
     };
+    let forceTimerFallbackOnce = true;
     const nextVisualPoll = () => new Promise((resolve) => {
       let settled = false;
       let frame = 0;
@@ -376,7 +377,8 @@ test("map view clears full state and delayed same-resource decode paints only la
         if (frame !== 0) cancelAnimationFrame(frame);
         resolve();
       };
-      frame = requestAnimationFrame(finish);
+      if (forceTimerFallbackOnce) forceTimerFallbackOnce = false;
+      else frame = requestAnimationFrame(finish);
       timer = setTimeout(finish, 50);
     });
     const waitForSample = async (read, accept, label) => {
@@ -406,6 +408,23 @@ test("map view clears full state and delayed same-resource decode paints only la
     return { stale, latest, cleared };
   }, { bytes: [...tileset], version: hash(tileset) }, 12_000, "bounded map paint evaluation");
   assert.equal(result.stale[3], 0); assert.deepEqual(result.latest, [40, 80, 220, 255]); assert.equal(result.cleared[3], 0);
+});
+
+test("browser evaluation watchdog bounds a non-settling page task", { timeout: 5_000 }, async (t) => {
+  const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await assert.rejects(
+    evaluateWithTimeout(
+      page,
+      async () => new Promise(() => {}),
+      undefined,
+      100,
+      "hung browser evaluation",
+    ),
+    /Timed out waiting for hung browser evaluation/,
+  );
+  await waitFor(() => page.isClosed(), "watchdog page close", 1_000);
 });
 
 test("map browser registration fails closed when an owned tag is already registered", { timeout: 15_000 }, async (t) => {
