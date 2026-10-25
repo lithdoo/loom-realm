@@ -137,7 +137,7 @@ test("invalid-only samples never synthesize zero, default, or null viewport.stat
   publisher.retire();
 });
 
-test("normalizeViewportSample floors finite fractions and rejects illegal samples", () => {
+test("normalizeViewportSample follows the trusted-source object boundary", () => {
   assert.deepEqual(normalizeViewportSample({ width: 640.9, height: 480.1 }), { width: 640, height: 480 });
   assert.equal(normalizeViewportSample(null), null);
   assert.equal(normalizeViewportSample("640x480"), null);
@@ -151,6 +151,50 @@ test("normalizeViewportSample floors finite fractions and rejects illegal sample
   assert.equal(normalizeViewportSample({ width: -1, height: 480 }), null);
   assert.equal(normalizeViewportSample({ width: 0.9, height: 480 }), null);
   assert.equal(normalizeViewportSample({ width: Number.MAX_SAFE_INTEGER + 1, height: 480 }), null);
+
+  const withSymbol = { width: 640, height: 480 };
+  withSymbol[Symbol("source metadata")] = true;
+  assert.deepEqual(normalizeViewportSample(withSymbol), { width: 640, height: 480 });
+
+  let getterHits = 0;
+  const withGetter = { height: 480 };
+  Object.defineProperty(withGetter, "width", {
+    get() {
+      getterHits += 1;
+      return 640.9;
+    },
+  });
+  assert.deepEqual(normalizeViewportSample(withGetter), { width: 640, height: 480 });
+  assert.equal(getterHits, 1);
+
+  const throwingGetter = { height: 480 };
+  Object.defineProperty(throwingGetter, "width", {
+    get() {
+      throw new Error("width getter boom");
+    },
+  });
+  assert.equal(normalizeViewportSample(throwingGetter), null);
+
+  const throwingGetProxy = new Proxy({ width: 640, height: 480 }, {
+    get(target, property, receiver) {
+      if (property === "width") throw new Error("width get trap boom");
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  assert.equal(normalizeViewportSample(throwingGetProxy), null);
+
+  let ownKeysHits = 0;
+  const throwingOwnKeysProxy = new Proxy({ width: 640, height: 480 }, {
+    ownKeys() {
+      ownKeysHits += 1;
+      throw new Error("ownKeys boom");
+    },
+  });
+  assert.deepEqual(normalizeViewportSample(throwingOwnKeysProxy), { width: 640, height: 480 });
+  assert.equal(ownKeysHits, 0);
+
+  const inherited = Object.create({ width: 640, height: 480 });
+  assert.deepEqual(normalizeViewportSample(inherited), { width: 640, height: 480 });
 });
 
 test("fresh Renderer does not republish the previous Renderer observation on a silent source", async () => {
@@ -309,4 +353,95 @@ test("fresh Data carrier republishes the current legal baseline", async () => {
   assert.deepEqual(acquisitions[2].received, [{ type: "viewport.state", width: 320, height: 240 }]);
   publisher.retire();
   await acquisitions[2].subsystem.terminal;
+});
+
+test("late completion from a retired Data generation cannot overwrite the current viewport", async () => {
+  const control = createMemoryCarrierPair();
+  const publisher = main(control, "a");
+  const oldPair = createMemoryCarrierPair();
+  const currentPair = createMemoryCarrierPair();
+  const oldReceived = [];
+  const currentReceived = [];
+  let sharedCurrent = null;
+  let releaseOldSend;
+  let oldSendStarted = false;
+  const oldSendGate = new Promise((resolve) => {
+    releaseOldSend = resolve;
+  });
+  const oldCarrier = {
+    closed: oldPair.right.closed,
+    async send(text) {
+      oldSendStarted = true;
+      await oldSendGate;
+      await oldPair.right.send(text);
+    },
+    messages: () => oldPair.right.messages(),
+    close: () => oldPair.right.close(),
+  };
+  const oldSubsystem = createSubsystemDataPeer({
+    binding: {
+      carrier: oldPair.left,
+      subsystemKey: "demo",
+      generation: 1,
+      dataProfile: "loomrealm.renderer-data/3",
+    },
+    handlers: {
+      onViewportState(message) {
+        oldReceived.push(message);
+        sharedCurrent = message;
+        return { kind: "accepted" };
+      },
+    },
+  });
+  const currentSubsystem = createSubsystemDataPeer({
+    binding: {
+      carrier: currentPair.left,
+      subsystemKey: "demo",
+      generation: 2,
+      dataProfile: "loomrealm.renderer-data/3",
+    },
+    handlers: {
+      onViewportState(message) {
+        currentReceived.push(message);
+        sharedCurrent = message;
+        return { kind: "accepted" };
+      },
+    },
+  });
+  let acquisitions = 0;
+  let emit;
+  const holder = createRendererControlHolder({
+    async acquire() {
+      acquisitions += 1;
+      return acquisitions === 1 ? oldCarrier : currentPair.right;
+    },
+  }, {
+    start(next) {
+      emit = next;
+      next({ width: 640, height: 480 });
+      return () => {};
+    },
+  });
+
+  await holder.connect({ carrier: control.right, rendererControlToken: "a" });
+  await waitFor(() => oldSendStarted, "old generation in-flight baseline");
+  publisher.publish(snapshot("a", 2, 2));
+  await waitFor(() => currentReceived.length === 1, "new generation baseline");
+  emit({ width: 800, height: 600 });
+  await waitFor(() => currentReceived.length === 2, "new generation resize");
+  assert.deepEqual(sharedCurrent, { type: "viewport.state", width: 800, height: 600 });
+
+  releaseOldSend();
+  await turn();
+  await turn();
+  assert.deepEqual(oldReceived, []);
+  assert.deepEqual(currentReceived, [
+    { type: "viewport.state", width: 640, height: 480 },
+    { type: "viewport.state", width: 800, height: 600 },
+  ]);
+  assert.deepEqual(sharedCurrent, { type: "viewport.state", width: 800, height: 600 });
+
+  publisher.retire();
+  await currentSubsystem.terminal;
+  await oldSubsystem.terminal;
 });

@@ -71,6 +71,68 @@ test("ViewportManager delivers null first, updates getter before callback, and i
   assert.deepEqual(after, []);
 });
 
+test("ViewportManager isolates hostile thenables and reentrant listener mutation", async () => {
+  const manager = new ViewportManager();
+  const healthy = [];
+  const nested = [];
+  const unhandled = [];
+  let thenGetterHits = 0;
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+
+  try {
+    manager.subscribe(() => {
+      throw new Error("sync boom");
+    });
+    manager.subscribe(() => Promise.reject(new Error("async boom")));
+    manager.subscribe(() => {
+      const thenable = {};
+      Object.defineProperty(thenable, "then", {
+        get() {
+          thenGetterHits += 1;
+          throw new Error("then getter boom");
+        },
+      });
+      return thenable;
+    });
+    manager.subscribe((value) => healthy.push(value && { ...value }));
+
+    let unsubscribeOuter = () => {};
+    unsubscribeOuter = manager.subscribe((value) => {
+      if (value?.width !== 640) return;
+      unsubscribeOuter();
+      manager.subscribe((next) => nested.push(next && { ...next }));
+    });
+
+    assert.doesNotThrow(() => {
+      manager.accept({ type: "viewport.state", width: 640, height: 480 });
+    });
+    manager.accept({ type: "viewport.state", width: 800, height: 600 });
+    await tick();
+    await tick();
+
+    assert.deepEqual(healthy, [
+      null,
+      { width: 640, height: 480 },
+      { width: 800, height: 600 },
+    ]);
+    assert.deepEqual(nested, [
+      { width: 640, height: 480 },
+      { width: 800, height: 600 },
+    ]);
+    assert.equal(thenGetterHits, 3);
+    assert.deepEqual(unhandled, []);
+
+    manager.terminate();
+    manager.accept({ type: "viewport.state", width: 1024, height: 768 });
+    assert.equal(healthy.length, 3);
+    assert.equal(nested.length, 2);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    manager.terminate();
+  }
+});
+
 test("ViewportManager ignores illegal internal samples without clearing retained current", () => {
   const manager = new ViewportManager();
   manager.accept({ type: "viewport.state", width: 640, height: 480 });
