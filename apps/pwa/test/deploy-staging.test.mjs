@@ -29,7 +29,7 @@ test("a failed candidate leaves the active release untouched", async () => {
     candidateUrl: "http://candidate/pwa/pokeman",
     officialUrl: "http://official/pwa/pokeman",
     releaseDir: (id) => `/engine/releases/${id}`,
-    portPublished: async () => false,
+    portPublished: async (port, project) => project === "official" && port === 8787,
     compose: async (...args) => { calls.push(args); throw new Error("candidate down"); },
     smoke: async () => { throw new Error("smoke failed"); },
   });
@@ -59,7 +59,7 @@ test("a failed official check restores the previous release", async () => {
     candidateUrl: "http://candidate/pwa/pokeman",
     officialUrl: "http://official/pwa/pokeman",
     releaseDir: (id) => `/engine/releases/${id}`,
-    portPublished: async () => false,
+    portPublished: async (port, project) => project === "official" && port === 8787,
     compose: async (project, releaseDir, port, action) => {
       calls.push({ project, releaseDir, port, action });
     },
@@ -76,6 +76,42 @@ test("a failed official check restores the previous release", async () => {
   assert.equal(calls.at(-1).project, "official");
   assert.equal(calls.at(-1).releaseDir, "/engine/releases/aaaaaaaaaaaaaaa");
   assert.equal(await readFile(join(root, "releases", "bbbbbbbbbbbbbbb", "marker.txt"), "utf8"), "new");
+});
+
+test("missing official port rolls back without publishing the new SHA", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loomrealm-deploy-"));
+  const source = join(root, "source");
+  await mkdir(source, { recursive: true });
+  await writeFile(join(source, "marker.txt"), "new", "utf8");
+  await mkdir(join(root, "deploy-state"), { recursive: true });
+  await writeFile(join(root, "deploy-state", "active.env"), "PWA_RELEASE_ID=aaaaaaaaaaaaaaa\n");
+  const checks = [];
+  const smokes = [];
+  const result = await deployRelease({
+    sha: "bbbbbbbbbbbbbbb",
+    dataRoot: root,
+    sourceDir: source,
+    candidatePort: 8790,
+    officialPort: 8787,
+    candidateProject: "candidate",
+    officialProject: "official",
+    candidateUrl: "candidate",
+    officialUrl: "official",
+    releaseDir: (id) => `/engine/releases/${id}`,
+    portPublished: async (port, project) => {
+      checks.push([port, project ?? null]);
+      return false;
+    },
+    compose: async () => {},
+    smoke: async (...args) => { smokes.push(args); },
+  });
+  assert.equal(result.status, "rolled-back");
+  assert.equal(await readActiveId(root), "aaaaaaaaaaaaaaa");
+  assert.deepEqual(checks, [[8790, null], [8787, "official"]]);
+  assert.deepEqual(smokes.map(([url, , releaseDir]) => [url, releaseDir]), [
+    ["candidate", "/engine/releases/bbbbbbbbbbbbbbb"],
+    ["official", "/engine/releases/aaaaaaaaaaaaaaa"],
+  ]);
 });
 
 test("successful deployment commits active SHA after official health and persists Nginx configuration", async () => {
@@ -95,7 +131,7 @@ test("successful deployment commits active SHA after official health and persist
     candidateUrl: "candidate",
     officialUrl: "official",
     releaseDir: (id) => `/engine/releases/${id}`,
-    portPublished: async () => false,
+    portPublished: async (port, project) => project === "official" && port === 8787,
     compose: async (project, releaseDir, port, action) => {
       seen.push(`${project}:${action[0]}`);
       if (action[0] === "up") {

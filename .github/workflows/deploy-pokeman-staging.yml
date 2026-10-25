@@ -2,7 +2,7 @@ name: Deploy PokeMan staging
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["PokeMan Staging Qualification"]
     types: [completed]
     branches: [main]
 
@@ -16,9 +16,11 @@ concurrency:
 jobs:
   deploy:
     if: >-
+      github.repository == 'lithdoo/loom-realm' &&
       github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.event == 'push'
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: [self-hosted, pwa]
     timeout-minutes: 45
     steps:
@@ -32,9 +34,42 @@ jobs:
       - uses: ./.github/actions/setup-workspace
         with:
           node-version: 24
+      - id: freshness
+        name: Skip obsolete main commit before build
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(git ls-remote origin refs/heads/main | cut -f1)"
+          test -n "$current"
+          if [ "$current" = "$EXPECTED_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping superseded staging commit: $EXPECTED_SHA (main: $current)"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build PokeMan staging bundle
+        if: steps.freshness.outputs.current == 'true'
         run: npm run build:staging -w @loomrealm/pwa
+      - id: publishability
+        name: Recheck main before publishing
+        if: steps.freshness.outputs.current == 'true'
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(git ls-remote origin refs/heads/main | cut -f1)"
+          test -n "$current"
+          if [ "$current" = "$EXPECTED_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping superseded staging publication: $EXPECTED_SHA (main: $current)"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish the checked commit
+        if: steps.publishability.outputs.current == 'true'
         env:
           GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
           PWA_DATA_ROOT: /run/desktop/mnt/host/f/lab-data/pwa

@@ -47,15 +47,19 @@ function run(command, args, env) {
   });
 }
 
-async function portPublished(port) {
+async function portPublished(port, project = null) {
   const output = await new Promise((resolve, reject) => {
-    const child = spawn("docker", ["ps", "--format", "{{.Ports}}"], { shell: false });
+    const args = ["ps", "--format", "{{.Ports}}"];
+    if (project !== null) {
+      args.push("--filter", `label=com.docker.compose.project=${project}`, "--filter", "label=com.docker.compose.service=web");
+    }
+    const child = spawn("docker", args, { shell: false });
     let text = "";
     child.stdout.on("data", (chunk) => { text += chunk; });
     child.once("error", reject);
     child.once("exit", (code) => code === 0 ? resolve(text) : reject(new Error("docker ps failed")));
   });
-  return output.split(/\r?\n/).some((line) => line.includes(`:${port}->`));
+  return output.split(/\r?\n/).some((line) => line.includes(`:${port}->80/tcp`));
 }
 
 /**
@@ -113,6 +117,9 @@ export async function deployRelease(options) {
   await options.compose(options.candidateProject, releaseDir, options.candidatePort, ["down"]);
   try {
     await options.compose(options.officialProject, releaseDir, options.officialPort, ["up", "-d", "--force-recreate", "--wait"]);
+    if (!(await options.portPublished(options.officialPort, options.officialProject))) {
+      throw new Error(`Official HTTP port ${options.officialPort} is not published by the expected Web container`);
+    }
     await options.smoke(options.officialUrl, options.officialProject, releaseDir, options.officialPort);
     // Commit the new active identity only after the official endpoint passes.
     await writeActiveId(options.dataRoot, options.sha);
