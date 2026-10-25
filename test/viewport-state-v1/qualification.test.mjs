@@ -3,12 +3,12 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import {
   createRendererDataPeer,
   createSubsystemDataPeer,
-  RENDERER_DATA_PROFILE_V1,
+  RENDERER_DATA_PROFILE_V3,
 } from "../../packages/data/dist/index.js";
 import { ViewportManager } from "../../packages/subsystem/dist/internal/viewport-manager.js";
 import {
   createMainRendererControlPeer,
-  prepareRendererHelloResultV1,
+  prepareRendererHelloResultV2,
 } from "@loomrealm/renderer-control";
 import { createRendererControlHolder } from "../../packages/renderer/dist/index.js";
 import { createDesktopRendererViewportSource } from "../../apps/desktop/dist/renderer-viewport-source.js";
@@ -19,16 +19,12 @@ const binding = (carrier, generation = 1) => ({
   carrier,
   subsystemKey: "demo",
   generation,
-  dataProfile: RENDERER_DATA_PROFILE_V1,
+  dataProfile: RENDERER_DATA_PROFILE_V3,
 });
 const subsystemHandlers = {
-  onInputState: accepted,
-  onInputEvent: accepted,
-  onInputReset: accepted,
   onViewportState: accepted,
 };
 const rendererHandlers = {
-  onInputInterest: accepted,
   onRenderDomains: accepted,
   onRenderSnapshot: accepted,
   onRenderPatch: accepted,
@@ -74,19 +70,13 @@ function createWriterCarrier() {
 const authority = {
   subsystemKey: "demo",
   generation: 1,
-  dataProfile: RENDERER_DATA_PROFILE_V1,
+  dataProfile: RENDERER_DATA_PROFILE_V3,
 };
-const inputTarget = Object.freeze({
-  subsystemKey: "demo",
-  frameId: "root",
-  activationId: "a1",
-});
 const snapshot = (sessionId, revision, generation = 1) => ({
   sessionId,
   revision,
   runtimes: [{ subsystemKey: "demo", state: "ready" }],
   stack: [{ frameId: "root", subsystemKey: "demo", lifecycle: "active", activationId: "a1" }],
-  inputTarget,
   dataAuthorities: [{ ...authority, generation }],
 });
 
@@ -98,7 +88,7 @@ function main(pair, sessionId) {
       return {
         kind: "accepted",
         snapshot: initial,
-        preparedHelloText: prepareRendererHelloResultV1(initial),
+        preparedHelloText: prepareRendererHelloResultV2(initial),
       };
     },
   });
@@ -308,7 +298,7 @@ qualify("retained-api", "Runtime-scoped readonly Viewport callback contract", as
   });
 });
 
-qualify("bounded-publisher", "blocked writer coalesces viewport latest without starving Input", async ({ prove }) => {
+qualify("bounded-publisher", "blocked writer coalesces viewport latest", async ({ prove }) => {
   await prove([
     "blocked-writer-one-inflight-one-pending",
     "resize-burst-gt-1024-latest-converges",
@@ -326,22 +316,15 @@ qualify("bounded-publisher", "blocked writer coalesces viewport latest without s
     for (let width = 1; width <= 1200; width += 1) {
       burst.push(renderer.viewport.sendState(viewport(width, 480)));
     }
-    const reset = renderer.input.sendReset({
-      type: "input.reset",
-      frameId: "f1",
-      activationId: "a1",
-    });
     await tick();
     assert.equal(carrier.maxActive, 1);
     carrier.releaseSend();
-    const [firstResult, resetResult, ...burstResults] = await Promise.all([first, reset, ...burst]);
+    const [firstResult, ...burstResults] = await Promise.all([first, ...burst]);
     assert.equal(firstResult.kind, "sent");
-    assert.equal(resetResult.kind, "sent");
     assert.ok(burstResults.every((result) => result.kind === "sent"));
     const parsed = carrier.sent.map((text) => JSON.parse(text));
     const types = parsed.map((message) => message.type);
     assert.equal(types.filter((type) => type === "viewport.state").length, 2);
-    assert.equal(types.filter((type) => type === "input.reset").length, 1);
     const viewports = parsed.filter((message) => message.type === "viewport.state");
     assert.deepEqual(viewports[0], viewport(320, 240));
     assert.deepEqual(viewports[1], viewport(1200, 480));
@@ -369,7 +352,7 @@ qualify("lifetime", "fresh carrier, fresh Renderer, and terminal fencing", async
         });
         return pair.right;
       },
-    }, undefined, {
+    }, {
       start(emit) {
         emit({ width: 0, height: 0 });
         return () => {};
@@ -401,7 +384,7 @@ qualify("lifetime", "fresh carrier, fresh Renderer, and terminal fencing", async
         });
         return pair.right;
       },
-    }, undefined, {
+    }, {
       start(emit) {
         emit({ width: 640.9, height: 480.4 });
         return () => {};
@@ -450,7 +433,7 @@ qualify("lifetime", "fresh carrier, fresh Renderer, and terminal fencing", async
         });
         return pair.right;
       },
-    }, undefined, {
+    }, {
       start(emit) {
         starts += 1;
         emits.push(emit);
@@ -481,7 +464,7 @@ qualify("lifetime", "fresh carrier, fresh Renderer, and terminal fencing", async
   });
 });
 
-qualify("input-frame-independence", "Viewport does not mint InputTarget or masquerade as custom state", async ({ prove }) => {
+qualify("input-frame-independence", "Viewport remains independent from retired Framework input", async ({ prove }) => {
   await prove("viewport-does-not-mutate-input-target", async () => {
     const control = createMemoryCarrierPair();
     const publisher = main(control, "a");
@@ -494,7 +477,7 @@ qualify("input-frame-independence", "Viewport does not mint InputTarget or masqu
         });
         return pair.right;
       },
-    }, undefined, {
+    }, {
       start(emit) {
         emit({ width: 800, height: 600 });
         return () => {};
@@ -502,23 +485,16 @@ qualify("input-frame-independence", "Viewport does not mint InputTarget or masqu
     });
     await holder.connect({ carrier: control.right, rendererControlToken: "a" });
     await tick();
-    assert.deepEqual(holder.current().snapshot.inputTarget, inputTarget);
+    assert.equal("inputTarget" in holder.current().snapshot, false);
     publisher.retire();
   });
 
   await prove("viewport-is-not-x-star-state", async () => {
     const pair = createMemoryCarrierPair();
-    const input = [];
     const viewports = [];
     const subsystem = createSubsystemDataPeer({
       binding: binding(pair.left),
       handlers: {
-        onInputState(message) {
-          input.push(message);
-          return accepted();
-        },
-        onInputEvent: accepted,
-        onInputReset: accepted,
         onViewportState(message) {
           viewports.push(message);
           return accepted();
@@ -531,7 +507,6 @@ qualify("input-frame-independence", "Viewport does not mint InputTarget or masqu
     });
     await renderer.viewport.sendState(viewport(400, 300));
     await tick();
-    assert.deepEqual(input, []);
     assert.deepEqual(viewports, [viewport(400, 300)]);
     await renderer.close();
     await subsystem.terminal;

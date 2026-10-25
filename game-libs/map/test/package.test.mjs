@@ -18,3 +18,11 @@ test("classic browser artifact contains no module syntax", async () => {
   assert.match(source, /lr-map-view/);
   assert.match(source, /lr-map-sprite/);
 });
+
+test("Map package and Runtime have no physical or unified controls dependency", async () => {
+  const metadata = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(metadata.scripts.prebuild, undefined);
+  assert.equal(metadata.dependencies["@loomrealm-game/common-controls"], undefined);
+  const source = await readFile(new URL("../src/runtime.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /keyboard\.|gamepad\.|controls\.(?:state|event)|game-(?:keyboard|gamepad|pointer)-input|createFreshDeviceStateTracker|SessionEvent/);
+});

@@ -1,13 +1,55 @@
-# Renderer Data Application Profile v2 — Superseded Proposal
+# Renderer Data Application Profile v2
 
-> 状态：**Superseded / Historical only / NOT a current contract / Never implemented or released**  
-> 原候选 identity：`loomrealm.renderer-data/2`（**不得 advertise、mint、install 或测试为 current**）  
-> Superseded by：[ADR0037：首次发布前直接修正 `/1`](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
-> Current SSOT：[Renderer Data Profile v1](./renderer-data-profile-v1.md) · [Viewport State v1](./viewport-state-v1.md) · [Profile v1 Conformance](./renderer-data-profile-conformance-v1.md)  
-> 日期：2026-09-16
+> 状态：Active / Normative / Frozen
+> Identity：`loomrealm.renderer-data/2`
+> 组成：[Render Update v1](./render-update-v1.md) + [Viewport State v1](./viewport-state-v1.md)
+> Authority：[Main ⇄ Renderer Control v2](./main-renderer-control-v2.md)
+> 最近复核：2026-10-21
 
-本文件仅保存「曾考虑 `/2 = Connection1 + Input1 + Render1 + Viewport1`」这一设计演进的导航事实。前提是首次发布前没有真实外部 compatibility obligation；该前提仍须在 Docs Freeze 前核实并归档，如不成立必须停止 direct reset 并另行制定迁移决策。
+Profile v2 是移除 Framework User Input 后的 Renderer ⇄ Subsystem Data 应用层配置。它保留 Data Connection v1 的单 reader、单 writer、终止与 fresh-carrier 语义，但不再包含 `input.*` 子协议。
 
-原方案为避免改动已经 Frozen 的三-child `/1`，为 Viewport 新建完整 `/2` identity，并设计 Main uniform `/2` rollout、Profile v1 compatibility、dual conformance。随后业务边界 Review证实 uniform rollout是产品策略，不是 profile protocol语义；仓库 [document governance](../00-overview/document-governance.md)要求没有真实兼容义务时直接修正 current first version，不制造 fake v2 或 dual parser。因此 ADR0037 撤销**必须引入 Profile v2**的结论，保留 Viewport 正交 Input、readonly Runtime retention、bounded publication、single reader/writer与 fresh carrier semantics。具体 current 规则全部以 `/1` 正式契约为准。
+## 1. Closed message set
 
-**不得将本历史页作为规范、实现工作项、qualification owner或恢复 `/2` 路径的依据。** 旧段落的详细设计留在 Git history/原 review subject `d0ab971d4df8626973afe0f2274b4e6a643d2c1c`。若真实下游 compatibility 被发现，另立 ADR，不自动复活此草案。
+Subsystem → Renderer：
+
+```text
+render.domains
+render.snapshot
+render.patch
+render.event
+```
+
+Renderer → Subsystem：
+
+```text
+viewport.state
+```
+
+其他 `type`，包括 `input.interest`、`input.state`、`input.event` 和 `input.reset`，均为 Profile protocol-fatal。实现不得通过兼容分支接受 `/1` input 消息。
+
+## 2. Binding
+
+```ts
+interface DataCurrentBindingV2 {
+  readonly carrier: MessageCarrier;
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly dataProfile: "loomrealm.renderer-data/2";
+}
+```
+
+绑定必须在占用 carrier reader 前验证。`subsystemKey`、`generation` 和 profile identity 由可信平台 authority 提供，业务消息不能覆盖。
+
+## 3. Ordering and recovery
+
+- 一个 peer 只占用一个 logical carrier reader，并通过一个共享 writer 串行发送。
+- Render 的 ordering、baseline、patch continuity 和 event barrier 继续由 Render Update v1 拥有。
+- Viewport 的合法样本、coalescing 与 fresh-carrier baseline 继续由 Viewport State v1 拥有。
+- Render 与 Viewport 相互独立；Profile 不增加跨子协议 barrier。
+- carrier 终止后不得继承 reader、writer、Render cursor 或 Viewport cursor。
+
+## 4. Ownership boundary
+
+Keyboard、Pointer、Gamepad、Input Interest、InputTarget、Frame/Activation 输入租约均不属于 Profile v2。设备输入由 [Game Common Controls Input v1](./game-common-controls-input-v1.md) 通过 Web Presentation Event 和 Session Events 发布。
+
+Profile `/1` 与 User Input v1 文档保留为历史冻结契约；当前实现只 advertise `/2`，不进行 dual-mode negotiation。

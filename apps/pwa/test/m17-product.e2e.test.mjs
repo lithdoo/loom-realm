@@ -17,7 +17,10 @@ async function realMapFixture() {
     gameEntryText: await text(example, "game.json"),
     launchManifestText: await text(example, "launch.hostra.json"),
     presentation: JSON.parse(await text(example, "presentation.json")),
-    executable: await text(repository, "apps", "pwa", "dist", "qualification", "map-subsystem.mjs"),
+    executables: [
+      { logicalModule: "subsystems/base.mjs", source: await text(repository, "apps", "pwa", "dist", "qualification", "base-subsystem.mjs") },
+      { logicalModule: "subsystems/map.mjs", source: await text(repository, "apps", "pwa", "dist", "qualification", "map-subsystem.mjs") },
+    ],
     content: [
       { kind: "record", namespace: "struct.Map", key: "1", mime: "application/json; charset=utf-8", encoding: "text", body: await text(fsdb, "[struct]Map", "1.json") },
       { kind: "record", namespace: "struct.MapTransfer", key: "1", mime: "application/json; charset=utf-8", encoding: "text", body: await text(fsdb, "[struct]MapTransfer", "1.json") },
@@ -26,6 +29,7 @@ async function realMapFixture() {
       { kind: "resource", namespace: "resource.Graphics", key: "Characters/m14_player", mime: "image/png", encoding: "base64", body: await binary(fsdb, "[resource]Graphics", "Characters", "m14_player.png") },
       { kind: "resource", namespace: "resource.Graphics", key: "Characters/m14_npc", mime: "image/png", encoding: "base64", body: await binary(fsdb, "[resource]Graphics", "Characters", "m14_npc.png") },
       { kind: "resource", namespace: "resource.Graphics", key: "Tilesets/m14_tileset", mime: "image/png", encoding: "base64", body: await binary(fsdb, "[resource]Graphics", "Tilesets", "m14_tileset.png") },
+      { kind: "resource", namespace: "resource.Presentation", key: "controls/device-input.browser.js", mime: "text/javascript; charset=utf-8", encoding: "text", body: await text(fsdb, "[resource]Presentation", "controls", "device-input.browser.js.js") },
       { kind: "resource", namespace: "resource.Presentation", key: "map/map.browser.js", mime: "text/javascript; charset=utf-8", encoding: "text", body: await text(fsdb, "[resource]Presentation", "map", "map.browser.js.js") },
       { kind: "resource", namespace: "resource.Presentation", key: "map/map.css", mime: "text/css; charset=utf-8", encoding: "text", body: await text(fsdb, "[resource]Presentation", "map", "map.css.css") },
       { kind: "resource", namespace: "resource.Presentation", key: "essentials/page.css", mime: "text/css; charset=utf-8", encoding: "text", body: await text(fsdb, "[resource]Presentation", "essentials", "page.css.css") },
@@ -86,7 +90,7 @@ test("M17 installs and runs the existing essentials map game-lib artifact throug
           mime: entry.mime,
           body: new Blob([decode(entry)], { type: entry.mime }),
         })),
-        executables: [{ logicalModule: "subsystems/map.mjs", mime: "text/javascript", body: new Blob([value.executable], { type: "text/javascript" }) }],
+        executables: value.executables.map((entry) => ({ logicalModule: entry.logicalModule, mime: "text/javascript", body: new Blob([entry.source], { type: "text/javascript" }) })),
       });
       await window.__loomrealmPwaQualification.launch(installed.installationId, value.presentation);
       return installed.installationId;
@@ -113,6 +117,8 @@ test("M17 installs and runs the existing essentials map game-lib artifact throug
       renderer: "installed",
       runtimeCreated: true,
     });
+    assert.equal(await page.locator("game-controls-input").count(), 1);
+    assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
     await page.keyboard.press("ArrowRight");
     await page.waitForFunction((x) => document.querySelector("lr-map-sprite")?._latestData?.x !== x, initial.player.x, { timeout: 5_000 });
     const moved = await page.evaluate(() => {
@@ -128,6 +134,13 @@ test("M17 installs and runs the existing essentials map game-lib artifact throug
     assert.match(executable.mime, /^text\/javascript/);
     assert.match(executable.source, /RPGMapBuilder/);
     assert.doesNotMatch(executable.source, /from\s+["']@loomrealm/);
+    const baseExecutable = await page.evaluate(async (id) => {
+      const response = await fetch(`/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/base.mjs`);
+      return { status: response.status, mime: response.headers.get("content-type"), source: await response.text() };
+    }, installationId);
+    assert.equal(baseExecutable.status, 200);
+    assert.match(baseExecutable.mime, /^text\/javascript/);
+    assert.match(baseExecutable.source, /game-controls-input/);
 
     // A fresh Session in the same Window (the BFCache shape) must reuse the
     // document bootstrap capability rather than evaluating one-shot custom
@@ -138,5 +151,7 @@ test("M17 installs and runs the existing essentials map game-lib artifact throug
     await page.locator("lr-map-view").waitFor({ state: "attached", timeout: 20_000 });
     await page.waitForFunction(() => document.querySelector("lr-map-view")?.dataset.mapVisualState === "ready", null, { timeout: 20_000 });
     assert.equal(await page.evaluate(() => window.__loomrealmPwa.failure), null);
+    assert.equal(await page.locator("game-controls-input").count(), 1);
+    assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
   } finally { await product.close(); }
 });

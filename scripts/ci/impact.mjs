@@ -170,14 +170,27 @@ export function classifyPaths(paths) {
       continue;
     }
 
-    if (path.startsWith("game-libs/rpg-dialogue/") || path.startsWith("test/rpg-dialogue-v0/")) {
+    if (
+      path.startsWith("game-libs/rpg-dialogue/")
+      || path.startsWith("test/rpg-dialogue-v0/")
+      || path.startsWith("test/rpg-dialogue-v1/")
+    ) {
       impact.code = true;
       impact.presentation = true;
       impact.dialogue = true;
       continue;
     }
 
-    if (path.startsWith("test/user-input-v1/") || path.startsWith("test/render-update-v1/")) {
+    if (path.startsWith("test/game-control-ports-v1/")) {
+      impact.code = true;
+      impact.presentation = true;
+      impact.map = true;
+      impact.pwa = true;
+      impact.dialogue = true;
+      continue;
+    }
+
+    if (path.startsWith("test/game-common-controls-input-v1/") || path.startsWith("test/render-update-v1/")) {
       impact.code = true;
       continue;
     }

@@ -1,17 +1,17 @@
 import type { MessageCarrier } from "@loomrealm/foundation";
 import type {
-  DataBindingViewV1,
-  DataCurrentBindingV1,
+  DataBindingViewV3,
+  DataCurrentBindingV3,
   DataInboundDisposition,
   DataSendOutcome,
   DataTerminal,
-  RendererDataMessageV1,
+  RendererDataMessageV3,
 } from "./model.js";
 import { DataProtocolError } from "./validation-common.js";
 import { decodeForRole, encodeForRole, protocolFamilyOfType, type DataRole } from "./profile-codec.js";
 
 const MAX_PENDING_SENDS = 1024;
-type Handler = (message: RendererDataMessageV1) => DataInboundDisposition | Promise<DataInboundDisposition>;
+type Handler = (message: RendererDataMessageV3) => DataInboundDisposition | Promise<DataInboundDisposition>;
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -27,12 +27,12 @@ function validateCarrier(carrier: MessageCarrier): void {
   ) throw new TypeError("Invalid carrier");
 }
 
-export function validateBinding(binding: DataCurrentBindingV1): Readonly<DataBindingViewV1> {
+export function validateBinding(binding: DataCurrentBindingV3): Readonly<DataBindingViewV3> {
   if (binding === null || typeof binding !== "object") throw new TypeError("Invalid binding");
   validateCarrier(binding.carrier);
   if (typeof binding.subsystemKey !== "string" || binding.subsystemKey.length === 0) throw new TypeError("Invalid subsystemKey");
   if (!Number.isSafeInteger(binding.generation) || binding.generation <= 0) throw new TypeError("Invalid generation");
-  if (binding.dataProfile !== "loomrealm.renderer-data/1") throw new TypeError("Invalid dataProfile");
+  if (binding.dataProfile !== "loomrealm.renderer-data/3") throw new TypeError("Invalid dataProfile");
   return freeze({ subsystemKey: binding.subsystemKey, generation: binding.generation, dataProfile: binding.dataProfile });
 }
 
@@ -68,7 +68,7 @@ export class DataRuntime {
     return this.terminalValue;
   }
 
-  async send(message: RendererDataMessageV1): Promise<DataSendOutcome> {
+  async send(message: RendererDataMessageV3): Promise<DataSendOutcome> {
     if (this.terminalValue) return freeze({ kind: "terminal", terminal: this.terminalValue });
     let text: string;
     try { text = encodeForRole(message, this.role); }
@@ -112,7 +112,7 @@ export class DataRuntime {
     try {
       for await (const raw of this.carrier.messages()) {
         if (this.terminalValue) break;
-        let message: RendererDataMessageV1;
+        let message: RendererDataMessageV3;
         try { message = decodeForRole(raw, this.role); }
         catch (cause) {
           if (cause instanceof DataProtocolError) this.commit({ kind: "protocol-fatal", protocol: cause.protocol, cause });

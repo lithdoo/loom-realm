@@ -6,12 +6,12 @@ import type {
 } from "@loomrealm/platform-ports";
 import {
   createMainRendererControlPeer,
-  prepareRendererHelloResultV1,
+  prepareRendererHelloResultV2,
   type MainRendererControlPeer,
   type MainRendererControlHelloAcceptance,
-  type RendererAuthoritySnapshotV1,
-  type RendererFrameLifecycleV1,
-  type RendererRuntimeLifecycleV1,
+  type RendererAuthoritySnapshotV2,
+  type RendererFrameLifecycleV2,
+  type RendererRuntimeLifecycleV2,
 } from "@loomrealm/renderer-control";
 import {
   createMainRuntimeControlPeer,
@@ -48,7 +48,7 @@ import {
   validProtocolString,
 } from "./primitives.js";
 
-const RENDERER_DATA_PROFILE_V1 = "loomrealm.renderer-data/1" as const;
+const RENDERER_DATA_PROFILE_V3 = "loomrealm.renderer-data/3" as const;
 
 type RuntimePhase =
   | "starting"
@@ -93,12 +93,6 @@ interface FrameRecord {
   outcome: ControlFrameOutcome | null;
   contextKnown: boolean;
   closeAttempted: boolean;
-}
-
-interface InputTarget {
-  readonly subsystemKey: string;
-  readonly frameId: string;
-  readonly activationId: string;
 }
 
 interface RendererCandidateAttempt {
@@ -293,7 +287,7 @@ class MainSessionRuntime {
   private readonly sessionId: string;
 
   private rendererRevision = 1;
-  private rendererSnapshot!: RendererAuthoritySnapshotV1;
+  private rendererSnapshot!: RendererAuthoritySnapshotV2;
   private rendererPayloadText = "";
   private currentRendererPeer: MainRendererControlPeer | null = null;
   private currentRendererControlToken: string | null = null;
@@ -821,15 +815,6 @@ class MainSessionRuntime {
     if (frame.currentActivationId !== activationId) {
       return { code: "ACTIVATION_MISMATCH" };
     }
-    const target = this.currentInputTarget();
-    if (
-      target === null ||
-      target.frameId !== frame.id ||
-      target.activationId !== activationId ||
-      target.subsystemKey !== source.key
-    ) {
-      return { code: "FRAME_STACK_MISMATCH" };
-    }
     return null;
   }
 
@@ -1320,10 +1305,10 @@ class MainSessionRuntime {
     return false;
   }
 
-  private projectRendererSnapshot(): RendererAuthoritySnapshotV1 {
+  private projectRendererSnapshot(): RendererAuthoritySnapshotV2 {
     const runtimes = this.bootstrap.subsystemKeys.map((key) => {
       const record = this.runtimes.get(key);
-      let state: RendererRuntimeLifecycleV1;
+      let state: RendererRuntimeLifecycleV2;
       if (record === undefined) state = "declared";
       else if (record.failure !== null) state = "failed";
       else if (record.physicallyTerminated && record.expectedTermination) state = "stopped";
@@ -1335,12 +1320,11 @@ class MainSessionRuntime {
       .map((frame) => Object.freeze({
         frameId: frame.id,
         subsystemKey: frame.subsystemKey,
-        lifecycle: frame.lifecycle as RendererFrameLifecycleV1,
+        lifecycle: frame.lifecycle as RendererFrameLifecycleV2,
         ...(frame.lifecycle === "active" && frame.currentActivationId !== null
           ? { activationId: frame.currentActivationId }
           : {}),
       }));
-    const target = this.currentInputTarget();
     const dataAuthorities = this.bootstrap.subsystemKeys.flatMap((subsystemKey) => {
       const record = this.runtimes.get(subsystemKey);
       if (record === undefined || record.failure !== null || record.phase !== "ready") {
@@ -1349,7 +1333,7 @@ class MainSessionRuntime {
       return [Object.freeze({
         subsystemKey,
         generation: 1,
-        dataProfile: RENDERER_DATA_PROFILE_V1,
+        dataProfile: RENDERER_DATA_PROFILE_V3,
       })];
     });
     return Object.freeze({
@@ -1357,16 +1341,14 @@ class MainSessionRuntime {
       revision: this.rendererRevision,
       runtimes: Object.freeze(runtimes),
       stack: Object.freeze(stack),
-      inputTarget: target,
       dataAuthorities: Object.freeze(dataAuthorities),
     });
   }
 
-  private rendererPayload(snapshot: RendererAuthoritySnapshotV1): string {
+  private rendererPayload(snapshot: RendererAuthoritySnapshotV2): string {
     return JSON.stringify({
       runtimes: snapshot.runtimes,
       stack: snapshot.stack,
-      inputTarget: snapshot.inputTarget,
       dataAuthorities: snapshot.dataAuthorities,
     });
   }
@@ -1403,7 +1385,7 @@ class MainSessionRuntime {
       entries.push(Object.freeze({
         subsystemKey,
         generation: 1,
-        dataProfile: RENDERER_DATA_PROFILE_V1,
+        dataProfile: RENDERER_DATA_PROFILE_V3,
         runtime: record.hosted,
       }));
     }
@@ -1512,7 +1494,7 @@ class MainSessionRuntime {
     const snapshot = this.rendererSnapshot;
     let preparedHelloText: string;
     try {
-      preparedHelloText = prepareRendererHelloResultV1(snapshot);
+      preparedHelloText = prepareRendererHelloResultV2(snapshot);
     } catch {
       return Object.freeze({ kind: "rejected", code: "PROTOCOL_STATE_ERROR" });
     }
@@ -1552,22 +1534,6 @@ class MainSessionRuntime {
     this.currentRendererPeer = null;
     this.currentRendererControlToken = null;
     current?.retire();
-  }
-
-  private currentInputTarget(): InputTarget | null {
-    const top = this.stack.at(-1);
-    if (
-      top === undefined ||
-      top.lifecycle !== "active" ||
-      top.currentActivationId === null
-    ) {
-      return null;
-    }
-    return Object.freeze({
-      subsystemKey: top.subsystemKey,
-      frameId: top.id,
-      activationId: top.currentActivationId,
-    });
   }
 
   private runtimeReady(record: RuntimeRecord): boolean {

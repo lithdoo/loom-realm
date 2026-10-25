@@ -48,6 +48,14 @@ export interface PwaRevokeRendererDataV1 {
   readonly connectionId: string;
 }
 
+export interface PwaInstallPresentationEventsV1 {
+  readonly formatVersion: 1;
+  readonly type: "presentation-events/install";
+  readonly requestId: string;
+  readonly sessionEpoch: string;
+  readonly port: MessagePort;
+}
+
 export interface PwaWindowBridgeResultV1 {
   readonly formatVersion: 1;
   readonly type: "install/result";
@@ -198,6 +206,27 @@ export function parseRevokeRendererData(value: unknown, epoch: string): PwaRevok
   const item = object(value, ["formatVersion", "type", "requestId", "sessionEpoch", "subsystemKey", "generation", "dataProfile", "connectionId"], "Renderer Data revoke");
   if (item.type !== "renderer-data/revoke" || item.formatVersion !== 1 || item.sessionEpoch !== epoch || !Number.isSafeInteger(item.generation) || Number(item.generation) <= 0) throw new TypeError("Stale Renderer Data revoke");
   return Object.freeze({ formatVersion: 1, type: item.type, requestId: text(item.requestId, "requestId"), sessionEpoch: epoch, subsystemKey: text(item.subsystemKey, "subsystemKey"), generation: item.generation as number, dataProfile: text(item.dataProfile, "dataProfile"), connectionId: text(item.connectionId, "connectionId") });
+}
+
+export function parseInstallPresentationEvents(
+  value: unknown,
+  epoch: string,
+): PwaInstallPresentationEventsV1 {
+  const item = object(
+    value,
+    ["formatVersion", "type", "requestId", "sessionEpoch", "port"],
+    "Presentation Events install",
+  );
+  if (item.type !== "presentation-events/install" || item.formatVersion !== 1 || item.sessionEpoch !== epoch) {
+    throw new TypeError("Stale Presentation Events install");
+  }
+  return Object.freeze({
+    formatVersion: 1,
+    type: "presentation-events/install",
+    requestId: text(item.requestId, "requestId"),
+    sessionEpoch: epoch,
+    port: port(item.port),
+  });
 }
 
 export function parseWindowBridgeResult(value: unknown, epoch: string, requestId: string): PwaWindowBridgeResultV1 {

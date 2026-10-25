@@ -11,13 +11,14 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { parseGameEntryV1 } from "@loomrealm/game-package";
 import { runMain } from "@loomrealm/main";
 import { createSharedStateClient } from "@loomrealm/shared-state";
-import { createSessionEventClient } from "@loomrealm/session-events";
+import { createSessionEventClient, createSessionEventHub } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
 import { runSubsystem } from "@loomrealm/subsystem/host";
 import { RPGMapBuilder } from "@loomrealm-game/map";
 import { attachRendererPresentation } from "../packages/renderer/dist/internal/presentation-seam.js";
 import { prepareExamplePresentation } from "../examples/essentials-v21.1/test/prepare.mjs";
+import baseSubsystem from "../examples/essentials-v21.1/subsystems/base.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const exampleRoot = path.join(root, "examples", "essentials-v21.1");
@@ -25,14 +26,24 @@ const scheduler = Object.freeze({ schedule(ms, callback) { const timer = setTime
 const runtimePolicy = Object.freeze({ scheduler, helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 100 });
 const mainPolicy = Object.freeze({ runtimeBootstrapDeadlineMs: 5_000, frameDeadlineMs: 5_000, shutdownDeadlineMs: 5_000, terminationDeadlineMs: 1_000 });
 const hash = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+let activeMapControls;
 const mapSubsystem = defineSubsystem((scope) => ({
-  frame(frame) {
+  async frame(frame) {
     const input = frame.params;
     const map = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
-    map.onMapEntering((context) => { context.setNPC([]); });
-    return map.run({ mapId: input.mapId, x: input.x, y: input.y });
+    map.onMapEntering((context) => {
+      context.setNPC([{ instanceId: "guide", npcId: "guide", x: 14, y: 8, direction: 4, pattern: 2 }]);
+    });
+    activeMapControls = map.controls;
+    try { return await map.run({ mapId: input.mapId, x: input.x, y: input.y }); }
+    finally { activeMapControls = undefined; }
   },
 }));
+const subsystemDefinitions = Object.freeze({ base: baseSubsystem, map: mapSubsystem });
+
+function mapRoot(view) {
+  return view?.subsystems.find(({ subsystemKey }) => subsystemKey === "map")?.domains[0]?.roots[0];
+}
 
 function executablePath() {
   return [process.env.LOOMREALM_CHROMIUM_PATH, "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean).find(existsSync);
@@ -61,27 +72,50 @@ async function waitFor(predicate, label, timeout = 10_000) {
   }
 }
 
+async function evaluateWithTimeout(page, callback, argument, timeoutMs, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      page.evaluate(callback, argument),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`Timed out waiting for ${label}`));
+          void page.close({ runBeforeUnload: false }).catch(() => {});
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 function createDataHub() {
-  const waiting = [];
-  const pairs = [];
-  const take = () => {
-    while (waiting.length && pairs.length) waiting.shift().resolve(pairs.shift());
+  const waiting = new Map();
+  const pairs = new Map();
+  const take = (subsystemKey) => {
+    const pending = waiting.get(subsystemKey) ?? [];
+    const available = pairs.get(subsystemKey) ?? [];
+    while (pending.length && available.length) pending.shift().resolve(available.shift());
   };
   return {
-    subsystemBinding: Object.freeze({
+    subsystemBinding(subsystemKey) { return Object.freeze({
       acquire(signal) {
         if (signal.aborted) return Promise.reject(signal.reason);
         return new Promise((resolve, reject) => {
           const request = { resolve, reject };
-          waiting.push(request); take();
-          signal.addEventListener("abort", () => { const index = waiting.indexOf(request); if (index >= 0) waiting.splice(index, 1); reject(signal.reason); }, { once: true });
+          const pending = waiting.get(subsystemKey) ?? [];
+          waiting.set(subsystemKey, pending);
+          pending.push(request); take(subsystemKey);
+          signal.addEventListener("abort", () => { const index = pending.indexOf(request); if (index >= 0) pending.splice(index, 1); reject(signal.reason); }, { once: true });
         });
       },
-    }),
+    }); },
     rendererBinding: Object.freeze({
-      acquire(_key, generation, dataProfile) {
+      acquire(subsystemKey, generation, dataProfile) {
         const pair = createMemoryCarrierPair();
-        pairs.push({ carrier: pair.left, generation, dataProfile }); take();
+        const available = pairs.get(subsystemKey) ?? [];
+        pairs.set(subsystemKey, available);
+        available.push({ carrier: pair.left, generation, dataProfile }); take(subsystemKey);
         return Promise.resolve(pair.right);
       },
     }),
@@ -122,13 +156,15 @@ async function fixtureServer(t, resources) {
   return { origin, presentation };
 }
 
-test("M14 checked-in game traverses Main, Input, Render, Content and real Chromium", { timeout: 30_000 }, async (t) => {
+test("M14 checked-in game traverses Main, Presentation Events, Render, Content and real Chromium", { timeout: 30_000 }, async (t) => {
   const fixture = JSON.parse(await readFile(path.join(exampleRoot, "fixtures", "semantic-content.json"), "utf8"));
   const tilesetBytes = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_tileset.png"));
   const playerBytes = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_player.png"));
+  const npcBytes = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_npc.png"));
   const resources = new Map([
     ["resource.Graphics/Tilesets/m14_tileset", { bytes: tilesetBytes, mime: "image/png", contentVersion: hash(tilesetBytes) }],
     ["resource.Graphics/Characters/m14_player", { bytes: playerBytes, mime: "image/png", contentVersion: hash(playerBytes) }],
+    ["resource.Graphics/Characters/m14_npc", { bytes: npcBytes, mime: "image/png", contentVersion: hash(npcBytes) }],
   ]);
   const server = await fixtureServer(t, resources);
   const game = parseGameEntryV1(await readFile(path.join(exampleRoot, "game.json"), "utf8"));
@@ -156,30 +192,40 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
   t.after(() => page.evaluate(() => globalThis.teardownM14?.()).catch(() => {}));
 
   const hub = createDataHub();
-  let inputEmit;
+  const sessionEventHub = createSessionEventHub();
+  t.after(() => sessionEventHub.terminate());
   let viewportEmit;
-  const inputSource = Object.freeze({ start(emit) { inputEmit = emit; emit({ kind: "availability", channel: "keyboard.event", available: true }); return () => {}; } });
   const viewportSource = Object.freeze({ start(emit) { viewportEmit = emit; emit({ width: 800, height: 600 }); return () => {}; } });
   let holder;
   const rendererControl = Object.freeze({
     acquire(token, signal) {
       if (holder) return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
       const pair = createMemoryCarrierPair();
-      holder = createRendererControlHolder(hub.rendererBinding, inputSource, viewportSource);
+      holder = createRendererControlHolder(hub.rendererBinding, viewportSource, {
+        async publish(event) {
+          const publisher = sessionEventHub.createDelegatedPublisher(event.ownerSubsystemKey);
+          await publisher.publish(
+            event.channel,
+            event.type,
+            event.payload,
+            event.broadcast ? undefined : event.ownerSubsystemKey,
+          );
+        },
+      });
       void holder.connect({ carrier: pair.right, rendererControlToken: token });
       return Promise.resolve(pair.left);
     },
   });
   const runtimeHosting = Object.freeze({
     async launch(request) {
-      assert.equal(request.subsystemKey, "map");
+      assert.ok(request.subsystemKey in subsystemDefinitions);
       const pair = createMemoryCarrierPair();
       let acquired = false;
       const runtime = runSubsystem({
-        definition: mapSubsystem, runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
-        runtimePolicy, launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] }, data: hub.subsystemBinding, content,
+        definition: subsystemDefinitions[request.subsystemKey], runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
+        runtimePolicy, launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] }, data: hub.subsystemBinding(request.subsystemKey), content,
         state: (() => { const client = createSharedStateClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
-        events: (() => { const client = createSessionEventClient(); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
+        events: (() => { const client = createSessionEventClient(sessionEventHub.createBinding(request.subsystemKey)); return Object.freeze({ client, terminate: () => client.terminate() }); })(),
       });
       void runtime.catch(() => {});
       return Object.freeze({ runtimeControl: { acquire() { return Promise.resolve(pair.left); } }, terminated: runtime, async requestTermination() { await pair.left.close(); } });
@@ -193,12 +239,12 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
     platform: { scheduler, opaqueMaterial: { generate: () => randomBytes(32).toString("base64url") }, runtimeHosting, rendererControl, dataConnections: { replace() {} } },
   });
   void main.catch(() => {});
-  await waitFor(() => holder?.current() !== null && typeof inputEmit === "function", "Renderer and input source");
+  await waitFor(() => holder?.current() !== null, "Renderer");
 
   let browserDelivery = Promise.resolve(); let latestView;
   const detach = attachRendererPresentation(holder, { reevaluate(source) { latestView = structuredClone(source.read()); browserDelivery = browserDelivery.then(() => page.evaluate((view) => globalThis.applyM14View(view), latestView)); } });
   t.after(detach);
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.data?.viewportWidth === 800, "initial map Render state");
+  await waitFor(() => activeMapControls && mapRoot(latestView)?.data?.viewportWidth === 800, "initial map Render state");
   await browserDelivery;
   await waitFor(async () => (await sampleVisibleTilePixel(page, 400, 268))[3] === 255, "initial Canvas paint");
   await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas")?.getContext("2d")?.getImageData(5, 5, 1, 1).data[3] === 255), "initial player paint");
@@ -208,7 +254,7 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
     return { size: [getComputedStyle(view).width, getComputedStyle(view).height], children: view.children.length, tags: [view.tagName, sprite.tagName], player: [...sprite.shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data] };
   });
   initial.tile = await sampleVisibleTilePixel(page, 400, 268);
-  assert.deepEqual(initial.size, ["800px", "600px"]); assert.equal(initial.children, 1); assert.deepEqual(initial.tags, ["LR-MAP-VIEW", "LR-MAP-SPRITE"]); assert.deepEqual(initial.tile, fixture.expectedPixels.tile385); assert.deepEqual(initial.player, fixture.expectedPixels.playerDown);
+  assert.deepEqual(initial.size, ["800px", "600px"]); assert.equal(initial.children, 2); assert.deepEqual(initial.tags, ["LR-MAP-VIEW", "LR-MAP-SPRITE"]); assert.deepEqual(initial.tile, fixture.expectedPixels.tile385); assert.deepEqual(initial.player, fixture.expectedPixels.playerDown);
   assert.deepEqual(await page.evaluate(() => {
     const root = document.querySelector("lr-map-view").shadowRoot;
     const footer = root.querySelector("footer");
@@ -216,18 +262,20 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
     return [getComputedStyle(content).height, getComputedStyle(footer).height, footer.textContent];
   }), ["568px", "32px", "1"]);
 
-  inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "ArrowRight", repeat: false } });
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.x === 11, "first movement commit"); await browserDelivery;
-  const moved = latestView.subsystems[0].domains[0].roots[0];
+  assert.equal(await page.locator("game-controls-input").count(), 1);
+  activeMapControls.setMoveIntent(6);
+  await waitFor(() => mapRoot(latestView)?.children[0]?.data?.x === 11, "first movement commit"); await browserDelivery;
+  activeMapControls.setMoveIntent(null);
+  const moved = mapRoot(latestView);
   assert.equal(moved.data.cameraX, 0); assert.deepEqual([moved.children[0].data.screenX, moved.children[0].data.screenY, moved.children[0].data.direction], [352, 256, 6]);
   await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data[2] === 240), "right-facing player crop");
   assert.deepEqual(await page.evaluate(() => [...document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data]), fixture.expectedPixels.playerRight);
   assert.deepEqual(await page.evaluate(() => [document.querySelector("lr-map-view").instance, document.querySelector("lr-map-sprite").instance]), [1, 2]);
-  inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "ArrowRight", repeat: false } });
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 6, "blocked movement render"); await new Promise((resolve) => setTimeout(resolve, 20));
-  const blocked = latestView.subsystems[0].domains[0].roots[0];
+  activeMapControls.setMoveIntent(6);
+  await waitFor(() => mapRoot(latestView)?.children[0]?.data?.direction === 6, "blocked movement render"); await new Promise((resolve) => setTimeout(resolve, 20));
+  const blocked = mapRoot(latestView);
   assert.equal(blocked.children[0].data.x, 11); assert.equal(blocked.data.cameraX, 0);
-  assert.equal(await page.evaluate(() => document.querySelectorAll("lr-map-view lr-map-sprite").length), 1);
+  assert.equal(await page.evaluate(() => document.querySelectorAll("lr-map-view lr-map-sprite").length), 2);
   assert.equal(await page.evaluate(() => document.querySelectorAll("lr-map-tile").length), 0);
 
   for (const expected of [
@@ -240,7 +288,7 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
     await page.setViewportSize({ width: expected.width, height: expected.height });
     viewportEmit({ width: expected.width, height: expected.height });
     await waitFor(() => {
-      const data = latestView?.subsystems[0]?.domains[0]?.roots[0]?.data;
+      const data = mapRoot(latestView)?.data;
       return data?.viewportWidth === expected.width && data?.viewportHeight === expected.height;
     }, `responsive ${expected.width}x${expected.height} Render state`);
     await browserDelivery;
@@ -285,7 +333,7 @@ test("map view clears full state and delayed same-resource decode paints only la
   const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) }); t.after(() => browser.close());
   const page = await browser.newPage(); await page.goto(server.origin);
   await page.addScriptTag({ url: `${server.origin}/presentation/map/map.browser.js` });
-  const result = await page.evaluate(async ({ bytes, version }) => {
+  const result = await evaluateWithTimeout(page, async ({ bytes, version }) => {
     const view = document.createElement("lr-map-view"); document.body.append(view);
     let release; const gate = new Promise((resolve) => { release = resolve; });
     view.receiveRenderContext({ resources: { async resource() { await gate; return { bytes: Uint8Array.from(bytes), mime: "image/png", contentVersion: version }; } } });
@@ -317,30 +365,66 @@ test("map view clears full state and delayed same-resource decode paints only la
       }
       return [0, 0, 0, 0];
     };
+    let forceTimerFallbackOnce = true;
+    const nextVisualPoll = () => new Promise((resolve) => {
+      let settled = false;
+      let frame = 0;
+      let timer;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (timer !== undefined) clearTimeout(timer);
+        if (frame !== 0) cancelAnimationFrame(frame);
+        resolve();
+      };
+      if (forceTimerFallbackOnce) forceTimerFallbackOnce = false;
+      else frame = requestAnimationFrame(finish);
+      timer = setTimeout(finish, 50);
+    });
+    const waitForSample = async (read, accept, label) => {
+      const deadline = performance.now() + 5_000;
+      while (true) {
+        const value = read();
+        if (accept(value)) return value;
+        if (performance.now() >= deadline) throw new Error(`Timed out waiting for ${label}`);
+        await nextVisualPoll();
+      }
+    };
     view.receiveRenderData(viewPayload(1, 0, 384, 0));
     view.receiveRenderData(viewPayload(2, 1, 385, 1));
     release();
-    const deadline = performance.now() + 5_000;
-    let latest;
-    while (performance.now() < deadline) {
-      latest = sample(37, 5);
-      if (latest[0] === 40 && latest[1] === 80 && latest[2] === 220 && latest[3] === 255) break;
-      latest = undefined;
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    }
-    if (!latest) throw new Error("Timed out waiting for latest map paint");
+    const latest = await waitForSample(
+      () => sample(37, 5),
+      (pixel) => pixel[0] === 40 && pixel[1] === 80 && pixel[2] === 220 && pixel[3] === 255,
+      "latest map paint",
+    );
     const stale = sample(5, 5);
     view.receiveRenderData(viewPayload(3, 0, 0, null));
-    let cleared;
-    const clearDeadline = performance.now() + 5_000;
-    while (performance.now() < clearDeadline) {
-      cleared = sample(37, 5);
-      if (cleared[3] === 0) break;
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    }
+    const cleared = await waitForSample(
+      () => sample(37, 5),
+      (pixel) => pixel[3] === 0,
+      "cleared map paint",
+    );
     return { stale, latest, cleared };
-  }, { bytes: [...tileset], version: hash(tileset) });
+  }, { bytes: [...tileset], version: hash(tileset) }, 12_000, "bounded map paint evaluation");
   assert.equal(result.stale[3], 0); assert.deepEqual(result.latest, [40, 80, 220, 255]); assert.equal(result.cleared[3], 0);
+});
+
+test("browser evaluation watchdog bounds a non-settling page task", { timeout: 5_000 }, async (t) => {
+  const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await assert.rejects(
+    evaluateWithTimeout(
+      page,
+      async () => new Promise(() => {}),
+      undefined,
+      100,
+      "hung browser evaluation",
+    ),
+    /Timed out waiting for hung browser evaluation/,
+  );
+  await waitFor(() => page.isClosed(), "watchdog page close", 1_000);
 });
 
 test("map browser registration fails closed when an owned tag is already registered", { timeout: 15_000 }, async (t) => {

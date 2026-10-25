@@ -4,10 +4,12 @@ import test from "node:test";
 
 const read = (relative) => readFile(new URL(relative, import.meta.url), "utf8");
 
-test("Desktop product wires one document-layout viewport source and Main only selects /1", async () => {
+test("Desktop product wires viewport and trusted Presentation Events while Main selects Data Profile v3", async () => {
   const entry = await read("../src/renderer-entry.ts");
   assert.match(entry, /createDesktopRendererViewportSource\(window\)/);
-  assert.match(entry, /createRendererControlHolder\(dataBinding, inputSource, viewportSource\)/);
+  assert.match(entry, /createRendererControlHolder\([\s\S]*dataBinding,[\s\S]*viewportSource,[\s\S]*createRendererPresentationEventBinding\(presentationEventCarrier\)/);
+  assert.doesNotMatch(entry, /inputSource|createDesktopRendererInputSource/);
+  assert.match(entry, /presentationEventsEndpoint/);
   assert.doesNotMatch(entry, /viewport\.state/);
 
   const adapter = await read("../src/renderer-viewport-source.ts");
@@ -22,7 +24,7 @@ test("Desktop product wires one document-layout viewport source and Main only se
   assert.doesNotMatch(source, /devicePixelRatio/);
 
   const main = await readFile(new URL("../../../packages/main/src/internal/main-session.ts", import.meta.url), "utf8");
-  assert.match(main, /RENDERER_DATA_PROFILE_V1 = "loomrealm\.renderer-data\/1"/);
+  assert.match(main, /RENDERER_DATA_PROFILE_V3 = "loomrealm\.renderer-data\/3"/);
   assert.doesNotMatch(main, /viewport\.state|innerWidth|innerHeight|scope\.viewport/);
-  assert.equal(main.includes("renderer-data/2"), false);
+  assert.equal(main.includes("renderer-data/1"), false);
 });

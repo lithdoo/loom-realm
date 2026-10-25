@@ -9,11 +9,11 @@ import {
   type JsonValue,
 } from "@loomrealm/wire";
 import type {
-  RendererAuthoritySnapshotV1,
-  RendererDataAuthorityV1,
-  RendererFrameStateV1,
-  RendererHelloParamsV1,
-  RendererRuntimeStateV1,
+  RendererAuthoritySnapshotV2,
+  RendererDataAuthorityV2,
+  RendererFrameStateV2,
+  RendererHelloParamsV2,
+  RendererRuntimeStateV2,
 } from "./model.js";
 
 const MESSAGE_BYTES = 1_048_576;
@@ -76,16 +76,16 @@ function frozen<T extends object>(value: T): T {
   return Object.freeze(value);
 }
 
-function runtime(raw: unknown): RendererRuntimeStateV1 {
+function runtime(raw: unknown): RendererRuntimeStateV2 {
   const value = plain(raw, "runtime");
   exact(value, ["subsystemKey", "state"]);
   const state = value.state;
   if (!["declared", "starting", "connected", "identified", "ready", "stopping", "stopped", "failed"].includes(state as string))
     fail("Invalid runtime state");
-  return frozen({ subsystemKey: text(value.subsystemKey, "subsystemKey", 256), state: state as RendererRuntimeStateV1["state"] });
+  return frozen({ subsystemKey: text(value.subsystemKey, "subsystemKey", 256), state: state as RendererRuntimeStateV2["state"] });
 }
 
-function frame(raw: unknown): RendererFrameStateV1 {
+function frame(raw: unknown): RendererFrameStateV2 {
   const value = plain(raw, "frame");
   exact(value, ["frameId", "subsystemKey", "lifecycle"], ["activationId"]);
   const lifecycle = value.lifecycle;
@@ -97,16 +97,16 @@ function frame(raw: unknown): RendererFrameStateV1 {
   return frozen({
     frameId: text(value.frameId, "frameId", 128),
     subsystemKey: text(value.subsystemKey, "subsystemKey", 256),
-    lifecycle: lifecycle as RendererFrameStateV1["lifecycle"],
+    lifecycle: lifecycle as RendererFrameStateV2["lifecycle"],
     ...(active ? { activationId: text(value.activationId, "activationId", 128) } : {}),
   });
 }
 
-function dataAuthority(raw: unknown): RendererDataAuthorityV1 {
+function dataAuthority(raw: unknown): RendererDataAuthorityV2 {
   const value = plain(raw, "dataAuthority");
   exact(value, ["subsystemKey", "generation", "dataProfile"]);
   const dataProfile = text(value.dataProfile, "dataProfile", 256, true);
-  if (dataProfile !== "loomrealm.renderer-data/1") fail("Unsupported dataProfile");
+  if (dataProfile !== "loomrealm.renderer-data/3") fail("Unsupported dataProfile");
   return frozen({
     subsystemKey: text(value.subsystemKey, "subsystemKey", 256),
     generation: positiveSafe(value.generation, "generation"),
@@ -114,9 +114,9 @@ function dataAuthority(raw: unknown): RendererDataAuthorityV1 {
   });
 }
 
-export function validateRendererAuthoritySnapshotV1(raw: unknown): RendererAuthoritySnapshotV1 {
+export function validateRendererAuthoritySnapshotV2(raw: unknown): RendererAuthoritySnapshotV2 {
   const value = plain(raw, "snapshot");
-  exact(value, ["sessionId", "revision", "runtimes", "stack", "inputTarget", "dataAuthorities"]);
+  exact(value, ["sessionId", "revision", "runtimes", "stack", "dataAuthorities"]);
   const runtimes = array(value.runtimes, "runtimes").map(runtime);
   const runtimeKeys = new Set<string>();
   for (const item of runtimes) {
@@ -125,7 +125,7 @@ export function validateRendererAuthoritySnapshotV1(raw: unknown): RendererAutho
   }
   const stack = array(value.stack, "stack").map(frame);
   const frameKeys = new Set<string>();
-  let active: RendererFrameStateV1 | null = null;
+  let active: RendererFrameStateV2 | null = null;
   for (let index = 0; index < stack.length; index += 1) {
     const item = stack[index]!;
     if (frameKeys.has(item.frameId) || !runtimeKeys.has(item.subsystemKey)) fail("Invalid frame relation");
@@ -134,18 +134,6 @@ export function validateRendererAuthoritySnapshotV1(raw: unknown): RendererAutho
       if (active !== null || index !== stack.length - 1) fail("Invalid active frame");
       active = item;
     }
-  }
-  let inputTarget = null;
-  if (value.inputTarget !== null) {
-    const input = plain(value.inputTarget, "inputTarget");
-    exact(input, ["subsystemKey", "frameId", "activationId"]);
-    inputTarget = frozen({
-      subsystemKey: text(input.subsystemKey, "subsystemKey", 256),
-      frameId: text(input.frameId, "frameId", 128),
-      activationId: text(input.activationId, "activationId", 128),
-    });
-    if (active === null || active.frameId !== inputTarget.frameId || active.subsystemKey !== inputTarget.subsystemKey || active.activationId !== inputTarget.activationId)
-      fail("Invalid input target relation");
   }
   const dataAuthorities = array(value.dataAuthorities, "dataAuthorities").map(dataAuthority);
   const dataKeys = new Set<string>();
@@ -158,12 +146,11 @@ export function validateRendererAuthoritySnapshotV1(raw: unknown): RendererAutho
     revision: positiveSafe(value.revision, "revision"),
     runtimes: frozen(runtimes),
     stack: frozen(stack),
-    inputTarget,
     dataAuthorities: frozen(dataAuthorities),
   });
 }
 
-export function validateRendererHelloParamsV1(raw: unknown): RendererHelloParamsV1 {
+export function validateRendererHelloParamsV2(raw: unknown): RendererHelloParamsV2 {
   const value = plain(raw, "renderer.hello params");
   exact(value, ["rendererControlToken", "protocolVersions"]);
   const versions = array(value.protocolVersions, "protocolVersions");
@@ -205,12 +192,12 @@ export function decodeRendererControlMessage(textValue: unknown): JsonRpcMessage
   return decodeJsonRpcMessage(value);
 }
 
-export function prepareRendererHelloResultV1(snapshot: RendererAuthoritySnapshotV1): string {
-  const checked = validateRendererAuthoritySnapshotV1(snapshot);
-  return encodeRendererControlMessage({ jsonrpc: "2.0", id: 1, result: { protocolVersion: 1, snapshot: checked } } as unknown as JsonValue);
+export function prepareRendererHelloResultV2(snapshot: RendererAuthoritySnapshotV2): string {
+  const checked = validateRendererAuthoritySnapshotV2(snapshot);
+  return encodeRendererControlMessage({ jsonrpc: "2.0", id: 1, result: { protocolVersion: 2, snapshot: checked } } as unknown as JsonValue);
 }
 
-export function prepareRendererStateV1(snapshot: RendererAuthoritySnapshotV1): string {
-  const checked = validateRendererAuthoritySnapshotV1(snapshot);
+export function prepareRendererStateV2(snapshot: RendererAuthoritySnapshotV2): string {
+  const checked = validateRendererAuthoritySnapshotV2(snapshot);
   return encodeRendererControlMessage({ jsonrpc: "2.0", method: "renderer.state", params: { snapshot: checked } } as unknown as JsonValue);
 }

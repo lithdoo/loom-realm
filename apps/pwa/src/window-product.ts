@@ -1,5 +1,10 @@
 import type { PwaWindowBridgeResultV1 } from "./bootstrap-protocol.js";
-import { parseInstallRendererControl, parseInstallRendererData, parseRevokeRendererData } from "./bootstrap-protocol.js";
+import {
+  parseInstallPresentationEvents,
+  parseInstallRendererControl,
+  parseInstallRendererData,
+  parseRevokeRendererData,
+} from "./bootstrap-protocol.js";
 import { createDemoInstallationBundle, DEMO_PRESENTATION } from "./installation-bundle.js";
 import { collectInstallationGarbage, ensurePwaBundle } from "./installer.js";
 import { getInstallation, type PwaInstallationRecord } from "./installation-store.js";
@@ -138,6 +143,10 @@ async function startFreshSession(selection: PwaProductLaunchSelection | null, re
         } else if (value?.type === "renderer-data/revoke") {
           const message = parseRevokeRendererData(event.data, epoch);
           renderer!.data.revoke({ subsystemKey: message.subsystemKey, generation: message.generation, dataProfile: message.dataProfile }, message.connectionId);
+        } else if (value?.type === "presentation-events/install") {
+          if (current !== ownedCurrent) { errorCode = "WINDOW_NOT_CURRENT"; throw new Error("Window Session is not current"); }
+          const message = parseInstallPresentationEvents(event.data, epoch);
+          renderer!.installPresentationEvents(message.port);
         } else throw new Error("Unknown Window bridge request");
         accepted = true;
       } catch {

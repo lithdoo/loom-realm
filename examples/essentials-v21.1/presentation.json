@@ -5,6 +5,7 @@
     { "namespace": "Presentation", "key": "essentials/page.css" }
   ],
   "scripts": [
+    { "namespace": "Presentation", "key": "controls/device-input.browser.js" },
     { "namespace": "Presentation", "key": "map/map.browser.js" }
   ]
 }

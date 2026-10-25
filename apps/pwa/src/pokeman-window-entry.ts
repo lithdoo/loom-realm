@@ -8,7 +8,12 @@ interface PokeManBundleFile {
   readonly gameEntryText: string;
   readonly launchManifestText: string;
   readonly presentation: unknown;
-  readonly executable: string;
+  readonly executables: readonly {
+    readonly logicalModule: string;
+    readonly mime: "text/javascript";
+    readonly source: string;
+    readonly contentVersion: string;
+  }[];
   readonly content: readonly {
     readonly kind: "record" | "group" | "resource";
     readonly namespace: string;
@@ -49,11 +54,11 @@ async function loadBundle(): Promise<{ readonly bundleId: string; readonly prese
         mime: entry.mime,
         body: decodeBlob(entry.body, entry.mime),
       }))),
-      executables: Object.freeze([Object.freeze({
-        logicalModule: "subsystems/map.mjs",
-        mime: "text/javascript" as const,
-        body: new Blob([value.executable], { type: "text/javascript" }),
-      })]),
+      executables: Object.freeze(value.executables.map((entry) => Object.freeze({
+        logicalModule: entry.logicalModule,
+        mime: entry.mime,
+        body: new Blob([entry.source], { type: entry.mime }),
+      }))),
     }),
   });
 }

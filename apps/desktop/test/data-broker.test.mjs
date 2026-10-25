@@ -80,7 +80,7 @@ class FakeProvisioner {
   }
 }
 
-function authority(token, hosted, generation = 1, dataProfile = "loomrealm.renderer-data/1") {
+function authority(token, hosted, generation = 1, dataProfile = "loomrealm.renderer-data/3") {
   return Object.freeze({
     rendererControlToken: token,
     entries: Object.freeze([Object.freeze({
@@ -105,11 +105,26 @@ function setup(options = {}) {
   return { broker, hosted, provisioner, binding };
 }
 
+test("presentation-event authority follows the live Renderer Control tuple", () => {
+  const broker = new DesktopDataConnectionBroker();
+  const hosted = runtime();
+  broker.sink.replace(authority("renderer-a", hosted, 3));
+
+  assert.equal(broker.authorizesPresentationEvent("renderer-a", "root", 3), true);
+  assert.equal(broker.authorizesPresentationEvent("renderer-b", "root", 3), false);
+  assert.equal(broker.authorizesPresentationEvent("renderer-a", "other", 3), false);
+  assert.equal(broker.authorizesPresentationEvent("renderer-a", "root", 2), false);
+
+  broker.sink.replace(null);
+  assert.equal(broker.authorizesPresentationEvent("renderer-a", "root", 3), false);
+  broker.close();
+});
+
 test("paired candidate installs once and relays opaque text in both directions", async (t) => {
   const { broker, hosted, provisioner, binding } = setup();
   t.after(() => broker.close());
   const rendererCarrierPromise = binding.acquire(
-    "root", 1, "loomrealm.renderer-data/1", new AbortController().signal,
+    "root", 1, "loomrealm.renderer-data/3", new AbortController().signal,
   );
   broker.sink.replace(authority("renderer-a", hosted));
   const rendererCarrier = await rendererCarrierPromise;
@@ -157,13 +172,13 @@ test("different subsystem slots install and retire independently", async (t) => 
   broker.onRuntimeDataProvisioner(runtimeA, provisionerA);
   broker.onRuntimeDataProvisioner(runtimeB, provisionerB);
   const binding = broker.rendererDataBinding("renderer-a");
-  const acquireA = binding.acquire("a", 1, "loomrealm.renderer-data/1", new AbortController().signal);
-  const acquireB = binding.acquire("b", 1, "loomrealm.renderer-data/1", new AbortController().signal);
+  const acquireA = binding.acquire("a", 1, "loomrealm.renderer-data/3", new AbortController().signal);
+  const acquireB = binding.acquire("b", 1, "loomrealm.renderer-data/3", new AbortController().signal);
   broker.sink.replace(Object.freeze({
     rendererControlToken: "renderer-a",
     entries: Object.freeze([
-      Object.freeze({ subsystemKey: "a", generation: 1, dataProfile: "loomrealm.renderer-data/1", runtime: runtimeA }),
-      Object.freeze({ subsystemKey: "b", generation: 1, dataProfile: "loomrealm.renderer-data/1", runtime: runtimeB }),
+      Object.freeze({ subsystemKey: "a", generation: 1, dataProfile: "loomrealm.renderer-data/3", runtime: runtimeA }),
+      Object.freeze({ subsystemKey: "b", generation: 1, dataProfile: "loomrealm.renderer-data/3", runtime: runtimeB }),
     ]),
   }));
   const [carrierA, carrierB] = await Promise.all([acquireA, acquireB]);
@@ -203,7 +218,7 @@ test("Renderer token and S/G/P replacement synchronously revoke stale pending ma
 test("post-install Runner commit failure retires B and never resurrects A", async (t) => {
   const { broker, hosted, provisioner, binding } = setup();
   t.after(() => broker.close());
-  const aPromise = binding.acquire("root", 1, "loomrealm.renderer-data/1", new AbortController().signal);
+  const aPromise = binding.acquire("root", 1, "loomrealm.renderer-data/3", new AbortController().signal);
   broker.sink.replace(authority("renderer-a", hosted));
   const a = await aPromise;
   await waitFor(() => provisioner.current !== null, "A current");
@@ -211,7 +226,7 @@ test("post-install Runner commit failure retires B and never resurrects A", asyn
   provisioner.failNextCommit = true;
   provisioner.commitFailureGate = deferred();
   assert.equal(await broker.requestCandidate("root"), true, "B reached logical installation");
-  const b = await binding.acquire("root", 1, "loomrealm.renderer-data/1", new AbortController().signal);
+  const b = await binding.acquire("root", 1, "loomrealm.renderer-data/3", new AbortController().signal);
   provisioner.commitFailureGate.resolve();
   assert.ok(["closed", "lost"].includes((await a.closed).kind));
   assert.ok(["closed", "lost"].includes((await b.closed).kind));
@@ -228,7 +243,7 @@ test("proactive same-generation replacement cuts over from A to B exactly once",
   const { broker, hosted, provisioner, binding } = setup();
   t.after(() => broker.close());
   const firstAcquire = binding.acquire(
-    "root", 1, "loomrealm.renderer-data/1", new AbortController().signal,
+    "root", 1, "loomrealm.renderer-data/3", new AbortController().signal,
   );
   broker.sink.replace(authority("renderer-a", hosted));
   const a = await firstAcquire;
@@ -237,12 +252,12 @@ test("proactive same-generation replacement cuts over from A to B exactly once",
   assert.equal(await broker.requestCandidate("root"), true);
   assert.equal(provisioner.current.request.candidateId, "candidate-2");
   const b = await binding.acquire(
-    "root", 1, "loomrealm.renderer-data/1", new AbortController().signal,
+    "root", 1, "loomrealm.renderer-data/3", new AbortController().signal,
   );
   assert.notEqual(b, a);
   assert.ok(["closed", "lost"].includes((await a.closed).kind));
   assert.equal(provisioner.current.request.generation, 1);
-  assert.equal(provisioner.current.request.dataProfile, "loomrealm.renderer-data/1");
+  assert.equal(provisioner.current.request.dataProfile, "loomrealm.renderer-data/3");
   assert.equal(provisioner.revokes.filter((id) => id === "candidate-1").length, 1);
 
   const bClosedEarly = await Promise.race([
@@ -260,10 +275,10 @@ test("Renderer authority transition closes and forgets the retired token binding
   const bindingB = broker.rendererDataBinding("renderer-b");
   broker.sink.replace(authority("renderer-b", hosted));
   await assert.rejects(
-    bindingA.acquire("root", 1, "loomrealm.renderer-data/1", new AbortController().signal),
+    bindingA.acquire("root", 1, "loomrealm.renderer-data/3", new AbortController().signal),
     /closed/,
   );
-  await bindingB.acquire("root", 1, "loomrealm.renderer-data/1", new AbortController().signal);
+  await bindingB.acquire("root", 1, "loomrealm.renderer-data/3", new AbortController().signal);
 });
 
 test("finite role-undelivered buffer overflow retires the whole pair and permits fresh same-generation install", async (t) => {
@@ -271,7 +286,7 @@ test("finite role-undelivered buffer overflow retires the whole pair and permits
     bufferPolicy: { maxMessages: 1, maxBytes: 128 },
   });
   t.after(() => broker.close());
-  const firstPromise = binding.acquire("root", 1, "loomrealm.renderer-data/1", new AbortController().signal);
+  const firstPromise = binding.acquire("root", 1, "loomrealm.renderer-data/3", new AbortController().signal);
   broker.sink.replace(authority("renderer-a", hosted));
   const first = await firstPromise;
   await waitFor(() => provisioner.current !== null, "first Runner carrier");
@@ -280,10 +295,10 @@ test("finite role-undelivered buffer overflow retires the whole pair and permits
   await firstRunner.send("two");
   assert.equal((await first.closed).kind, "lost");
 
-  const secondPromise = binding.acquire("root", 1, "loomrealm.renderer-data/1", new AbortController().signal);
+  const secondPromise = binding.acquire("root", 1, "loomrealm.renderer-data/3", new AbortController().signal);
   const second = await secondPromise;
   assert.notEqual(second, first);
   await waitFor(() => provisioner.prepares.length >= 2, "same-generation replacement");
   assert.equal(provisioner.prepares[1].request.generation, 1);
-  assert.equal(provisioner.prepares[1].request.dataProfile, "loomrealm.renderer-data/1");
+  assert.equal(provisioner.prepares[1].request.dataProfile, "loomrealm.renderer-data/3");
 });

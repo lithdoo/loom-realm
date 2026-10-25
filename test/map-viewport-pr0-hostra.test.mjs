@@ -207,6 +207,14 @@ test("PR1 Hostra 640 ordinary/refresh product gates", { timeout: 600_000 }, asyn
     const records = [];
     globalThis.__loomrealmMovementRecords = records;
     globalThis.__loomrealmMovementQualification = (record) => { records.push(record); };
+    window.addEventListener("keydown", (event) => {
+      if (!event.isTrusted || event.repeat) return;
+      globalThis.__loomrealmMovementQualification?.({
+        name: "input-captured",
+        at: performance.now(),
+        detail: { code: event.code },
+      });
+    }, { capture: true });
   });
   await page.bringToFront();
   await page.mouse.click(320, 240);

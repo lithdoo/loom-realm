@@ -53,7 +53,7 @@ test("Render Event delta adds only the optional transient seam and no retained o
   assert.doesNotMatch(control, /(instanceof WebProjector|new WebProjector|EventStore|retry|timeout|NACK|\bACK\b|\bResult\b)/);
   assert.doesNotMatch(projector, /(eventId|sequenceNumber|pendingEvents|replay|retry|timeout|NACK|\bACK\b|\bResult\b)/);
   assert.match(dataModel, /type RenderUpdateMessageV1 = RenderDomainsV1 \| RenderSnapshotV1 \| RenderPatchV1 \| RenderEventV1/);
-  assert.match(dataModel, /RENDERER_DATA_PROFILE_V1 = "loomrealm\.renderer-data\/1"/);
+  assert.match(dataModel, /RENDERER_DATA_PROFILE_V3 = "loomrealm\.renderer-data\/3"/);
   assert.match(publicDeclaration, /type RenderEventReceiver/);
   assert.match(publicDeclaration, /type WebPresentationRenderEvent/);
   assert.match(publicDeclaration, /RendererPresentationRenderEvent/);
@@ -67,7 +67,7 @@ test("Web Presentation capability preserves Chromium, boundary, pack and Node 20
   const runner = await text("scripts/ci/run-capability.mjs");
   const workflow = await text(".github/workflows/ci.yml");
   assert.equal(monorepo.devDependencies.playwright, "1.63.0");
-  assert.match(runner, /presentation\(\) \{[\s\S]*build:desktop-stack[\s\S]*web-presentation-v1\/qualification\.test\.mjs[\s\S]*test\/m13-boundary\.test\.mjs[\s\S]*@loomrealm\/renderer/);
+  assert.match(runner, /presentation\(\) \{[\s\S]*build:desktop-stack[\s\S]*web-presentation-v2\/qualification\.test\.mjs[\s\S]*test\/m13-boundary\.test\.mjs[\s\S]*@loomrealm\/renderer/);
   assert.doesNotMatch(runner, /npm\("run", "test:m13/);
   assert.match(workflow, /name: Browser \/ Node 24/);
   assert.match(workflow, /playwright install --with-deps chromium/);

@@ -94,7 +94,6 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
       "struct.MapTransfer/1": emptyTransfer(1),
       ...options.records,
     };
-    const handlers = new Map();
     const states = [];
     const timers = installTimers(t);
     const scope = {
@@ -117,17 +116,7 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
           return { bytes: new Uint8Array([1]), mime: "image/png", contentVersion: "v-image" };
         },
       },
-      createInputListener({ channels }) {
-        assert.deepEqual([...channels], ["keyboard.event", "keyboard.state"]);
-        return {
-          on(channel, handler) {
-            handlers.set(channel, handler);
-            return () => {};
-          },
-          setChannels() {},
-          close() {},
-        };
-      },
+      events: { async subscribe() { throw new Error("Map runtime must not subscribe to physical input"); } },
       createRenderDomain(initial) {
         states.push(structuredClone(initial));
         return {
@@ -148,12 +137,16 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
     const map = new RPGMapBuilder(scope, frame).build({ player: { characterName: options.params.characterName } });
     map.onMapEntering((context) => { context.setNPC([]); });
     const pending = map.run({ mapId: options.params.mapId, x: options.params.x, y: options.params.y });
-    for (let attempt = 0; attempt < 40 && (states.length === 0 || !handlers.has("keyboard.event")); attempt += 1) {
+    for (let attempt = 0; attempt < 40 && states.length === 0; attempt += 1) {
       await new Promise((resolve) => setImmediate(resolve));
     }
     assert.ok(states.length >= 1, "expected initial standing RenderDomain");
     return {
-      emitEvent(payload) { return handlers.get("keyboard.event")(payload); },
+      async emitEvent(payload) {
+        const direction = { ArrowDown: 2, ArrowLeft: 4, ArrowRight: 6, ArrowUp: 8 }[payload.code];
+        map.controls.setMoveIntent(payload.action === "down" ? direction : null);
+        await new Promise((resolve) => setImmediate(resolve));
+      },
       latestState: () => states.at(-1),
       abort() { controller.abort(); },
       pending,

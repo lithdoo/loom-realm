@@ -80,6 +80,21 @@ async function committedFixture(options = {}) {
   return { broker, hosted, runner, window, log, observations };
 }
 
+test("presentation-event authority follows the live subsystem generation", async () => {
+  const hosted = runtimeFixture();
+  const window = bridgeFixture([]);
+  const broker = new PwaDataBroker(window.bridge, "epoch-1");
+  broker.sink.replace(view(hosted.runtime, 3));
+
+  assert.equal(broker.authorizesPresentationEvent("demo", 3), true);
+  assert.equal(broker.authorizesPresentationEvent("other", 3), false);
+  assert.equal(broker.authorizesPresentationEvent("demo", 2), false);
+
+  broker.sink.replace(null);
+  assert.equal(broker.authorizesPresentationEvent("demo", 3), false);
+  await broker.close();
+});
+
 test("commits only one channel identity after both endpoints acknowledge", async () => {
   const fixture = await committedFixture();
   const installs = fixture.log.filter((entry) => entry.action === "install");

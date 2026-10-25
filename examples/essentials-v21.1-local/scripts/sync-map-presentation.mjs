@@ -8,20 +8,23 @@ import { fileURLToPath } from "node:url";
 
 const BACKUP_SUFFIX = ".loomrealm-sync.backup";
 const TARGET_RELATIVE = Object.freeze({
+  controlsJs: join("[resource]Presentation", "controls", "device-input.browser.js.js"),
   js: join("[resource]Presentation", "map", "map.browser.js.js"),
   css: join("[resource]Presentation", "map", "map.css.css"),
   pageCss: join("[resource]Presentation", "page.css.css"),
 });
 const DIST_RELATIVE = Object.freeze({
+  controlsJs: join("game-libs", "game-common-controls", "dist", "browser", "device-input.browser.js"),
   js: join("game-libs", "map", "dist", "browser", "map.browser.js"),
   css: join("game-libs", "map", "dist", "browser", "map.css"),
 });
 const SOURCE_RELATIVE = Object.freeze({
+  controlsJs: join("game-libs", "game-common-controls", "dist", "browser", "device-input.browser.js"),
   js: join("game-libs", "map", "browser", "map.browser.js"),
   css: join("game-libs", "map", "browser", "map.css"),
   pageCss: join("examples", "essentials-v21.1-local", "presentation.css"),
 });
-const RESOURCE_LABELS = Object.freeze({ js: "map browser JS", css: "map CSS", pageCss: "page CSS" });
+const RESOURCE_LABELS = Object.freeze({ controlsJs: "device input browser JS", js: "map browser JS", css: "map CSS", pageCss: "page CSS" });
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -201,7 +204,10 @@ export async function syncMapPresentation({
     for (const [index, key] of keys.entries()) details.resources[key].target = targets[index];
     if (!checkOnly) {
       for (const target of targets) await restoreBackup(fileOps, target);
-      for (const directory of new Set(targets.map(dirname))) await removeStaleStaging(fileOps, directory);
+      for (const directory of new Set(targets.map(dirname))) {
+        await fileOps.mkdir(directory, { recursive: true });
+        await removeStaleStaging(fileOps, directory);
+      }
     }
 
     const expectedBytes = [];

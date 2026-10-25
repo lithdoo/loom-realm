@@ -4,7 +4,7 @@ import test from "node:test";
 import { classifyPaths, requiresBrowser } from "../scripts/ci/impact.mjs";
 
 const root = new URL("../", import.meta.url);
-const read = (relative) => readFile(new URL(relative, root), "utf8");
+const read = async (relative) => (await readFile(new URL(relative, root), "utf8")).replaceAll("\r\n", "\n");
 
 test("active workflow surface is compact and milestone-free", async () => {
   const files = (await readdir(new URL(".github/workflows/", root))).sort();
@@ -30,31 +30,29 @@ test("self-hosted diagnostics remain manual, main-only and without repository to
   assert.doesNotMatch(workflow, /systemctl --user|loginctl show-user|ss -H -ltn/);
 });
 
-test("PokeMan staging deploy runs directly on trusted main pushes with build and HTTP gates", async () => {
-  const files = await readdir(new URL(".github/workflows/", root));
-  if (!files.includes("deploy-pokeman-staging.yml")) return;
+test("PokeMan staging deploy only follows successful trusted main PokeMan qualification", async () => {
   const workflow = await read(".github/workflows/deploy-pokeman-staging.yml");
-  assert.match(workflow, /^on:\n  push:\n    branches: \[main\]/m);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
-  assert.match(workflow, /github\.repository == 'lithdoo\/loom-realm'/);
+  assert.match(workflow, /workflows: \["PokeMan Staging Qualification"\]/);
+  assert.match(workflow, /types: \[completed\]/);
+  assert.match(workflow, /branches: \[main\]/);
+  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/);
+  assert.match(workflow, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
   assert.match(workflow, /runs-on: \[self-hosted, pwa\]/);
-  assert.match(workflow, /actions\/setup-node@v6/);
-  assert.match(workflow, /node-version: 24/);
-  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
-  assert.match(workflow, /npm run build:staging -w @loomrealm\/pwa/);
-  assert.match(workflow, /node apps\/pwa\/scripts\/deploy-staging\.mjs/);
-  assert.doesNotMatch(workflow, /workflow_run|pull_request/);
+  assert.match(workflow, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
+  assert.match(workflow, /GITHUB_SHA: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
+  assert.match(workflow, /git ls-remote origin refs\/heads\/main/g);
+  assert.match(workflow, /steps\.freshness\.outputs\.current == 'true'/);
+  assert.match(workflow, /steps\.publishability\.outputs\.current == 'true'/);
+  assert.doesNotMatch(workflow, /^\s+pull_request:/m);
 });
 
-test("PokeMan deployment qualification runs on hosted workers for PRs and main, never on the privileged Runner", async () => {
+test("PokeMan staging qualification is hosted-only and runs the real browser vertical", async () => {
   const workflow = await read(".github/workflows/pokeman-staging-qualification.yml");
-  assert.match(workflow, /^name: PokeMan Staging Qualification$/m);
   assert.match(workflow, /^on:\n  pull_request:\n  push:\n    branches: \[main\]/m);
-  assert.match(workflow, /^permissions:\n  contents: read$/m);
+  assert.match(workflow, /permissions:\n  contents: read/);
   assert.match(workflow, /runs-on: ubuntu-latest/);
   assert.doesNotMatch(workflow, /self-hosted|pull_request_target|secrets\./);
-  assert.match(workflow, /timeout-minutes: 20/);
-  assert.match(workflow, /node-version: 24/);
   assert.match(workflow, /playwright install --with-deps chromium/);
   assert.match(workflow, /npm run build:staging -w @loomrealm\/pwa/);
   assert.match(workflow, /npm run build:qualification -w @loomrealm\/pwa/);
@@ -62,7 +60,6 @@ test("PokeMan deployment qualification runs on hosted workers for PRs and main, 
   assert.match(workflow, /npm test -w @loomrealm-game\/map/);
   assert.match(workflow, /npm test -w @loomrealm-example\/pokeman/);
   assert.match(workflow, /run-e2e\.mjs staging/);
-  assert.match(workflow, /--kill-after=30s 6m/);
 });
 
 test("impact routing is selective for docs, routes Battle to Browser, and fails closed for unknown code", () => {
@@ -94,6 +91,40 @@ test("impact routing is selective for docs, routes Battle to Browser, and fails 
   assert.equal(dialogue.presentation, true);
   assert.equal(requiresBrowser(dialogue), true);
 
+  const dialogueQualification = classifyPaths(["test/rpg-dialogue-v1/qualification.test.mjs"]);
+  assert.deepEqual(dialogueQualification, {
+    code: true,
+    content: false,
+    presentation: true,
+    map: false,
+    schema: false,
+    pwa: false,
+    battle: false,
+    dialogue: true,
+    desktop: false,
+    windows: false,
+    docs: false,
+  });
+
+  const controlPortsQualification = classifyPaths(["test/game-control-ports-v1/composition.test.mjs"]);
+  assert.deepEqual(controlPortsQualification, {
+    code: true,
+    content: false,
+    presentation: true,
+    map: true,
+    schema: false,
+    pwa: true,
+    battle: false,
+    dialogue: true,
+    desktop: false,
+    windows: false,
+    docs: false,
+  });
+  assert.equal(requiresBrowser(controlPortsQualification), true);
+
+  const commonControlsQualification = classifyPaths(["test/game-common-controls-input-v1/qualification.test.mjs"]);
+  assert.equal(commonControlsQualification.code, true);
+
   const unknown = classifyPaths(["new-runtime-surface.bin"]);
   assert.equal(unknown.code, true);
   assert.equal(unknown.desktop, true);
@@ -114,34 +145,20 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   const ci = await read(".github/workflows/ci.yml");
   const runner = await read("scripts/ci/run-capability.mjs");
   assert.match(ci, /name: CI \/ summary/);
-  // A hosted Linux regression stall must not block main -> staging forever.
-  const linuxJob = ci.match(/\n  linux:[\s\S]*?\n  pwa-staging:/)?.[0] ?? "";
-  assert.match(linuxJob, /timeout-minutes: 20/);
-  assert.match(linuxJob, /timeout --verbose --signal=TERM --kill-after=30s 12m node scripts\/ci\/run-capability\.mjs core/);
-  const capabilityRunner = await read("scripts/ci/run-capability.mjs");
-  assert.match(capabilityRunner, /\[ci-command\] started=/);
-  assert.match(capabilityRunner, /\[ci-command\] finished=/);
-
-  // Staging qualification uses an independent checkout: regression must not
-  // inherit build artifacts or processes from a cold PokeMan staging build.
-  const stagingJob = ci.match(/\n  pwa-staging:[\s\S]*?\n  node20:/)?.[0] ?? "";
-  assert.match(stagingJob, /if: needs\.impact\.outputs\.pwa == 'true'/);
-  assert.match(stagingJob, /timeout-minutes: 12/);
-  assert.match(stagingJob, /name: Clean PokeMan staging build[\s\S]*?npm run build:staging -w @loomrealm\/pwa/);
-  assert.doesNotMatch(linuxJob, /Clean PokeMan staging build/);
-  assert.match(ci, /needs: \[impact, linux, pwa-staging, node20, browser, desktop, windows, docs\]/);
-  assert.match(ci, /require_success "\$PWA_STAGING_REQUIRED" "\$PWA_STAGING_RESULT" pwa-staging/);
+  // A fresh deploy Runner cannot rely on artifacts built by earlier CI steps.
+  const coldBuild = ci.indexOf("- name: Clean PokeMan staging build");
+  const canonical = ci.indexOf("- name: Canonical package and contract regression");
+  assert.ok(coldBuild > 0 && coldBuild < canonical, "clean staging build must run before canonical workspace regression");
+  assert.match(ci, /name: Clean PokeMan staging build[\s\S]*?needs\.impact\.outputs\.pwa == 'true'[\s\S]*?npm run build:staging -w @loomrealm\/pwa/);
 
   assert.match(ci, /require_success "\$CODE" "\$LINUX_RESULT"/);
   assert.match(ci, /require_success "\$BROWSER_REQUIRED" "\$BROWSER_RESULT"/);
   assert.match(ci, /if: needs\.impact\.outputs\.browser == 'true'/);
   assert.match(ci, /LOOMREALM_CHROMIUM_PATH/);
-  assert.match(ci, /name: Map and RPGMap[\s\S]*?timeout --verbose --signal=TERM --kill-after=30s 8m node scripts\/ci\/run-capability\.mjs map/);
-  assert.match(runner, /test\/map-depth-boundary-browser\.test\.mjs"\], \{ timeout: 180_000, killSignal: "SIGTERM" \}/);
   assert.match(ci, /name: Battle browser qualification[\s\S]*run-capability\.mjs battle/);
   assert.match(ci, /name: RPG Dialogue closed-loop qualification[\s\S]*run-capability\.mjs rpg-dialogue/);
   assert.match(ci, /name: Session Events v1 qualification[\s\S]*run-capability\.mjs session-events/);
-  assert.doesNotMatch(linuxJob, /run-capability\.mjs battle/);
+  assert.doesNotMatch(ci.match(/  linux:[\s\S]*?\n  node20:/)?.[0] ?? "", /run-capability\.mjs battle/);
   assert.match(runner, /runWithRetry\(process\.execPath, \["--test", "game-libs\/battle\/test\/browser-e2e\.test\.mjs"\]\)/);
   assert.doesNotMatch(ci, /npm run (?:test|build):m\d+/);
   assert.doesNotMatch(runner, /npm\("run", "(?:test|build):m\d+/);

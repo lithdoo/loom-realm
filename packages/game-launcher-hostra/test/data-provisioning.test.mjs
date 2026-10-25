@@ -58,7 +58,7 @@ test("host treats child.send false as flow control and waits for the IPC callbac
     candidateId: "candidate-a",
     endpoint: `ws://127.0.0.1:12345/${"a".repeat(43)}`,
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/1",
+    dataProfile: "loomrealm.renderer-data/3",
   };
 
   const preparing = provisioner.prepare(request, new AbortController().signal);
@@ -79,7 +79,7 @@ test("host treats child.send callback error as authoritative IPC terminal failur
     candidateId: "candidate-a",
     endpoint: `ws://127.0.0.1:12345/${"a".repeat(43)}`,
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/1",
+    dataProfile: "loomrealm.renderer-data/3",
   };
 
   await assert.rejects(
@@ -131,7 +131,7 @@ test("runner IPC disconnect closes committed-undelivered Data material", async (
     candidateId: "candidate-a",
     endpoint: `ws://127.0.0.1:${address.port}${path}`,
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/1",
+    dataProfile: "loomrealm.renderer-data/3",
   });
   const socket = await connection.promise;
   await waitFor(() => ipc.sent.some(({ type }) => type === "prepared"), "prepared ACK");

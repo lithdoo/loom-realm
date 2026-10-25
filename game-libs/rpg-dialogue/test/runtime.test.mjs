@@ -88,10 +88,30 @@ test("READY ACTIVE READY supports sequential Conversations with one persistent l
     domainCloses: 0,
     unsubscribeCount: 0,
   });
+  assert.deepEqual(fixture.operations.find((entry) => entry.type === "listener.create").channels, ["x.loomrealm.web-presentation.event"]);
   fixture.dialogue.close();
   assert.equal(fixture.counts().domainCloses, 1);
   assert.equal(fixture.counts().listenerCloses, 1);
-  assert.equal(fixture.counts().unsubscribeCount, 3);
+  assert.equal(fixture.counts().unsubscribeCount, 0);
+});
+
+test("controls are stable, READY/CLOSED no-op, and commands never queue or replay", async () => {
+  const fixture = harness({ dialogueOptions: { cancelable: true } });
+  const controls = fixture.dialogue.controls;
+  assert.equal(controls, fixture.dialogue.controls);
+  for (const action of ["confirm", "previous", "next", "history", "cancel"]) controls[action]();
+  assert.equal(fixture.states.length, 0);
+  assert.equal(fixture.events.length, 0);
+
+  const { pending } = await openStarted(fixture, request());
+  assert.equal(fixture.events.length, 0, "READY commands must not replay when a Conversation opens");
+  fixture.dialogue.close();
+  await assert.rejects(pending);
+  const operationCount = fixture.operations.length;
+  for (const action of ["confirm", "previous", "next", "history", "cancel"]) {
+    assert.doesNotThrow(() => controls[action]());
+  }
+  assert.equal(fixture.operations.length, operationCount);
 });
 
 test("second concurrent open rejects asynchronously without replacing the active projection", async () => {
@@ -159,16 +179,16 @@ test("History set/append is retained, detached, atomic, READY-only, and refreshe
   await assert.rejects(next);
 });
 
-test("keyboard and gamepad mappings route retained mode and transient events with cancel precedence", async () => {
+test("semantic controls route retained mode and transient commands with cancel precedence", async () => {
   const fixture = harness({ dialogueOptions: { cancelable: true } });
+  assert.equal(fixture.dialogue.controls, fixture.dialogue.controls);
   fixture.dialogue.setHistory([history("a")]);
   const { pending } = await openStarted(fixture, request({ choices: [choice("a"), choice("b")] }));
-  fixture.emit("keyboard.event", { action: "down", code: "ArrowUp", repeat: false });
-  fixture.emit("keyboard.event", { action: "down", code: "ArrowDown", repeat: false });
-  fixture.emit("keyboard.event", { action: "down", code: "Enter", repeat: false });
-  fixture.emit("keyboard.event", { action: "down", code: "Space", repeat: false });
-  fixture.emit("keyboard.event", { action: "down", code: "Space", repeat: true });
-  fixture.emit("gamepad.event", { action: "down", gamepadId: 0, button: "south", value: 1 });
+  fixture.dialogue.controls.previous();
+  fixture.dialogue.controls.next();
+  fixture.dialogue.controls.confirm();
+  fixture.dialogue.controls.confirm();
+  fixture.dialogue.controls.confirm();
   assert.deepEqual(fixture.events.map((event) => [event.targetKey, event.name]), [
     ["conversation", "choice-previous"],
     ["conversation", "choice-next"],
@@ -178,24 +198,24 @@ test("keyboard and gamepad mappings route retained mode and transient events wit
   ]);
 
   const beforeHistory = fixture.operations.length;
-  fixture.emit("gamepad.event", { action: "down", gamepadId: 0, button: "select", value: 1 });
+  fixture.dialogue.controls.history();
   const historyOps = fixture.operations.slice(beforeHistory).map((entry) => entry.type === "domain.emit" ? entry.event.name : entry.type);
   assert.deepEqual(historyOps, ["domain.replace", "scroll-to-latest"]);
   assert.equal(findNode(fixture.latest(), "history").attrs.visible, "true");
-  fixture.emit("gamepad.event", { action: "down", gamepadId: 0, button: "dpadUp", value: 1 });
-  fixture.emit("gamepad.event", { action: "down", gamepadId: 0, button: "dpadDown", value: 1 });
+  fixture.dialogue.controls.previous();
+  fixture.dialogue.controls.next();
   assert.deepEqual(fixture.events.slice(-2).map((event) => event.name), ["scroll-up", "scroll-down"]);
-  fixture.emit("keyboard.event", { action: "down", code: "Escape", repeat: false });
+  fixture.dialogue.controls.cancel();
   assert.equal(findNode(fixture.latest(), "history").attrs.visible, "false");
   assert.equal(await Promise.race([pending.then(() => "settled"), turn().then(() => "open")]), "open");
-  fixture.emit("gamepad.event", { action: "down", gamepadId: 0, button: "east", value: 1 });
+  fixture.dialogue.controls.cancel();
   assert.deepEqual(await pending, { type: "cancelled" });
 });
 
 test("non-cancelable cancel does not settle", async () => {
   const fixture = harness();
   const { pending } = await openStarted(fixture, request());
-  fixture.emit("keyboard.event", { action: "down", code: "Escape", repeat: false });
+  fixture.dialogue.controls.cancel();
   assert.equal(await Promise.race([pending.then(() => "settled"), turn().then(() => "open")]), "open");
   fixture.submit(conversationId(fixture));
   assert.deepEqual(await pending, { type: "submitted" });
@@ -209,10 +229,10 @@ test("reverse submit revalidates correlation, mode, choice presence, identity, a
   fixture.submit(id);
   fixture.submit(id, { choiceId: "missing" });
   fixture.submit(id, { choiceId: "disabled" });
-  fixture.emit("keyboard.event", { action: "down", code: "Tab", repeat: false });
+  fixture.dialogue.controls.history();
   fixture.submit(id, { choiceId: "enabled" });
   assert.equal(await Promise.race([pending.then(() => "settled"), turn().then(() => "open")]), "open");
-  fixture.emit("keyboard.event", { action: "down", code: "Escape", repeat: false });
+  fixture.dialogue.controls.cancel();
   fixture.submit(id, { choiceId: "enabled" });
   assert.deepEqual(await pending, { type: "submitted", choiceId: "enabled" });
   fixture.submit(id, { choiceId: "enabled" });
@@ -244,17 +264,17 @@ test("close and abort settle once, clean resources, and enforce CLOSED behavior"
 });
 
 test("operation establishment failures reject returned promises and clean partial resources", async () => {
-  const inputFailure = harness({ inputCreateError: new Error("input failed") });
+  const inputFailure = harness({ subscriptionCreateError: new Error("subscription failed") });
   let inputPending;
   assert.doesNotThrow(() => { inputPending = inputFailure.dialogue.openConversation(request()); });
-  await assert.rejects(inputPending, /input failed/);
+  await assert.rejects(inputPending, /subscription failed/);
   assert.equal(inputFailure.states.length, 0);
 
   const domainFailure = harness({ domainCreateError: new Error("domain failed") });
   const domainPending = domainFailure.dialogue.openConversation(request());
   await assert.rejects(domainPending, /domain failed/);
   assert.equal(domainFailure.counts().listenerCloses, 1);
-  assert.equal(domainFailure.counts().unsubscribeCount, 3);
+  assert.equal(domainFailure.counts().unsubscribeCount, 0);
 });
 
 function assertClosedCleanupOnce(fixture) {
@@ -263,7 +283,7 @@ function assertClosedCleanupOnce(fixture) {
     listenerCloses: 1,
     domainCreates: 1,
     domainCloses: 1,
-    unsubscribeCount: 3,
+    unsubscribeCount: 0,
   });
   fixture.dialogue.close();
   fixture.frameController.abort();
@@ -273,7 +293,7 @@ function assertClosedCleanupOnce(fixture) {
     listenerCloses: 1,
     domainCreates: 1,
     domainCloses: 1,
-    unsubscribeCount: 3,
+    unsubscribeCount: 0,
   });
 }
 
@@ -281,7 +301,7 @@ test("ACTIVE domain emit failure rejects and closes every session resource once"
   const cause = new Error("emit failed");
   const fixture = harness({ domainEmitError: cause });
   const { pending } = await openStarted(fixture, request());
-  fixture.emit("keyboard.event", { action: "down", code: "Enter", repeat: false });
+  fixture.dialogue.controls.confirm();
   await assert.rejects(pending, (error) => error === cause);
   assertClosedCleanupOnce(fixture);
 });
@@ -291,7 +311,7 @@ test("HISTORY mode replacement failure rejects and fails closed", async () => {
   const fixture = harness({ domainReplaceError: cause });
   fixture.dialogue.setHistory([history("past")]);
   const { pending } = await openStarted(fixture, request());
-  fixture.emit("keyboard.event", { action: "down", code: "Tab", repeat: false });
+  fixture.dialogue.controls.history();
   await assert.rejects(pending, (error) => error === cause);
   assertClosedCleanupOnce(fixture);
 });
@@ -305,12 +325,12 @@ test("READY retained projection replacement failure rejects instead of resolving
   assertClosedCleanupOnce(fixture);
 });
 
-test("settle-once ignores repeated reverse submit and repeated physical commit", async () => {
+test("settle-once ignores repeated reverse submit after repeated semantic commit", async () => {
   const fixture = harness();
   const { pending } = await openStarted(fixture, request());
   const id = conversationId(fixture);
-  fixture.emit("keyboard.event", { action: "down", code: "Enter", repeat: false });
-  fixture.emit("keyboard.event", { action: "down", code: "Enter", repeat: false });
+  fixture.dialogue.controls.confirm();
+  fixture.dialogue.controls.confirm();
   assert.equal(fixture.events.length, 2);
   fixture.submit(id);
   fixture.submit(id);

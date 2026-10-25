@@ -6,13 +6,23 @@ import { prepareExamplePresentation } from "./prepare.mjs";
 
 const root = new URL("../", import.meta.url);
 
-test("checked-in Game Entry has the frozen M14 topology and initial input", async () => {
+test("checked-in Game Entry and Hostra use the product-private base plus Map topology", async () => {
   const game = parseGameEntryV1(await readFile(new URL("game.json", root), "utf8"));
   assert.deepEqual(game, {
     formatVersion: 1,
-    initial: { subsystem: "map", input: { mapId: 1, x: 10, y: 8, characterName: "m14_player" } },
-    subsystems: [{ key: "map" }],
+    initial: { subsystem: "base", input: { mapId: 1, x: 10, y: 8, characterName: "m14_player" } },
+    subsystems: [{ key: "base" }, { key: "map" }],
   });
+  assert.deepEqual(JSON.parse(await readFile(new URL("launch.hostra.json", root), "utf8")), {
+    formatVersion: 1,
+    subsystems: [
+      { key: "base", module: "subsystems/base.mjs" },
+      { key: "map", module: "subsystems/map.mjs" },
+    ],
+  });
+  const base = await readFile(new URL("subsystems/base.mjs", root), "utf8");
+  assert.equal((base.match(/tag:\s*"game-controls-input"/g) ?? []).length, 1);
+  assert.doesNotMatch(base, /createControlsConsumer|RPGMapControls|setMoveIntent/);
 });
 
 test("checked-in presentation config resolves map artifacts only through package subpaths", async () => {
@@ -22,6 +32,7 @@ test("checked-in presentation config resolves map artifacts only through package
     { namespace: "Presentation", key: "essentials/page.css", mime: "text/css" },
   ]);
   assert.deepEqual(result.prepared.scripts.map(({ namespace, key, mime }) => ({ namespace, key, mime })), [
+    { namespace: "Presentation", key: "controls/device-input.browser.js", mime: "text/javascript" },
     { namespace: "Presentation", key: "map/map.browser.js", mime: "text/javascript" },
   ]);
 });

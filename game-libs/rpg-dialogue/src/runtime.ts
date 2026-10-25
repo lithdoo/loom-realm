@@ -1,17 +1,17 @@
-import { WEB_PRESENTATION_EVENT_CHANNEL_V1 } from "@loomrealm/data";
 import type {
   Frame,
-  InputListener,
   RenderDomain,
   RenderDomainState,
   RenderNode,
+  SessionEvent,
+  SessionEventSubscription,
   SubsystemScope,
-  Unsubscribe,
 } from "@loomrealm/subsystem";
 import type {
   ConversationRequestV0,
   ConversationResultV0,
   DialogueHistoryEntryV0,
+  RPGDialogueControls,
   RPGDialogueOptionsV0,
 } from "./model.js";
 import {
@@ -28,6 +28,7 @@ type InteractionMode = "CONVERSATION" | "HISTORY";
 type SemanticAction = "confirm" | "previous" | "next" | "history" | "cancel";
 
 const ACTIONS = ["confirm", "previous", "next", "history", "cancel"] as const;
+const WEB_PRESENTATION_EVENT_CHANNEL = "x.loomrealm.web-presentation.event";
 
 interface ActiveOperation {
   readonly request: ConversationRequestV0;
@@ -49,8 +50,7 @@ interface ProjectionPlan {
 }
 
 interface SessionResources {
-  readonly listener: InputListener;
-  readonly unsubscribes: readonly Unsubscribe[];
+  readonly subscription: SessionEventSubscription;
 }
 
 function abortError(): Error {
@@ -79,6 +79,7 @@ function exactKeys(value: Record<string, unknown>, required: readonly string[], 
 }
 
 export class RPGDialogue {
+  readonly controls: RPGDialogueControls;
   private readonly scope: SubsystemScope;
   private readonly frame: Frame;
   private readonly cancelable: boolean;
@@ -86,8 +87,7 @@ export class RPGDialogue {
   private lifecycle: Lifecycle = "READY";
   private mode: InteractionMode = "CONVERSATION";
   private domain?: RenderDomain;
-  private listener?: InputListener;
-  private unsubscribes: Unsubscribe[] = [];
+  private subscription?: SessionEventSubscription;
   private active?: ActiveOperation;
   private retainedRequest?: ConversationRequestV0;
   private retainedConversationId?: string;
@@ -108,6 +108,13 @@ export class RPGDialogue {
     this.frame = validated.frame;
     this.cancelable = validated.cancelable;
     this.zIndex = validated.zIndex;
+    this.controls = Object.freeze({
+      confirm: () => this.routeSafely("confirm"),
+      previous: () => this.routeSafely("previous"),
+      next: () => this.routeSafely("next"),
+      history: () => this.routeSafely("history"),
+      cancel: () => this.routeSafely("cancel"),
+    });
     this.frame.signal.addEventListener("abort", this.frameAbort, { once: true });
     this.scope.signal.addEventListener("abort", this.scopeAbort, { once: true });
     if (this.frame.signal.aborted || this.scope.signal.aborted) this.terminate(abortError());
@@ -115,9 +122,9 @@ export class RPGDialogue {
 
   openConversation(request: ConversationRequestV0): Promise<ConversationResultV0> {
     return new Promise<ConversationResultV0>((resolve, reject) => {
-      queueMicrotask(() => {
+      queueMicrotask(async () => {
         try {
-          this.beginConversation(request, resolve, reject);
+          await this.beginConversation(request, resolve, reject);
         } catch (cause) {
           reject(cause);
         }
@@ -175,11 +182,11 @@ export class RPGDialogue {
     this.terminate(operationClosedError());
   }
 
-  private beginConversation(
+  private async beginConversation(
     requestValue: unknown,
     resolve: (value: ConversationResultV0) => void,
     reject: (cause: unknown) => void,
-  ): void {
+  ): Promise<void> {
     if (this.lifecycle === "CLOSED") throw this.closeReason ?? closedError();
     if (this.lifecycle === "ACTIVE") throw new Error("An RPG Dialogue Conversation is already active");
     const request = validateRequest(requestValue);
@@ -188,16 +195,15 @@ export class RPGDialogue {
     validateProjection(state);
 
     if (this.domain === undefined) {
-      const resources = this.createSessionResources();
+      const resources = await this.createSessionResources();
       let domain: RenderDomain;
       try {
         domain = this.scope.createRenderDomain(state);
       } catch (cause) {
-        this.cleanupResources(resources.listener, resources.unsubscribes);
+        this.cleanupResources(resources.subscription);
         throw cause;
       }
-      this.listener = resources.listener;
-      this.unsubscribes = [...resources.unsubscribes];
+      this.subscription = resources.subscription;
       this.domain = domain;
     } else {
       this.domain.replace(state);
@@ -272,46 +278,21 @@ export class RPGDialogue {
     return { key: `dialogue-node-${serial}`, nextSerial: serial + 1 };
   }
 
-  private createSessionResources(): SessionResources {
-    const listener = this.scope.createInputListener({
-      frame: this.frame,
-      channels: ["keyboard.event", "gamepad.event", WEB_PRESENTATION_EVENT_CHANNEL_V1],
-    });
-    const unsubscribes: Unsubscribe[] = [];
-    try {
-      unsubscribes.push(listener.on("keyboard.event", (event) => {
-        if (event.action !== "down" || event.repeat) return;
-        const action = event.code === "Enter" || event.code === "Space" ? "confirm"
-          : event.code === "ArrowUp" ? "previous"
-          : event.code === "ArrowDown" ? "next"
-          : event.code === "Tab" ? "history"
-          : event.code === "Escape" ? "cancel"
-          : undefined;
-        if (action !== undefined) this.routeSafely(action);
-      }));
-      unsubscribes.push(listener.on("gamepad.event", (event) => {
-        if (event.action !== "down") return;
-        const action = event.button === "south" ? "confirm"
-          : event.button === "dpadUp" ? "previous"
-          : event.button === "dpadDown" ? "next"
-          : event.button === "select" ? "history"
-          : event.button === "east" ? "cancel"
-          : undefined;
-        if (action !== undefined) this.routeSafely(action);
-      }));
-      unsubscribes.push(listener.on(WEB_PRESENTATION_EVENT_CHANNEL_V1, (event) => this.receivePresentationEvent(event)));
-      return { listener, unsubscribes };
-    } catch (cause) {
-      this.cleanupResources(listener, unsubscribes);
-      throw cause;
-    }
+  private async createSessionResources(): Promise<SessionResources> {
+    const subscription = await this.scope.events.subscribe(
+      [WEB_PRESENTATION_EVENT_CHANNEL],
+      (event: SessionEvent) => {
+        if (event.channel === WEB_PRESENTATION_EVENT_CHANNEL) this.receivePresentationEvent(event);
+      },
+    );
+    return { subscription };
   }
 
-  private receivePresentationEvent(value: unknown): void {
-    if (this.lifecycle !== "ACTIVE" || this.active?.settled !== false || !plainDataObject(value) ||
-        !exactKeys(value, ["domainId", "targetKey", "name", "data"], []) ||
-        typeof value.domainId !== "string" || value.targetKey !== "conversation" || value.name !== "submit" ||
-        !plainDataObject(value.data)) return;
+  private receivePresentationEvent(event: SessionEvent): void {
+    const value = event.payload;
+    if (event.type !== "submit" || this.lifecycle !== "ACTIVE" || this.active?.settled !== false || !plainDataObject(value) ||
+        !exactKeys(value, ["domainId", "targetKey", "data"], []) ||
+        typeof value.domainId !== "string" || value.targetKey !== "conversation" || !plainDataObject(value.data)) return;
     const data = value.data;
     if (!exactKeys(data, ["conversationId"], ["choiceId"]) ||
         typeof data.conversationId !== "string" || data.conversationId !== this.active.conversationId ||
@@ -543,22 +524,14 @@ export class RPGDialogue {
     }, "READY", "CONVERSATION"));
   }
 
-  private cleanupResources(listener: InputListener, unsubscribes: readonly Unsubscribe[]): void {
-    for (const unsubscribe of unsubscribes) {
-      try { unsubscribe(); } catch { /* best-effort */ }
-    }
-    try { listener.close(); } catch { /* best-effort */ }
+  private cleanupResources(subscription: SessionEventSubscription): void {
+    try { subscription.close(); } catch { /* best-effort */ }
   }
 
   private cleanupSession(): void {
-    const unsubscribes = this.unsubscribes;
-    this.unsubscribes = [];
-    for (const unsubscribe of unsubscribes) {
-      try { unsubscribe(); } catch { /* best-effort */ }
-    }
-    const listener = this.listener;
-    this.listener = undefined;
-    try { listener?.close(); } catch { /* best-effort */ }
+    const subscription = this.subscription;
+    this.subscription = undefined;
+    try { subscription?.close(); } catch { /* best-effort */ }
     const domain = this.domain;
     this.domain = undefined;
     try { domain?.close(); } catch { /* best-effort */ }

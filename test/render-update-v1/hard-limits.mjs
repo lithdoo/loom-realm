@@ -15,8 +15,8 @@ async function outbound(message, accepted, label = message.type) {
   const carrier = inboundCarrier([]);
   carrier.send = async (raw) => { sent.push(raw); };
   const peer = createSubsystemDataPeer({
-    binding: { carrier, subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/1" },
-    handlers: { onInputState: () => ({ kind: "accepted" }), onInputEvent: () => ({ kind: "accepted" }), onInputReset: () => ({ kind: "accepted" }), onViewportState: () => ({ kind: "accepted" }) },
+    binding: { carrier, subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
+    handlers: { onViewportState: () => ({ kind: "accepted" }) },
   });
   const outcome = await peer.render[methodFor(message)](message);
   assert.equal(outcome.kind, accepted ? "sent" : "terminal", label);
@@ -27,9 +27,8 @@ async function outbound(message, accepted, label = message.type) {
 async function inbound(message, accepted) {
   let delivered = 0;
   const peer = createRendererDataPeer({
-    binding: { carrier: inboundCarrier([typeof message === "string" ? message : JSON.stringify(message)]), subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/1" },
+    binding: { carrier: inboundCarrier([typeof message === "string" ? message : JSON.stringify(message)]), subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
     handlers: {
-      onInputInterest: () => ({ kind: "accepted" }),
       onRenderDomains: () => { delivered += 1; return { kind: "accepted" }; },
       onRenderSnapshot: () => { delivered += 1; return { kind: "accepted" }; },
       onRenderPatch: () => { delivered += 1; return { kind: "accepted" }; },

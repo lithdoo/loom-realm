@@ -40,6 +40,7 @@ export interface RendererPresentationNodeEvent {
   readonly targetKey: string;
   readonly name: unknown;
   readonly data: unknown;
+  readonly options: unknown;
 }
 
 export interface RendererPresentationRenderEvent {

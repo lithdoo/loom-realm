@@ -10,6 +10,15 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import WebSocket from "ws";
 import { syncMapPresentation } from "../examples/essentials-v21.1-local/scripts/sync-map-presentation.mjs";
+import {
+  battleExecutable as frameEventBattleExecutable,
+  expectedPresentationEvent,
+  gameEntryText as frameEventGameEntry,
+  launchManifestText as frameEventLaunchManifest,
+  presentation as frameEventPresentation,
+  presentationSource as frameEventPresentationSource,
+  worldExecutable as frameEventWorldExecutable,
+} from "./frame-targeted-presentation-v1/browser-fixture.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workspace = path.resolve(repository, "..");
@@ -312,6 +321,25 @@ async function prepareLocalPresentationInstallation() {
   return installation;
 }
 
+async function prepareFrameTargetedPresentationInstallation() {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "loomrealm-frame-events-desktop-"));
+  const exampleRoot = path.join(temporary, "game");
+  const subsystemRoot = path.join(exampleRoot, "subsystems");
+  const presentationRoot = path.join(exampleRoot, "[FSDB]frame-events", "[resource]Presentation");
+  await fs.mkdir(subsystemRoot, { recursive: true });
+  await fs.mkdir(presentationRoot, { recursive: true });
+  await Promise.all([
+    writeFile(path.join(exampleRoot, "game.json"), frameEventGameEntry),
+    writeFile(path.join(exampleRoot, "launch.hostra.json"), frameEventLaunchManifest),
+    writeFile(path.join(exampleRoot, "presentation.json"), JSON.stringify(frameEventPresentation)),
+    writeFile(path.join(subsystemRoot, "world.mjs"), frameEventWorldExecutable),
+    writeFile(path.join(subsystemRoot, "battle.mjs"), frameEventBattleExecutable),
+    writeFile(path.join(presentationRoot, ".desc.meta"), "Frame-targeted Presentation Event qualification resources.\n"),
+    writeFile(path.join(presentationRoot, "frame-event-probe.browser.js.js"), frameEventPresentationSource),
+  ]);
+  return { temporary, exampleRoot };
+}
+
 test("syncMapPresentation atomically replaces all three Presentation resources", async () => {
   const fixture = await presentationFixture();
   try {
@@ -569,6 +597,67 @@ test("Local Presentation fills six real Hostra viewports and keeps the footer vi
   }
 });
 
+test("M15 real Custom Element delivers top-frame from World through Hostra only to the Battle Frame", { timeout: 90_000 }, async (t) => {
+  const installation = await prepareFrameTargetedPresentationInstallation();
+  const eventLog = path.join(installation.temporary, "events.jsonl");
+  await writeFile(eventLog, "");
+  const hostra = launchHostra(eventLog, path.join(installation.temporary, "hostra-user-data"), {
+    LOOMREALM_DESKTOP_INSTALLATION_ROOT: installation.exampleRoot,
+  });
+  let browser = null;
+  t.after(async () => {
+    try {
+      await browser?.close().catch(() => {});
+      await terminateChild(hostra.child);
+    } finally {
+      await rmBusy(installation.temporary);
+    }
+  });
+
+  const ready = await hostra.ready;
+  browser = await chromium.connectOverCDP(ready.data.cdpEndpoint);
+  const context = browser.contexts()[0];
+  await waitFor(
+    () => context.pages().some((candidate) => /\/_lr\/window\//u.test(candidate.url())),
+    "Hostra Window",
+  );
+  const page = context.pages().find((candidate) => /\/_lr\/window\//u.test(candidate.url()));
+  assert.ok(page);
+  const diagnostics = [];
+  page.on("console", (message) => diagnostics.push(`console:${message.type()}:${message.text()}`));
+  page.on("pageerror", (error) => diagnostics.push(`pageerror:${error.stack ?? error.message}`));
+
+  try {
+    await page.waitForFunction(() => {
+      const element = document.querySelector("#frame-event-source");
+      return document.documentElement.dataset.loomrealmRenderer === "installed" &&
+        element?.dataset.contextReady === "true" &&
+        document.querySelector("#frame-event-target") !== null &&
+        typeof element.sendTopFrameEvent === "function";
+    }, null, { timeout: 30_000 });
+    await page.locator("#frame-event-source").evaluate((element) => element.sendTopFrameEvent());
+    await page.waitForFunction(() => document.querySelector("#frame-event-target")?.hasAttribute("data-delivered"), null, { timeout: 20_000 });
+  } catch (cause) {
+    const state = await page.evaluate(() => ({
+      dataset: { ...document.documentElement.dataset },
+      html: document.documentElement.outerHTML.slice(0, 4_000),
+    })).catch((error) => ({ error: error.message }));
+    throw new Error(`${cause.message}\n${JSON.stringify(state)}\n${diagnostics.join("\n")}\n${hostra.output()}\n${JSON.stringify(await events(eventLog))}`);
+  }
+
+  const delivered = JSON.parse(await page.locator("#frame-event-target").getAttribute("data-delivered"));
+  assert.deepEqual(delivered, {
+    ...expectedPresentationEvent,
+    source: {
+      subsystemKey: "world",
+      domainId: delivered.source.domainId,
+      targetKey: "source",
+    },
+  });
+  assert.match(delivered.source.domainId, /^d[0-9a-z]+$/u);
+  assert.equal(await page.locator("#frame-event-source").getAttribute("data-world-delivered"), null);
+});
+
 test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_000 }, async (t) => {
   const installation = await prepareMovementInstallation();
   const eventLog = path.join(installation.temporary, "events.jsonl");
@@ -610,6 +699,8 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
     const state = await page.evaluate(() => ({ url: location.href, html: document.documentElement.outerHTML.slice(0, 4000), dataset: { ...document.documentElement.dataset } })).catch((error) => ({ error: error.message }));
     throw new Error(`${cause.message}\n${JSON.stringify(state)}\n${browserMessages.join("\n")}\n${hostra.output()}\n${JSON.stringify(await events(eventLog))}`);
   }
+  assert.equal(await page.locator("game-controls-input").count(), 1);
+  assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
   await setLogicalViewport(page, 640, 480);
   await waitFor(async () => (await events(eventLog)).some(({ type }) => type === "data-current"), "initial Data candidate");
   const rpc = await connectRpc(ready.data.rpcEndpoint, hostra.rpcToken);
@@ -625,7 +716,7 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
   const loomProcess = rows.find(({ pid }) => pid === hostState.subprocess.pid);
   assert.equal(loomProcess?.ppid, ready.data.pid);
   const runners = rows.filter(({ ppid, command }) => ppid === loomProcess.pid && /game-launcher-hostra[\\/]dist[\\/]runner[\\/]entry\.js/u.test(command));
-  assert.equal(runners.length, 1, JSON.stringify(rows.filter(({ ppid }) => ppid === loomProcess.pid)));
+  assert.equal(runners.length, 2, JSON.stringify(rows.filter(({ ppid }) => ppid === loomProcess.pid)));
   const firstIdentity = await page.evaluate(() => document.documentElement.dataset.loomrealmRendererIdentity);
   const firstDocuments = (await events(eventLog)).filter(({ type }) => type === "document-bootstrap").length;
   assert.equal(typeof firstIdentity, "string");
@@ -843,6 +934,14 @@ test("M15 movement latency harness records input-to-paint traces", { timeout: 90
     const records = [];
     globalThis.__loomrealmMovementRecords = records;
     globalThis.__loomrealmMovementQualification = (record) => { records.push(record); };
+    window.addEventListener("keydown", (event) => {
+      if (!event.isTrusted || event.repeat) return;
+      globalThis.__loomrealmMovementQualification?.({
+        name: "input-captured",
+        at: performance.now(),
+        detail: { code: event.code },
+      });
+    }, { capture: true });
   });
   await page.bringToFront();
   await page.mouse.click(320, 240);
@@ -912,6 +1011,14 @@ test(`M15 Hostra ${fullLatencyQualification ? "640/720/1080 full P95" : "640 PR 
     const records = [];
     globalThis.__loomrealmMovementRecords = records;
     globalThis.__loomrealmMovementQualification = (record) => { records.push(record); };
+    window.addEventListener("keydown", (event) => {
+      if (!event.isTrusted || event.repeat) return;
+      globalThis.__loomrealmMovementQualification?.({
+        name: "input-captured",
+        at: performance.now(),
+        detail: { code: event.code },
+      });
+    }, { capture: true });
   });
   await page.bringToFront();
   await page.mouse.click(320, 240);

@@ -2,7 +2,7 @@ import type { MessageCarrier } from "@loomrealm/foundation";
 
 export type AuthorityRevision = number;
 
-export type RendererRuntimeLifecycleV1 =
+export type RendererRuntimeLifecycleV2 =
   | "declared"
   | "starting"
   | "connected"
@@ -12,57 +12,50 @@ export type RendererRuntimeLifecycleV1 =
   | "stopped"
   | "failed";
 
-export interface RendererRuntimeStateV1 {
+export interface RendererRuntimeStateV2 {
   readonly subsystemKey: string;
-  readonly state: RendererRuntimeLifecycleV1;
+  readonly state: RendererRuntimeLifecycleV2;
 }
 
-export type RendererFrameLifecycleV1 =
+export type RendererFrameLifecycleV2 =
   | "starting"
   | "active"
   | "suspended"
   | "closing";
 
-export interface RendererFrameStateV1 {
+export interface RendererFrameStateV2 {
   readonly frameId: string;
   readonly subsystemKey: string;
-  readonly lifecycle: RendererFrameLifecycleV1;
+  readonly lifecycle: RendererFrameLifecycleV2;
   readonly activationId?: string;
 }
 
-export interface RendererInputTargetV1 {
-  readonly subsystemKey: string;
-  readonly frameId: string;
-  readonly activationId: string;
-}
-
-export interface RendererDataAuthorityV1 {
+export interface RendererDataAuthorityV2 {
   readonly subsystemKey: string;
   readonly generation: number;
   readonly dataProfile: string;
 }
 
-export interface RendererAuthoritySnapshotV1 {
+export interface RendererAuthoritySnapshotV2 {
   readonly sessionId: string;
   readonly revision: AuthorityRevision;
-  readonly runtimes: readonly RendererRuntimeStateV1[];
-  readonly stack: readonly RendererFrameStateV1[];
-  readonly inputTarget: RendererInputTargetV1 | null;
-  readonly dataAuthorities: readonly RendererDataAuthorityV1[];
+  readonly runtimes: readonly RendererRuntimeStateV2[];
+  readonly stack: readonly RendererFrameStateV2[];
+  readonly dataAuthorities: readonly RendererDataAuthorityV2[];
 }
 
-export interface RendererHelloParamsV1 {
+export interface RendererHelloParamsV2 {
   readonly rendererControlToken: string;
   readonly protocolVersions: readonly number[];
 }
 
-export interface RendererHelloResultV1 {
-  readonly protocolVersion: 1;
-  readonly snapshot: RendererAuthoritySnapshotV1;
+export interface RendererHelloResultV2 {
+  readonly protocolVersion: 2;
+  readonly snapshot: RendererAuthoritySnapshotV2;
 }
 
-export interface RendererStateParamsV1 {
-  readonly snapshot: RendererAuthoritySnapshotV1;
+export interface RendererStateParamsV2 {
+  readonly snapshot: RendererAuthoritySnapshotV2;
 }
 
 export type RendererControlTerminalKind =
@@ -84,7 +77,7 @@ export type RendererControlPublishOutcome =
 export type MainRendererControlHelloAcceptance =
   | {
       readonly kind: "accepted";
-      readonly snapshot: RendererAuthoritySnapshotV1;
+      readonly snapshot: RendererAuthoritySnapshotV2;
       readonly preparedHelloText: string;
     }
   | {
@@ -96,8 +89,8 @@ export interface MainRendererControlPeerOptions {
   readonly carrier: MessageCarrier;
   acceptHello(
     peer: MainRendererControlPeer,
-    params: RendererHelloParamsV1,
-    selectedProtocolVersion: 1,
+    params: RendererHelloParamsV2,
+    selectedProtocolVersion: 2,
   ):
     | MainRendererControlHelloAcceptance
     | Promise<MainRendererControlHelloAcceptance>;
@@ -105,13 +98,13 @@ export interface MainRendererControlPeerOptions {
 
 export interface MainRendererControlPeer {
   readonly terminal: Promise<RendererControlTerminal>;
-  publish(snapshot: RendererAuthoritySnapshotV1): RendererControlPublishOutcome;
+  publish(snapshot: RendererAuthoritySnapshotV2): RendererControlPublishOutcome;
   retire(): RendererControlTerminal;
 }
 
 export interface RendererControlPeer {
   readonly terminal: Promise<RendererControlTerminal>;
-  states(): AsyncIterable<RendererAuthoritySnapshotV1>;
+  states(): AsyncIterable<RendererAuthoritySnapshotV2>;
   close(): Promise<void>;
 }
 
@@ -125,7 +118,7 @@ export type RendererPeerConnectOutcome =
   | {
       readonly kind: "connected";
       readonly peer: RendererControlPeer;
-      readonly snapshot: RendererAuthoritySnapshotV1;
+      readonly snapshot: RendererAuthoritySnapshotV2;
     }
   | {
       readonly kind: "rejected";

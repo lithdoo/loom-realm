@@ -263,10 +263,9 @@ function rendererDataPeer(carrier) {
       carrier,
       subsystemKey: "demo",
       generation: 1,
-      dataProfile: "loomrealm.renderer-data/1",
+      dataProfile: "loomrealm.renderer-data/3",
     },
     handlers: {
-      onInputInterest: accept,
       onRenderDomains: accept,
       onRenderSnapshot: accept,
       onRenderPatch: accept,
@@ -296,7 +295,7 @@ test("ready Data acquisition is non-blocking and terminal reacquires a fresh pee
   requests[0].gate.resolve({
     carrier: firstPair.right,
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/1",
+    dataProfile: "loomrealm.renderer-data/3",
   });
   const firstRenderer = rendererDataPeer(firstPair.left);
   await tick();
@@ -306,6 +305,85 @@ test("ready Data acquisition is non-blocking and terminal reacquires a fresh pee
 
   await shutdown(session);
   assert.equal(requests[1].signal.aborted, true);
+});
+
+test("Runtime wires Presentation listeners through the actual Data carrier to the exact Frame", async () => {
+  const pair = createMemoryCarrierPair();
+  const interests = [];
+  const delivered = [];
+  const never = new Promise(() => {});
+  let listenerCount = 0;
+  const session = await createSession(
+    defineSubsystem((scope) => ({
+      async frame(frame) {
+        const listener = scope.presentationEvents.createListener({
+          frame,
+          channels: ["controls.event"],
+        });
+        listener.on("controls.event", (event) => delivered.push([frame.id, event]));
+        listenerCount += 1;
+        return never;
+      },
+    })),
+    {},
+    defaultPolicy,
+    {
+      async acquire() {
+        return { carrier: pair.right, generation: 1, dataProfile: "loomrealm.renderer-data/3" };
+      },
+    },
+  );
+  const renderer = createRendererDataPeer({
+    binding: { carrier: pair.left, subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
+    handlers: {
+      onRenderDomains: () => ({ kind: "accepted" }),
+      onRenderSnapshot: () => ({ kind: "accepted" }),
+      onRenderPatch: () => ({ kind: "accepted" }),
+      onRenderEvent: () => ({ kind: "accepted" }),
+      onPresentationInterest(message) { interests.push(structuredClone(message)); return { kind: "accepted" }; },
+    },
+  });
+
+  await session.main.frame.initialize({ frameId: "parent", input: null });
+  await session.main.frame.initialize({ frameId: "child", input: null });
+  await session.main.frame.activate({ frameId: "parent", activationId: "parent-a1" });
+  await session.main.frame.activate({ frameId: "child", activationId: "child-a1" });
+  await waitFor(() => listenerCount === 2 && interests.at(-1)?.frames.length === 2, "Presentation Interest union");
+
+  await renderer.presentation.sendEvent({
+    type: "presentation.event",
+    sourceSubsystemKey: "world",
+    domainId: "hud",
+    targetKey: "controls",
+    frameId: "child",
+    activationId: "child-a1",
+    channel: "controls.event",
+    name: "input.event",
+    data: { action: "down" },
+  });
+  await waitFor(() => delivered.length === 1, "exact Frame Presentation callback");
+  assert.equal(delivered[0][0], "child");
+  assert.deepEqual(delivered[0][1].source, { subsystemKey: "world", domainId: "hud", targetKey: "controls" });
+
+  await renderer.presentation.sendEvent({
+    type: "presentation.event",
+    sourceSubsystemKey: "world",
+    domainId: "hud",
+    targetKey: "controls",
+    frameId: "parent",
+    activationId: "stale",
+    channel: "controls.event",
+    name: "input.event",
+    data: { action: "down" },
+  });
+  await tick();
+  assert.equal(delivered.length, 1);
+
+  await session.main.frame.closeFrame({ frameId: "child" });
+  await waitFor(() => interests.at(-1)?.frames.every(({ frameId }) => frameId !== "child"), "Frame Interest cleanup");
+  await session.main.frame.closeFrame({ frameId: "parent" });
+  await shutdown(session);
+  await renderer.close();
 });
 
 test("shutdown aborts pending Data and closes a late carrier without changing Runtime result", async () => {
@@ -330,7 +408,7 @@ test("shutdown aborts pending Data and closes a late carrier without changing Ru
   request.resolve({
     carrier: late.right,
     generation: 1,
-    dataProfile: "loomrealm.renderer-data/1",
+    dataProfile: "loomrealm.renderer-data/3",
   });
   assert.deepEqual(await late.left.closed, { kind: "closed" });
 });
@@ -371,7 +449,7 @@ test("throwing carrier close getter stays isolated during Subsystem construction
             },
           },
           generation: 1,
-          dataProfile: "loomrealm.renderer-data/1",
+          dataProfile: "loomrealm.renderer-data/3",
         };
       },
     },
@@ -428,7 +506,7 @@ test("hanging Data close shares the Runtime cleanup deadline and cannot replace 
         return {
           carrier,
           generation: 1,
-          dataProfile: "loomrealm.renderer-data/1",
+          dataProfile: "loomrealm.renderer-data/3",
         };
       },
     },
@@ -570,175 +648,6 @@ test("recoverable call rejection is catchable and keeps the current activation u
   });
 
   await session.main.frame.closeFrame({ frameId: "root" });
-  await shutdown(session);
-});
-
-test("recoverable frame.call converges retained State before business observes rejection", async () => {
-  const dataPair = createMemoryCarrierPair();
-  const callReply = deferred();
-  const listenerReady = deferred();
-  const beginCall = deferred();
-  const observations = [];
-  let renderer;
-
-  const session = await createSession(
-    defineSubsystem((scope) => ({
-      async frame(frame) {
-        const listener = scope.createInputListener({
-          frame,
-          channels: ["keyboard.state", "keyboard.event"],
-        });
-        listener.on("keyboard.state", (value) => {
-          observations.push(`state:${value.down.join(",")}`);
-        });
-        listener.on("keyboard.event", () => observations.push("event"));
-        listenerReady.resolve();
-        await beginCall.promise;
-        try {
-          await frame.call("missing", null);
-        } catch (error) {
-          assert.ok(error instanceof FrameCallRejectedError);
-          observations.push("catch");
-        }
-        return completed(null);
-      },
-    })),
-    {
-      onFrameCall() {
-        return callReply.promise;
-      },
-    },
-    defaultPolicy,
-    {
-      async acquire() {
-        return {
-          carrier: dataPair.right,
-          generation: 1,
-          dataProfile: "loomrealm.renderer-data/1",
-        };
-      },
-    },
-  );
-  renderer = rendererDataPeer(dataPair.left);
-
-  await session.main.frame.initialize({ frameId: "root", input: null });
-  await session.main.frame.activate({ frameId: "root", activationId: "a1" });
-  await listenerReady.promise;
-  await renderer.input.sendState({
-    type: "input.state",
-    frameId: "root",
-    activationId: "a1",
-    channel: "keyboard.state",
-    payload: { down: [] },
-  });
-  beginCall.resolve();
-  await waitFor(() => session.calls.length === 1, "pending frame.call");
-  await renderer.input.sendState({
-    type: "input.state",
-    frameId: "root",
-    activationId: "a1",
-    channel: "keyboard.state",
-    payload: { down: ["KeyA"] },
-  });
-  await renderer.input.sendEvent({
-    type: "input.event",
-    frameId: "root",
-    activationId: "a1",
-    channel: "keyboard.event",
-    payload: { action: "down", code: "KeyA", repeat: false },
-  });
-  callReply.resolve({
-    kind: "semantic-error",
-    error: { code: "FRAME_CALL_TARGET_NOT_FOUND" },
-  });
-  await waitFor(() => session.returns.length === 1, "recoverable Frame return");
-  assert.deepEqual(observations, ["state:", "state:KeyA", "catch"]);
-
-  await session.main.frame.closeFrame({ frameId: "root" });
-  await renderer.close();
-  await shutdown(session);
-});
-
-test("committed frame.call discards suppressed old-Activation State", async () => {
-  const dataPair = createMemoryCarrierPair();
-  const callReply = deferred();
-  const listenerReady = deferred();
-  const beginCall = deferred();
-  const finishFrame = deferred();
-  const observations = [];
-  const session = await createSession(
-    defineSubsystem((scope) => ({
-      async frame(frame) {
-        const listener = scope.createInputListener({
-          frame,
-          channels: ["keyboard.state"],
-        });
-        listener.on("keyboard.state", (value) => observations.push(value.down.join(",")));
-        listenerReady.resolve();
-        await beginCall.promise;
-        await frame.call("child", null);
-        await finishFrame.promise;
-        return completed(null);
-      },
-    })),
-    { onFrameCall: () => callReply.promise },
-    defaultPolicy,
-    {
-      async acquire() {
-        return {
-          carrier: dataPair.right,
-          generation: 1,
-          dataProfile: "loomrealm.renderer-data/1",
-        };
-      },
-    },
-  );
-  const renderer = rendererDataPeer(dataPair.left);
-  await session.main.frame.initialize({ frameId: "root", input: null });
-  await session.main.frame.activate({ frameId: "root", activationId: "a1" });
-  await listenerReady.promise;
-  beginCall.resolve();
-  await waitFor(() => session.calls.length === 1, "pending committed frame.call");
-  await renderer.input.sendState({
-    type: "input.state",
-    frameId: "root",
-    activationId: "a1",
-    channel: "keyboard.state",
-    payload: { down: ["KeyA"] },
-  });
-  callReply.resolve({ kind: "success", result: { childFrameId: "child-1" } });
-  await tick();
-  await tick();
-  await renderer.input.sendState({
-    type: "input.state",
-    frameId: "root",
-    activationId: "a1",
-    channel: "keyboard.state",
-    payload: { down: ["KeyB"] },
-  });
-  assert.deepEqual(
-    await session.main.frame.resume({
-      frameId: "root",
-      activationId: "a2",
-      returnedFrameId: "child-1",
-      result: { type: "completed", value: null },
-    }),
-    { kind: "success", result: {} },
-  );
-  await tick();
-  await renderer.input.sendState({
-    type: "input.state",
-    frameId: "root",
-    activationId: "a2",
-    channel: "keyboard.state",
-    payload: { down: ["KeyC"] },
-  });
-  assert.deepEqual(observations, ["KeyC"]);
-  finishFrame.resolve();
-  await waitFor(() => session.returns.length === 1, "committed Frame return");
-
-  await session.main.frame.closeFrame({ frameId: "root" });
-  await renderer.close();
   await shutdown(session);
 });
 

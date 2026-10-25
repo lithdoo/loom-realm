@@ -1,1 +1,3 @@
 *.bat text eol=crlf
+*.js.js text eol=lf
+*.css.css text eol=lf

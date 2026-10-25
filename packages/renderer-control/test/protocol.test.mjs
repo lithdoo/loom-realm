@@ -4,7 +4,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import {
   connectRendererControlPeer,
   createMainRendererControlPeer,
-  prepareRendererHelloResultV1,
+  prepareRendererHelloResultV2,
 } from "../dist/index.js";
 
 const snapshot = (revision = 1) => Object.freeze({
@@ -12,7 +12,6 @@ const snapshot = (revision = 1) => Object.freeze({
   revision,
   runtimes: Object.freeze([{ subsystemKey: "game", state: "ready" }]),
   stack: Object.freeze([{ frameId: "f:1", subsystemKey: "game", lifecycle: "active", activationId: "a:1" }]),
-  inputTarget: Object.freeze({ subsystemKey: "game", frameId: "f:1", activationId: "a:1" }),
   dataAuthorities: Object.freeze([]),
 });
 
@@ -22,9 +21,9 @@ test("concrete peers perform one-shot hello and lazy initial handoff", async () 
     carrier: pair.left,
     acceptHello(peer, params, version) {
       assert.equal(params.rendererControlToken, "token");
-      assert.equal(version, 1);
+      assert.equal(version, 2);
       const initial = snapshot();
-      return { kind: "accepted", snapshot: initial, preparedHelloText: prepareRendererHelloResultV1(initial) };
+      return { kind: "accepted", snapshot: initial, preparedHelloText: prepareRendererHelloResultV2(initial) };
     },
   });
   const connected = await connectRendererControlPeer({ carrier: pair.right, rendererControlToken: "token" });
@@ -41,7 +40,7 @@ test("protocol peer rejects unsupported version before authority acceptance", as
   const pair = createMemoryCarrierPair();
   let calls = 0;
   createMainRendererControlPeer({ carrier: pair.left, acceptHello() { calls += 1; throw new Error("unreachable"); } });
-  const outcome = await connectRendererControlPeer({ carrier: pair.right, rendererControlToken: "token", protocolVersions: [2] });
+  const outcome = await connectRendererControlPeer({ carrier: pair.right, rendererControlToken: "token", protocolVersions: [1] });
   assert.deepEqual(outcome, { kind: "rejected", code: "RENDERER_CONTROL_PROTOCOL_UNSUPPORTED" });
   assert.equal(calls, 0);
 });
@@ -50,7 +49,7 @@ test("renderer peer fail-closes revision regression", async () => {
   const pair = createMemoryCarrierPair();
   const main = createMainRendererControlPeer({
     carrier: pair.left,
-    acceptHello() { const value = snapshot(2); return { kind: "accepted", snapshot: value, preparedHelloText: prepareRendererHelloResultV1(value) }; },
+    acceptHello() { const value = snapshot(2); return { kind: "accepted", snapshot: value, preparedHelloText: prepareRendererHelloResultV2(value) }; },
   });
   const connected = await connectRendererControlPeer({ carrier: pair.right, rendererControlToken: "token" });
   assert.equal(connected.kind, "connected");

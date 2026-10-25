@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
-import { createSubsystemDataPeer, WEB_PRESENTATION_EVENT_CHANNEL_V1 } from "@loomrealm/data";
-import { createMainRendererControlPeer, prepareRendererHelloResultV1 } from "@loomrealm/renderer-control";
+import { createSubsystemDataPeer } from "@loomrealm/data";
+import { createMainRendererControlPeer, prepareRendererHelloResultV2 } from "@loomrealm/renderer-control";
 import { createRendererControlHolder } from "../dist/index.js";
 
 const snapshot = (sessionId, revision, dataAuthorities = []) => ({
@@ -10,7 +10,6 @@ const snapshot = (sessionId, revision, dataAuthorities = []) => ({
   revision,
   runtimes: dataAuthorities.map(({ subsystemKey }) => ({ subsystemKey, state: "ready" })),
   stack: [],
-  inputTarget: null,
   dataAuthorities,
 });
 
@@ -19,7 +18,7 @@ function main(pair, sessionId, dataAuthorities = []) {
     carrier: pair.left,
     acceptHello() {
       const initial = snapshot(sessionId, 1, dataAuthorities);
-      return { kind: "accepted", snapshot: initial, preparedHelloText: prepareRendererHelloResultV1(initial) };
+      return { kind: "accepted", snapshot: initial, preparedHelloText: prepareRendererHelloResultV2(initial) };
     },
   });
 }
@@ -47,7 +46,7 @@ async function waitFor(predicate, message) {
 const authority = (subsystemKey) => ({
   subsystemKey,
   generation: 1,
-  dataProfile: "loomrealm.renderer-data/1",
+  dataProfile: "loomrealm.renderer-data/3",
 });
 
 function renderDataHarness() {
@@ -58,9 +57,6 @@ function renderDataHarness() {
       const peer = createSubsystemDataPeer({
         binding: { carrier: pair.left, subsystemKey, generation, dataProfile },
         handlers: {
-          onInputState: () => ({ kind: "accepted" }),
-          onInputEvent: () => ({ kind: "accepted" }),
-          onInputReset: () => ({ kind: "accepted" }),
           onViewportState: () => ({ kind: "accepted" }),
         },
       });
@@ -84,7 +80,7 @@ test("holder atomically installs initial peer+Snapshot before consuming later st
   assert.ok(Object.isFrozen(holder.current()));
 });
 
-test("public holder factory keeps old M8 calls valid while accepting the M10 source seam", () => {
+test("public holder factory accepts Data, Viewport, and Presentation Event seams", () => {
   assert.equal(createRendererControlHolder.length, 3);
   assert.ok(createRendererControlHolder());
   assert.throws(() => createRendererControlHolder(null), /Invalid RendererDataBinding/);
@@ -93,31 +89,8 @@ test("public holder factory keeps old M8 calls valid while accepting the M10 sou
     () => createRendererControlHolder({ get acquire() { throw new Error("getter"); } }),
     /Invalid RendererDataBinding/,
   );
-  assert.throws(() => createRendererControlHolder(undefined, null), /Invalid RendererInputSource/);
-  assert.throws(() => createRendererControlHolder(undefined, undefined, null), /Invalid RendererViewportSource/);
-});
-
-test("ordinary RendererInputSource synchronously rejects the reserved presentation channel", async () => {
-  let sourceEmit;
-  const holder = createRendererControlHolder(undefined, {
-    start(emit) {
-      sourceEmit = emit;
-      return () => {};
-    },
-  });
-  const pair = createMemoryCarrierPair();
-  main(pair, "a");
-  await holder.connect({ carrier: pair.right, rendererControlToken: "t" });
-  assert.throws(() => sourceEmit({
-    kind: "event",
-    channel: WEB_PRESENTATION_EVENT_CHANNEL_V1,
-    payload: {},
-  }), TypeError);
-  assert.throws(() => sourceEmit({
-    kind: "availability",
-    channel: WEB_PRESENTATION_EVENT_CHANNEL_V1,
-    available: true,
-  }), TypeError);
+  assert.throws(() => createRendererControlHolder(undefined, null), /Invalid RendererViewportSource/);
+  assert.throws(() => createRendererControlHolder(undefined, undefined, null), /Invalid RendererPresentationEventBinding/);
 });
 
 test("replacement identity ignores old late state and old terminal", async () => {

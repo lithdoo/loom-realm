@@ -10,7 +10,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain } from "@loomrealm/main";
 import { createSharedStateClient } from "@loomrealm/shared-state";
-import { createSessionEventClient } from "@loomrealm/session-events";
+import { createSessionEventClient, createSessionEventHub } from "@loomrealm/session-events";
 import { createRendererControlHolder } from "@loomrealm/renderer";
 import { defineSubsystem } from "@loomrealm/subsystem";
 import { createBoundContentClient, runSubsystem } from "@loomrealm/subsystem/host";
@@ -20,6 +20,7 @@ import { attachRendererPresentation } from "../packages/renderer/dist/internal/p
 import { run as runImporter } from "../tools/fixtures/essentials-v21.1/import.mjs";
 import { buildSourceManifest } from "../tools/fixtures/essentials-v21.1/lib/source/manifest.mjs";
 import { prepareExamplePresentation } from "../examples/essentials-v21.1/test/prepare.mjs";
+import baseSubsystem from "../examples/essentials-v21.1/subsystems/base.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workRoot = path.join(repository, ".local", "m14-essentials");
@@ -28,14 +29,22 @@ const scheduler = Object.freeze({ schedule(ms, callback) { const timer = setTime
 const runtimePolicy = Object.freeze({ scheduler, helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 100 });
 const mainPolicy = Object.freeze({ runtimeBootstrapDeadlineMs: 5_000, frameDeadlineMs: 5_000, shutdownDeadlineMs: 5_000, terminationDeadlineMs: 1_000 });
 const runnerPolicy = Object.freeze({ helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 1_000, terminationGraceMs: 100 });
+let activeMapControls;
 const mapSubsystem = defineSubsystem((scope) => ({
-  frame(frame) {
+  async frame(frame) {
     const input = frame.params;
     const map = new RPGMapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
     map.onMapEntering((context) => { context.setNPC([]); });
-    return map.run({ mapId: input.mapId, x: input.x, y: input.y });
+    activeMapControls = map.controls;
+    try { return await map.run({ mapId: input.mapId, x: input.x, y: input.y }); }
+    finally { activeMapControls = undefined; }
   },
 }));
+const subsystemDefinitions = Object.freeze({ base: baseSubsystem, map: mapSubsystem });
+
+function mapRoot(view) {
+  return view?.subsystems.find(({ subsystemKey }) => subsystemKey === "map")?.domains[0]?.roots[0];
+}
 
 function argumentsOf(argv) {
   if (argv.length === 5 && argv.every((value) => !value.startsWith("--"))) {
@@ -73,26 +82,32 @@ async function waitFor(predicate, label, timeout = 15_000) {
 }
 
 function createDataHub() {
-  const waiting = [];
-  const pairs = [];
-  const take = () => {
-    while (waiting.length && pairs.length) waiting.shift().resolve(pairs.shift());
+  const waiting = new Map();
+  const pairs = new Map();
+  const take = (subsystemKey) => {
+    const pending = waiting.get(subsystemKey) ?? [];
+    const available = pairs.get(subsystemKey) ?? [];
+    while (pending.length && available.length) pending.shift().resolve(available.shift());
   };
   return {
-    subsystemBinding: Object.freeze({
+    subsystemBinding(subsystemKey) { return Object.freeze({
       acquire(signal) {
         if (signal.aborted) return Promise.reject(signal.reason);
         return new Promise((resolve, reject) => {
           const request = { resolve, reject };
-          waiting.push(request); take();
-          signal.addEventListener("abort", () => { const index = waiting.indexOf(request); if (index >= 0) waiting.splice(index, 1); reject(signal.reason); }, { once: true });
+          const pending = waiting.get(subsystemKey) ?? [];
+          waiting.set(subsystemKey, pending);
+          pending.push(request); take(subsystemKey);
+          signal.addEventListener("abort", () => { const index = pending.indexOf(request); if (index >= 0) pending.splice(index, 1); reject(signal.reason); }, { once: true });
         });
       },
-    }),
+    }); },
     rendererBinding: Object.freeze({
-      acquire(_key, generation, dataProfile) {
+      acquire(subsystemKey, generation, dataProfile) {
         const pair = createMemoryCarrierPair();
-        pairs.push({ carrier: pair.left, generation, dataProfile }); take();
+        const available = pairs.get(subsystemKey) ?? [];
+        pairs.set(subsystemKey, available);
+        available.push({ carrier: pair.left, generation, dataProfile }); take(subsystemKey);
         return Promise.resolve(pair.right);
       },
     }),
@@ -106,10 +121,11 @@ async function prepareProductionContent(options) {
   await Promise.all([
     writeFile(path.join(installationRoot, "game.json"), `${JSON.stringify({
       formatVersion: 1,
-      initial: { subsystem: "map", input: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] } },
-      subsystems: [{ key: "map" }],
+      initial: { subsystem: "base", input: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] } },
+      subsystems: [{ key: "base" }, { key: "map" }],
     }, null, 2)}\n`),
-    writeFile(path.join(installationRoot, "launch.hostra.json"), '{"formatVersion":1,"subsystems":[{"key":"map","module":"subsystems/map.mjs"}]}\n'),
+    writeFile(path.join(installationRoot, "launch.hostra.json"), '{"formatVersion":1,"subsystems":[{"key":"base","module":"subsystems/base.mjs"},{"key":"map","module":"subsystems/map.mjs"}]}\n'),
+    writeFile(path.join(subsystems, "base.mjs"), "export default () => ({ frame() {} });\n"),
     writeFile(path.join(subsystems, "map.mjs"), "export default () => ({ frame() {} });\n"),
   ]);
   const fsdbRoot = await runImporter(["--source", options.source, "--output", installationRoot]);
@@ -178,6 +194,7 @@ const production = await prepareProductionContent(options);
 const controller = new AbortController();
 let main;
 let detach = () => {};
+let sessionEventHub;
 try {
   const mapResult = await production.content.record("struct.Map", String(options["map-id"]));
   const map = mapResult.value;
@@ -197,37 +214,46 @@ try {
   ]);
 
   const hub = createDataHub();
-  let inputEmit;
-  const inputSource = Object.freeze({ start(emit) { inputEmit = emit; emit({ kind: "availability", channel: "keyboard.event", available: true }); return () => {}; } });
+  sessionEventHub = createSessionEventHub();
   const viewportSource = Object.freeze({ start(emit) { emit({ width: 800, height: 600 }); return () => {}; } });
   let holder;
   const rendererControl = Object.freeze({
     acquire(token, signal) {
       if (holder) return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
       const pair = createMemoryCarrierPair();
-      holder = createRendererControlHolder(hub.rendererBinding, inputSource, viewportSource);
+      holder = createRendererControlHolder(hub.rendererBinding, viewportSource, {
+        async publish(event) {
+          const publisher = sessionEventHub.createDelegatedPublisher(event.ownerSubsystemKey);
+          await publisher.publish(
+            event.channel,
+            event.type,
+            event.payload,
+            event.broadcast ? undefined : event.ownerSubsystemKey,
+          );
+        },
+      });
       void holder.connect({ carrier: pair.right, rendererControlToken: token });
       return Promise.resolve(pair.left);
     },
   });
   const runtimeHosting = Object.freeze({
     async launch(request) {
-      assert.equal(request.subsystemKey, "map");
+      assert.ok(request.subsystemKey in subsystemDefinitions);
       const pair = createMemoryCarrierPair();
       let acquired = false;
       const runtime = runSubsystem({
-        definition: mapSubsystem,
+        definition: subsystemDefinitions[request.subsystemKey],
         runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
         runtimePolicy,
         launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] },
-        data: hub.subsystemBinding,
+        data: hub.subsystemBinding(request.subsystemKey),
         content: production.content,
         state: (() => {
           const client = createSharedStateClient();
           return Object.freeze({ client, terminate: () => client.terminate() });
         })(),
         events: (() => {
-          const client = createSessionEventClient();
+          const client = createSessionEventClient(sessionEventHub.createBinding(request.subsystemKey));
           return Object.freeze({ client, terminate: () => client.terminate() });
         })(),
       });
@@ -245,22 +271,28 @@ try {
   void main.catch((error) => { mainFailure = error; });
   await waitFor(() => {
     if (mainFailure) throw mainFailure;
-    return holder?.current() !== null && typeof inputEmit === "function";
-  }, "Renderer and M10 input source");
+    return holder?.current() !== null;
+  }, "Renderer");
   let latestView;
-  detach = attachRendererPresentation(holder, { reevaluate(source) { latestView = structuredClone(source.read()); } });
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 2, "initial exact-source Render state");
-  const before = latestView.subsystems[0].domains[0].roots[0].children[0].data;
-  inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "ArrowRight", repeat: false } });
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 6, "ArrowRight through M10");
-  const domain = latestView.subsystems[0].domains[0];
+  detach = attachRendererPresentation(holder, {
+    reevaluate(source) {
+      latestView = structuredClone(source.read());
+    },
+  });
+  await waitFor(() => activeMapControls && mapRoot(latestView)?.children[0]?.data?.direction === 2, "initial exact-source Render state");
+  const before = mapRoot(latestView).children[0].data;
+  activeMapControls.setMoveIntent(6);
+  await waitFor(() => mapRoot(latestView)?.children[0]?.data?.direction === 6, "RPGMapControls right intent");
+  activeMapControls.setMoveIntent(null);
+  const subsystem = latestView.subsystems.find(({ subsystemKey }) => subsystemKey === "map");
+  const domain = subsystem.domains[0];
   const after = domain.roots[0].children[0].data;
   const browser = await browserQualification(domain, resources);
   const record = {
     sourceFingerprint: `sha256:${fingerprint}`,
     fsdbRoot: production.fsdbRoot,
     content: { seam: "Desktop FSDB HTTP -> Bound ContentClient", mapVersion: mapResult.contentVersion, tilesetVersion: tilesetResult.contentVersion, tilesetMime: tilesetResource.mime, playerMime: playerResource.mime },
-    input: { seam: "RendererInputSource -> M10 -> Data -> Subsystem InputListener", action: "down", code: "ArrowRight", repeat: false },
+    input: { seam: "product composition -> RPGMapControls", moveIntent: 6 },
     selection: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] },
     tileset: tileset.tileset_name,
     movement: { code: "ArrowRight", before: { x: before.x, y: before.y }, after: { x: after.x, y: after.y }, direction: after.direction },
@@ -273,6 +305,7 @@ try {
   detach();
   controller.abort(new Error("M14 exact-source qualification complete"));
   if (main) await main.catch(() => {});
+  sessionEventHub?.terminate();
   production.lifetime.abort();
   await production.service.close().catch(() => {});
   await rm(production.installationRoot, { recursive: true, force: true });

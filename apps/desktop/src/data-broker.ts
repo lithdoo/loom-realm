@@ -110,6 +110,16 @@ export class DesktopDataConnectionBroker {
     };
   }
 
+  authorizesPresentationEvent(
+    rendererControlToken: string,
+    subsystemKey: string,
+    generation: number,
+  ): boolean {
+    if (this.closed || this.authority?.rendererControlToken !== rendererControlToken) return false;
+    const entry = this.authority.entries.find((candidate) => candidate.subsystemKey === subsystemKey);
+    return entry !== undefined && entry.generation === generation;
+  }
+
   rendererDataBinding(rendererControlToken: string): RendererDataBinding {
     if (typeof rendererControlToken !== "string" || rendererControlToken.length === 0) {
       throw new TypeError("Invalid Renderer Control correlation token");

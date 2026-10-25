@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listFsdbEntries, openFsdb, openFsdbObject } from "@loomrealm/fsdb";
@@ -197,20 +198,35 @@ export async function preparePokeManPwaContent(options = {}) {
 
 export async function createPokeManPwaFixture(options = {}) {
   const root = options.exampleRoot ?? exampleRoot;
-  const executablePath = options.executablePath;
-  if (typeof executablePath !== "string" || executablePath.length === 0) throw new TypeError("executablePath is required");
-  const [gameEntryText, launchManifestText, presentationText, executable, content] = await Promise.all([
+  const executablePaths = options.executablePaths;
+  if (executablePaths === null || typeof executablePaths !== "object") throw new TypeError("executablePaths are required");
+  const specifications = Object.freeze([
+    Object.freeze({ logicalModule: "subsystems/base.mjs", path: executablePaths.base }),
+    Object.freeze({ logicalModule: "subsystems/map.mjs", path: executablePaths.map }),
+  ]);
+  for (const specification of specifications) {
+    if (typeof specification.path !== "string" || specification.path.length === 0) throw new TypeError(`Executable path is required for ${specification.logicalModule}`);
+  }
+  const [gameEntryText, launchManifestText, presentationText, executableSources, content] = await Promise.all([
     readFile(join(root, "game.json"), "utf8"),
     readFile(join(root, "launch.pwa.json"), "utf8"),
     readFile(join(root, "presentation.json"), "utf8"),
-    readFile(executablePath, "utf8"),
+    Promise.all(specifications.map(async (specification) => Object.freeze({
+      logicalModule: specification.logicalModule,
+      mime: "text/javascript",
+      source: await readFile(specification.path, "utf8"),
+    }))),
     preparePokeManPwaContent(options),
   ]);
+  const executables = Object.freeze(executableSources.map((executable) => Object.freeze({
+    ...executable,
+    contentVersion: `sha256:${createHash("sha256").update(executable.source).digest("hex")}`,
+  })));
   return Object.freeze({
     gameEntryText,
     launchManifestText,
     presentation: JSON.parse(presentationText),
-    executable,
+    executables,
     content: Object.freeze(content.map((entry) => Object.freeze({
       kind: entry.kind,
       namespace: entry.namespace,

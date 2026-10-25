@@ -1,4 +1,5 @@
-import type { InputEventV1, RenderEventV1, RenderNodeV1 } from "@loomrealm/data";
+import type { RenderEventV1, RenderNodeV1 } from "@loomrealm/data";
+import type { JsonValue } from "@loomrealm/wire";
 import {
   createPresentationResourceClient,
   type PresentationResourceClient,
@@ -16,9 +17,18 @@ import type {
 
 type JsonObject = RenderEventV1["data"];
 
+export interface CustomEventOptions {
+  readonly broadcast?: boolean | "top-frame";
+  readonly channel?: string;
+}
+
 export interface WebPresentationContext {
   readonly resources: PresentationResourceClient;
-  emitCustomEvent(name: string, data?: InputEventV1["payload"]): void;
+  emitCustomEvent(
+    name: string,
+    data?: Readonly<Record<string, JsonValue>>,
+    options?: CustomEventOptions,
+  ): void;
 }
 
 export interface RenderContextReceiver {
@@ -77,7 +87,7 @@ interface LiveElement {
 }
 
 const noData = Symbol("loomrealm.renderer.no-presentation-data");
-const EMPTY_JSON_OBJECT = Object.freeze({}) as InputEventV1["payload"];
+const EMPTY_JSON_OBJECT = Object.freeze({}) as Readonly<Record<string, JsonValue>>;
 
 function identity(sessionId: string, subsystemKey: string, generation: number, domainId: string, key: string): string {
   return JSON.stringify([sessionId, subsystemKey, generation, domainId, key]);
@@ -244,11 +254,16 @@ export class WebProjector implements RendererPresentationEffect {
       let record: LiveElement;
       const context: WebPresentationContext = Object.freeze({
         resources: this.resources,
-        emitCustomEvent: (name: string, data?: InputEventV1["payload"]) => {
+        emitCustomEvent: (
+          name: string,
+          data?: Readonly<Record<string, JsonValue>>,
+          options?: CustomEventOptions,
+        ) => {
           this.emitNodeEvent(
             record,
             name,
             data === undefined ? EMPTY_JSON_OBJECT : data,
+            options,
           );
         },
       });
@@ -341,7 +356,12 @@ export class WebProjector implements RendererPresentationEffect {
     }
   }
 
-  private emitNodeEvent(record: LiveElement, name: unknown, data: unknown): void {
+  private emitNodeEvent(
+    record: LiveElement,
+    name: unknown,
+    data: unknown,
+    options: unknown,
+  ): void {
     if (this.ended || this.failed || this.live.get(record.identity) !== record) return;
     this.presentationEmitNodeEvent?.({
       sessionId: record.sessionId,
@@ -351,6 +371,7 @@ export class WebProjector implements RendererPresentationEffect {
       targetKey: record.targetKey,
       name,
       data,
+      options,
     });
   }
 

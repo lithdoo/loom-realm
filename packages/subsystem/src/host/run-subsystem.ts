@@ -9,7 +9,7 @@ import {
 import type { SessionEventClient } from "@loomrealm/session-events";
 import {
   createSubsystemDataPeer,
-  RENDERER_DATA_PROFILE_V1,
+  RENDERER_DATA_PROFILE_V3,
   type SubsystemDataPeer,
 } from "@loomrealm/data";
 import {
@@ -27,11 +27,10 @@ import type {
   SubsystemDefinitionFactory,
   SubsystemScope,
 } from "../model.js";
-import type { CreateInputListenerOptions } from "../input.js";
 import { FrameRuntime } from "../internal/frame-runtime.js";
-import { InputManager } from "../internal/input-manager.js";
 import { RenderManager } from "../internal/render-manager.js";
 import { ViewportManager } from "../internal/viewport-manager.js";
+import { PresentationEventManager } from "../internal/presentation-event-manager.js";
 import type { RenderDomainState } from "../render.js";
 import { ContentReadError, type ContentClient } from "../content.js";
 
@@ -284,9 +283,9 @@ class SubsystemHost {
   private pendingDataAcquire: DataAcquireAttempt | null = null;
   private dataAcquisitionStopped = false;
   private dataCleanup: Promise<void> = Promise.resolve();
-  private readonly input = new InputManager();
   private readonly render = new RenderManager();
   private readonly viewport = new ViewportManager();
+  private readonly presentationEvents = new PresentationEventManager();
   private readonly runtimeState: SharedStateRuntimeCapability;
   private readonly runtimeEvents: SessionEventsRuntimeCapability;
 
@@ -313,8 +312,7 @@ class SubsystemHost {
       events: this.runtimeEvents.client,
       content: this.options.content ?? unavailableContent,
       viewport: this.viewport,
-      createInputListener: (options: CreateInputListenerOptions) =>
-        this.input.createListener(options),
+      presentationEvents: this.presentationEvents,
       createRenderDomain: (state: RenderDomainState) =>
         this.render.createDomain(state),
     });
@@ -340,9 +338,9 @@ class SubsystemHost {
       () => this.peer,
       this.canAcceptFrames,
       (runtimeFailure) => this.failRuntime(runtimeFailure),
-      this.input,
+      (frameId) => this.presentationEvents.closeFrame(frameId),
     );
-    this.input.bindRuntime(this.frames);
+    this.presentationEvents.bindRuntime(this.frames);
 
     let carrier;
     try {
@@ -483,7 +481,7 @@ class SubsystemHost {
 
     let peer: SubsystemDataPeer;
     try {
-      if (result.dataProfile !== RENDERER_DATA_PROFILE_V1) {
+      if (result.dataProfile !== RENDERER_DATA_PROFILE_V3) {
         throw new TypeError("Unsupported Renderer Data profile");
       }
       peer = createSubsystemDataPeer({
@@ -494,21 +492,13 @@ class SubsystemHost {
           dataProfile: result.dataProfile,
         },
         handlers: {
-          onInputState: (message) =>
-            this.currentDataPeer === peer
-              ? this.input.onState(message)
-              : acceptedDataMessage,
-          onInputEvent: (message) =>
-            this.currentDataPeer === peer
-              ? this.input.onEvent(message)
-              : acceptedDataMessage,
-          onInputReset: (message) =>
-            this.currentDataPeer === peer
-              ? this.input.onReset(message)
-              : acceptedDataMessage,
           onViewportState: (message) => {
             if (this.currentDataPeer === peer) this.viewport.accept(message);
             return acceptedDataMessage;
+          },
+          onPresentationEvent: (message) => {
+            if (this.currentDataPeer !== peer) return acceptedDataMessage;
+            return this.presentationEvents.onEvent(message);
           },
         },
       });
@@ -523,13 +513,13 @@ class SubsystemHost {
       return;
     }
     this.currentDataPeer = peer;
-    this.input.setDataPeer(peer);
     this.render.setDataPeer(peer);
+    this.presentationEvents.setDataPeer(peer);
     void peer.terminal.then(() => {
       if (this.currentDataPeer !== peer) return;
       this.currentDataPeer = null;
-      this.input.setDataPeer(null);
       this.render.setDataPeer(null);
+      this.presentationEvents.setDataPeer(null);
       this.startDataAcquire();
     });
   }
@@ -547,8 +537,8 @@ class SubsystemHost {
     attempt?.controller.abort();
     const peer = this.currentDataPeer;
     this.currentDataPeer = null;
-    this.input.setDataPeer(null);
     this.render.setDataPeer(null);
+    this.presentationEvents.setDataPeer(null);
     if (peer === null) return;
     const close = peer.close().catch(() => {});
     this.dataCleanup = Promise.allSettled([this.dataCleanup, close]).then(() => undefined);
@@ -609,7 +599,7 @@ class SubsystemHost {
     this.leaveDataReady();
     this.scopeController.abort();
     this.frames?.abortAll();
-    this.input.closeAll();
+    this.presentationEvents.closeAll();
     this.render.closeAll();
     this.viewport.terminate();
     void this.finishFatal(primary);
@@ -621,7 +611,7 @@ class SubsystemHost {
     this.runtimeState.terminate();
     this.runtimeEvents.terminate();
     this.frames?.abortAll();
-    this.input.closeAll();
+    this.presentationEvents.closeAll();
     this.render.closeAll();
     this.viewport.terminate();
     await this.bounded(this.bestEffortStatus({ state: "stopping" }));

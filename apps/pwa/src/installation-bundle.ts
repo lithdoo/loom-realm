@@ -20,6 +20,8 @@ export interface PwaInstallationBundleV1 {
   readonly executables: readonly PwaBundleExecutableEntryV1[];
 }
 
+declare const __LOOMREALM_GAME_COMMON_CONTROLS_SOURCE__: string;
+
 export const DEMO_EXECUTABLE = `
 export default (scope) => ({
   async frame(frame) {
@@ -53,44 +55,54 @@ export default (scope) => ({
         },
         data: { title: "LoomRealm PWA" },
         children: []
+      }, {
+        key: "demo-keyboard-input",
+        tag: "game-keyboard-input",
+        attrs: {},
+        data: {},
+        children: []
       }]
     });
     const stopViewport = scope.viewport.subscribe((viewport) => {
       if (viewport) domain.update({ nodes: [{ key: "demo-root", attrs: { set: { "data-viewport": viewport.width + "x" + viewport.height } } }] });
     });
-    const input = scope.createInputListener({ frame, channels: ["keyboard.event"] });
-    return await new Promise((resolve) => {
-      const finish = (outcome) => {
-        stopViewport();
-        input.close();
-        resolve(outcome);
-      };
-      input.on("keyboard.event", (event) => {
-        if (event.action === "down" && event.code === "Enter") {
-          finish({
-            type: "completed",
-            value: {
-              result: "demo-complete",
-              visits,
-              content: content.value.message,
-              sessionEvent: {
-                channel: sessionEvent.channel,
-                type: sessionEvent.type,
-                payload: sessionEvent.payload,
-                source: sessionEvent.source,
-                closed: sessionEventClosed
-              }
-            }
-          });
+    let resolveOutcome;
+    const outcome = new Promise((resolve) => { resolveOutcome = resolve; });
+    let keyboardSubscription;
+    const finish = (value) => {
+      stopViewport();
+      keyboardSubscription?.close();
+      resolveOutcome(value);
+    };
+    keyboardSubscription = await scope.events.subscribe(["keyboard.event"], (message) => {
+      const event = message.payload?.data;
+      if (event?.action === "down" && event?.code === "Enter") finish({
+        type: "completed",
+        value: {
+          result: "demo-complete",
+          visits,
+          content: content.value.message,
+          sessionEvent: {
+            channel: sessionEvent.channel,
+            type: sessionEvent.type,
+            payload: sessionEvent.payload,
+            source: sessionEvent.source,
+            closed: sessionEventClosed
+          }
         }
       });
-      frame.signal.addEventListener("abort", () => finish({ type: "cancelled" }), { once: true });
     });
+    frame.signal.addEventListener("abort", () => finish({ type: "cancelled" }), { once: true });
+    return await outcome;
   }
 });
 `.trim();
 
-export const DEMO_PRESENTATION = Object.freeze({ formatVersion: 1, scripts: Object.freeze([]), styles: Object.freeze([]) });
+export const DEMO_PRESENTATION = Object.freeze({
+  formatVersion: 1,
+  scripts: Object.freeze([{ namespace: "Presentation", key: "controls/device-input.browser.js" }]),
+  styles: Object.freeze([]),
+});
 
 export function createDemoInstallationBundle(): PwaInstallationBundleV1 {
   return Object.freeze({
@@ -110,6 +122,7 @@ export function createDemoInstallationBundle(): PwaInstallationBundleV1 {
       Object.freeze({ kind: "group", namespace: "group.demo", key: "items", mime: "application/x-ndjson; charset=utf-8", body: new Blob(['{"id":1}\n{"id":2}\n'], { type: "application/x-ndjson; charset=utf-8" }) }),
       Object.freeze({ kind: "resource", namespace: "resource.demo", key: "hello.txt", mime: "text/plain; charset=utf-8", body: new Blob(["LoomRealm PWA"], { type: "text/plain; charset=utf-8" }) }),
       Object.freeze({ kind: "resource", namespace: "resource.demo", key: "nested/hello.txt", mime: "text/plain; charset=utf-8", body: new Blob(["Nested LoomRealm PWA"], { type: "text/plain; charset=utf-8" }) }),
+      Object.freeze({ kind: "resource", namespace: "resource.Presentation", key: "controls/device-input.browser.js", mime: "text/javascript; charset=utf-8", body: new Blob([__LOOMREALM_GAME_COMMON_CONTROLS_SOURCE__], { type: "text/javascript; charset=utf-8" }) }),
     ]),
     executables: Object.freeze([
       Object.freeze({ logicalModule: "subsystems/demo.mjs", mime: "text/javascript", body: new Blob([DEMO_EXECUTABLE], { type: "text/javascript" }) }),

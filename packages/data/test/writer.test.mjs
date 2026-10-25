@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createSubsystemDataPeer,
-  RENDERER_DATA_PROFILE_V1,
+  RENDERER_DATA_PROFILE_V3,
 } from "../dist/index.js";
 
 const accepted = () => ({ kind: "accepted" });
@@ -10,12 +10,9 @@ const binding = (carrier) => ({
   carrier,
   subsystemKey: "map",
   generation: 1,
-  dataProfile: RENDERER_DATA_PROFILE_V1,
+  dataProfile: RENDERER_DATA_PROFILE_V3,
 });
 const handlers = {
-  onInputState: accepted,
-  onInputEvent: accepted,
-  onInputReset: accepted,
   onViewportState: accepted,
 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -73,7 +70,7 @@ function createWriterCarrier() {
   return carrier;
 }
 
-test("writer preserves enqueue order across Input and Render", async () => {
+test("writer preserves enqueue order across Render messages", async () => {
   const carrier = createWriterCarrier();
   const subsystem = createSubsystemDataPeer({
     binding: binding(carrier),
@@ -81,7 +78,7 @@ test("writer preserves enqueue order across Input and Render", async () => {
   });
   const results = await Promise.all([
     subsystem.render.sendDomains({ type: "render.domains", domains: ["hud"] }),
-    subsystem.input.sendInterest({ type: "input.interest", frames: [] }),
+    subsystem.render.sendDomains({ type: "render.domains", domains: ["menu"] }),
     subsystem.render.sendEvent({
       type: "render.event",
       domainId: "hud",
@@ -93,7 +90,7 @@ test("writer preserves enqueue order across Input and Render", async () => {
   assert.deepEqual(results, [{ kind: "sent" }, { kind: "sent" }, { kind: "sent" }]);
   assert.deepEqual(
     carrier.sent.map((text) => JSON.parse(text).type),
-    ["render.domains", "input.interest", "render.event"],
+    ["render.domains", "render.domains", "render.event"],
   );
   assert.equal(carrier.maxActive, 1);
   await subsystem.close();
@@ -139,7 +136,7 @@ test("writer pending operations settle exactly once on terminal", async () => {
     handlers,
   });
   const first = subsystem.render.sendDomains({ type: "render.domains", domains: ["a"] });
-  const second = subsystem.input.sendInterest({ type: "input.interest", frames: [] });
+  const second = subsystem.render.sendDomains({ type: "render.domains", domains: ["pending"] });
   const third = subsystem.render.sendDomains({ type: "render.domains", domains: ["b"] });
   await waitFor(() => carrier.maxActive === 1);
   carrier.closeNow();

@@ -34,23 +34,24 @@ function harness(overrides = {}) {
       domains.push(domain);
       return domain;
     },
-    createInputListener(options) {
+    events: { async subscribe(options, next) {
       if (overrides.listenerFailure) throw overrides.listenerFailure;
+      handler = next;
       const listener = {
         options,
         closed: 0,
-        on(_channel, next) { handler = next; return () => { handler = undefined; }; },
-        setChannels() {},
-        close() { listener.closed += 1; if (overrides.closeListenerFailure) throw overrides.closeListenerFailure; },
+        closedPromise: new Promise(() => {}),
+        close() { handler = undefined; listener.closed += 1; if (overrides.closeListenerFailure) throw overrides.closeListenerFailure; },
       };
       listeners.push(listener);
-      return listener;
-    },
+      return { closed: listener.closedPromise, close: listener.close };
+    } },
   };
   return {
     abort, domains, frame, listeners, scope, updates,
     event(name, data = {}, targetKey = domains[0]?.state.roots[0].key) {
-      handler?.({ domainId: "ignored", targetKey, name, data });
+      handler?.({ channel: "x.loomrealm.web-presentation.event", type: name,
+        payload: { domainId: "ignored", targetKey, data }, source: { subsystemKey: "form" } });
     },
   };
 }

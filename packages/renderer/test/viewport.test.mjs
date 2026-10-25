@@ -4,7 +4,7 @@ import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createSubsystemDataPeer } from "@loomrealm/data";
 import {
   createMainRendererControlPeer,
-  prepareRendererHelloResultV1,
+  prepareRendererHelloResultV2,
 } from "@loomrealm/renderer-control";
 import { createRendererControlHolder } from "../dist/index.js";
 import { normalizeViewportSample } from "../dist/internal/viewport-publisher.js";
@@ -12,21 +12,14 @@ import { normalizeViewportSample } from "../dist/internal/viewport-publisher.js"
 const authority = {
   subsystemKey: "demo",
   generation: 1,
-  dataProfile: "loomrealm.renderer-data/1",
+  dataProfile: "loomrealm.renderer-data/3",
 };
-
-const inputTarget = Object.freeze({
-  subsystemKey: "demo",
-  frameId: "root",
-  activationId: "a1",
-});
 
 const snapshot = (sessionId, revision, generation = 1) => ({
   sessionId,
   revision,
   runtimes: [{ subsystemKey: "demo", state: "ready" }],
   stack: [{ frameId: "root", subsystemKey: "demo", lifecycle: "active", activationId: "a1" }],
-  inputTarget,
   dataAuthorities: [{ ...authority, generation }],
 });
 
@@ -38,7 +31,7 @@ function main(pair, sessionId) {
       return {
         kind: "accepted",
         snapshot: initial,
-        preparedHelloText: prepareRendererHelloResultV1(initial),
+        preparedHelloText: prepareRendererHelloResultV2(initial),
       };
     },
   });
@@ -77,12 +70,9 @@ test("floors legal CSS logical samples, discards invalid ones, and fences old so
           carrier: pair.left,
           subsystemKey: "demo",
           generation: 1,
-          dataProfile: "loomrealm.renderer-data/1",
+          dataProfile: "loomrealm.renderer-data/3",
         },
         handlers: {
-          onInputState: () => ({ kind: "accepted" }),
-          onInputEvent: () => ({ kind: "accepted" }),
-          onInputReset: () => ({ kind: "accepted" }),
           onViewportState(message) {
             received.push(message);
             return { kind: "accepted" };
@@ -91,18 +81,16 @@ test("floors legal CSS logical samples, discards invalid ones, and fences old so
       });
       return pair.right;
     },
-  }, undefined, source);
+  }, source);
   await holder.connect({ carrier: control.right, rendererControlToken: "a" });
   await waitFor(() => received.length === 1, "legal floor");
   assert.deepEqual(received[0], { type: "viewport.state", width: 640, height: 480 });
-  assert.deepEqual(holder.current().snapshot.inputTarget, inputTarget);
   emit({ width: 800, height: 600 });
   await waitFor(() => received.length === 2, "resize");
   assert.deepEqual(received[1], { type: "viewport.state", width: 800, height: 600 });
   emit({ width: 800, height: 600 });
   await turn();
   assert.equal(received.length, 2);
-  assert.deepEqual(holder.current().snapshot.inputTarget, inputTarget);
   publisher.retire();
   await waitFor(() => stops === 1, "source stop");
   emit({ width: 1024, height: 768 });
@@ -130,12 +118,9 @@ test("invalid-only samples never synthesize zero, default, or null viewport.stat
           carrier: pair.left,
           subsystemKey: "demo",
           generation: 1,
-          dataProfile: "loomrealm.renderer-data/1",
+          dataProfile: "loomrealm.renderer-data/3",
         },
         handlers: {
-          onInputState: () => ({ kind: "accepted" }),
-          onInputEvent: () => ({ kind: "accepted" }),
-          onInputReset: () => ({ kind: "accepted" }),
           onViewportState(message) {
             received.push(message);
             return { kind: "accepted" };
@@ -144,7 +129,7 @@ test("invalid-only samples never synthesize zero, default, or null viewport.stat
       });
       return pair.right;
     },
-  }, undefined, source);
+  }, source);
   await holder.connect({ carrier: control.right, rendererControlToken: "a" });
   await turn();
   await turn();
@@ -192,12 +177,9 @@ test("fresh Renderer does not republish the previous Renderer observation on a s
           carrier: pair.left,
           subsystemKey: "demo",
           generation,
-          dataProfile: "loomrealm.renderer-data/1",
+          dataProfile: "loomrealm.renderer-data/3",
         },
         handlers: {
-          onInputState: () => ({ kind: "accepted" }),
-          onInputEvent: () => ({ kind: "accepted" }),
-          onInputReset: () => ({ kind: "accepted" }),
           onViewportState(message) {
             local.push(message);
             received.push({ generation, message });
@@ -207,7 +189,7 @@ test("fresh Renderer does not republish the previous Renderer observation on a s
       });
       return pair.right;
     },
-  }, undefined, source);
+  }, source);
   const a = createMemoryCarrierPair();
   main(a, "a");
   await holder.connect({ carrier: a.right, rendererControlToken: "a" });
@@ -250,12 +232,9 @@ test("fresh Renderer fences the old source and queued callback", async () => {
           carrier: pair.left,
           subsystemKey: "demo",
           generation,
-          dataProfile: "loomrealm.renderer-data/1",
+          dataProfile: "loomrealm.renderer-data/3",
         },
         handlers: {
-          onInputState: () => ({ kind: "accepted" }),
-          onInputEvent: () => ({ kind: "accepted" }),
-          onInputReset: () => ({ kind: "accepted" }),
           onViewportState(message) {
             local.push(message);
             received.push(message);
@@ -265,7 +244,7 @@ test("fresh Renderer fences the old source and queued callback", async () => {
       });
       return pair.right;
     },
-  }, undefined, source);
+  }, source);
   const a = createMemoryCarrierPair();
   main(a, "a");
   await holder.connect({ carrier: a.right, rendererControlToken: "a" });
@@ -301,12 +280,9 @@ test("fresh Data carrier republishes the current legal baseline", async () => {
           carrier: pair.left,
           subsystemKey: "demo",
           generation,
-          dataProfile: "loomrealm.renderer-data/1",
+          dataProfile: "loomrealm.renderer-data/3",
         },
         handlers: {
-          onInputState: () => ({ kind: "accepted" }),
-          onInputEvent: () => ({ kind: "accepted" }),
-          onInputReset: () => ({ kind: "accepted" }),
           onViewportState(message) {
             received.push(message);
             return { kind: "accepted" };
@@ -316,7 +292,7 @@ test("fresh Data carrier republishes the current legal baseline", async () => {
       acquisitions.push({ generation, received, subsystem });
       return pair.right;
     },
-  }, undefined, source);
+  }, source);
   await holder.connect({ carrier: control.right, rendererControlToken: "a" });
   await waitFor(() => acquisitions[0]?.received.length === 1, "generation 1 baseline");
   publisher.publish(snapshot("a", 2, 2));

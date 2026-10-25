@@ -65,7 +65,7 @@ test("RenderDomain state traverses WebProjector into battle custom elements", { 
   const manager = new RenderManager(); const renderDomain = manager.createDomain(domain(1));
   const accepted = (outcome) => assert.deepEqual(outcome, { kind: "accepted" });
   manager.setDataPeer({
-    binding: { subsystemKey: "battle", generation: 1, dataProfile: "loomrealm.renderer-data/1" },
+    binding: { subsystemKey: "battle", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
     render: {
       async sendDomains(message) { accepted(store.onDomains(message)); return { kind: "sent" }; },
       async sendSnapshot(message) { accepted(store.onSnapshot(message)); return { kind: "sent" }; },
@@ -172,7 +172,7 @@ test("RenderDomain state traverses WebProjector into battle custom elements", { 
     const handlerStore = new RendererRenderStore(2); handlerStore.beginCarrier();
     const handlerManager = new RenderManager();
     handlerManager.setDataPeer({
-      binding: { subsystemKey: "battle", generation: 2, dataProfile: "loomrealm.renderer-data/1" },
+      binding: { subsystemKey: "battle", generation: 2, dataProfile: "loomrealm.renderer-data/3" },
       render: {
         async sendDomains(message) { accepted(handlerStore.onDomains(message)); return { kind: "sent" }; },
         async sendSnapshot(message) { accepted(handlerStore.onSnapshot(message)); return { kind: "sent" }; },
@@ -199,7 +199,6 @@ test("RenderDomain state traverses WebProjector into battle custom elements", { 
         async resource() { return { bytes: new Uint8Array([1]), mime: "image/png", contentVersion: version }; },
       },
       viewport,
-      createInputListener() { throw new Error("not used"); },
       createRenderDomain(state) { return handlerManager.createDomain(state); },
     };
     const frame = { id: "handler-e2e", params: null, signal: controller.signal, async call() { return { type: "cancelled" }; } };

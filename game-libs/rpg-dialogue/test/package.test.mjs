@@ -17,3 +17,9 @@ test("published package exposes runtime and built Browser artifacts", async () =
   assert.equal(existsSync(path.join(root, "dist/browser/rpg-dialogue.browser.js")), true);
   assert.equal(existsSync(path.join(root, "dist/browser/rpg-dialogue.browser.css")), true);
 });
+
+test("current v1 Runtime has no physical or unified controls protocol ownership", async () => {
+  const source = await readFile(path.join(root, "src/runtime.ts"), "utf8");
+  assert.doesNotMatch(source, /keyboard\.|gamepad\.|controls\.(?:state|event)|ControlsButton/);
+  assert.match(source, /\[WEB_PRESENTATION_EVENT_CHANNEL\]/);
+});

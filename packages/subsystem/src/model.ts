@@ -1,10 +1,10 @@
 import type { JsonValue } from "@loomrealm/wire";
 import type { SharedStateClient } from "@loomrealm/shared-state";
 import type { SessionEventClient } from "@loomrealm/session-events";
-import type { CreateInputListenerOptions, InputListener } from "./input.js";
 import type { RenderDomain, RenderDomainState } from "./render.js";
 import type { ContentClient } from "./content.js";
 import type { Viewport } from "./viewport.js";
+import type { PresentationEventClient } from "./presentation-events.js";
 
 export interface FrameFailure {
   readonly code: string;
@@ -39,7 +39,7 @@ export interface SubsystemScope {
   readonly events: SessionEventClient;
   readonly content: ContentClient;
   readonly viewport: Viewport;
-  createInputListener(options: CreateInputListenerOptions): InputListener;
+  readonly presentationEvents: PresentationEventClient;
   createRenderDomain(initialState: RenderDomainState): RenderDomain;
 }
 

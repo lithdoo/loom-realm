@@ -6,7 +6,10 @@ import { createPokeManPwaFixture } from "../../../examples/PokeMan/scripts/prepa
 import { openProduct } from "./helpers/browser.mjs";
 import { createPokeManRoutePlanner } from "./helpers/pokeman.mjs";
 
-const executablePath = join(import.meta.dirname, "..", "dist", "qualification", "pokeman-map-subsystem.mjs");
+const executablePaths = Object.freeze({
+  base: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-base-subsystem.mjs"),
+  map: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-map-subsystem.mjs"),
+});
 
 async function mapSnapshot(page) {
   return page.evaluate(() => {
@@ -61,7 +64,7 @@ async function assertNpcProjection(page, mapId) {
 }
 
 test("PokeMan installs and runs its map-only route in real Chromium", { timeout: 180_000 }, async () => {
-  const fixture = await createPokeManPwaFixture({ executablePath });
+  const fixture = await createPokeManPwaFixture({ executablePaths });
   const planner = createPokeManRoutePlanner(fixture);
   const product = await openProduct({ viewport: { width: 960, height: 720 } });
   const history = [];
@@ -80,11 +83,11 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
           mime: entry.mime,
           body: new Blob([decode(entry)], { type: entry.mime }),
         })),
-        executables: [{
-          logicalModule: "subsystems/map.mjs",
-          mime: "text/javascript",
-          body: new Blob([value.executable], { type: "text/javascript" }),
-        }],
+        executables: value.executables.map((entry) => ({
+          logicalModule: entry.logicalModule,
+          mime: entry.mime,
+          body: new Blob([entry.source], { type: entry.mime }),
+        })),
       });
       await window.__loomrealmPwaQualification.launch(installed.installationId, value.presentation);
       return installed.installationId;
@@ -93,6 +96,8 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
     const initial = Object.freeze({ mapId: 3, x: 3, y: 8, direction: 2 });
     await page.locator("lr-map-view").waitFor({ state: "attached", timeout: 20_000 });
     await waitForState(page, initial);
+    assert.equal(await page.locator("game-controls-input").count(), 1, "Base must keep exactly one active controls producer while Map is active");
+    assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
     assert.deepEqual(await mapSnapshot(page), {
       mapId: 3,
       visual: "ready",
@@ -146,7 +151,8 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
       const requests = {
         map: `/_lr/v1/games/${encodeURIComponent(id)}/records/struct.Map/3`,
         presentation: `/_lr/v1/games/${encodeURIComponent(id)}/resources/resource.Presentation/map/map.browser.js`,
-        executable: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/map.mjs`,
+        baseExecutable: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/base.mjs`,
+        mapExecutable: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/map.mjs`,
       };
       const output = {};
       for (const [name, url] of Object.entries(requests)) {
@@ -167,11 +173,15 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
     assert.equal(routes.presentation.status, 200);
     assert.match(routes.presentation.mime, /^text\/javascript/);
     assert.match(routes.presentation.version, /^sha256:[0-9a-f]{64}$/);
-    assert.equal(routes.executable.status, 200);
-    assert.match(routes.executable.mime, /^text\/javascript/);
-    assert.match(routes.executable.version, /^sha256:[0-9a-f]{64}$/);
-    assert.match(routes.executable.body, /RPGMapBuilder/);
-    assert.doesNotMatch(routes.executable.body, /from\s*["']@loomrealm/u);
+    assert.equal(routes.baseExecutable.status, 200);
+    assert.match(routes.baseExecutable.mime, /^text\/javascript/);
+    assert.match(routes.baseExecutable.version, /^sha256:[0-9a-f]{64}$/);
+    assert.match(routes.baseExecutable.body, /game-controls-input/);
+    assert.equal(routes.mapExecutable.status, 200);
+    assert.match(routes.mapExecutable.mime, /^text\/javascript/);
+    assert.match(routes.mapExecutable.version, /^sha256:[0-9a-f]{64}$/);
+    assert.match(routes.mapExecutable.body, /RPGMapBuilder/);
+    assert.doesNotMatch(routes.mapExecutable.body, /from\s*["']@loomrealm/u);
 
     await context.setOffline(true);
     try {
@@ -200,6 +210,8 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
     await page.waitForFunction((epoch) => window.__loomrealmPwa.sessionEpoch !== epoch, previousEpoch, { timeout: 20_000 });
     await page.locator("lr-map-view").waitFor({ state: "attached", timeout: 20_000 });
     await waitForState(page, initial);
+    assert.equal(await page.locator("game-controls-input").count(), 1);
+    assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
     await assertNpcProjection(page, 3);
     const restarted = await mapSnapshot(page);
     assert.notEqual(restarted.sessionEpoch, previousEpoch);

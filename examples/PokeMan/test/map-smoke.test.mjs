@@ -13,12 +13,12 @@ async function json(path) {
   return JSON.parse(await readFile(new URL(path, root), "utf8"));
 }
 
-test("the parsed Game Entry boots exactly one Map subsystem from the player home", async () => {
+test("the parsed Game Entry boots product-private Base then Map from the player home", async () => {
   const game = parseGameEntryV1(await readFile(new URL("game.json", root), "utf8"));
   assert.deepEqual(game, {
     formatVersion: 1,
     initial: {
-      subsystem: "map",
+      subsystem: "base",
       input: {
         mapId: 3,
         x: 3,
@@ -26,13 +26,19 @@ test("the parsed Game Entry boots exactly one Map subsystem from the player home
         characterName: "Player",
       },
     },
-    subsystems: [{ key: "map" }],
+    subsystems: [{ key: "base" }, { key: "map" }],
   });
 
   assert.deepEqual(await json("launch.hostra.json"), {
     formatVersion: 1,
-    subsystems: [{ key: "map", module: "subsystems/map.mjs" }],
+    subsystems: [
+      { key: "base", module: "subsystems/base.mjs" },
+      { key: "map", module: "subsystems/map.mjs" },
+    ],
   });
+  const base = await readFile(new URL("subsystems/base.mjs", root), "utf8");
+  assert.equal((base.match(/tag:\s*"game-controls-input"/g) ?? []).length, 1);
+  assert.doesNotMatch(base, /createControlsConsumer|setMoveIntent|RPGMapBuilder/);
 });
 
 test("installation root exposes exactly one direct FSDB root", async () => {
@@ -52,10 +58,12 @@ test("Map presentation is resolved from PokeMan Content resources", async () => 
       { namespace: "Presentation", key: "page.css" },
     ],
     scripts: [
+      { namespace: "Presentation", key: "controls/device-input.browser.js" },
       { namespace: "Presentation", key: "map/map.browser.js" },
     ],
   });
 
+  await access(new URL("[resource]Presentation/controls/device-input.browser.js.js", fsdbRoot));
   await access(new URL("[resource]Presentation/map/map.css.css", fsdbRoot));
   await access(new URL("[resource]Presentation/map/map.browser.js.js", fsdbRoot));
   await access(new URL("[resource]Presentation/page.css.css", fsdbRoot));

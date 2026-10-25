@@ -9,6 +9,17 @@ import test from "node:test";
 const root = new URL("../../../", import.meta.url);
 const read = async (url) => JSON.parse(await readFile(url, "utf8"));
 
+test("generic PWA build keeps PokeMan fixture loading inside the staging boundary", async () => {
+  const source = await readFile(new URL("../scripts/build.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /^import .*prepare-pwa-content\.mjs/m);
+  assert.match(
+    source,
+    /async function buildStaging\(\) \{[\s\S]*await import\([\s\S]*prepare-pwa-content\.mjs[\s\S]*\)/,
+  );
+  assert.equal((source.match(/async function bundleSubsystem\(/g) ?? []).length, 1);
+  assert.equal((source.match(/await build\(\{/g) ?? []).length, 1, "esbuild subsystem options stay centralized");
+});
+
 async function workspacePackages() {
   const packages = new Map();
   for (const directory of ["packages", "game-libs", "apps"]) {
@@ -38,7 +49,7 @@ test("PokeMan staging build is self-contained and dependency-ordered for fresh R
   assert.equal(new Set(order).size, order.length, "workspace should not be built twice");
   const position = new Map(order.map((name, index) => [name, index]));
 
-  // PokeMan staging also builds a Map executable from source and creates an
+  // PokeMan staging also builds Base and Map executables from source and creates an
   // FSDB fixture, neither of which is a declared app/pwa runtime dependency.
   const required = new Set();
   const visit = (name) => {

@@ -23,7 +23,6 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
     ["struct.NPC/huge", { name: "Huge", sprite: { namespace: "resource.Graphics", key: `Characters/${"x".repeat(1_000_000)}` } }],
   ]);
   const states = [];
-  const inputHandlers = new Map();
   let closed = false;
   const scope = {
     signal: aborter.signal,
@@ -35,7 +34,7 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
         return { bytes: png(), mime: "image/png", contentVersion: "image" };
       },
     },
-    createInputListener() { return { on(channel, listener) { inputHandlers.set(channel, listener); return () => inputHandlers.delete(channel); }, setChannels() {}, close() {} }; },
+    events: { async subscribe() { throw new Error("Map Runtime must not subscribe to input"); } },
     createRenderDomain(initial) {
       states.push(structuredClone(initial));
       return { replace(state) { states.push(structuredClone(state)); }, update() {}, emit() {}, close() { closed = true; } };
@@ -43,6 +42,8 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
   };
   const frame = { id: "public-api", params: {}, signal: aborter.signal, async call() { throw new Error("unused"); } };
   const handler = new RPGMapBuilder(scope, frame).build({ player: { characterName: "player" } });
+  const directions = { ArrowDown: 2, ArrowLeft: 4, ArrowRight: 6, ArrowUp: 8 };
+  let held = [];
   handler.onMapEntering(hook);
   const enteredUnsubscribers = (options.enteredListeners ?? []).map((listener) => handler.onMapEntered(listener));
   const pending = handler.run({ mapId: 1, x: 1, y: 1 });
@@ -50,7 +51,17 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
   return {
     aborter,
     closed: () => closed,
-    emit(channel, value) { inputHandlers.get(channel)?.(value); },
+    emit(channel, value) {
+      if (channel !== "keyboard.event" || directions[value.code] === undefined || value.repeat) return;
+      const direction = directions[value.code];
+      if (value.action === "down") {
+        held = held.filter((item) => item !== direction);
+        held.push(direction);
+      } else if (value.action === "up") {
+        held = held.filter((item) => item !== direction);
+      }
+      handler.controls.setMoveIntent(held.at(-1) ?? null);
+    },
     enteredUnsubscribers,
     handler,
     pending,
@@ -60,6 +71,9 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
 
 test("public Builder/Handler normalizes NPCs and never reuses a retired RenderNode key", async () => {
   const harness = await createHarness();
+  assert.equal(harness.handler.controls, harness.handler.controls);
+  assert.throws(() => harness.handler.controls.setMoveIntent(1), TypeError);
+  assert.throws(() => harness.handler.controls.setMoveIntent("up"), TypeError);
   assert.deepEqual(harness.handler.getSnapshot()?.npcs, []);
   const placement = { instanceId: "guide-1", npcId: "guide", x: 2, y: 2, direction: 6, pattern: 3 };
   await harness.handler.setNPC([placement]);
@@ -80,6 +94,9 @@ test("public Builder/Handler normalizes NPCs and never reuses a retired RenderNo
   assert.deepEqual(await harness.pending, { type: "cancelled" });
   assert.equal(harness.closed(), true);
   assert.equal(harness.handler.getSnapshot(), null);
+  const stateCount = harness.states.length;
+  harness.handler.controls.setMoveIntent(6);
+  assert.equal(harness.states.length, stateCount, "controls are inert after terminal cleanup");
 });
 
 test("onMapEntering cancellation releases run even when the listener never settles", async () => {

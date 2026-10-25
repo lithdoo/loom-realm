@@ -11,25 +11,14 @@ const MAP_LAYERING_WITHOUT_TIMING_RACES = `^(?!(?:${MAP_LAYERING_TIMING_RACES.ma
 
 function spawn(command, args, options = {}) {
   const printable = [command, ...args].join(" ");
-  const started = process.hrtime.bigint();
   console.log(`\n> ${printable}`);
-  console.log(`[ci-command] started=${new Date().toISOString()}`);
-  try {
-    const result = spawnSync(command, args, {
-      cwd: new URL(".", root),
-      stdio: "inherit",
-      shell: process.platform === "win32",
-      env: process.env,
-      ...options,
-    });
-    const seconds = Number(process.hrtime.bigint() - started) / 1e9;
-    console.log(`[ci-command] finished=${new Date().toISOString()} duration=${seconds.toFixed(1)}s exit=${result.status ?? "none"} signal=${result.signal ?? "none"}`);
-    if (result.error) console.error(`[ci-command] spawn error: ${result.error.message}`);
-    return result;
-  } catch (cause) {
-    console.error(`[ci-command] threw after ${(Number(process.hrtime.bigint() - started) / 1e9).toFixed(1)}s`);
-    throw cause;
-  }
+  return spawnSync(command, args, {
+    cwd: new URL(".", root),
+    stdio: "inherit",
+    shell: process.platform === "win32",
+    env: process.env,
+    ...options,
+  });
 }
 
 function run(command, args, options = {}) {
@@ -79,6 +68,7 @@ function buildMapStack() {
     "-w", "@loomrealm/main",
     "-w", "@loomrealm/game-launcher-hostra",
     "-w", "@loomrealm/desktop",
+    "-w", "@loomrealm-game/common-controls",
     "-w", "@loomrealm-game/tile-presentation",
     "-w", "@loomrealm-game/map",
   );
@@ -125,7 +115,6 @@ async function packPublishable() {
 function runDesktopTests() {
   node(
     "--test",
-    "apps/desktop/test/renderer-input-source.test.mjs",
     "apps/desktop/test/renderer-viewport-source.test.mjs",
     "apps/desktop/test/product-viewport-composition.test.mjs",
     "apps/desktop/test/loopback-renderer-control.test.mjs",
@@ -139,8 +128,8 @@ const capabilities = {
   core() {
     buildRegressionStack();
     npm("run", "test:regression");
-    node("--test", "test/user-input-v1/qualification.test.mjs");
-    node("--test", "test/m10-boundary.test.mjs");
+    npm("run", "build", "-w", "@loomrealm-game/common-controls");
+    node("--test", "test/game-common-controls-input-v1/qualification.test.mjs");
     node("--test", "test/render-update-v1/qualification.test.mjs");
     node("--test", "test/m11-boundary.test.mjs");
   },
@@ -158,7 +147,14 @@ const capabilities = {
 
   presentation() {
     npm("run", "build:desktop-stack");
-    node("--test", "test/web-presentation-v1/qualification.test.mjs");
+    node(
+      "--test",
+      "packages/renderer/test/web-presentation-config.test.mjs",
+      "packages/renderer/test/web-projector-events.test.mjs",
+      "packages/renderer/test/presentation-event.test.mjs",
+      "packages/renderer/test/presentation-seam.test.mjs",
+      "test/web-presentation-v2/qualification.test.mjs",
+    );
     node("--test", "test/m13-boundary.test.mjs");
     npm("pack", "-w", "@loomrealm/renderer", "--dry-run");
   },
@@ -192,9 +188,7 @@ const capabilities = {
       `--test-name-pattern=${MAP_LAYERING_WITHOUT_TIMING_RACES}`,
       "test/map-layering-browser.test.mjs",
     );
-    // Node test timeouts do not guarantee teardown of Chromium child processes.
-    // Bound this individual browser test command as well as the hosted Map job.
-    run(process.execPath, ["--test", "test/map-depth-boundary-browser.test.mjs"], { timeout: 180_000, killSignal: "SIGTERM" });
+    node("--test", "test/map-depth-boundary-browser.test.mjs");
   },
 
   "schema-form"() {
