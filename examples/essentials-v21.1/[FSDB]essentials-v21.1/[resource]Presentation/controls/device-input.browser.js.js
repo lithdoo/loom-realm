@@ -320,6 +320,13 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
     });
   }
 
+  // browser/gamepad-layout.ts
+  function supportsCanonicalGamepadButtons(pad) {
+    if (!pad.connected) return false;
+    if (pad.mapping === "standard") return true;
+    return pad.mapping === "" && /\bVendor:\s*4001\s+Product:\s*0428\b/i.test(pad.id) && pad.buttons.length >= 17 && pad.axes.length >= 4;
+  }
+
   // browser/source-types.ts
   function windowUsable(target) {
     return target.document.visibilityState === "visible" && target.document.hasFocus();
@@ -363,7 +370,7 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
     const samples = [];
     const seen = /* @__PURE__ */ new Set();
     for (const pad of read.call(target.navigator)) {
-      if (pad === null || !pad.connected || pad.mapping !== "standard" || seen.has(pad.index)) continue;
+      if (pad === null || !supportsCanonicalGamepadButtons(pad) || seen.has(pad.index)) continue;
       seen.add(pad.index);
       const pressed = [];
       for (let index = 0; index < pad.buttons.length; index += 1) {
@@ -538,7 +545,7 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
           gamepads.clear();
           if (read === null) return;
           for (const pad of read()) {
-            if (!pad || !pad.connected || pad.mapping !== "standard" || gamepads.size >= 16) continue;
+            if (!pad || !supportsCanonicalGamepadButtons(pad) || gamepads.size >= 16) continue;
             const value = sample(pad, nextId++);
             gamepads.set(pad.index, { canonicalId: value.gamepadId, sample: value, pressed: pressedOf(value) });
           }
@@ -549,7 +556,7 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
           let changed = false;
           const crossings = [];
           for (const pad of read()) {
-            if (!pad || !pad.connected || pad.mapping !== "standard") continue;
+            if (!pad || !supportsCanonicalGamepadButtons(pad)) continue;
             let tracked = gamepads.get(pad.index);
             if (tracked === void 0 && gamepads.size >= 16) continue;
             seen.add(pad.index);

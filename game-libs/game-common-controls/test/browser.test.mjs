@@ -97,6 +97,69 @@ test("gamepad component preserves normalization, threshold, ordering, and exact 
   assert.equal(events.every(({ options }) => options.broadcast === true), true);
 });
 
+test("Pocket Block unmapped AYANEO pad publishes raw canonical D-pad State before Event", async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent("<!doctype html><body></body>");
+  await page.evaluate(() => {
+    globalThis.pocketPad = {
+      index: 2, connected: true, id: "AYANEO Controller (Vendor: 4001 Product: 0428)",
+      mapping: "", axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ value: 0 })),
+    };
+    const unknown = {
+      index: 3, connected: true, id: "Unknown non-standard controller", mapping: "",
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, (_, i) => ({ value: i === 12 ? 1 : 0 })),
+    };
+    Object.defineProperty(navigator, "getGamepads", {
+      configurable: true, value: () => [globalThis.pocketPad, unknown],
+    });
+  });
+  await page.addScriptTag({ path: browserBundle });
+  await page.evaluate(() => {
+    globalThis.deviceEvents = [];
+    const gamepad = document.createElement("game-gamepad-input");
+    gamepad.receiveRenderContext({
+      emitCustomEvent(name, data, options) { deviceEvents.push({ name, data, options }); },
+    });
+    document.body.append(gamepad);
+  });
+  await page.waitForFunction(() => deviceEvents.some((event) => event.options.channel === "gamepad.state"));
+  const baseline = await page.evaluate(() =>
+    deviceEvents.find((event) => event.options.channel === "gamepad.state").data.gamepads
+  );
+  assert.equal(baseline.length, 1, "unknown unmapped pad must not be interpreted as canonical");
+  assert.equal(baseline[0].gamepadId, 1);
+  assert.equal(baseline[0].buttons.dpadUp, 0);
+
+  for (const [index, button] of [[12, "dpadUp"], [13, "dpadDown"], [14, "dpadLeft"], [15, "dpadRight"]]) {
+    for (const [value, action] of [[1, "down"], [0, "up"]]) {
+      const before = await page.evaluate(() => deviceEvents.length);
+      await page.evaluate(({ index, value }) => { pocketPad.buttons[index].value = value; }, { index, value });
+      await page.waitForFunction(({ before, button, action }) =>
+        deviceEvents.slice(before).some((event) =>
+          event.options.channel === "gamepad.event"
+          && event.data.button === button
+          && event.data.action === action
+        ), { before, button, action });
+      const batch = await page.evaluate((from) => deviceEvents.slice(from), before);
+      const edgeIndex = batch.findIndex((event) =>
+        event.options.channel === "gamepad.event"
+        && event.data.button === button
+        && event.data.action === action
+      );
+      assert.ok(edgeIndex > 0, button + " " + action + " must follow gamepad.state");
+      assert.equal(batch[edgeIndex - 1].options.channel, "gamepad.state");
+      assert.equal(batch[edgeIndex - 1].data.gamepads.length, 1);
+      assert.equal(batch[edgeIndex - 1].data.gamepads[0].buttons[button], value * 1_000_000);
+      assert.equal(batch[edgeIndex].data.value, value * 1_000_000);
+      assert.equal(batch[edgeIndex].data.gamepadId, 1);
+    }
+  }
+});
+
 test("non-neutral State refreshes and disconnect stops publication while releasing the duplicate claim", async (t) => {
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
