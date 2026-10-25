@@ -63,9 +63,12 @@ async function installation(t) {
     subsystems: [{ key: "root", module: "subsystems/root.mjs" }],
   }));
   const marker = path.join(root, "presentation-event.json");
+  const markerPublishingPath = path.join(root, "presentation-event.json.publishing");
   await writeFile(path.join(root, "subsystems", "root.mjs"), `
-    import { writeFile } from "node:fs/promises";
+    import { rename, writeFile } from "node:fs/promises";
     export default (scope) => {
+      let markerPublished = false;
+      let markerPublishing = false;
       scope.createRenderDomain({
         zIndex: 0,
         roots: [{ key: "controls", tag: "lr-controls", attrs: {}, data: {}, children: [] }],
@@ -74,7 +77,15 @@ async function installation(t) {
       async frame(frame) {
         const listener = scope.presentationEvents.createListener({ frame, channels: ["controls.event"] });
         listener.on("controls.event", async (event) => {
-          await writeFile(${JSON.stringify(marker)}, JSON.stringify(event));
+          if (markerPublished || markerPublishing) return;
+          markerPublishing = true;
+          try {
+            await writeFile(${JSON.stringify(markerPublishingPath)}, JSON.stringify(event));
+            await rename(${JSON.stringify(markerPublishingPath)}, ${JSON.stringify(marker)});
+            markerPublished = true;
+          } finally {
+            markerPublishing = false;
+          }
         });
         await new Promise((resolve) => {
           const timer = setTimeout(resolve, 10_000);
