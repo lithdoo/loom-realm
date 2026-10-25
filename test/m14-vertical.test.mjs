@@ -72,6 +72,23 @@ async function waitFor(predicate, label, timeout = 10_000) {
   }
 }
 
+async function evaluateWithTimeout(page, callback, argument, timeoutMs, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      page.evaluate(callback, argument),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`Timed out waiting for ${label}`));
+          void page.close({ runBeforeUnload: false }).catch(() => {});
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 function createDataHub() {
   const waiting = new Map();
   const pairs = new Map();
@@ -316,7 +333,7 @@ test("map view clears full state and delayed same-resource decode paints only la
   const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) }); t.after(() => browser.close());
   const page = await browser.newPage(); await page.goto(server.origin);
   await page.addScriptTag({ url: `${server.origin}/presentation/map/map.browser.js` });
-  const result = await page.evaluate(async ({ bytes, version }) => {
+  const result = await evaluateWithTimeout(page, async ({ bytes, version }) => {
     const view = document.createElement("lr-map-view"); document.body.append(view);
     let release; const gate = new Promise((resolve) => { release = resolve; });
     view.receiveRenderContext({ resources: { async resource() { await gate; return { bytes: Uint8Array.from(bytes), mime: "image/png", contentVersion: version }; } } });
@@ -348,30 +365,66 @@ test("map view clears full state and delayed same-resource decode paints only la
       }
       return [0, 0, 0, 0];
     };
+    let forceTimerFallbackOnce = true;
+    const nextVisualPoll = () => new Promise((resolve) => {
+      let settled = false;
+      let frame = 0;
+      let timer;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (timer !== undefined) clearTimeout(timer);
+        if (frame !== 0) cancelAnimationFrame(frame);
+        resolve();
+      };
+      if (forceTimerFallbackOnce) forceTimerFallbackOnce = false;
+      else frame = requestAnimationFrame(finish);
+      timer = setTimeout(finish, 50);
+    });
+    const waitForSample = async (read, accept, label) => {
+      const deadline = performance.now() + 5_000;
+      while (true) {
+        const value = read();
+        if (accept(value)) return value;
+        if (performance.now() >= deadline) throw new Error(`Timed out waiting for ${label}`);
+        await nextVisualPoll();
+      }
+    };
     view.receiveRenderData(viewPayload(1, 0, 384, 0));
     view.receiveRenderData(viewPayload(2, 1, 385, 1));
     release();
-    const deadline = performance.now() + 5_000;
-    let latest;
-    while (performance.now() < deadline) {
-      latest = sample(37, 5);
-      if (latest[0] === 40 && latest[1] === 80 && latest[2] === 220 && latest[3] === 255) break;
-      latest = undefined;
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    }
-    if (!latest) throw new Error("Timed out waiting for latest map paint");
+    const latest = await waitForSample(
+      () => sample(37, 5),
+      (pixel) => pixel[0] === 40 && pixel[1] === 80 && pixel[2] === 220 && pixel[3] === 255,
+      "latest map paint",
+    );
     const stale = sample(5, 5);
     view.receiveRenderData(viewPayload(3, 0, 0, null));
-    let cleared;
-    const clearDeadline = performance.now() + 5_000;
-    while (performance.now() < clearDeadline) {
-      cleared = sample(37, 5);
-      if (cleared[3] === 0) break;
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    }
+    const cleared = await waitForSample(
+      () => sample(37, 5),
+      (pixel) => pixel[3] === 0,
+      "cleared map paint",
+    );
     return { stale, latest, cleared };
-  }, { bytes: [...tileset], version: hash(tileset) });
+  }, { bytes: [...tileset], version: hash(tileset) }, 12_000, "bounded map paint evaluation");
   assert.equal(result.stale[3], 0); assert.deepEqual(result.latest, [40, 80, 220, 255]); assert.equal(result.cleared[3], 0);
+});
+
+test("browser evaluation watchdog bounds a non-settling page task", { timeout: 5_000 }, async (t) => {
+  const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await assert.rejects(
+    evaluateWithTimeout(
+      page,
+      async () => new Promise(() => {}),
+      undefined,
+      100,
+      "hung browser evaluation",
+    ),
+    /Timed out waiting for hung browser evaluation/,
+  );
+  await waitFor(() => page.isClosed(), "watchdog page close", 1_000);
 });
 
 test("map browser registration fails closed when an owned tag is already registered", { timeout: 15_000 }, async (t) => {
