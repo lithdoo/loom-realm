@@ -46,6 +46,7 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
   let held = [];
   handler.onMapEntering(hook);
   const enteredUnsubscribers = (options.enteredListeners ?? []).map((listener) => handler.onMapEntered(listener));
+  const interactionUnsubscribers = (options.interactionListeners ?? []).map((listener) => handler.onNPCInteract(listener));
   const pending = handler.run({ mapId: 1, x: 1, y: 1 });
   for (let attempt = 0; attempt < 20 && states.length === 0; attempt += 1) await new Promise((resolve) => setImmediate(resolve));
   return {
@@ -63,6 +64,7 @@ async function createHarness(hook = (context) => context.setNPC([]), options = {
       handler.controls.setMoveIntent(held.at(-1) ?? null);
     },
     enteredUnsubscribers,
+    interactionUnsubscribers,
     handler,
     pending,
     states,
@@ -84,6 +86,7 @@ test("public Builder/Handler normalizes NPCs and never reuses a retired RenderNo
   await harness.handler.setNPC([placement]);
   assert.notEqual(harness.states.at(-1).roots[0].children[1].key, firstKey);
   assert.equal(harness.handler.getSnapshot().npcs[0].pattern, 3);
+  assert.equal(harness.handler.getSnapshot().npcs[0].interactable, false);
   await assert.rejects(harness.handler.setNPC([{ ...placement, x: 1, y: 1 }]), (error) => error instanceof RPGMapError && error.code === "MAP_NPC_INVALID");
   const statesBeforeCapacityFailure = harness.states.length;
   const snapshotBeforeCapacityFailure = harness.handler.getSnapshot();
@@ -97,6 +100,171 @@ test("public Builder/Handler normalizes NPCs and never reuses a retired RenderNo
   const stateCount = harness.states.length;
   harness.handler.controls.setMoveIntent(6);
   assert.equal(harness.states.length, stateCount, "controls are inert after terminal cleanup");
+});
+
+
+test("confirm emits an interaction only for an interactable NPC directly in front of the player", async () => {
+  const seen = [];
+  const harness = await createHarness(undefined, {
+    interactionListeners: [(event) => seen.push(event)],
+  });
+  const placement = { instanceId: "guide-1", npcId: "guide", x: 2, y: 1, direction: 4, interactable: true };
+
+  await harness.handler.setNPC([placement]);
+  harness.handler.controls.confirm();
+  assert.deepEqual(seen, [], "an NPC outside the facing tile must not be targeted");
+
+  await harness.handler.setNPC([{ ...placement, x: 1, y: 3 }]);
+  harness.handler.controls.confirm();
+  assert.deepEqual(seen, [], "an NPC more than one tile away must not be targeted");
+
+  await harness.handler.setNPC([{ ...placement, x: 1, y: 2, interactable: false }]);
+  harness.handler.controls.confirm();
+  assert.deepEqual(seen, [], "non-interactable NPCs must not emit events");
+
+  const snapshotBeforeInvalidReplacement = harness.handler.getSnapshot();
+  const statesBeforeInvalidReplacement = harness.states.length;
+  await assert.rejects(
+    harness.handler.setNPC([{ ...placement, x: 1, y: 2, interactable: "yes" }]),
+    (error) => error instanceof RPGMapError && error.code === "MAP_NPC_INVALID",
+  );
+  assert.deepEqual(harness.handler.getSnapshot(), snapshotBeforeInvalidReplacement);
+  assert.equal(harness.states.length, statesBeforeInvalidReplacement);
+  harness.handler.controls.confirm();
+  assert.deepEqual(seen, [], "a failed replacement must preserve the previous non-interactable NPC");
+
+  await assert.rejects(
+    harness.handler.setNPC([{ ...placement, x: 1, y: 2, unexpected: true }]),
+    (error) => error instanceof RPGMapError && error.code === "MAP_NPC_INVALID",
+  );
+  assert.deepEqual(harness.handler.getSnapshot(), snapshotBeforeInvalidReplacement);
+  assert.equal(harness.states.length, statesBeforeInvalidReplacement);
+
+  await harness.handler.setNPC([{ ...placement, x: 1, y: 2 }]);
+  assert.equal(harness.handler.getSnapshot().npcs[0].interactable, true);
+  harness.handler.controls.confirm();
+  assert.deepEqual(seen, [{
+    mapId: 1,
+    npc: { instanceId: "guide-1", npcId: "guide", x: 1, y: 2 },
+    player: { x: 1, y: 1, direction: 2 },
+  }]);
+  assert.equal(Object.isFrozen(seen[0]), true);
+  assert.equal(Object.isFrozen(seen[0].npc), true);
+  assert.equal(Object.isFrozen(seen[0].player), true);
+
+  harness.aborter.abort();
+  await harness.pending;
+  harness.handler.controls.confirm();
+  assert.equal(seen.length, 1, "confirm must be inert after terminal cleanup");
+});
+
+test("one confirm cannot synchronously re-enter the same NPC interaction", async () => {
+  const seen = [];
+  let harness;
+  harness = await createHarness(undefined, {
+    interactionListeners: [(event) => {
+      seen.push(event);
+      if (seen.length === 1) harness.handler.controls.confirm();
+    }],
+  });
+  await harness.handler.setNPC([{
+    instanceId: "guide-1", npcId: "guide", x: 1, y: 2, direction: 2, interactable: true,
+  }]);
+  harness.handler.controls.confirm();
+  assert.equal(seen.length, 1);
+  harness.aborter.abort();
+  await harness.pending;
+});
+
+test("NPC interaction listeners isolate failures and support idempotent unsubscribe", async () => {
+  const seen = [];
+  const diagnostics = [];
+  const originalError = console.error;
+  console.error = (...args) => { diagnostics.push(args); };
+  try {
+    const harness = await createHarness(undefined, {
+      interactionListeners: [
+        () => seen.push("removed"),
+        () => { throw new Error("listener boom"); },
+        () => seen.push("kept"),
+      ],
+    });
+    await harness.handler.setNPC([{
+      instanceId: "guide-1", npcId: "guide", x: 1, y: 2, direction: 2, interactable: true,
+    }]);
+    harness.handler.controls.confirm();
+    assert.deepEqual(seen, ["removed", "kept"]);
+    harness.interactionUnsubscribers[0]();
+    harness.interactionUnsubscribers[0]();
+    harness.handler.controls.confirm();
+    assert.deepEqual(seen, ["removed", "kept", "kept"]);
+    assert.equal(diagnostics.length, 2);
+    assert.equal(diagnostics.every((entry) => entry[0] === "[RPGMap] NPC_INTERACT_LISTENER_FAILED"), true);
+    harness.aborter.abort();
+    await harness.pending;
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("confirm is ignored while a movement is active", async () => {
+  const seen = [];
+  const harness = await createHarness(undefined, {
+    interactionListeners: [(event) => seen.push(event)],
+  });
+  await harness.handler.setNPC([{
+    instanceId: "guide-1", npcId: "guide", x: 1, y: 2, direction: 2, interactable: true,
+  }]);
+  harness.handler.controls.setMoveIntent(6);
+  harness.handler.controls.confirm();
+  assert.deepEqual(seen, []);
+  harness.aborter.abort();
+  await harness.pending;
+});
+
+test("confirm is not cached during setNPC replacement or map transition", async () => {
+  const seen = [];
+  let delayNextGuide = false;
+  let releaseGuide;
+  let guideRequestedResolve;
+  let guideRequested = new Promise((resolve) => { guideRequestedResolve = resolve; });
+  const harness = await createHarness(undefined, {
+    interactionListeners: [(event) => seen.push(event)],
+    resource: async () => {
+      if (!delayNextGuide) return { bytes: png(), mime: "image/png", contentVersion: "image" };
+      guideRequestedResolve();
+      return await new Promise((resolve) => {
+        releaseGuide = () => resolve({ bytes: png(), mime: "image/png", contentVersion: "replacement" });
+      });
+    },
+  });
+  const placement = { instanceId: "guide-1", npcId: "guide", x: 1, y: 2, direction: 2 };
+  await harness.handler.setNPC([{ ...placement, interactable: true }]);
+  harness.handler.controls.confirm();
+  assert.equal(seen.length, 1);
+
+  delayNextGuide = true;
+  guideRequested = new Promise((resolve) => { guideRequestedResolve = resolve; });
+  const replacement = harness.handler.setNPC([{ ...placement, interactable: false }]);
+  await guideRequested;
+  harness.handler.controls.confirm();
+  assert.equal(seen.length, 1, "confirm during setNPC preparation must be ignored");
+  releaseGuide();
+  await replacement;
+  assert.equal(seen.length, 1, "an ignored confirm must not replay after setNPC completes");
+  harness.handler.controls.confirm();
+  assert.equal(seen.length, 1, "the replacement interaction flag must take effect immediately");
+
+  delayNextGuide = false;
+  await harness.handler.setNPC([{ ...placement, interactable: true }]);
+  const transition = harness.handler.enterMap({ mapId: 1, x: 2, y: 2 });
+  harness.handler.controls.confirm();
+  assert.equal(seen.length, 1, "confirm during map transition must be ignored");
+  await transition;
+  assert.equal(seen.length, 1, "an ignored confirm must not replay after map transition");
+
+  harness.aborter.abort();
+  await harness.pending;
 });
 
 test("onMapEntering cancellation releases run even when the listener never settles", async () => {
@@ -128,7 +296,7 @@ test("setNPC preparation excludes movement and revalidates the stable player cel
   assert.deepEqual(harness.handler.getSnapshot(), {
     mapId: 1,
     player: { x: 1, y: 1, direction: 2 },
-    npcs: [{ instanceId: "guard", npcId: "guide", x: 2, y: 1, direction: 4, pattern: 2 }],
+    npcs: [{ instanceId: "guard", npcId: "guide", x: 2, y: 1, direction: 4, pattern: 2, interactable: false }],
   });
   harness.aborter.abort();
   await harness.pending;

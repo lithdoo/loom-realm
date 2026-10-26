@@ -33,10 +33,15 @@ import { calculateLayout, type MapLayout } from "./layout.js";
 interface ResourceRef { readonly [name: string]: string; namespace: string; key: string; contentVersion: string }
 export type Pattern = 0 | 1 | 2 | 3;
 export type MapEntry = Readonly<{ mapId: number; x: number; y: number; direction?: Direction }>;
-export type NPCPlacement = Readonly<{ instanceId: string; npcId: string; x: number; y: number; direction: Direction; pattern?: Pattern | null }>;
-export type NormalizedNPCPlacement = Readonly<{ instanceId: string; npcId: string; x: number; y: number; direction: Direction; pattern: Pattern }>;
+export type NPCPlacement = Readonly<{ instanceId: string; npcId: string; x: number; y: number; direction: Direction; pattern?: Pattern | null; interactable?: boolean }>;
+export type NormalizedNPCPlacement = Readonly<{ instanceId: string; npcId: string; x: number; y: number; direction: Direction; pattern: Pattern; interactable: boolean }>;
 export type MapEnteringContext = Readonly<{ mapId: number; fromMapId: number | null; signal: AbortSignal; setNPC(npcs: readonly NPCPlacement[]): void }>;
 export type MapEnteredEvent = Readonly<{ mapId: number; fromMapId: number | null; player: Readonly<{ x: number; y: number; direction: Direction }> }>;
+export type NPCInteractEvent = Readonly<{
+  mapId: number;
+  npc: Readonly<{ instanceId: string; npcId: string; x: number; y: number }>;
+  player: Readonly<{ x: number; y: number; direction: Direction }>;
+}>;
 export type MapSnapshot = Readonly<{ mapId: number; player: Readonly<{ x: number; y: number; direction: Direction }>; npcs: readonly NormalizedNPCPlacement[] }>;
 export type RPGMapErrorCode = "MAP_INVALID_ARGUMENT" | "MAP_INVALID_STATE" | "MAP_ALREADY_RUN" | "MAP_BUSY" | "MAP_CONTENT_FAILED" | "MAP_NPC_INVALID" | "MAP_STALE_SCENE" | "MAP_CANCELLED" | "MAP_COMMIT_FAILED";
 
@@ -142,17 +147,18 @@ function normalizeNPCs(values: readonly NPCPlacement[], map: MapRecord, playerX:
   return Object.freeze(values.map((value) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) throw new RPGMapError("MAP_NPC_INVALID");
     const keys = Object.keys(value);
-    if (keys.some((key) => !["instanceId", "npcId", "x", "y", "direction", "pattern"].includes(key))) throw new RPGMapError("MAP_NPC_INVALID");
+    if (keys.some((key) => !["instanceId", "npcId", "x", "y", "direction", "pattern", "interactable"].includes(key))) throw new RPGMapError("MAP_NPC_INVALID");
     if (typeof value.instanceId !== "string" || value.instanceId.length === 0 || typeof value.npcId !== "string" || value.npcId.length === 0) throw new RPGMapError("MAP_NPC_INVALID");
     if (ids.has(value.instanceId)) throw new RPGMapError("MAP_NPC_INVALID", "Duplicate NPC instanceId");
     if (!Number.isSafeInteger(value.x) || !Number.isSafeInteger(value.y) || !inBounds(map, value.x, value.y)) throw new RPGMapError("MAP_NPC_INVALID");
     if (![2, 4, 6, 8].includes(value.direction)) throw new RPGMapError("MAP_NPC_INVALID");
     const pattern = value.pattern == null ? 0 : value.pattern;
     if (![0, 1, 2, 3].includes(pattern)) throw new RPGMapError("MAP_NPC_INVALID");
+    if (value.interactable !== undefined && typeof value.interactable !== "boolean") throw new RPGMapError("MAP_NPC_INVALID");
     const cell = `${value.x},${value.y}`;
     if (cells.has(cell) || (value.x === playerX && value.y === playerY)) throw new RPGMapError("MAP_NPC_INVALID", "NPC placement collision");
     ids.add(value.instanceId); cells.add(cell);
-    return Object.freeze({ instanceId: value.instanceId, npcId: value.npcId, x: value.x, y: value.y, direction: value.direction, pattern }) as NormalizedNPCPlacement;
+    return Object.freeze({ instanceId: value.instanceId, npcId: value.npcId, x: value.x, y: value.y, direction: value.direction, pattern, interactable: value.interactable ?? false }) as NormalizedNPCPlacement;
   }));
 }
 
@@ -378,17 +384,21 @@ interface RuntimeBridge {
   updateSnapshot(snapshot: MapSnapshot): void;
   setCommands(commands: { enter(entry: MapEntry): Promise<void>; setNPC(npcs: readonly NPCPlacement[]): Promise<void> }): void;
   setMoveIntentSink(sink: ((intent: Direction | null) => void) | undefined): void;
+  setConfirmSink(sink: (() => void) | undefined): void;
+  npcInteract(event: NPCInteractEvent): void;
   clear(): void;
 }
 
 export interface RPGMapControls {
   setMoveIntent(direction: Direction | null): void;
+  confirm(): void;
 }
 
 export interface RPGMapHandler {
   readonly controls: RPGMapControls;
   onMapEntering(listener: (context: MapEnteringContext) => void | Promise<void>): () => void;
   onMapEntered(listener: (event: MapEnteredEvent) => void): () => void;
+  onNPCInteract(listener: (event: NPCInteractEvent) => void): () => void;
   run(initial: MapEntry): Promise<FrameOutcome>;
   enterMap(target: MapEntry): Promise<void>;
   setNPC(npcs: readonly NPCPlacement[]): Promise<void>;
@@ -404,8 +414,10 @@ class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
   private terminal = false;
   private currentMoveIntent: Direction | null = null;
   private moveIntentSink?: (intent: Direction | null) => void;
+  private confirmSink?: () => void;
   private entering?: (context: MapEnteringContext) => void | Promise<void>;
   private readonly enteredListeners = new Set<(event: MapEnteredEvent) => void>();
+  private readonly npcInteractListeners = new Set<(event: NPCInteractEvent) => void>();
   private commands?: { enter(entry: MapEntry): Promise<void>; setNPC(npcs: readonly NPCPlacement[]): Promise<void> };
   private snapshot: MapSnapshot | null = null;
 
@@ -414,6 +426,7 @@ class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
     this.characterName = characterName;
     this.controls = Object.freeze({
       setMoveIntent: (direction: Direction | null) => this.setMoveIntent(direction),
+      confirm: () => this.confirm(),
     });
   }
   get moveIntent(): Direction | null { return this.currentMoveIntent; }
@@ -425,8 +438,15 @@ class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
     this.currentMoveIntent = direction;
     this.moveIntentSink?.(direction);
   }
+  private confirm(): void {
+    if (this.terminal) return;
+    this.confirmSink?.();
+  }
   setMoveIntentSink(sink: ((intent: Direction | null) => void) | undefined): void {
     this.moveIntentSink = sink;
+  }
+  setConfirmSink(sink: (() => void) | undefined): void {
+    this.confirmSink = sink;
   }
   onMapEntering(listener: (context: MapEnteringContext) => void | Promise<void>): () => void {
     if (this.runCalled || typeof listener !== "function" || this.entering) throw new RPGMapError("MAP_INVALID_STATE");
@@ -437,6 +457,11 @@ class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
     if (this.runCalled || typeof listener !== "function") throw new RPGMapError("MAP_INVALID_STATE");
     this.enteredListeners.add(listener);
     return () => { this.enteredListeners.delete(listener); };
+  }
+  onNPCInteract(listener: (event: NPCInteractEvent) => void): () => void {
+    if (this.runCalled || typeof listener !== "function") throw new RPGMapError("MAP_INVALID_STATE");
+    this.npcInteractListeners.add(listener);
+    return () => { this.npcInteractListeners.delete(listener); };
   }
   async prepareNPC(mapId: number, fromMapId: number | null, signal: AbortSignal): Promise<readonly NPCPlacement[]> {
     if (!this.entering) return Object.freeze([]);
@@ -461,6 +486,19 @@ class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
     }
   }
   updateSnapshot(snapshot: MapSnapshot): void { this.snapshot = snapshot; }
+  npcInteract(event: NPCInteractEvent): void {
+    if (this.terminal) return;
+    for (const listener of this.npcInteractListeners) {
+      try { listener(event); } catch (error) {
+        console.error("[RPGMap] NPC_INTERACT_LISTENER_FAILED", {
+          mapId: event.mapId,
+          npcId: event.npc.npcId,
+          instanceId: event.npc.instanceId,
+          message: error instanceof Error ? error.message : "listener failed",
+        });
+      }
+    }
+  }
   setCommands(commands: { enter(entry: MapEntry): Promise<void>; setNPC(npcs: readonly NPCPlacement[]): Promise<void> }): void { this.commands = commands; }
   clear(): void {
     this.running = false;
@@ -468,6 +506,7 @@ class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
     this.snapshot = null;
     this.currentMoveIntent = null;
     this.moveIntentSink = undefined;
+    this.confirmSink = undefined;
     this.terminal = true;
   }
   async run(initial: MapEntry): Promise<FrameOutcome> {
@@ -506,6 +545,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
     let unsubscribeViewport: (() => void) | null = null;
     let activeMove: ActiveMove | null = null;
     let transitioning = false;
+    let confirmDispatching = false;
     let cleanedUp = false;
     const cleanup = () => {
       if (cleanedUp) return;
@@ -517,6 +557,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         resizeTimer = null;
       }
       api.setMoveIntentSink(undefined);
+      api.setConfirmSink(undefined);
       if (stepTimer !== null) {
         clearTimeout(stepTimer);
         stepTimer = null;
@@ -626,7 +667,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         })));
       };
 
-      const currentSnapshot = (): MapSnapshot => Object.freeze({ mapId: current.mapId, player: Object.freeze({ x, y, direction }), npcs: Object.freeze(npcs.map(({ instanceId, npcId, x, y, direction, pattern }) => Object.freeze({ instanceId, npcId, x, y, direction, pattern }))) });
+      const currentSnapshot = (): MapSnapshot => Object.freeze({ mapId: current.mapId, player: Object.freeze({ x, y, direction }), npcs: Object.freeze(npcs.map(({ instanceId, npcId, x, y, direction, pattern, interactable }) => Object.freeze({ instanceId, npcId, x, y, direction, pattern, interactable }))) });
       const publishSnapshot = (fromMapId: number | null) => {
         const snapshot = currentSnapshot();
         api.entered(Object.freeze({ mapId: current.mapId, fromMapId, player: snapshot.player }), snapshot);
@@ -1213,6 +1254,21 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       eventBusy = false;
       publishSnapshot(null);
       api.setMoveIntentSink(() => { pumpMoveIntent(); });
+      api.setConfirmSink(() => {
+        if (runtimeEnded() || operationBusy() || confirmDispatching) return;
+        const { dx, dy } = stepDelta[direction];
+        const targetX = x + dx;
+        const targetY = y + dy;
+        const target = npcs.find((npc) => npc.interactable && npc.x === targetX && npc.y === targetY);
+        if (!target) return;
+        const event: NPCInteractEvent = Object.freeze({
+          mapId: current.mapId,
+          npc: Object.freeze({ instanceId: target.instanceId, npcId: target.npcId, x: target.x, y: target.y }),
+          player: Object.freeze({ x, y, direction }),
+        });
+        confirmDispatching = true;
+        try { api.npcInteract(event); } finally { confirmDispatching = false; }
+      });
       pumpMoveIntent();
       const outcome = await Promise.race([
         terminal,
