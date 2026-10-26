@@ -5,6 +5,7 @@ export {
   type MapEnteringContext,
   type MapEntry,
   type MapSnapshot,
+  type NPCInteractEvent,
   type NPCPlacement,
   type Pattern,
   type RPGMapErrorCode,
