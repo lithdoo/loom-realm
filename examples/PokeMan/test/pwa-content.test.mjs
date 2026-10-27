@@ -68,6 +68,8 @@ test("real PokeMan FSDB produces a deterministic map-only dependency closure", a
     "resource/resource.Graphics/Characters/Player",
     "resource/resource.Presentation/map/map.browser.js",
     "resource/resource.Presentation/map/map.css",
+    "resource/resource.Presentation/dialogue/dialogue.browser.js",
+    "resource/resource.Presentation/dialogue/dialogue.css",
     "resource/resource.Presentation/page.css",
   ]) assert.ok(ids.has(expected), `missing ${expected}`);
 

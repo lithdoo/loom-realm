@@ -20,6 +20,8 @@ const targetRelative = Object.freeze({
   controlsJs: join("[resource]Presentation", "controls", "device-input.browser.js.js"),
   js: join("[resource]Presentation", "map", "map.browser.js.js"),
   css: join("[resource]Presentation", "map", "map.css.css"),
+  dialogueJs: join("[resource]Presentation", "dialogue", "dialogue.browser.js.js"),
+  dialogueCss: join("[resource]Presentation", "dialogue", "dialogue.css.css"),
   pageCss: join("[resource]Presentation", "page.css.css"),
 });
 
@@ -33,6 +35,8 @@ async function makeFixture(t) {
     controlsJs: join(repoRoot, "game-libs", "game-common-controls", "dist", "browser", "device-input.browser.js"),
     js: join(repoRoot, "game-libs", "map", "browser", "map.browser.js"),
     css: join(repoRoot, "game-libs", "map", "browser", "map.css"),
+    dialogueJs: join(exampleRoot, "presentation", "dialogue.browser.js"),
+    dialogueCss: join(exampleRoot, "presentation", "dialogue.css"),
     pageCss: join(exampleRoot, "presentation.css"),
   };
   const dist = {
@@ -45,19 +49,25 @@ async function makeFixture(t) {
     mkdir(join(repoRoot, "game-libs", "map", "browser"), { recursive: true }),
     mkdir(join(repoRoot, "game-libs", "map", "dist", "browser"), { recursive: true }),
     mkdir(join(repoRoot, "game-libs", "game-common-controls", "dist", "browser"), { recursive: true }),
+    mkdir(join(exampleRoot, "presentation"), { recursive: true }),
     mkdir(join(fsdbRoot, "[resource]Presentation", "controls"), { recursive: true }),
     mkdir(join(fsdbRoot, "[resource]Presentation", "map"), { recursive: true }),
+    mkdir(join(fsdbRoot, "[resource]Presentation", "dialogue"), { recursive: true }),
   ]);
   const expected = {
     controlsJs: Buffer.from("customElements.define('game-keyboard-input', class extends HTMLElement {});\n"),
     js: Buffer.from("export const presentation = 'map';\n"),
     css: Buffer.from("lr-map-view { display: block; }\n"),
+    dialogueJs: Buffer.from("(function () { customElements.define('lr-dialogue-view', class extends HTMLElement {}); })();\n"),
+    dialogueCss: Buffer.from("lr-dialogue-view { display: block; }\n"),
     pageCss: Buffer.from("lr-map-view { width: 100vw; height: 100vh; }\n"),
   };
   await Promise.all([
     writeFile(source.controlsJs, expected.controlsJs),
     writeFile(source.js, expected.js),
     writeFile(source.css, expected.css),
+    writeFile(source.dialogueJs, expected.dialogueJs),
+    writeFile(source.dialogueCss, expected.dialogueCss),
     writeFile(source.pageCss, expected.pageCss),
     writeFile(dist.js, expected.js),
     writeFile(dist.css, expected.css),
@@ -95,15 +105,15 @@ test("sync copies built Map artifacts and the PokeMan page CSS idempotently", as
   for (const key of Object.keys(fixture.target)) {
     assert.deepEqual(await readFile(fixture.target[key]), fixture.expected[key]);
   }
-  assert.equal(counters.opens, 4);
+  assert.equal(counters.opens, 6);
   const renamesAfterFirstSync = counters.renames;
 
   await syncMapPresentation({ ...fixture, runBuild: false, fileOps });
-  assert.equal(counters.opens, 4, "an idempotent sync must not create staging files");
+  assert.equal(counters.opens, 6, "an idempotent sync must not create staging files");
   assert.equal(counters.renames, renamesAfterFirstSync, "an idempotent sync must not replace targets");
 
   await syncMapPresentation({ ...fixture, runBuild: false, checkOnly: true, fileOps });
-  assert.equal(counters.opens, 4, "--check must be read-only");
+  assert.equal(counters.opens, 6, "--check must be read-only");
 });
 
 test("--check detects missing and corrupted FSDB artifacts without repairing them", async (t) => {
@@ -147,6 +157,7 @@ test("a replacement failure restores the complete previous Presentation set", as
   const leftovers = [
     ...await readdir(join(fixture.fsdbRoot, "[resource]Presentation")),
     ...await readdir(join(fixture.fsdbRoot, "[resource]Presentation", "controls")),
+    ...await readdir(join(fixture.fsdbRoot, "[resource]Presentation", "dialogue")),
     ...await readdir(join(fixture.fsdbRoot, "[resource]Presentation", "map")),
   ].filter((name) => name.includes(".loomrealm-sync."));
   assert.deepEqual(leftovers, []);
@@ -161,6 +172,23 @@ test("source/dist drift fails before changing FSDB artifacts", async (t) => {
     /source\/dist hash \(map browser JS\)/,
   );
   assert.deepEqual(await readFile(fixture.target.js), before);
+});
+
+test("presentation.json preserves the ordered classic Presentation bootstrap", async () => {
+  const presentation = JSON.parse(await readFile(new URL("../presentation.json", import.meta.url), "utf8"));
+  assert.deepEqual(presentation, {
+    formatVersion: 1,
+    styles: [
+      { namespace: "Presentation", key: "map/map.css" },
+      { namespace: "Presentation", key: "dialogue/dialogue.css" },
+      { namespace: "Presentation", key: "page.css" },
+    ],
+    scripts: [
+      { namespace: "Presentation", key: "controls/device-input.browser.js" },
+      { namespace: "Presentation", key: "map/map.browser.js" },
+      { namespace: "Presentation", key: "dialogue/dialogue.browser.js" },
+    ],
+  });
 });
 
 test("a build failure stops synchronization before changing FSDB artifacts", async (t) => {

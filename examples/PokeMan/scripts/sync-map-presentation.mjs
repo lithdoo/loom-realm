@@ -11,6 +11,8 @@ const TARGET_RELATIVE = Object.freeze({
   controlsJs: join("[resource]Presentation", "controls", "device-input.browser.js.js"),
   js: join("[resource]Presentation", "map", "map.browser.js.js"),
   css: join("[resource]Presentation", "map", "map.css.css"),
+  dialogueJs: join("[resource]Presentation", "dialogue", "dialogue.browser.js.js"),
+  dialogueCss: join("[resource]Presentation", "dialogue", "dialogue.css.css"),
   pageCss: join("[resource]Presentation", "page.css.css"),
 });
 const DIST_RELATIVE = Object.freeze({
@@ -22,9 +24,18 @@ const SOURCE_RELATIVE = Object.freeze({
   controlsJs: join("game-libs", "game-common-controls", "dist", "browser", "device-input.browser.js"),
   js: join("game-libs", "map", "browser", "map.browser.js"),
   css: join("game-libs", "map", "browser", "map.css"),
+  dialogueJs: join("examples", "PokeMan", "presentation", "dialogue.browser.js"),
+  dialogueCss: join("examples", "PokeMan", "presentation", "dialogue.css"),
   pageCss: join("examples", "PokeMan", "presentation.css"),
 });
-const RESOURCE_LABELS = Object.freeze({ controlsJs: "device input browser JS", js: "map browser JS", css: "map CSS", pageCss: "page CSS" });
+const RESOURCE_LABELS = Object.freeze({
+  controlsJs: "device input browser JS",
+  js: "map browser JS",
+  css: "map CSS",
+  dialogueJs: "dialogue browser JS",
+  dialogueCss: "dialogue CSS",
+  pageCss: "page CSS",
+});
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
