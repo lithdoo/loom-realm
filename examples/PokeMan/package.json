@@ -15,6 +15,7 @@
     "@loomrealm/game-package": "0.1.0-alpha.0"
   },
   "scripts": {
+    "pretest": "npm run build -w @loomrealm-game/rpg-dialogue",
     "test": "node --test test/*.test.mjs"
   }
 }
