@@ -1466,13 +1466,14 @@ PokeMan focused tests
 
 # 30. Required qualification commands
 
-至少运行并通过与当前仓库脚本等价的：
+至少运行并通过当前仓库已有的 exact commands：
 
 ```text
 npm test -w @loomrealm-example/pokeman
 npm test -w @loomrealm-game/map
-npm test -w @loomrealm-game/rpg-dialogue
-npm run test:frame-call:qualification   (或仓库当前 exact equivalent)
+npm run test:rpg-dialogue
+npm run test:game-control-ports:qualification
+npm test -w @loomrealm/subsystem -w @loomrealm/main -w @loomrealm/game-launcher-hostra
 
 npm run build:qualification -w @loomrealm/pwa
 npm run test:unit -w @loomrealm/pwa
@@ -1482,7 +1483,7 @@ npm run build:staging -w @loomrealm/pwa
 node apps/pwa/scripts/run-e2e.mjs staging
 ```
 
-如果 root script名称已变化，Agent使用仓库当前等价命令，并在 PR报告 exact command。
+如果实现提交期间仓库脚本名称发生变化，Agent 使用最新等价命令，并在 PR 报告 exact command；不得引用不存在的 qualification script。
 
 关键证据必须实际存在：
 
@@ -1563,27 +1564,63 @@ second Professor interaction
 
 # 33. Failure policy
 
-Unexpected：
+本 slice冻结以下 product failure codes：
 
 ```text
-frame.call target unavailable
-invalid Dialogue Frame input
-NPC content invalid
-resource resolve failure
-RPGDialogue open failure
-Presentation/session establishment failure
-unexpected result / choice
-child Frame failed outcome
+Dialogue child:
+POKEMAN_DIALOGUE_INPUT_INVALID
+POKEMAN_DIALOGUE_CONTENT_FAILED
+POKEMAN_DIALOGUE_SESSION_FAILED
+
+Map caller:
+POKEMAN_DIALOGUE_CALL_REJECTED
+POKEMAN_DIALOGUE_RESULT_INVALID
+POKEMAN_DIALOGUE_CHILD_FAILED
+POKEMAN_DIALOGUE_CHILD_CANCELLED
 ```
 
-必须进入明确 failure path；不能 `console.error` 后假装成功。
-
-Map child call得到 `failed` 时不得重新创建正常 A2 gameplay controls然后继续。
-
-用户在 RPGDialogue 中的 `{ type: "cancelled" }` 是正常业务结果，由 Dialogue Subsystem转换成：
+## 33.1 Dialogue child
 
 ```text
-completed({ conclusion:"cancelled" })
+invalid exact frame.params
+→ POKEMAN_DIALOGUE_INPUT_INVALID
+
+NPC/resource producer failure
+→ POKEMAN_DIALOGUE_CONTENT_FAILED
+
+RPGDialogue / conversation flow / unexpected choice/result failure
+→ POKEMAN_DIALOGUE_SESSION_FAILED
+```
+
+不要静默吞异常，也不要让已知 product failure意外退化成 generic `UNHANDLED_BUSINESS_EXCEPTION`。
+
+## 33.2 Map caller
+
+```text
+recoverable pre-commit FrameCallRejectedError
+→ POKEMAN_DIALOGUE_CALL_REJECTED
+→ data.callCode = exact FRAME_CALL_TARGET_* code
+
+completed(value) invalid
+→ POKEMAN_DIALOGUE_RESULT_INVALID
+
+child failed(error)
+→ POKEMAN_DIALOGUE_CHILD_FAILED
+→ data.childCode = error.code
+
+outer child cancelled
+→ POKEMAN_DIALOGUE_CHILD_CANCELLED
+```
+
+这些 Map failure都结束当前 Map Frame；不得建立正常 A2 gameplay controls继续。
+
+用户在 RPGDialogue 中的 `{ type: "cancelled" }` 仍是正常业务结果，由 Dialogue Subsystem转换成：
+
+```text
+completed({
+  dialogueKey: "professor-vertical-slice",
+  conclusion: "cancelled"
+})
 ```
 
 不是 child failure。
@@ -1647,16 +1684,22 @@ Controls Activation lifecycle
 # 36. Exit criteria
 
 ```text
+[ ] 73 supersedes 72 only for topology + Activation-local Map controls
 [ ] production topology = base + map + dialogue
 [ ] dialogue.mjs 不再是 empty subsystem
 [ ] Professor interactable=true
 [ ] other NPC interaction scope unchanged
 [ ] Map 不 import RPGDialogue
-[ ] Map 使用 frame.call("dialogue", exact input)
-[ ] @loomrealm-game/rpg-dialogue 是 production dependency
-[ ] Map A1 consumer 在 call 前关闭
-[ ] Map moveIntent 在 call 前 neutral
+[ ] Map south/start repeat=false routes RPGMapControls.confirm()
+[ ] NPC callback只做 synchronous rendezvous，不直接 await/call child
+[ ] Map Frame handler自己 await frame.call("dialogue", exact input)
+[ ] Frame handler绝不在 child call pending时 settle
+[ ] @loomrealm-game/rpg-dialogue 是 PokeMan production dependency
+[ ] Map A1 moveIntent在 call前 neutral
+[ ] Map A1 Consumer在 call前关闭
 [ ] A1 tracker reset/discard
+[ ] recoverable call rejection → exact product failure，不恢复旧 controls
+[ ] Dialogue input closed-schema validation发生在任何 side effect 前
 [ ] Dialogue child owns fresh ControlsConsumer
 [ ] child 是真实 Top Active Frame
 [ ] Map suspended期间不接 ordinary controls
@@ -1667,23 +1710,27 @@ Controls Activation lifecycle
 [ ] Conversation B choice works
 [ ] Dialogue Subsystem owns branching
 [ ] Conversation C works
-[ ] user cancel → normal completed child result
-[ ] unexpected failure → failed child outcome
-[ ] child close释放 Dialogue resources
-[ ] Map resumes fresh A2
+[ ] RPGDialogue user cancel → completed conclusion cancelled
+[ ] Dialogue cleanup uses finally + consumer.close/dialogue.close
+[ ] Map validates exact completed child value
+[ ] child failed / outer cancelled / invalid result均 fail-stop
+[ ] valid child completed后 Map resumes fresh A2
 [ ] A2 uses new Consumer/Tracker
 [ ] A2 starts neutral
 [ ] old A1 State/Event不泄漏
 [ ] same Map RenderDomain / HTMLElement / scene remain live
 [ ] movement after resume works
-[ ] second interaction creates fresh child Frame
-[ ] Hostra qualification passes
-[ ] PWA dialogue executable installed
-[ ] PWA qualification passes
+[ ] second interaction creates fresh child Frame + fresh History
+[ ] PWA executable set = base + map + dialogue
+[ ] PWA Content closure不引入 struct.Dialogue
+[ ] PWA fresh-checkout builds @loomrealm-game/rpg-dialogue before bundling Dialogue executable
+[ ] pokeman-map.e2e real Frame-stack vertical passes
+[ ] pokeman-staging.e2e real Dialogue interaction passes
+[ ] Hostra manifest smoke + manual play acceptance pass
 [ ] Map tests pass
 [ ] RPG Dialogue v1 tests pass
 [ ] Game Control Ports tests pass
-[ ] relevant Frame / Call conformance regressions pass
+[ ] Subsystem/Main/Hostra Frame-call regressions pass
 ```
 
 # 37. Next step after qualification
