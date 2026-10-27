@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -9,6 +10,9 @@ import { chromium } from "playwright";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scriptPath = path.join(root, "presentation/dialogue.browser.js");
 const cssPath = path.join(root, "presentation/dialogue.css");
+const spritePath = path.join(root, "[FSDB]PokeMan/[resource]Graphics/Characters/Professor.png");
+const spriteBytes = await readFile(spritePath);
+const spriteVersion = `sha256:${createHash("sha256").update(spriteBytes).digest("hex")}`;
 const tags = [
   "lr-dialogue-view",
   "lr-dialogue-characters",
@@ -186,6 +190,53 @@ test("READY/ACTIVE visibility, first-active layout, fallback, and semantic hints
   assert.equal(noCharacter.columns.split(" ").length, 1, "transient speaker/no active character must use full width");
 });
 
+test("typewriter text is not a live region while dialog, choice, and history semantics remain intact", async (t) => {
+  const page = await pageFixture(t, { reduced: true });
+  const semantics = await page.evaluate(() => {
+    const fixture = makeDialogueFixture({
+      text: "逐字文本只应视觉更新，不应反复触发辅助技术播报。",
+      choices: [{ id: "continue", text: "继续" }],
+      historyEntries: [{ id: "intro", speaker: "博士", text: "欢迎" }],
+    });
+    fixture.controls.querySelector('[action="confirm"]').setAttribute("enabled", "true");
+    const visibleText = fixture.textElement.shadowRoot.querySelector(".text");
+    const composedLiveAncestor = (start) => {
+      let current = start;
+      while (current) {
+        if (current instanceof Element && current.hasAttribute("aria-live")) return current.getAttribute("aria-live");
+        const root = current.getRootNode();
+        current = current.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
+      }
+      return null;
+    };
+    return {
+      visibleText: visibleText.textContent,
+      liveAncestor: composedLiveAncestor(visibleText),
+      conversationLive: fixture.conversation.shadowRoot.querySelector(".conversation").getAttribute("aria-live"),
+      dialog: {
+        role: fixture.view.shadowRoot.querySelector(".modal").getAttribute("role"),
+        modal: fixture.view.shadowRoot.querySelector(".modal").getAttribute("aria-modal"),
+        label: fixture.view.shadowRoot.querySelector(".modal").getAttribute("aria-label"),
+      },
+      choices: {
+        role: fixture.choiceList.shadowRoot.querySelector(".choice-list").getAttribute("role"),
+        optionRole: fixture.choiceList.children[0].shadowRoot.querySelector(".choice").getAttribute("role"),
+      },
+      historyLabelledBy: fixture.history.shadowRoot.querySelector(".history").getAttribute("aria-labelledby"),
+      historyHeading: fixture.history.shadowRoot.querySelector("h2").textContent,
+    };
+  });
+  assert.deepEqual(semantics, {
+    visibleText: "逐字文本只应视觉更新，不应反复触发辅助技术播报。",
+    liveAncestor: null,
+    conversationLive: null,
+    dialog: { role: "dialog", modal: "true", label: "对话" },
+    choices: { role: "listbox", optionRole: "option" },
+    historyLabelledBy: "pokeman-dialogue-history-heading",
+    historyHeading: "HISTORY",
+  });
+});
+
 test("reveal, exact submits, disabled navigation, wrap-around, and pointer boundary work", async (t) => {
   const page = await pageFixture(t);
   const result = await page.evaluate(async () => {
@@ -355,6 +406,61 @@ test("sprite consumer validates exact versioned PNG data, crops 4x4 without smoo
   assert.deepEqual(result.valid.draws, [{ args: [0, 0, 4, 5, 0, 0, 4, 5], smoothing: false }]);
   assert.deepEqual(result.valid.closed, ["closed"]);
   assert.deepEqual(result.invalid, { status: "fallback", callCount: 1 });
+});
+
+test("real Professor sprite renders a scaled 32x48 frame within desktop and narrow character stages", async (t) => {
+  const page = await pageFixture(t, { reduced: true });
+  await page.evaluate(async ({ bytes, contentVersion }) => {
+    globalThis.fixture = makeDialogueFixture({
+      text: "真实博士精灵尺寸资格测试。",
+      characters: [{ id: "professor", name: "博士", active: true }],
+    });
+    const character = fixture.characterList.children[0];
+    character.receiveRenderContext({
+      resources: {
+        async resource(namespace, key, expectedVersion) {
+          if (namespace !== "resource.Graphics" || key !== "Characters/Professor" || expectedVersion !== contentVersion) {
+            throw new Error("unexpected Professor resource request");
+          }
+          return { bytes: new Uint8Array(bytes), mime: "image/png", contentVersion };
+        },
+      },
+    });
+    character.receiveRenderData({ sprite: { namespace: "resource.Graphics", key: "Characters/Professor", contentVersion } });
+    fixture.controls.querySelector('[action="confirm"]').setAttribute("enabled", "true");
+    while (character._spriteStatus === "loading") await new Promise((resolve) => setTimeout(resolve, 0));
+    if (character._spriteStatus !== "ready") throw new Error(`Professor sprite failed: ${character._spriteStatus}`);
+  }, { bytes: [...spriteBytes], contentVersion: spriteVersion });
+
+  for (const viewport of [{ width: 1280, height: 720 }, { width: 640, height: 480 }, { width: 360, height: 480 }]) {
+    await page.setViewportSize(viewport);
+    const geometry = await page.evaluate(() => {
+      const character = fixture.characterList.children[0];
+      const canvas = character.shadowRoot.querySelector("canvas");
+      const canvasRect = canvas.getBoundingClientRect();
+      const stageRect = fixture.characterList.shadowRoot.querySelector(".character-stage").getBoundingClientRect();
+      const modalRect = fixture.view.shadowRoot.querySelector(".modal").getBoundingClientRect();
+      const conversationRect = fixture.conversation.getBoundingClientRect();
+      return {
+        intrinsic: { width: canvas.width, height: canvas.height },
+        rendered: canvasRect.toJSON(),
+        stage: stageRect.toJSON(),
+        modal: modalRect.toJSON(),
+        conversation: conversationRect.toJSON(),
+        imageRendering: getComputedStyle(canvas).imageRendering,
+      };
+    });
+    assert.deepEqual(geometry.intrinsic, { width: 32, height: 48 }, "the real 128x192 sheet must keep a 32x48 canvas backing store");
+    assert.ok(geometry.rendered.width > geometry.intrinsic.width && geometry.rendered.height > geometry.intrinsic.height);
+    assert.ok(Math.abs(geometry.rendered.width / geometry.rendered.height - 2 / 3) < 0.01, "rendering must preserve the frame aspect ratio");
+    assert.ok(geometry.rendered.height / geometry.stage.height >= 0.54 && geometry.rendered.height / geometry.stage.height <= 0.56);
+    assert.ok(geometry.rendered.left >= geometry.stage.left && geometry.rendered.right <= geometry.stage.right);
+    assert.ok(geometry.rendered.top >= geometry.stage.top && geometry.rendered.bottom <= geometry.stage.bottom);
+    assert.ok(geometry.stage.left >= geometry.modal.left && geometry.stage.right <= geometry.modal.right);
+    assert.ok(geometry.stage.top >= geometry.modal.top && geometry.stage.bottom <= geometry.modal.bottom);
+    assert.ok(geometry.conversation.width > 0 && geometry.conversation.height > 0);
+    assert.equal(geometry.imageRendering, "pixelated");
+  }
 });
 
 test("sprite load rejects MIME/grid errors and ignores stale or disconnected completions", async (t) => {

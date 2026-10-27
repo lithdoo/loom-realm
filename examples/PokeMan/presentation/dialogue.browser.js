@@ -195,7 +195,7 @@
         :host { display: block; width: 100%; height: 100%; }
         .character { width: 100%; height: 100%; display: grid; place-items: center; }
         .character[hidden] { display: none; }
-        canvas { display: block; max-width: 88%; max-height: 82%; width: auto; height: auto; object-fit: contain; image-rendering: pixelated; }
+        canvas { display: block; width: auto; height: 55%; max-width: 88%; max-height: 82%; object-fit: contain; image-rendering: pixelated; }
         canvas[hidden], .fallback[hidden] { display: none; }
         .fallback { width: clamp(72px, 42%, 132px); aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; color: #45536d; background: rgb(255 255 255 / .7); box-shadow: inset 0 0 0 1px rgb(66 84 118 / .13); font-size: clamp(28px, 6vw, 52px); font-weight: 700; }
       </style><div class="character" hidden><canvas class="sprite" aria-hidden="true" hidden></canvas><div class="fallback" aria-hidden="true">?</div></div>`);
@@ -398,7 +398,7 @@
         @keyframes continue { from { opacity: .42; transform: translateY(-2px); } to { opacity: 1; transform: translateY(2px); } }
         @media (max-width: 640px) { .conversation { padding-left: 0; } .body { padding-top: 12px; } }
         @media (prefers-reduced-motion: reduce) { .continue { animation: none; } }
-      </style><section class="conversation" aria-live="polite"><header class="speaker"></header><div class="body"><slot></slot></div><footer class="status"><span class="continue" aria-label="可以继续" hidden>⌄</span></footer></section>`);
+      </style><section class="conversation"><header class="speaker"></header><div class="body"><slot></slot></div><footer class="status"><span class="continue" aria-label="可以继续" hidden>⌄</span></footer></section>`);
       this._observer = new MutationObserver(() => this.syncDescendantFacts());
     }
 

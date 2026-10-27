@@ -9,7 +9,7 @@ lr-dialogue-view {
   --pokeman-dialogue-radius: 18px;
   --pokeman-dialogue-shadow: 0 24px 70px rgb(0 0 0 / 0.34);
   --pokeman-dialogue-font: 400 18px/1.68 system-ui, -apple-system, "Segoe UI", sans-serif;
-  z-index: 0;
+  z-index: 20;
 }
 
 lr-dialogue-character,
