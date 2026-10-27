@@ -397,7 +397,7 @@ reuse A1 heldOrder
 reuse A1 freshness timer
 ```
 
-# 10. Map Controls lifecycle
+# 10. Map Controls lifecycle and semantic mapping
 
 `map.mjs` controls wiring 从 Frame-lifetime 一次创建改为 Activation-local：
 
@@ -406,7 +406,7 @@ startMapControlsActivation()
 stopMapControlsActivation()
 ```
 
-每次 start：
+每次 `startMapControlsActivation()`：
 
 ```text
 new DirectionalControlsTracker
@@ -414,54 +414,211 @@ new ControlsConsumer
 initial neutral State
 ```
 
-每次 stop：
+Map Consumer exact behavior：
+
+```text
+onState(state)
+→ directions.acceptState(state)
+→ applyMoveIntent()
+
+onEvent(event)
+→ directions.acceptEvent(event)
+→ applyMoveIntent()
+
+→ if event.action === "down"
+     AND event.repeat === false
+     AND event.button in {"south","start"}
+   then handler.controls.confirm()
+
+all other semantic buttons
+→ no Map command in this slice
+```
+
+因此真实产品链：
+
+```text
+KeyZ / Gamepad south
+→ controls.event south
+→ RPGMapControls.confirm()
+→ adjacent interactable Professor
+→ NPCInteractEvent
+```
+
+每次 `stopMapControlsActivation()` exact order：
 
 ```text
 handler.controls.setMoveIntent(null)
-tracker.reset()
+directions.reset()
 consumer.close()
-discard tracker / consumer references
+discard directions / consumer references
 ```
 
-# 11. Map child-call sequence
+close/reset 必须 idempotent-safe；A1 references 不得被 A2 复用。
 
-Professor interaction：
+# 11. Map frame-handler-owned interaction rendezvous
+
+**`frame.call()` 必须由 Map Frame handler 的主 async control flow 自己 await。**
+
+禁止：
 
 ```text
-NPCInteractEvent
-→ gate duplicate dialogueTask
-→ stopMapControlsActivation()
-→ frame.call("dialogue", input)
-→ await child outcome
-→ caller resumes under fresh Activation
-→ if continuation allowed:
-   startMapControlsActivation()
+onNPCInteract()
+→ detached async task
+→ task owns frame.call()
+→ outer frame handler only races/observes a failure promise
 ```
 
-必须先关闭 A1 controls，再调用 `frame.call`。
-
-如果 call 在 commit 前因 target unavailable/not found 被拒绝，本 slice 直接 fail current Map Frame；不要重建旧 A1 controls 后假装产品正常。
-
-# 12. Async child-call ownership
-
-`RPGMapHandler.onNPCInteract()` 是同步 callback，Map Runtime 不 await callback Promise。
-
-Map composition 显式拥有：
+因为 child call commit 后 Map Frame 处于 `awaiting-resume`；如果 outer Frame handler 在 child return 前 settle，Subsystem Runtime 会触发：
 
 ```text
-dialogueTask: Promise<void> | null
+SUBSYSTEM_FRAME_HANDLER_CONTROL_FLOW_INVALID
 ```
 
-并让 Map Frame 顶层能观察 child-call failure，例如 composition-owned failure channel 与：
+正确模型是 synchronous NPC callback 只写入一个 **one-slot rendezvous**，真正的 `frame.call` 由 Frame handler loop 执行：
 
 ```text
-Promise.race(
-  handler.run(...),
-  ownedDialogueFailure
-)
+RPGMapHandler.onNPCInteract(event)
+→ synchronous only
+→ if Professor and current waiter is armed:
+     resolve waiter(event)
+→ never await
+→ never call frame.call directly
 ```
 
-禁止 `void frame.call(...).catch(console.error)` 后继续运行。
+Map Frame handler 创建一次：
+
+```text
+mapRun = handler.run(initial)
+```
+
+然后驱动 loop：
+
+```text
+while Map Frame is healthy:
+
+  arm one-shot Professor interaction waiter
+  startMapControlsActivation()
+
+  next = await Promise.race(
+    mapRun,
+    professorInteractionWaiter
+  )
+
+  stopMapControlsActivation()
+
+  if next is mapRun outcome:
+      disarm waiter
+      return that exact Map FrameOutcome
+
+  if next is Professor interaction:
+      childOutcome = await frame.call("dialogue", exactInput)
+      validate childOutcome per §8.1
+
+      if childOutcome is valid completed:
+          loop
+          → caller is already under fresh Activation
+          → next iteration creates A2 Consumer/Tracker
+
+      otherwise:
+          return failed(...) per §8.1
+```
+
+关键 invariant：
+
+> 从 `frame.call` 发起到其 Promise resolve 的整个时间段，Map Frame handler 自身必须仍在 `await frame.call(...)`，绝不能完成。
+
+`handler.run()` 在 child active 期间继续 pending；Frame suspension本身不 abort `frame.signal`，因此 Map RenderDomain保持 live。
+
+如果 Map runtime在等待 Professor interaction期间先产生 terminal outcome：
+
+```text
+mapRun wins race
+→ disarm interaction waiter
+→ stop current controls
+→ return mapRun outcome
+```
+
+如果 Map Frame因为 child failure决定 return failed，SDK 后续 Frame return/close 会 abort `frame.signal`，RPGMap按既有 abort path清理；不要另外关闭 Map RenderDomain。
+
+## 11.1 Rendezvous rules
+
+one-slot waiter必须满足：
+
+```text
+at most one pending Professor event
+no unbounded queue
+no replay across Activation
+no retained A1 event after child return
+```
+
+每次 loop arm 一个新的 waiter。
+
+`onNPCInteract` 只接受：
+
+```text
+event.npc.instanceId === "professor"
+AND
+event.npc.npcId === "professor"
+```
+
+其他事件 no-op。waiter 已 settled / disarmed 时，再来的重复 callback no-op。
+
+# 12. frame.call rejection and commit boundary
+
+调用前：
+
+```text
+A1 moveIntent = null
+A1 tracker reset
+A1 consumer closed
+```
+
+然后：
+
+```js
+await frame.call("dialogue", exactInput)
+```
+
+只允许显式 recoverable pre-commit rejection：
+
+```text
+FrameCallRejectedError
+- FRAME_CALL_TARGET_NOT_FOUND
+- FRAME_CALL_TARGET_UNAVAILABLE
+```
+
+它们表示 child call **没有 commit**，A1仍是 current Activation；但本 product topology已声明 Dialogue 必须存在，所以不重建 A1 controls继续游戏。
+
+Map返回：
+
+```text
+failed({
+  code: "POKEMAN_DIALOGUE_CALL_REJECTED",
+  data: { callCode: error.code }
+})
+```
+
+其他 `FrameBusyError / FrameInactiveError / FrameClosedError / TypeError` 都是 product/programming invariant violation；不要 catch 后恢复旧 controls。允许它们进入 Frame handler failure path，或显式映射为稳定 product failure，但测试必须冻结所选结果。
+
+call success commit 后：
+
+```text
+A1 permanently revoked
+Map awaiting-resume
+```
+
+只有 child return + Main fresh resume 后，`await frame.call(...)` 才 resolve。
+
+因此：
+
+```text
+valid completed child
+→ A2 normal controls may start
+
+failed / cancelled / invalid child result
+→ Map returns failed
+→ no normal A2 controls
+```
 
 # 13. Map remains rendered while suspended
 
