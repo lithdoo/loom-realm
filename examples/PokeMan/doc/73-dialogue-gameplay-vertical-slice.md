@@ -1322,117 +1322,181 @@ player facing Professor
 
 ---
 
-# 29. Required tests
+# 29. Required tests and exact landing
 
-至少覆盖五层。
+## 29.1 PokeMan focused tests
 
-## 29.1 Topology / placement
+新增或扩展 PokeMan test，建议固定：
 
 ```text
-game.json = base + map + dialogue
-launch.hostra = base + map + dialogue
-launch.pwa = base + map + dialogue
+examples/PokeMan/test/dialogue-gameplay-vertical-slice.test.mjs
+```
+
+覆盖：
+
+```text
+topology = base + map + dialogue
 Professor interactable=true
-other current NPC fixtures unchanged
-```
+other NPC fixtures unchanged
 
-## 29.2 Map child-call / Activation controls
+Map:
+south/start down repeat=false → map.controls.confirm()
+repeat=true → no confirm
 
-```text
-Map A1:
-south/start → map.controls.confirm()
+A1:
+moveIntent neutral before call
+consumer closes before call
+tracker reset/discard
 
-Professor NPCInteractEvent
-→ exact frame.call("dialogue", input)
+exact Map → Dialogue input
+FrameCallRejectedError → POKEMAN_DIALOGUE_CALL_REJECTED
 
-before call:
-→ moveIntent=null
-→ A1 consumer closed
-→ A1 tracker reset/discarded
-
-child active:
-→ old A1 delivery cannot affect Map
-
-after child return:
-→ Map resumed under fresh A2
-→ A2 Consumer is a new instance
-→ A2 Tracker is a new instance
-→ A2 starts neutral
-→ only new A2 controls.state rebuilds held truth
-```
-
-## 29.3 Dialogue Subsystem
-
-```text
+Dialogue:
 exact frame.params validation
-one child-frame ControlsConsumer
-south/start → confirm
-up/down → previous/next
-select → history
-east → cancel
-repeat=true → no command
-RPGDialogue lifecycle / cleanup
-exact completed / failed child outcomes
+invalid input atomic failure
+real NPC/contentVersion producer
+child ControlsConsumer mapping
+A / History / B / branching / C
+user cancel → completed conclusion cancelled
+cleanup
+
+Map child outcome:
+valid completed → normal resume
+invalid completed → POKEMAN_DIALOGUE_RESULT_INVALID
+failed → POKEMAN_DIALOGUE_CHILD_FAILED
+outer cancelled → POKEMAN_DIALOGUE_CHILD_CANCELLED
 ```
 
-## 29.4 Producer / dialogue flow
+Focused harness可以使用受控 fake Frame/Content/PresentationEvent client验证 product-private branching，但不能替代真实 Frame-stack E2E。
 
-使用真实 Content fixture：
+## 29.2 Existing PWA qualification fixture
+
+必须更新：
 
 ```text
-struct.NPC/professor
-→ sprite namespace/key
-→ Content resource
-→ real contentVersion
-→ exact DialogueCharacterV0.data.sprite
+examples/PokeMan/scripts/prepare-pwa-content.mjs
+apps/pwa/scripts/build.mjs
+apps/pwa/test/pokeman-bundle.test.mjs
+apps/pwa/test/staging-build.test.mjs
 ```
 
-并覆盖 A、History、B、ready/not-yet、Dialogue-owned branching、C、user cancel。
+使 qualification/staging executable index精确包含 `base / map / dialogue`。
 
-不得 hard-code contentVersion。
+## 29.3 Real Frame-stack gameplay E2E
 
-## 29.5 Real Frame-stack gameplay vertical
+**复用并扩展现有**：
 
 ```text
-base → map A1
-real Map visible
-Professor NPC visible
-semantic confirm
-real NPCInteractEvent
-real frame.call("dialogue")
-Map A1 suspended
-Dialogue child is Top Active Frame
+apps/pwa/test/pokeman-map.e2e.test.mjs
+```
+
+不要另造一套平行 PWA harness。
+
+在现有真实 Chromium / real PWA install / real route planner 路径中：
+
+```text
+boot Map 3
+→ route to Map 4
+→ find reachable tile adjacent to Professor
+→ face Professor
+→ KeyZ
+→ real RPGMapControls.confirm()
+→ real NPCInteractEvent
+→ real frame.call("dialogue")
+→ Map A1 suspended
+→ Dialogue child active
+→ real PokeMan Dialogue WC appears
+→ A reveal/submit
+→ B choices
+→ Tab History
+→ X back to B
+→ choose ready or not-yet
+→ C
+→ complete
+→ Dialogue disappears
+→ same lr-map-view HTMLElement remains
+→ same Map scene remains
+→ Map A2 receives fresh controls
+→ movement succeeds
+→ interact again
+→ fresh child Dialogue / fresh History
+```
+
+E2E还要 fetch/install `subsystems/dialogue.mjs`，并验证其 MIME/contentVersion 与 executable graph。
+
+## 29.4 Real staging E2E
+
+扩展：
+
+```text
+apps/pwa/test/pokeman-staging.e2e.test.mjs
+```
+
+至少跑一次：
+
+```text
+route to Professor
+→ open real Dialogue child
+→ complete/cancel
+→ Map resumes
+```
+
+staging不暴露 qualification-only controls的既有要求保持。
+
+## 29.5 Hostra acceptance boundary
+
+当前仓库没有 PokeMan-specific Hostra Chromium E2E。
+
+本 slice不为了对称性新增第二套浏览器 harness。
+
+自动 Hostra侧验证使用：
+
+```text
+examples/PokeMan/test/map-smoke.test.mjs
+→ exact launch.hostra base/map/dialogue
+
+generic Frame/Call conformance
+→ child call lifecycle contract
+
+PokeMan focused tests
+→ product routing/input/output contract
+```
+
+并保留 §31 的 `play.bat` 手工 acceptance作为真实 Hostra产品验证。
+
+# 30. Required qualification commands
+
+至少运行并通过与当前仓库脚本等价的：
+
+```text
+npm test -w @loomrealm-example/pokeman
+npm test -w @loomrealm-game/map
+npm test -w @loomrealm-game/rpg-dialogue
+npm run test:frame-call:qualification   (或仓库当前 exact equivalent)
+
+npm run build:qualification -w @loomrealm/pwa
+npm run test:unit -w @loomrealm/pwa
+node apps/pwa/scripts/run-e2e.mjs m17
+
+npm run build:staging -w @loomrealm/pwa
+node apps/pwa/scripts/run-e2e.mjs staging
+```
+
+如果 root script名称已变化，Agent使用仓库当前等价命令，并在 PR报告 exact command。
+
+关键证据必须实际存在：
+
+```text
+Frame call/suspend/return/resume
+A1 → child → A2 controls authority
+base/map/dialogue executable install
+real Professor interaction
 real RPGDialogue
-real PokeMan Dialogue Web Components
-History / Choice work
-child returns
-Map A2 fresh Activation
-same Map RenderDomain / HTMLElement remains
-fresh Map controls work
-movement works again
+real Dialogue Web Presentation
+real Map resume
 ```
 
-这次只证明两个 RenderDomain同 Window共存是不够的；必须验证真实 call / suspend / child / return / resume。
-
-# 30. Hostra / PWA evidence
-
-至少现有受影响 qualification 必须继续 PASS：
-
-```text
-PokeMan package tests
-PokeMan Presentation tests
-PokeMan Staging Qualification
-PWA content/build qualification
-RPG Dialogue v1 qualification
-Game Control Ports qualification
-Map tests
-```
-
-如果可以合理复用现有 PokeMan staging browser harness，应增加一次真实 product interaction。
-
-不要只用 fake `RPGDialogue.controls` 对象证明 closed loop。
-
----
+现有 `.github/workflows/pokeman-staging-qualification.yml` 的 fresh-checkout build必须继续通过；不能依赖本地残留 `dist/`。
 
 # 31. Manual acceptance path
 
