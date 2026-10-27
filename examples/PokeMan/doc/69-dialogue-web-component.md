@@ -177,6 +177,8 @@ Runtime HISTORY
 - `revealing` 不进入 Runtime、Renderer Store 或 Shared State；
 - `choices.length` 来自 canonical `lr-dialogue-choices` children，不创建额外状态 authority。
 
+下面 REVEALING / CONVERSATION / CHOICES 的 Wireframe 默认画“存在 active character”的双栏形态；**没有 active character 时，状态语义完全相同，只是 characters pane 隐藏、conversation pane 变为 100% 宽度。**
+
 ### REVEALING
 
 条件：
@@ -212,7 +214,7 @@ Wireframe：
 
 此状态：
 
-- character pane：visible；
+- character pane：仅在存在 active character 时 visible，否则 hidden / no grid space；
 - conversation pane：visible；
 - text：partial；
 - choices：若存在则 visible，可导航；
@@ -1454,33 +1456,55 @@ HISTORY
 
 # 12. Conversation / History mode transition
 
-History 切换保持 Modal shell 不动，但允许内部 layout 从两栏变为单栏。
+History 切换保持 Modal shell 不动，但内部 layout 会从当前 Conversation geometry 切到 100% History。
 
-推荐 transition：
+当前 Conversation geometry 可能是：
 
 ```text
-enter History:
-character pane     opacity 1 → 0
-conversation pane  opacity 1 → 0
-history pane       opacity 0 → 1
-layout             32/68 → 100% history
+with active character
+→ 32% character + 68% conversation
 
-leave History:
-history pane       opacity 1 → 0
-layout             100% history → 32/68
-character pane     opacity 0 → 1
-conversation pane  opacity 0 → 1
+without active character
+→ 100% conversation
 ```
 
-视觉淡入淡出建议 120–160ms。grid 切换本身可以即时完成，不要求对列宽做复杂动画。
+进入 History：
 
-Modal、backdrop 不移动、不缩放、不重新 mount。
+```text
+1. history.visible attr 同步到达
+2. view 同步 mode = HISTORY
+3. conversation.setPresented(false)
+4. character / conversation 从 layout 与 a11y tree 隐藏
+5. history 立即获得 100% content geometry
+6. 可执行 120–180ms opacity transition
+7. 后续 scroll-to-latest Render Event 按最终 geometry 处理
+```
+
+离开 History：
+
+```text
+1. history.visible=false 同步到达
+2. view 同步 mode = CONVERSATION
+3. view 根据“当前是否有 active character”恢复：
+   - 32/68，或
+   - 100% conversation
+4. if view.presented=true:
+   conversation.setPresented(true)
+5. 恢复此前 reveal / selection / conversation scroll local state
+6. 可执行 120–180ms opacity transition
+```
+
+关键约束：
+
+- layout switch 本身是同步的，不等待 transition；
+- transition 只做视觉淡入淡出，不承担 state ordering；
+- character pane 只有实际存在时才参与 fade；
+- Modal、backdrop 不移动、不缩放、不重新 mount；
+- 不做 page slide、scene fade 或第二个 modal。
 
 目标 mental model：
 
-> 玩家仍处于同一个 Dialogue session，只是从“当前会话”切到“全宽历史记录”。
-
-避免使用 page slide、scene fade 或重新创建 modal。
+> 玩家仍处于同一个 Dialogue session，只是从“当前会话”切到“历史记录”。
 
 # 13. Reveal 与 History 的组合状态
 
@@ -1890,8 +1914,6 @@ map
 本任务不因为要测试 WC 而把空的 `subsystems/dialogue.mjs` 接入 production topology。
 
 若测试需要直接构造 `RPGDialogue`，`@loomrealm-game/rpg-dialogue` 只作为 qualification/test dependency 使用；这不等价于 PokeMan gameplay Dialogue subsystem 已经集成。
-
-# 20. Interaction state machine
 
 # 20. Interaction state machine
 
