@@ -299,13 +299,23 @@ Map 不传 speaker、text、choices、sprite、contentVersion、RPGDialogue inst
 
 # 8. Dialogue Frame output
 
-正常业务返回值：
+正常业务返回值 exact shape：
 
 ```ts
 type PokeManDialogueFrameResultV1 = {
   dialogueKey: "professor-vertical-slice";
   conclusion: "ready" | "not-yet" | "cancelled";
 };
+```
+
+closed shape：
+
+```text
+exactly { dialogueKey, conclusion }
+no unknown fields
+
+dialogueKey → exactly "professor-vertical-slice"
+conclusion  → exactly "ready" | "not-yet" | "cancelled"
 ```
 
 RPGDialogue 的 user cancel 是 child 内部普通业务结果，应转换成：
@@ -318,6 +328,44 @@ completed({
 ```
 
 真正运行失败才返回 `failed(...)`。
+
+## 8.1 Map 对 FrameOutcome 的 exact policy
+
+`frame.call("dialogue", ...)` resolve 后，Map 必须按三种 FrameOutcome 分支：
+
+```text
+completed(value)
+→ validate exact PokeManDialogueFrameResultV1
+→ valid:
+     resume normal Map gameplay under fresh A2
+→ invalid:
+     return failed({ code: "POKEMAN_DIALOGUE_RESULT_INVALID" })
+
+failed(error)
+→ return failed({
+     code: "POKEMAN_DIALOGUE_CHILD_FAILED",
+     data: { childCode: error.code }
+   })
+→ do NOT start normal A2 controls
+
+cancelled
+→ unexpected for this product call
+→ return failed({ code: "POKEMAN_DIALOGUE_CHILD_CANCELLED" })
+→ do NOT start normal A2 controls
+```
+
+这里必须区分：
+
+```text
+RPGDialogue user cancel
+→ child completed({ conclusion:"cancelled" })
+
+outer FrameOutcome.cancelled
+→ unexpected child-frame lifecycle outcome
+→ Map fail-stop
+```
+
+Map 第一版不解释 `ready/not-yet` 的 Story 含义；只验证 exact result 后恢复 gameplay。
 
 # 9. Frame / Activation semantics
 
