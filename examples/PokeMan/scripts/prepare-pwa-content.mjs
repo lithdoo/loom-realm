@@ -203,6 +203,7 @@ export async function createPokeManPwaFixture(options = {}) {
   const specifications = Object.freeze([
     Object.freeze({ logicalModule: "subsystems/base.mjs", path: executablePaths.base }),
     Object.freeze({ logicalModule: "subsystems/map.mjs", path: executablePaths.map }),
+    Object.freeze({ logicalModule: "subsystems/dialogue.mjs", path: executablePaths.dialogue }),
   ]);
   for (const specification of specifications) {
     if (typeof specification.path !== "string" || specification.path.length === 0) throw new TypeError(`Executable path is required for ${specification.logicalModule}`);

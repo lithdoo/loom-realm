@@ -8,6 +8,10 @@
     {
       "key": "map",
       "module": "subsystems/map.mjs"
+    },
+    {
+      "key": "dialogue",
+      "module": "subsystems/dialogue.mjs"
     }
   ]
 }
