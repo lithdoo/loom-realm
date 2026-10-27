@@ -4,7 +4,7 @@
 >
 > 状态：**Design / Ready for implementation**
 >
-> 本文只定义 PokeMan 的 Dialogue Web Presentation：视觉布局、Web Component 行为、Presentation-local state、人物像素图展示、Conversation / History 模式以及 Presentation 资源接入。固定 Dialogue 的业务数据模型见 [64-dialogue.md](./64-dialogue.md)；Content / FSDB 物理模型见 [68-content-fsdb.md](./68-content-fsdb.md)。
+> 本文只定义 PokeMan 的 Dialogue Web Presentation：视觉布局、Web Component 行为、Presentation-local state、人物 sprite 展示、Conversation / History 模式以及 Presentation 资源接入。固定 Dialogue 的业务数据模型见 [64-dialogue.md](./64-dialogue.md)；Content / FSDB 物理模型见 [68-content-fsdb.md](./68-content-fsdb.md)。
 >
 > 本文不修改 `@loomrealm-game/rpg-dialogue` Runtime、public API 或 Frozen Presentation ABI。PokeMan 实现必须继续兼容现有 canonical `lr-dialogue-*` tags、attrs/data 和 Render Event / Custom Event 语义。
 
@@ -71,7 +71,7 @@ Visual Novel backlog
 → 打开时优先定位到最新记录
 ```
 
-PokeMan 不复制任何具体游戏 UI；只采用这些信息架构原则，并使用自身 Map 像素资源形成统一视觉语言。
+PokeMan 不复制任何具体游戏 UI；只采用这些信息架构原则。人物继续复用 Map sprite 资源，但界面本身采用现代、克制的 JRPG / Visual Novel 视觉语言，不把像素素材的风格扩展成整套像素化 UI。
 
 # 4. 与 RPG Dialogue canonical tree 的关系
 
@@ -243,17 +243,57 @@ Modal 本体应接近不透明，避免地图纹理穿透正文。
 
 # 7. 视觉语言
 
-PokeMan Dialogue 与地图像素资源保持同一风格：
+PokeMan Dialogue UI **不采用像素风格**。
 
-- hard border；
-- 小或无圆角；
-- limited palette；
-- pixel shadow；
-- 高对比正文；
+人物素材仍然来自现有 Map character sprite sheet，但：
+
+```text
+pixel character asset
+≠
+pixel-style interface
+```
+
+界面本身采用现代、克制的 JRPG / Visual Novel modal 语言：
+
+- soft / high-opacity surface；
+- moderate radius；
+- subtle shadow；
+- 清晰、舒适的 typography；
+- restrained accent color；
+- 轻量分隔线；
+- 短促、平滑的 opacity / transform transition；
 - 不依赖 hover；
-- focus / selection 对手柄操作明显可见。
+- focus / selection 对手柄操作必须明显可见。
 
-不采用默认 generic Browser Presentation 的现代 card / 大圆角视觉作为 PokeMan 最终风格。
+Modal 不使用：
+
+- hard pixel border；
+- square-corner retro frame；
+- pixel shadow；
+- 模拟 8-bit / 16-bit UI palette；
+- 为了“复古感”而降低文字可读性的装饰；
+- 把每个控件都做成像素菜单。
+
+人物 sprite 可以与现代 UI surface 并置，形成“现代界面 + 复古人物素材”的视觉反差；这种反差是允许的，也是第一版推荐方向。
+
+推荐 surface 层级：
+
+```text
+backdrop
+→ dimmed game world
+
+modal
+→ high-opacity primary surface
+
+character pane
+→ quiet secondary surface / neutral stage
+
+content pane
+→ primary reading surface
+
+selected choice
+→ subtle accent surface + border / marker
+```
 
 推荐基本尺寸：
 
@@ -268,12 +308,21 @@ PokeMan Dialogue 与地图像素资源保持同一风格：
 | 外层 padding | 20–28px |
 | 内容区 padding | 24–32px |
 | 中文正文 | 18–22px |
-| speaker | 16–18px / bold |
+| speaker | 16–18px / semibold |
 | 行高 | 1.6–1.75 |
+| Modal radius | 12–20px 起步验证 |
 | Choice row | >= 44px |
-| mode transition | 120–160ms |
+| mode transition | 120–180ms |
 
-具体色值和字体在实现阶段通过 PokeMan screenshot qualification 调整，不在本文冻结为 compatibility surface。
+建议：
+
+- Modal shadow 柔和，不做高对比硬边阴影；
+- border 若存在，只作为低对比分隔，不承担“像素框”造型；
+- accent color 用于 speaker、selected choice、focus marker 等少量位置；
+- History 以阅读密度为优先，不把每条 entry 做成厚重 card；
+- `prefers-reduced-motion` 下关闭非必要位移和 pulse。
+
+具体色值、字体、radius 和 shadow 在实现阶段通过 PokeMan screenshot qualification 调整，不冻结为 compatibility surface。
 
 # 8. Character pane
 
@@ -332,17 +381,26 @@ sourceY     = ((direction - 2) / 2) * frameHeight
 
 ## 8.3 Rendering
 
-推荐使用 canvas 裁出单帧，然后通过 CSS 整数倍率放大：
+人物素材本身是低分辨率 sprite，因此仍应避免浏览器平滑插值：
 
 ```css
 image-rendering: pixelated;
 ```
 
-必须关闭 canvas image smoothing。
+canvas 必须关闭 image smoothing。
 
-人物 frame 在 character pane 中水平和垂直居中，显示高度目标约为 pane 高度的 45–60%，周围保留足够留白。
+这里的 `pixelated` 只是 **sprite 资源渲染要求**，不是 Dialogue UI 的视觉风格要求。
 
-可以增加弱像素地面阴影，但不增加第二套 portrait decoration authority。
+人物 frame 在 character pane 中水平和垂直居中，显示高度目标约为 pane 高度的 45–60%，周围保留足够留白。缩放优先保持清晰边缘；不要求整个 pane、边框、文字或控件使用像素风格。
+
+Character stage 可以使用现代的轻量背景处理，例如：
+
+- neutral surface；
+- 很弱的 radial / linear gradient；
+- 柔和的普通阴影；
+- 低对比装饰形状。
+
+不使用 pixel shadow、retro frame 或模拟像素地面的装饰，也不增加第二套 portrait decoration authority。
 
 ## 8.4 ResourceClient
 
@@ -427,13 +485,13 @@ AND reveal = REVEALED
 AND 当前 conversation 可以继续提交
 ```
 
-视觉建议使用右下角小型 `▼`，以 600–800ms 的低幅 opacity pulse 表达可继续。
+视觉建议使用右下角轻量 chevron / arrow indicator，例如细线 `⌄` 或等价图标。可以使用低幅 opacity 或 translateY 微动效表达可继续，周期约 600–800ms。
 
-History 模式不显示该 indicator。
+该提示应与现代 modal 视觉一致，不使用像素箭头或复古菜单光标。History 模式不显示该 indicator。
 
 # 10. Choice
 
-Choice 不弹第二个窗口，直接位于正文下方。
+Choice 不弹第二个窗口，直接位于正文下方，使用现代 selectable row。
 
 示意：
 
@@ -441,9 +499,9 @@ Choice 不弹第二个窗口，直接位于正文下方。
 你愿意接受这个任务吗？
 
 ┌──────────────────────────────┐
-│ ▶ 接受                      │
+│ 接受                      ›  │
 ├──────────────────────────────┤
-│   拒绝                      │
+│ 拒绝                         │
 └──────────────────────────────┘
 ```
 
@@ -455,13 +513,21 @@ selected
 disabled
 ```
 
+视觉建议：
+
+- row 使用轻量 surface / divider，而不是像素菜单框；
+- selected 使用 accent background、border、leading marker 或 chevron 中至少两种可见信号；
+- disabled 降低对比度并保留明确的 disabled 语义；
+- radius 与 modal 整体一致；
+- 不使用 `▶` 作为固定的复古像素光标要求；
+- 不依赖 hover。
+
 规则：
 
 - `choice-next` / `choice-previous` 只在 enabled choices 间循环；
 - 当前没有 selection 时，第一次 next 选第一个 enabled，第一次 previous 选最后一个 enabled；
 - disabled choice 保留显示，但不可成为 selection；
-- selection 使用明确的 cursor / border / contrast，而不是只依赖颜色；
-- 不要求 hover；
+- selection 不能只靠颜色表达；
 - `choiceId` 只用于 Custom Event payload，不展示给玩家。
 
 # 11. History mode
@@ -905,7 +971,7 @@ narrow viewport fallback
 关注：
 
 - modal 不溢出；
-- sprite 不模糊；
+- sprite 缩放清晰、无平滑模糊；
 - 中文正文可读；
 - choice 不被截断；
 - History 不显示 character stage；
@@ -921,7 +987,7 @@ narrow viewport fallback
 - [ ] Dialogue 以 modal 覆盖底层地图。
 - [ ] Modal 在 Conversation / History 间保持同一位置和尺寸。
 - [ ] Conversation mode 左侧显示来自 Map character sheet 的正面静止像素人物。
-- [ ] sprite 使用 pixelated / no smoothing。
+- [ ] 人物 sprite 保持清晰、canvas no smoothing；该要求不扩展成像素风 UI。
 - [ ] Conversation mode 右侧支持 speaker、逐字显示、继续、choices。
 - [ ] History mode 隐藏人物区和当前 Conversation visual content。
 - [ ] History 使用 100% modal 内容宽度显示 session entries，并默认定位最新记录。
@@ -936,7 +1002,7 @@ narrow viewport fallback
 第一版之后可按真实需求逐项增加：
 
 1. 多 character stage / active character 亮度切换；
-2. sprite idle animation；
+2. sprite idle animation（人物资源增强，不改变现代 UI 基调）；
 3. speaker-specific accent；
 4. 专用 portrait resource；
 5. expression / pose Presentation data；
