@@ -68,6 +68,7 @@ examples/PokeMan/scripts/prepare-pwa-content.mjs
 apps/pwa/scripts/build.mjs
 apps/pwa/package.json
 apps/pwa/test/pokeman-bundle.test.mjs
+apps/pwa/test/pokeman-bundle-id.test.mjs
 apps/pwa/test/pokeman-map.e2e.test.mjs
 apps/pwa/test/pokeman-staging.e2e.test.mjs
 apps/pwa/test/staging-build.test.mjs
@@ -563,7 +564,45 @@ event.npc.npcId === "professor"
 
 其他事件 no-op。waiter 已 settled / disarmed 时，再来的重复 callback no-op。
 
+## 11.2 Map terminal while Dialogue child is active
+
+`handler.run(initial)` 的 terminal outcome必须被 latch：
+
+```text
+mapRun settles while Map is waiting for child
+→ remember exact Map FrameOutcome
+→ DO NOT complete Map Frame yet
+→ DO NOT race the committed frame.call against mapRun
+→ continue awaiting frame.call until child return/resume completes
+```
+
+child return后，先检查 latched Map terminal outcome：
+
+```text
+latched Map outcome exists
+→ do not create A2 ControlsConsumer/Tracker
+→ return the exact latched Map outcome
+
+no latched Map outcome
+→ continue loop
+→ create fresh A2 controls
+```
+
+这样同时满足：
+
+```text
+Frame handler never settles while child call is pending
+Map runtime terminal is not lost
+no transient A2 gameplay authority after Map has already terminalled
+```
+
 # 12. frame.call rejection and commit boundary
+
+Map implementation应从 `@loomrealm/subsystem` 使用现有 public exports：
+
+```js
+import { defineSubsystem, failed, FrameCallRejectedError } from "@loomrealm/subsystem";
+```
 
 调用前：
 
@@ -1311,6 +1350,10 @@ apps/pwa/test/pokeman-bundle.test.mjs
 → fixture executablePaths 加 dialogue
 → expected executable graph = base/map/dialogue
 
+apps/pwa/test/pokeman-bundle-id.test.mjs
+→ fixture 加 dialogue executable
+→ changing dialogue executable must change bundleId
+
 apps/pwa/test/staging-build.test.mjs
 → fresh-checkout dependency closure包含 @loomrealm-game/rpg-dialogue
 ```
@@ -1393,6 +1436,7 @@ tracker reset/discard
 
 exact Map → Dialogue input
 FrameCallRejectedError → POKEMAN_DIALOGUE_CALL_REJECTED
+other frame.call invariant exceptions → POKEMAN_DIALOGUE_MAP_INVARIANT_FAILED
 
 Dialogue:
 exact frame.params validation
@@ -1420,6 +1464,7 @@ Focused harness可以使用受控 fake Frame/Content/PresentationEvent client验
 examples/PokeMan/scripts/prepare-pwa-content.mjs
 apps/pwa/scripts/build.mjs
 apps/pwa/test/pokeman-bundle.test.mjs
+apps/pwa/test/pokeman-bundle-id.test.mjs
 apps/pwa/test/staging-build.test.mjs
 ```
 
@@ -1617,6 +1662,7 @@ POKEMAN_DIALOGUE_SESSION_FAILED
 
 Map caller:
 POKEMAN_DIALOGUE_CALL_REJECTED
+POKEMAN_DIALOGUE_MAP_INVARIANT_FAILED
 POKEMAN_DIALOGUE_RESULT_INVALID
 POKEMAN_DIALOGUE_CHILD_FAILED
 POKEMAN_DIALOGUE_CHILD_CANCELLED
@@ -1742,6 +1788,7 @@ Controls Activation lifecycle
 [ ] Map A1 Consumer在 call前关闭
 [ ] A1 tracker reset/discard
 [ ] recoverable call rejection → exact product failure，不恢复旧 controls
+[ ] other frame.call invariant exceptions → POKEMAN_DIALOGUE_MAP_INVARIANT_FAILED
 [ ] Dialogue input closed-schema validation发生在任何 side effect 前
 [ ] Dialogue child owns fresh ControlsConsumer
 [ ] child 是真实 Top Active Frame
@@ -1757,7 +1804,9 @@ Controls Activation lifecycle
 [ ] Dialogue cleanup uses finally + consumer.close/dialogue.close
 [ ] Map validates exact completed child value
 [ ] child failed / outer cancelled / invalid result均 fail-stop
-[ ] valid child completed后 Map resumes fresh A2
+[ ] child active期间 Map terminal outcome被 latch，不提前 settle caller
+[ ] latched Map terminal后 child return不创建 A2 controls
+[ ] valid child completed且 Map未terminal后才 resumes fresh A2
 [ ] A2 uses new Consumer/Tracker
 [ ] A2 starts neutral
 [ ] old A1 State/Event不泄漏
