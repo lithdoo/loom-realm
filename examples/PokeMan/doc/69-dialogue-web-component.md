@@ -385,7 +385,33 @@ PokeMan 只定义每个 canonical element 自己的 Shadow DOM。
    └─ <slot class="canonical-root">
 ```
 
-`.modal` 是唯一稳定外框。slot 使用 layout flattening，使四个 canonical direct children 参与 modal grid；实现不得把 canonical nodes 从 `lr-dialogue-view` reparent 到别处。
+`.modal` 是唯一稳定外框。canonical slot 必须使用 layout flattening，使四个 canonical direct children 直接参与 modal grid；实现不得把 canonical nodes 从 `lr-dialogue-view` reparent 到别处。
+
+第一版固定采用：
+
+```css
+.modal {
+  position: relative;
+  display: grid;
+}
+
+.surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+slot.canonical-root {
+  display: contents;
+}
+
+::slotted(lr-dialogue-characters)   { grid-area: characters; }
+::slotted(lr-dialogue-conversation) { grid-area: conversation; }
+::slotted(lr-dialogue-controls)     { grid-area: controls; }
+::slotted(lr-dialogue-history)      { grid-area: history; }
+```
+
+`.surface` 只能承担背景 / border / shadow，不能成为额外 layout item。
 
 Conversation mode：
 
@@ -407,7 +433,16 @@ grid-template-areas:
   "controls";
 ```
 
-`lr-dialogue-view` 用 `MutationObserver` 观察 direct child `lr-dialogue-history[visible]`，只更新 Shadow DOM 内部 `.modal` 的 private mode class / data；不向 Runtime 写任何 attr。
+`lr-dialogue-view` 用一个 `MutationObserver` 观察：
+
+```text
+lr-dialogue-history[visible]
+lr-dialogue-control-hint[enabled]
+```
+
+observer 必须覆盖 direct children 的 subtree / childList / `visible` / `enabled` attr 变化，因为 managed attrs 可能在 element connected 之后才 materialize。
+
+它只更新 Shadow DOM 内部 `.modal` 的 private mode / visibility state，不向 Runtime 写任何 attr。
 
 ### `lr-dialogue-characters`
 
@@ -420,9 +455,15 @@ grid-template-areas:
 规则：
 
 - 多个 `lr-dialogue-character` 可以同时存在；
-- 只把 `active="true"` 的 character 作为主要可见人物；
-- inactive characters 可以保留在 DOM，但不得抢占主要视觉空间；
+- PokeMan v1 的 character stage **只显示一个人物**；
+- `active="true"` 为 0 个时：stage 保留，但不显示 sprite；
+- `active="true"` 为 1 个时：显示该 character；
+- `active="true"` 多于 1 个时：按 canonical light-DOM 顺序显示第一个 active character，其余 active character 视觉隐藏；
+- inactive characters 保留在 DOM，但不占主要视觉空间；
+- 多 active 不视为 Runtime / Presentation error，不抛异常；
 - 不根据 `speaker-name` 猜测 active character。
+
+该规则冻结 PokeMan v1 的单人物舞台行为，同时保留 generic RPG Dialogue 允许多个 Character 的 ABI。
 
 ### `lr-dialogue-character`
 
@@ -551,7 +592,9 @@ RPGDialogue Runtime
 └─ control-hint enabled facts
 
 lr-dialogue-view
-└─ derived visual mode: conversation | history
+├─ derived visual mode: conversation | history
+└─ presented: true | false
+   └─ derived only from canonical control-hint enabled facts
 
 lr-dialogue-conversation
 ├─ reveal progress
@@ -587,6 +630,61 @@ History pixel scroll
 
 其中 REVEALING 如果当前 Conversation 自带 choices，selection navigation 仍必须工作；`commit` 永远先结束 reveal，不得在同一次 command 中继续 submit。
 
+
+## 4.5 READY / ACTIVE 的 Modal visibility
+
+RPG Dialogue 在 Conversation settle 后进入 READY，但 RenderDomain 与上一轮 retained projection 会继续存在。因此 PokeMan Presentation 必须显式区分：
+
+```text
+retained Dialogue tree exists
+≠
+active Dialogue modal should be visible
+```
+
+Frozen Runtime 已提供足够的 retained facts：
+
+```text
+READY
+→ confirm=false
+→ previous=false
+→ next=false
+→ history=false
+→ cancel=false
+
+ACTIVE / CONVERSATION or HISTORY
+→ 至少一个 control hint enabled=true
+```
+
+PokeMan v1 固定用五个 canonical `lr-dialogue-control-hint[enabled]` 推导 Presentation visibility：
+
+```text
+any canonical control hint enabled="true"
+→ presented = true
+→ backdrop + modal visible
+
+all five canonical control hints enabled="false"
+→ presented = false
+→ backdrop + modal hidden + inert
+```
+
+这不是新的 lifecycle authority。WC 只是从 Runtime 已经发布的 canonical facts 推导可见性。
+
+实现要求：
+
+- `lr-dialogue-view` 不增加 `active` / `ready` public attr；
+- 不通过 `conversation-id` 是否存在判断 ACTIVE，因为 READY 保留该 identity；
+- 不通过 History entries 是否为空判断 ACTIVE；
+- `presented=false` 时内部 modal / backdrop 应使用 `hidden` 或等价语义同时退出 layout、pointer hit testing 与 accessibility tree；
+- 从 ACTIVE settle 到 READY 后，上一轮 Conversation local state 可以继续存在于 HTMLElement 内，但不得继续可见或接收用户交互；
+- 下一次新的 `conversation-id` 到来并恢复 control enabled facts 后，再显示 modal，并按 new Conversation reset 规则开始。
+
+因此四个 UI state：
+
+```text
+REVEALING | CONVERSATION | CHOICES | HISTORY
+```
+
+只在 `presented=true` 时有视觉意义；READY 使用正交的 `presented=false`，不新增第五个交互 state。
 
 # 5. Modal 布局
 
@@ -789,16 +887,14 @@ selected choice
 
 Character pane **只属于 Conversation mode**。进入 History 后该区域从视觉布局和可访问交互树中隐藏；History 不需要人物舞台。
 
-## 8.1 资源复用
+## 8.1 PokeMan v1 Character data contract
 
 第一版不新增 portrait table。
 
-当前人物图继续来自 Map 使用的 `resource.Graphics` character sprite sheet。PokeMan Dialogue caller 通过现有 `DialogueCharacterV0.data` 传入 Presentation-owned payload。
-
-推荐 PokeMan payload：
+当前人物图继续来自 Map 使用的 `resource.Graphics` character sprite sheet。PokeMan Dialogue caller 必须通过现有 `DialogueCharacterV0.data` 传入以下 **PokeMan v1 Presentation contract**：
 
 ```ts
-type PokeManDialogueCharacterData = Readonly<{
+type PokeManDialogueCharacterDataV1 = Readonly<{
   sprite: Readonly<{
     namespace: string;
     key: string;
@@ -807,7 +903,38 @@ type PokeManDialogueCharacterData = Readonly<{
 }>;
 ```
 
-`rpg-dialogue` Runtime 不解释该 data；PokeMan `lr-dialogue-character` Web Component 负责解释。
+第一版按 exact shape 处理：
+
+```text
+character.data
+→ exactly { sprite }
+
+sprite
+→ exactly { namespace, key, contentVersion }
+
+namespace / key / contentVersion
+→ non-empty string
+```
+
+generic `@loomrealm-game/rpg-dialogue` Runtime 仍然不解释该 data；这个 schema 只属于 PokeMan product Presentation。
+
+非法 / 缺失 data 的行为冻结为：
+
+```text
+invalid or missing sprite data
+→ 不加载资源
+→ 不抛出 gameplay / Runtime error
+→ character stage 显示 presentation fallback
+→ Conversation 继续可读、可操作
+```
+
+fallback 优先级：
+
+```text
+display-name 首个 Unicode code point
+→ character-id 首个 Unicode code point
+→ 空的 neutral placeholder
+```
 
 不要把 `npcId`、`instanceId`、Relationship identity 塞进 Presentation payload。
 
@@ -985,8 +1112,11 @@ disabled
 
 规则：
 
-- `choice-next` / `choice-previous` 只在 enabled choices 间循环；
+- `choice-next` / `choice-previous` 只在 enabled choices 间导航；
 - 当前没有 selection 时，第一次 next 选第一个 enabled，第一次 previous 选最后一个 enabled；
+- **PokeMan v1 固定 wrap-around**：
+  - 当前是最后一个 enabled choice + next → 第一个 enabled choice；
+  - 当前是第一个 enabled choice + previous → 最后一个 enabled choice；
 - disabled choice 保留显示，但不可成为 selection；
 - selection 不能只靠颜色表达；
 - `choiceId` 只用于 Custom Event payload，不展示给玩家。
@@ -1213,20 +1343,57 @@ emitCustomEvent("submit", {
 
 # 16. Control hints
 
-`lr-dialogue-controls` 可以显示当前有效 semantic actions，例如：
+`lr-dialogue-controls` 只显示 **semantic action hint**，第一版不得显示物理键位 glyph。
+
+PokeMan 可以根据 canonical `action` 做本地化，例如：
 
 ```text
-[A] 继续
-[↑↓] 选择
-[Y] 历史
-[B] 返回
+confirm   → 继续
+previous  → 上一个
+next      → 下一个
+history   → 历史
+cancel    → 返回
 ```
 
-但这里显示的是 semantic action 的 presentation hint，不处理 Keyboard code、Gamepad button 或统一 controls mapping。
+有 choices 时可以把 previous / next 合并成视觉上的“选择”提示，但 underlying canonical hint nodes 仍保持五个，不能改变 Runtime facts。
 
-物理输入 mapping 继续属于 product composition。
+第一版明确禁止由 Dialogue Web Component 自行显示：
 
-小屏空间不足时，control hints 可以压缩或只显示关键动作；不得遮挡正文和 choice。
+```text
+[A]
+[B]
+[Y]
+Enter
+Space
+ArrowUp
+gamepad south
+任何其他 physical binding
+```
+
+原因是 physical Keyboard / Gamepad / unified-controls mapping 属于 product composition，不属于 Dialogue Runtime 或当前 Presentation data authority。
+
+只有未来 Common Controls 明确提供独立、可消费的 device-hint Presentation contract 后，才允许把 semantic hint 与当前物理 glyph 组合。
+
+小屏空间不足时，control hints 可以压缩或只显示当前 enabled 的关键动作；不得遮挡正文和 choice。
+
+## 16.1 Pointer / touch boundary
+
+现代 selectable row 只是一种视觉呈现，不代表第一版获得 pointer / touch gameplay authority。
+
+PokeMan v1 固定：
+
+```text
+pointer / touch
+→ MAY drive hover / pressed visual feedback
+→ MUST NOT directly emit submit
+→ MUST NOT toggle History
+→ MUST NOT cancel Conversation
+→ MUST NOT mutate selectedChoiceId as a gameplay navigation path
+```
+
+业务交互仍只能来自 Runtime 已定义的 semantic controls / Render Events。
+
+如果以后需要鼠标或触屏直接选择 / 提交，必须先扩展统一 controls / Dialogue interaction contract，不能由 Web Component 私自形成第二条 authority path。
 
 # 17. Accessibility
 
@@ -1260,7 +1427,7 @@ duplicate / invalid choice state
 stale async resource completion
 ```
 
-人物资源失败时，可以显示稳定的 fallback silhouette / initials，但 Conversation 仍应保持可读；是否报告 projector failure 以 Web Presentation 现有 failure contract 为准。
+人物 data 非法、资源 fetch 失败、PNG decode 失败或 sprite sheet 非 4×4 时，统一降级到 §8.1 定义的稳定 fallback；Conversation 必须保持可读、可操作。此类人物视觉失败不允许自动提交、取消或改变 Runtime state。
 
 失败时禁止：
 
@@ -1393,6 +1560,8 @@ conversationScroll
 | HISTORY | `scroll-up/down` | history has entries | local scroll | HISTORY |
 | HISTORY | Runtime clears History visible | ACTIVE | restore layout; resume reveal if it was paused | previous Conversation phase |
 | any phase | new `conversation-id` | — | old reveal/selection/scroll state discarded | recompute from new Conversation |
+| any active phase | all control hints become disabled | Runtime settled to READY | hide modal/backdrop; retain DOM but make inert | presented=false |
+| presented=false | any control hint becomes enabled | Runtime ACTIVE projection reconciled | show modal/backdrop; phase determined by current Conversation / History facts | REVEALING / CONVERSATION / CHOICES / HISTORY |
 
 ### Local coordination contract
 
@@ -1422,6 +1591,9 @@ lr-dialogue-view observes history.visible
 至少验证：
 
 - canonical tags 全部成功注册；
+- canonical root slot 使用 `display: contents`，四个 direct canonical children 按固定 grid area 布局；
+- READY（五个 control hints 全 disabled）时 modal / backdrop hidden + inert；
+- ACTIVE（至少一个 control hint enabled）时 modal 可见；
 - Conversation mode 使用 character + content 两栏；
 - History mode 隐藏 character stage 和当前 Conversation visual content；
 - History pane 使用完整 modal 内容宽度；
@@ -1430,15 +1602,20 @@ lr-dialogue-view observes history.visible
 - text reveal 逐步显示；
 - revealing 时第一次 commit 只 reveal，不 submit；
 - revealed 后 commit 正确 submit；
-- choices next / previous / disabled / wrap；
+- choices next / previous / disabled / 固定 wrap-around；
 - choice submit payload exact；
 - History 初始定位最新记录；
 - History scroll events；
 - History 打开 / 关闭保留 Conversation selection、scroll 和 reveal state；
+- Character data exact schema 校验与 invalid/missing fallback；
+- 0 / 1 / 多个 active character 的 deterministic first-active policy；
 - resource sprite 使用 4×4 crop、direction=2、pattern=0；
+- resource fetch/decode/4×4 failure 降级 fallback 且不影响 Conversation；
 - image smoothing 关闭；
 - stale resource result 不覆盖新人物；
 - disconnected cleanup；
+- semantic control hints 不包含 physical key / gamepad glyph；
+- pointer / touch 不直接触发 submit/history/cancel/selection；
 - reduced motion；
 - 无人物 / narration 时仍可正常显示 Conversation。
 
@@ -1487,13 +1664,18 @@ narrow viewport fallback
 - [ ] 不修改 RPG Dialogue Runtime / public API / Frozen ABI。
 - [ ] Dialogue 以 modal 覆盖底层地图。
 - [ ] Modal 在 Conversation / History 间保持同一位置和尺寸。
+- [ ] READY retained projection 不显示 modal；ACTIVE projection 才显示 modal。
 - [ ] Conversation mode 左侧显示来自 Map character sheet 的正面静止像素人物。
+- [ ] `DialogueCharacterV0.data` 使用冻结的 PokeMan v1 exact sprite schema，非法 / 缺失资源稳定降级 fallback。
+- [ ] 0 / 1 / 多个 active character 按“空 stage / 唯一 active / canonical 顺序第一个 active”规则显示。
 - [ ] 人物 sprite 保持清晰、canvas no smoothing；该要求不扩展成像素风 UI。
-- [ ] Conversation mode 右侧支持 speaker、逐字显示、继续、choices。
+- [ ] Conversation mode 右侧支持 speaker、逐字显示、继续、choices，并固定 enabled choice wrap-around。
 - [ ] History mode 隐藏人物区和当前 Conversation visual content。
 - [ ] History 使用 100% modal 内容宽度显示 session entries，并默认定位最新记录。
 - [ ] History 打开 / 关闭保留 Conversation 的 reveal、selection 和 scroll local state。
 - [ ] semantic Render Events 与 `submit` Custom Event 完整兼容。
+- [ ] Control hints 不自行展示物理 Keyboard / Gamepad glyph。
+- [ ] Pointer / touch 不形成第二条 Dialogue gameplay interaction authority。
 - [ ] Presentation 资源纳入 PokeMan source → FSDB 同步和漂移检查。
 - [ ] Browser / qualification 测试覆盖真实 closed loop。
 - [ ] 不引入 Dialogue graph、Event mutation、NPC wiring 等业务职责。
