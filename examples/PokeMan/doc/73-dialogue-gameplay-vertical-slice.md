@@ -759,17 +759,29 @@ validation helper保持 product-private；不要上升成 RPG Dialogue public AP
 
 ## 14.2 Dialogue child resource/session cleanup
 
-输入通过后，Dialogue Subsystem负责全部 child-local资源。
+输入通过后，Dialogue Subsystem负责全部 child-local资源，并从 `@loomrealm/subsystem` 使用现有 public outcomes：
 
-推荐顺序：
+```js
+import { defineSubsystem, completed, failed } from "@loomrealm/subsystem";
+```
+
+error boundary固定为：
 
 ```text
 validate input
-→ resolve Professor participant
-→ new RPGDialogue(scope, frame, { cancelable:true })
-→ create child ControlsConsumer
-→ run Conversation A/B/C
-→ return completed(...)
+→ invalid:
+   failed({ code: "POKEMAN_DIALOGUE_INPUT_INVALID" })
+
+resolve Professor participant
+→ Content read / shape / version failure:
+   failed({ code: "POKEMAN_DIALOGUE_CONTENT_FAILED" })
+
+new RPGDialogue + create ControlsConsumer + run A/B/C
+→ unexpected session/flow failure:
+   failed({ code: "POKEMAN_DIALOGUE_SESSION_FAILED" })
+
+normal business completion:
+→ completed(PokeManDialogueFrameResultV1)
 ```
 
 使用 `try/finally` 保证：
@@ -1704,6 +1716,9 @@ RPGDialogue / conversation flow / unexpected choice/result failure
 recoverable pre-commit FrameCallRejectedError
 → POKEMAN_DIALOGUE_CALL_REJECTED
 → data.callCode = exact FRAME_CALL_TARGET_* code
+
+other frame.call invariant exception
+→ POKEMAN_DIALOGUE_MAP_INVARIANT_FAILED
 
 completed(value) invalid
 → POKEMAN_DIALOGUE_RESULT_INVALID
