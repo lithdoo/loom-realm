@@ -2,7 +2,7 @@
 
 > 路径：`examples/PokeMan/doc/69-dialogue-web-component.md`
 >
-> 状态：**Design / Ready for implementation**
+> 状态：**Implementation-ready / PokeMan v1 decisions frozen**
 >
 > 本文只定义 PokeMan 的 Dialogue Web Presentation：视觉布局、Web Component 行为、Presentation-local state、人物 sprite 展示、Conversation / History 模式以及 Presentation 资源接入。固定 Dialogue 的业务数据模型见 [64-dialogue.md](./64-dialogue.md)；Content / FSDB 物理模型见 [68-content-fsdb.md](./68-content-fsdb.md)。
 >
@@ -658,13 +658,29 @@ ACTIVE / CONVERSATION or HISTORY
 PokeMan v1 固定用五个 canonical `lr-dialogue-control-hint[enabled]` 推导 Presentation visibility：
 
 ```text
-any canonical control hint enabled="true"
+five canonical action hints not yet completely materialized
+→ presented = false
+→ prevent first-connect flash
+
+all five canonical action hints present
+AND any enabled="true"
 → presented = true
 → backdrop + modal visible
 
-all five canonical control hints enabled="false"
+all five canonical action hints present
+AND all enabled="false"
 → presented = false
 → backdrop + modal hidden + inert
+```
+
+完整 action set 固定为：
+
+```text
+confirm
+previous
+next
+history
+cancel
 ```
 
 这不是新的 lifecycle authority。WC 只是从 Runtime 已经发布的 canonical facts 推导可见性。
@@ -1260,7 +1276,7 @@ reveal
 = REVEALING | REVEALED
 ```
 
-推荐 History 打开时：
+PokeMan v1 **固定** History 打开时 pause / resume reveal：
 
 ```text
 REVEALING
@@ -1272,9 +1288,9 @@ REVEALING
 → 从原 revealIndex 继续
 ```
 
-不要因为查看 History 而隐式完成当前句。
+进入 History 不允许隐式 reveal all，也不允许重置 reveal progress。
 
-如果实现复杂度证明不值得，可以后续明确改为“进入 History 时 reveal all”，但第一版实现应优先尝试 pause/resume，因为它不会改变玩家尚未完成的阅读状态。
+如果进入 History 时已经 `REVEALED`，只保留该状态；关闭 History 后仍为 `REVEALED`。
 
 # 14. Canonical element 职责
 
@@ -1592,8 +1608,9 @@ lr-dialogue-view observes history.visible
 
 - canonical tags 全部成功注册；
 - canonical root slot 使用 `display: contents`，四个 direct canonical children 按固定 grid area 布局；
-- READY（五个 control hints 全 disabled）时 modal / backdrop hidden + inert；
-- ACTIVE（至少一个 control hint enabled）时 modal 可见；
+- control hints 尚未完整 materialize 时 modal 保持 hidden，避免 first-connect flash；
+- READY（完整五个 control hints 全 disabled）时 modal / backdrop hidden + inert；
+- ACTIVE（完整五个 control hints 中至少一个 enabled）时 modal 可见；
 - Conversation mode 使用 character + content 两栏；
 - History mode 隐藏 character stage 和当前 Conversation visual content；
 - History pane 使用完整 modal 内容宽度；
