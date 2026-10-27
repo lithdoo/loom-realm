@@ -657,6 +657,70 @@ child business result
 cleanup
 ```
 
+## 14.1 Dialogue input validation and atomicity
+
+`dialogue.mjs` 在任何 Content read、ControlsConsumer、RPGDialogue 或 RenderDomain 建立前先验证 `frame.params`。
+
+closed schema exact：
+
+```text
+frame.params
+→ plain object
+→ exactly { dialogueKey, source }
+
+dialogueKey → exactly "professor-vertical-slice"
+
+source
+→ plain object
+→ exactly { mapId, npc }
+
+mapId → positive safe integer
+
+npc
+→ plain object
+→ exactly { instanceId, npcId }
+
+instanceId → exactly "professor"
+npcId      → exactly "professor"
+```
+
+unknown field、missing field、wrong type、wrong literal都：
+
+```text
+→ return failed({
+     code: "POKEMAN_DIALOGUE_INPUT_INVALID"
+   })
+→ before any Dialogue side effect
+```
+
+validation helper保持 product-private；不要上升成 RPG Dialogue public API。
+
+## 14.2 Dialogue child resource/session cleanup
+
+输入通过后，Dialogue Subsystem负责全部 child-local资源。
+
+推荐顺序：
+
+```text
+validate input
+→ resolve Professor participant
+→ new RPGDialogue(scope, frame, { cancelable:true })
+→ create child ControlsConsumer
+→ run Conversation A/B/C
+→ return completed(...)
+```
+
+使用 `try/finally` 保证：
+
+```text
+consumer?.close()
+dialogue?.close()
+```
+
+在 completed / failed / frame abort / unexpected exception下都执行。
+
+不要依赖 child Frame close自动替代业务对象自己的 `close()`。
+
 # 15. Dialogue Subsystem controls
 
 Dialogue child Frame 创建自己的：
@@ -869,7 +933,7 @@ history()
 这真实验证：
 
 ```text
-caller appendHistory
+Dialogue Subsystem appendHistory
 → RPGDialogue History
 → PokeMan History Web Component
 ```
@@ -987,7 +1051,7 @@ dialogue.appendHistory({
 
 这不是正式 transcript policy。
 
-正式游戏以后由 Dialogue/Story caller 单独定义。
+正式游戏以后由 Dialogue/Story owner 单独定义。
 
 ---
 
