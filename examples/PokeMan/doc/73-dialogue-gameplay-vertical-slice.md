@@ -976,7 +976,11 @@ submitted
 → continue
 
 cancelled
-→ end interaction and return Map
+→ child completed({
+     dialogueKey: "professor-vertical-slice",
+     conclusion: "cancelled"
+   })
+→ return Map through normal child Frame completion
 ```
 
 Conversation A settle 后，Dialogue 是 READY，因此 append：
@@ -1175,9 +1179,13 @@ cancelable: true
 Conversation + east
 → current openConversation()
    resolves { type: "cancelled" }
-→ end entire Professor interaction
-→ close Dialogue
-→ return Map
+→ Dialogue Subsystem maps to
+   completed({
+     dialogueKey: "professor-vertical-slice",
+     conclusion: "cancelled"
+   })
+→ child closes
+→ Map resumes fresh Activation
 ```
 
 History 中：
