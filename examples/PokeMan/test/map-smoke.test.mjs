@@ -149,7 +149,7 @@ test("the intended Map-only route graph is represented by transfer rules", async
   assert.ok((await targetsFrom(7)).has(5), "Map 7 must lead back to Map 5");
 });
 
-test("page CSS fills the viewport and startup synchronizes Presentation before Hostra", async () => {
+test("page CSS fills the viewport and Hostra startup clean-builds Dialogue after Presentation sync", async () => {
   const css = await readFile(new URL("presentation.css", root), "utf8");
   assert.match(css, /body\s*\{[^}]*overflow:\s*hidden/s);
   assert.match(css, /lr-map-view\s*\{[^}]*width:\s*100vw[^}]*height:\s*100vh/s);
@@ -157,6 +157,18 @@ test("page CSS fills the viewport and startup synchronizes Presentation before H
 
   const play = await readFile(new URL("play.bat", root), "utf8");
   const syncIndex = play.indexOf("scripts\\sync-map-presentation.mjs");
-  const hostraIndex = play.indexOf('"%NODE%" "%HOSTRA_JS%"');
-  assert.ok(syncIndex >= 0 && hostraIndex > syncIndex, "play.bat must sync Presentation before launching Hostra");
+  const dialogueBuild = "npm run build -w @loomrealm-game/rpg-dialogue";
+  const dialogueBuildIndex = play.indexOf(dialogueBuild);
+  const dialogueBuildFailureIndex = play.indexOf("Dialogue Runtime 构建失败。");
+  const hostraIndex = play.indexOf('\"%NODE%\" \"%HOSTRA_JS%\"');
+
+  assert.ok(syncIndex >= 0, "play.bat must sync/build the existing Map/Desktop stack");
+  assert.equal((play.match(/npm run build -w @loomrealm-game\/rpg-dialogue/g) ?? []).length, 1,
+    "play.bat must build the production Dialogue dependency exactly once");
+  assert.ok(dialogueBuildIndex > syncIndex,
+    "play.bat must build RPGDialogue after the Presentation sync/build");
+  assert.ok(dialogueBuildFailureIndex > dialogueBuildIndex && hostraIndex > dialogueBuildFailureIndex,
+    "a failed RPGDialogue build must prevent Hostra launch");
+  assert.ok(hostraIndex > dialogueBuildIndex,
+    "play.bat must build RPGDialogue before launching Hostra");
 });
