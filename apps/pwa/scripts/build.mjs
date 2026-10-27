@@ -61,6 +61,10 @@ async function buildRoot() {
       join(root, "..", "..", "examples", "PokeMan", "subsystems", "map.mjs"),
       join(output, "qualification", "pokeman-map-subsystem.mjs"),
     );
+    await bundleSubsystem(
+      join(root, "..", "..", "examples", "PokeMan", "subsystems", "dialogue.mjs"),
+      join(output, "qualification", "pokeman-dialogue-subsystem.mjs"),
+    );
   }
   await writeFile(join(output, "index.html"), indexHtml("/window.js"), "utf8");
   await writeFile(join(output, "generation.json"), `${JSON.stringify({ version: 1, generation })}\n`, "utf8");
@@ -75,6 +79,7 @@ async function buildStaging() {
   const executablePaths = Object.freeze({
     base: join(output, "staging", "pokeman-base-subsystem.mjs"),
     map: join(output, "staging", "pokeman-map-subsystem.mjs"),
+    dialogue: join(output, "staging", "pokeman-dialogue-subsystem.mjs"),
   });
   const stagingEntries = Object.freeze([
     { input: join(sourceRoot, "pokeman-window-entry.ts"), output: "window.js" },

@@ -9,6 +9,7 @@ const fixture = () => ({
   executables: [
     { logicalModule: "subsystems/base.mjs", mime: "text/javascript", source: "export default () => ({ frame() {} });", contentVersion: "sha256:base" },
     { logicalModule: "subsystems/map.mjs", mime: "text/javascript", source: "export default () => ({ frame() {} });", contentVersion: "sha256:map" },
+    { logicalModule: "subsystems/dialogue.mjs", mime: "text/javascript", source: "export default () => ({ frame() {} });", contentVersion: "sha256:dialogue" },
   ],
   content: [{ kind: "record", namespace: "struct.Map", key: "3", mime: "application/json", body: "eyJ4IjozfQ==" }],
 });
@@ -28,13 +29,16 @@ test("changing only PokeMan Map data creates a new installation identity", () =>
   assert.notEqual(pokeManBundleId("same-shell", original), pokeManBundleId("same-shell", changed));
 });
 
-test("changing either executable or presentation changes the PokeMan bundle ID", () => {
+test("changing any executable or presentation changes the PokeMan bundle ID", () => {
   const original = fixture();
   const changedBase = fixture();
   changedBase.executables = changedBase.executables.map((entry, index) => index === 0 ? { ...entry, source: "export default () => null" } : entry);
   const changedMap = fixture();
   changedMap.executables = changedMap.executables.map((entry, index) => index === 1 ? { ...entry, source: "export default () => null" } : entry);
+  const changedDialogue = fixture();
+  changedDialogue.executables = changedDialogue.executables.map((entry, index) => index === 2 ? { ...entry, source: "export default () => null" } : entry);
   assert.notEqual(pokeManBundleId("same-shell", original), pokeManBundleId("same-shell", changedBase));
   assert.notEqual(pokeManBundleId("same-shell", original), pokeManBundleId("same-shell", changedMap));
+  assert.notEqual(pokeManBundleId("same-shell", original), pokeManBundleId("same-shell", changedDialogue));
   assert.notEqual(pokeManBundleId("same-shell", original), pokeManBundleId("same-shell", { ...fixture(), presentation: { scripts: ["new-map-browser.js"] } }));
 });

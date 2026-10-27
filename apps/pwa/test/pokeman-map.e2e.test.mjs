@@ -9,6 +9,7 @@ import { createPokeManRoutePlanner } from "./helpers/pokeman.mjs";
 const executablePaths = Object.freeze({
   base: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-base-subsystem.mjs"),
   map: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-map-subsystem.mjs"),
+  dialogue: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-dialogue-subsystem.mjs"),
 });
 
 async function mapSnapshot(page) {
@@ -63,7 +64,49 @@ async function assertNpcProjection(page, mapId) {
   assert.deepEqual(observed, expected, `Map ${mapId} NPC projection mismatch`);
 }
 
-test("PokeMan installs and runs its map-only route in real Chromium", { timeout: 180_000 }, async () => {
+async function waitForDialogue(page, text) {
+  await page.waitForFunction((expected) => {
+    const view = document.querySelector("lr-dialogue-view");
+    const conversation = view?.querySelector("lr-dialogue-conversation");
+    return view?.shadowRoot.querySelector(".modal")?.hidden === false
+      && conversation?.querySelector("lr-dialogue-text")?.getAttribute("text") === expected;
+  }, text, { timeout: 20_000 });
+}
+
+async function revealAndConfirm(page) {
+  await page.keyboard.press("KeyZ");
+  await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 20_000 });
+  await page.keyboard.press("KeyZ");
+}
+
+async function completeProfessorDialogue(page) {
+  await waitForDialogue(page, "你终于来了。");
+  await revealAndConfirm(page);
+  await waitForDialogue(page, "准备好出发了吗？");
+  await page.keyboard.press("KeyZ");
+  await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 20_000 });
+  const conversationId = await page.locator("lr-dialogue-conversation").getAttribute("conversation-id");
+  await page.keyboard.press("Tab");
+  await page.waitForFunction(() => {
+    const view = document.querySelector("lr-dialogue-view");
+    return view?._mode === "history"
+      && [...view.querySelectorAll("lr-dialogue-history-entry")].some((entry) => entry.getAttribute("text") === "你终于来了。");
+  }, null, { timeout: 20_000 });
+  await page.keyboard.press("KeyX");
+  await page.waitForFunction((expectedId) => {
+    const view = document.querySelector("lr-dialogue-view");
+    return view?._mode === "conversation"
+      && view.querySelector("lr-dialogue-conversation")?.getAttribute("conversation-id") === expectedId;
+  }, conversationId, { timeout: 20_000 });
+  await page.keyboard.press("ArrowDown");
+  await page.waitForFunction(() => document.querySelector('lr-dialogue-choice[choice-id="ready"]')?.isSelected() === true, null, { timeout: 20_000 });
+  await page.keyboard.press("KeyZ");
+  await waitForDialogue(page, "很好，出发吧。");
+  await revealAndConfirm(page);
+  await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 20_000 });
+}
+
+test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real Chromium", { timeout: 180_000 }, async () => {
   const fixture = await createPokeManPwaFixture({ executablePaths });
   const planner = createPokeManRoutePlanner(fixture);
   const product = await openProduct({ viewport: { width: 960, height: 720 } });
@@ -136,7 +179,56 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
       { mapId: beforeCollision.mapId, x: beforeCollision.player.x, y: beforeCollision.player.y },
     );
 
-    for (const targetMapId of [4, 2, 8, 2, 5, 7]) {
+    const toProfessorMap = planner.planToMap(state, 4);
+    assert.ok(toProfessorMap.length > 0);
+    state = await runActions(page, toProfessorMap, history);
+    await assertNpcProjection(page, 4);
+    const professor = planner.planNpcCollision(state);
+    assert.equal(professor.npc.instanceId, "professor");
+    if (professor.travel.length > 0) state = await runActions(page, professor.travel, history);
+    state = await runActions(page, [professor.collision], history);
+    await page.evaluate(() => {
+      window.__pokemanMapBeforeDialogue = document.querySelector("lr-map-view");
+      window.__pokemanDialogueBeforeRepeat = null;
+    });
+    await page.keyboard.press("KeyZ");
+    await waitForDialogue(page, "你终于来了。");
+    assert.equal(await page.locator("lr-dialogue-view").count(), 1);
+    assert.equal(await page.locator("game-controls-input").count(), 1);
+    assert.equal(await page.evaluate(() => document.querySelector("lr-map-view") === window.__pokemanMapBeforeDialogue), true);
+    await page.evaluate(() => { window.__pokemanDialogueBeforeRepeat = document.querySelector("lr-dialogue-view"); });
+    await completeProfessorDialogue(page);
+    await waitForState(page, state);
+    assert.equal(await page.evaluate(() => document.querySelector("lr-map-view") === window.__pokemanMapBeforeDialogue), true);
+
+    const moves = [
+      { direction: 2, code: "ArrowDown", dx: 0, dy: 1 },
+      { direction: 4, code: "ArrowLeft", dx: -1, dy: 0 },
+      { direction: 6, code: "ArrowRight", dx: 1, dy: 0 },
+      { direction: 8, code: "ArrowUp", dx: 0, dy: -1 },
+    ];
+    const move = moves.map((candidate) => ({ candidate, expected: planner.transition(state, candidate) }))
+      .find(({ expected }) => expected.mapId === state.mapId && (expected.x !== state.x || expected.y !== state.y));
+    assert.ok(move, "Map A2 must have a legal movement from the Professor interaction tile");
+    state = await runActions(page, [{ ...move.candidate, expected: move.expected }], history);
+    const repeatProfessor = planner.planNpcCollision(state);
+    assert.equal(repeatProfessor.npc.instanceId, "professor");
+    if (repeatProfessor.travel.length > 0) state = await runActions(page, repeatProfessor.travel, history);
+    state = await runActions(page, [repeatProfessor.collision], history);
+    await page.keyboard.press("KeyZ");
+    await waitForDialogue(page, "你终于来了。");
+    assert.equal(await page.evaluate(() => document.querySelector("lr-dialogue-view") !== window.__pokemanDialogueBeforeRepeat), true,
+      "second interaction must create a fresh Dialogue presentation");
+    await page.keyboard.press("Tab");
+    await page.waitForFunction(() => document.querySelector("lr-dialogue-view")?._mode === "history", null, { timeout: 20_000 });
+    assert.equal(await page.locator("lr-dialogue-history-entry").count(), 0, "second Dialogue session must start with fresh History");
+    await page.keyboard.press("KeyX");
+    await page.waitForFunction(() => document.querySelector("lr-dialogue-view")?._mode === "conversation", null, { timeout: 20_000 });
+    await page.keyboard.press("KeyX");
+    await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 20_000 });
+    await waitForState(page, state);
+
+    for (const targetMapId of [2, 8, 2, 5, 7]) {
       const actions = planner.planToMap(state, targetMapId);
       assert.ok(actions.length > 0, `Map ${state.mapId} must route to Map ${targetMapId}`);
       state = await runActions(page, actions, history);
@@ -153,6 +245,7 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
         presentation: `/_lr/v1/games/${encodeURIComponent(id)}/resources/resource.Presentation/map/map.browser.js`,
         baseExecutable: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/base.mjs`,
         mapExecutable: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/map.mjs`,
+        dialogueExecutable: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/dialogue.mjs`,
       };
       const output = {};
       for (const [name, url] of Object.entries(requests)) {
@@ -181,6 +274,10 @@ test("PokeMan installs and runs its map-only route in real Chromium", { timeout:
     assert.match(routes.mapExecutable.mime, /^text\/javascript/);
     assert.match(routes.mapExecutable.version, /^sha256:[0-9a-f]{64}$/);
     assert.match(routes.mapExecutable.body, /RPGMapBuilder/);
+    assert.equal(routes.dialogueExecutable.status, 200);
+    assert.match(routes.dialogueExecutable.mime, /^text\/javascript/);
+    assert.match(routes.dialogueExecutable.version, /^sha256:[0-9a-f]{64}$/);
+    assert.match(routes.dialogueExecutable.body, /professor-vertical-slice/);
     assert.doesNotMatch(routes.mapExecutable.body, /from\s*["']@loomrealm/u);
 
     await context.setOffline(true);

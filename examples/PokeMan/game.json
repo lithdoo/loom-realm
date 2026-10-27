@@ -11,6 +11,7 @@
   },
   "subsystems": [
     { "key": "base" },
-    { "key": "map" }
+    { "key": "map" },
+    { "key": "dialogue" }
   ]
 }
