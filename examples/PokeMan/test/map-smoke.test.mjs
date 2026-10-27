@@ -50,22 +50,26 @@ test("installation root exposes exactly one direct FSDB root", async () => {
   await assert.rejects(access(new URL("fsdb/[FSDB]PokeMan/", root)));
 });
 
-test("Map presentation is resolved from PokeMan Content resources", async () => {
+test("Map and Dialogue presentation are resolved from PokeMan Content resources", async () => {
   assert.deepEqual(await json("presentation.json"), {
     formatVersion: 1,
     styles: [
       { namespace: "Presentation", key: "map/map.css" },
+      { namespace: "Presentation", key: "dialogue/dialogue.css" },
       { namespace: "Presentation", key: "page.css" },
     ],
     scripts: [
       { namespace: "Presentation", key: "controls/device-input.browser.js" },
       { namespace: "Presentation", key: "map/map.browser.js" },
+      { namespace: "Presentation", key: "dialogue/dialogue.browser.js" },
     ],
   });
 
   await access(new URL("[resource]Presentation/controls/device-input.browser.js.js", fsdbRoot));
   await access(new URL("[resource]Presentation/map/map.css.css", fsdbRoot));
   await access(new URL("[resource]Presentation/map/map.browser.js.js", fsdbRoot));
+  await access(new URL("[resource]Presentation/dialogue/dialogue.css.css", fsdbRoot));
+  await access(new URL("[resource]Presentation/dialogue/dialogue.browser.js.js", fsdbRoot));
   await access(new URL("[resource]Presentation/page.css.css", fsdbRoot));
 });
 

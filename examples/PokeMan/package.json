@@ -9,6 +9,7 @@
     "@loomrealm/subsystem": "0.1.0-alpha.0"
   },
   "devDependencies": {
+    "@loomrealm-game/rpg-dialogue": "0.1.0-alpha.0",
     "@loomrealm/fsdb": "0.1.0-alpha.0",
     "@loomrealm/game-launcher-pwa": "0.1.0-alpha.0",
     "@loomrealm/game-package": "0.1.0-alpha.0"
