@@ -1217,9 +1217,7 @@ presentation.json
 
 ```json
 {
-  "initial": {
-    "subsystem": "base"
-  },
+  "initial": { "subsystem": "base" },
   "subsystems": [
     { "key": "base" },
     { "key": "map" },
@@ -1236,9 +1234,67 @@ map      -> subsystems/map.mjs
 dialogue -> subsystems/dialogue.mjs
 ```
 
-PWA 使用相同 subsystem topology，并必须把 `dialogue.mjs` 纳入 installed executable index。
+PWA 使用相同 topology。
 
-`base` 继续只拥有 unified controls producer lifetime；它不变成 Dialogue orchestrator。
+`base` 继续拥有唯一 unified controls producer lifetime；它不变成 Dialogue orchestrator。
+
+## 27.1 Exact PWA executable landing
+
+当前 PWA fixture/build 对 PokeMan executable set 仍硬编码为 `base + map`。实现必须精确扩成：
+
+```text
+subsystems/base.mjs
+subsystems/map.mjs
+subsystems/dialogue.mjs
+```
+
+必须修改：
+
+```text
+examples/PokeMan/scripts/prepare-pwa-content.mjs
+→ createPokeManPwaFixture().specifications 加 dialogue
+→ executablePaths 要求 base/map/dialogue
+
+apps/pwa/scripts/build.mjs
+→ qualification bundle 增加 pokeman-dialogue-subsystem.mjs
+→ staging executablePaths 增加 dialogue
+→ staging bundle loop构建三个 PokeMan subsystem
+
+apps/pwa/package.json
+→ build:qualification prerequisite 加 @loomrealm-game/rpg-dialogue
+→ build:staging prerequisite 加 @loomrealm-game/rpg-dialogue
+
+apps/pwa/test/pokeman-bundle.test.mjs
+→ fixture executablePaths 加 dialogue
+→ expected executable graph = base/map/dialogue
+
+apps/pwa/test/staging-build.test.mjs
+→ fresh-checkout dependency closure包含 @loomrealm-game/rpg-dialogue
+```
+
+PokeMan自己的 `@loomrealm-game/rpg-dialogue` 必须位于 `dependencies`，不再只属于 `devDependencies`。
+
+## 27.2 PWA Content closure does NOT expand to Dialogue content
+
+本 slice不读取：
+
+```text
+struct.Dialogue/*
+```
+
+Professor的 `struct.NPC/professor` 与 `resource.Graphics/Characters/Professor` 已属于现有 reachable Map/NPC closure。
+
+所以：
+
+```text
+PWA executable set
+→ base + map + dialogue
+
+PWA Content data closure
+→ 不因为 Dialogue graph扩大
+```
+
+不要为了“有 Dialogue Subsystem”把全部 `struct.Dialogue`、Story或Character tables打进 PWA。
 
 # 28. Initial spawn policy
 
