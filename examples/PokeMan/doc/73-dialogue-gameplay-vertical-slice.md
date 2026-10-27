@@ -64,7 +64,14 @@ examples/PokeMan/launch.hostra.json
 examples/PokeMan/launch.pwa.json
 examples/PokeMan/package.json
 package-lock.json
-PokeMan tests / staging / PWA qualification
+examples/PokeMan/scripts/prepare-pwa-content.mjs
+apps/pwa/scripts/build.mjs
+apps/pwa/package.json
+apps/pwa/test/pokeman-bundle.test.mjs
+apps/pwa/test/pokeman-map.e2e.test.mjs
+apps/pwa/test/pokeman-staging.e2e.test.mjs
+apps/pwa/test/staging-build.test.mjs
+PokeMan focused tests / qualification
 ```
 
 本阶段不修改：
@@ -134,6 +141,32 @@ Main
 - 不使用 same-Frame `mapControlsActive/dialogueControlsActive` flag；
 - Dialogue 返回后 Map 获得 fresh Activation；
 - 后续正式 `struct.Dialogue` runner 可以自然落在 `dialogue.mjs`。
+
+## 3.1 73 对 72 的 authority override
+
+[72-controls-composition.md](./72-controls-composition.md) 描述的是已经实现并 qualified 的上一阶段 `base + map` Map-only topology。
+
+本 vertical slice 落地后，本文 **只在以下两点 supersede 72**：
+
+```text
+production subsystem topology
+→ base + map + dialogue
+
+Map controls lifetime around child call
+→ Activation-local A1 / A2 Consumers
+```
+
+72 继续作为以下事实的 authority：
+
+```text
+base owns exactly one <game-controls-input>
+controls producer remains live across child Frames
+Map direction mapping uses Common Controls
+blocked movement semantics remain unchanged
+raw Keyboard/Gamepad are not reintroduced
+```
+
+实现 Agent 不得因为 topology 增加 Dialogue 就把 controls producer 从 `base` 移走。
 
 # 4. Test NPC：Professor only
 
