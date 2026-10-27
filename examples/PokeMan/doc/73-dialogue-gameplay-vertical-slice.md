@@ -468,7 +468,56 @@ Dialogue returns
 
 Map A2 必须从 neutral 开始。即使玩家仍按住方向，也只能由 A2 下新收到的 `controls.state` 重建 held truth；不能直接恢复 A1 direction。
 
-# 17. Hard-coded validation script
+# 17. Professor presentation participant resolver
+
+Dialogue Subsystem真实执行 PokeMan Presentation producer chain：
+
+```text
+scope.content.record(
+  "struct.NPC",
+  "professor",
+  { signal: frame.signal }
+)
+→ name + sprite
+
+scope.content.resource(
+  sprite.namespace,
+  sprite.key,
+  { signal: frame.signal }
+)
+→ resource.contentVersion
+```
+
+构造：
+
+```js
+{
+  characterId: "professor",
+  displayName: "博士",
+  active: true,
+  data: {
+    sprite: {
+      namespace: "resource.Graphics",
+      key: "Characters/Professor",
+      contentVersion: resource.contentVersion,
+    },
+  },
+}
+```
+
+禁止 hard-code SHA。
+
+当前 fixture只冻结：
+
+```text
+dialogueKey = "professor-vertical-slice"
+→ Character identity = "professor"
+→ appearance npcId = "professor"
+```
+
+不得把 `npcId === characterId` 推广成通用规则；`rival-lab/rival-casual → Character rival` 仍属于后续 appearance resolver。
+
+# 18. Hard-coded validation script
 
 第一版不读取：
 
@@ -488,7 +537,7 @@ Story Index
 
 固定流程：
 
-## 17.1 Conversation A
+## 18.1 Conversation A
 
 ```text
 speaker: 博士
@@ -533,7 +582,7 @@ dialogue.appendHistory({
 
 ---
 
-# 18. Conversation B：Choice
+# 19. Conversation B：Choice
 
 第二段：
 
@@ -590,7 +639,7 @@ caller appendHistory
 
 ---
 
-# 19. Caller-owned branching
+# 20. Caller-owned branching
 
 Conversation B result 由普通 PokeMan JavaScript branching 处理。
 
@@ -613,7 +662,7 @@ Conversation B result 由普通 PokeMan JavaScript branching 处理。
 
 ---
 
-# 20. Conversation C
+# 21. Conversation C
 
 ## ready
 
@@ -649,7 +698,7 @@ interaction complete
 
 ---
 
-# 21. History policy for this slice
+# 22. History policy for this slice
 
 本 slice History 只用于验证 session API。
 
@@ -684,7 +733,7 @@ dialogue.appendHistory({
 
 ---
 
-# 22. Cancel behavior
+# 23. Cancel behavior
 
 RPGDialogue 使用：
 
@@ -717,7 +766,7 @@ PokeMan composition 不重复实现 History cancel precedence。
 
 ---
 
-# 23. Input router order
+# 24. Input router order
 
 每个 valid `controls.event` 建议按以下顺序处理：
 
@@ -748,7 +797,7 @@ directions.acceptState(state)
 
 ---
 
-# 24. Interaction race rules
+# 25. Interaction race rules
 
 必须处理：
 
@@ -799,7 +848,7 @@ finally cleanup 必须 idempotent。
 
 ---
 
-# 25. Render / Presentation composition
+# 26. Render / Presentation composition
 
 本 slice 真实运行两个 RenderDomain：
 
@@ -831,7 +880,7 @@ presentation.json
 
 ---
 
-# 26. Production topology remains unchanged
+# 27. Production topology remains unchanged
 
 完成后仍必须是：
 
@@ -872,7 +921,7 @@ Subsystem。
 
 ---
 
-# 27. Initial spawn policy
+# 28. Initial spawn policy
 
 不要为了方便手工验证修改 production：
 
@@ -898,7 +947,7 @@ player facing Professor
 
 ---
 
-# 28. Required tests
+# 29. Required tests
 
 至少增加 PokeMan-level tests 覆盖以下四层。
 
@@ -976,7 +1025,7 @@ real Map visible
 
 ---
 
-# 29. Hostra / PWA evidence
+# 30. Hostra / PWA evidence
 
 至少现有受影响 qualification 必须继续 PASS：
 
@@ -996,7 +1045,7 @@ Map tests
 
 ---
 
-# 30. Manual acceptance path
+# 31. Manual acceptance path
 
 开发者可用当前 Common Controls keyboard policy手工验证：
 
@@ -1025,7 +1074,7 @@ Map tests
 
 ---
 
-# 31. Observable invariants
+# 32. Observable invariants
 
 整个 vertical slice 必须保持：
 
@@ -1055,7 +1104,7 @@ second Professor interaction
 
 ---
 
-# 32. Failure policy
+# 33. Failure policy
 
 第一轮不是 production Story system，但不能静默吞 correctness failure。
 
@@ -1090,7 +1139,7 @@ cancelled
 
 ---
 
-# 33. Explicit non-goals
+# 34. Explicit non-goals
 
 本 slice 不实现：
 
@@ -1120,7 +1169,7 @@ physical key hint UI
 
 ---
 
-# 34. What this proves
+# 35. What this proves
 
 本 slice 成功后，我们获得的证据是：
 
@@ -1147,7 +1196,7 @@ Content Dialogue schema 已经适合 runtime runner
 
 ---
 
-# 35. Exit criteria
+# 36. Exit criteria
 
 只有以下全部成立，本 vertical slice 才算完成：
 
@@ -1187,7 +1236,7 @@ Content Dialogue schema 已经适合 runtime runner
 
 ---
 
-# 36. Next step after qualification
+# 37. Next step after qualification
 
 只有本 vertical slice 通过后，再单独设计：
 
