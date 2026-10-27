@@ -7,6 +7,7 @@
 > - [69-dialogue-web-component.md](./69-dialogue-web-component.md)
 > - [72-controls-composition.md](./72-controls-composition.md)
 > - [Game Control Ports](../../../doc/10-architecture/game-control-ports.md)
+> - [Frame / Call Protocol v1](../../../doc/15-contracts/frame-call-protocol-v1.md)
 > - [RPG Dialogue v1 API](../../../game-libs/rpg-dialogue/RPG_DIALOGUE_V1_API.md)
 
 本文定义下一步 PokeMan 产品验证：使用已经落地的 Map NPC Interaction API、LoomRealm canonical `frame.call(...)`、RPG Dialogue v1 semantic controls 和 PokeMan Dialogue Web Presentation，在真实 PokeMan 中跑通一次标准业务子系统调用。
