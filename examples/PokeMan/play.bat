@@ -64,6 +64,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo 正在构建 Dialogue Runtime...
+pushd "%REPO%"
+call npm run build -w @loomrealm-game/rpg-dialogue
+set "DIALOGUE_BUILD_CODE=%ERRORLEVEL%"
+popd
+if not "%DIALOGUE_BUILD_CODE%"=="0" (
+  echo Dialogue Runtime 构建失败。
+  pause
+  exit /b %DIALOGUE_BUILD_CODE%
+)
+
 set "HOSTRA_RPC_PORT=0"
 set "HOSTRA_RPC_TOKEN=loomrealm-pokeman-%RANDOM%%RANDOM%"
 set "HOSTRA_CONFIG_DIR=%REPO%"
