@@ -332,7 +332,9 @@ completed({
 
 ## 8.1 Map 对 FrameOutcome 的 exact policy
 
-`frame.call("dialogue", ...)` resolve 后，Map 必须按三种 FrameOutcome 分支：
+`frame.call("dialogue", ...)` resolve 后，先应用 §11.2 的 Map terminal precedence。
+
+只有没有 latched Map terminal outcome 时，才按三种 child FrameOutcome 分支：
 
 ```text
 completed(value)
@@ -512,7 +514,16 @@ while Map Frame is healthy:
       return that exact Map FrameOutcome
 
   if next is Professor interaction:
+      if map terminal outcome was latched before call commit:
+          return exact Map outcome
+          do not call Dialogue
+
       childOutcome = await frame.call("dialogue", exactInput)
+
+      if Map terminal outcome became latched while child was active:
+          return exact Map outcome
+          do not create A2 controls
+
       validate childOutcome per §8.1
 
       if childOutcome is valid completed:
@@ -576,7 +587,9 @@ mapRun settles while Map is waiting for child
 → continue awaiting frame.call until child return/resume completes
 ```
 
-child return后，先检查 latched Map terminal outcome：
+如果 Professor waiter赢得 race，但 `frame.call` 尚未 commit 前 `mapRun` 已经 terminal，也先返回 exact Map outcome，不启动 Dialogue。
+
+如果 call已经 commit，child return后再检查 latched Map terminal outcome：
 
 ```text
 latched Map outcome exists
@@ -593,6 +606,8 @@ no latched Map outcome
 ```text
 Frame handler never settles while child call is pending
 Map runtime terminal is not lost
+Map terminal outcome has precedence over child outcome
+no Dialogue starts after Map already terminalled pre-call
 no transient A2 gameplay authority after Map has already terminalled
 ```
 
