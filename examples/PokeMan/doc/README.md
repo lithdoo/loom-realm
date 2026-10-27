@@ -17,12 +17,13 @@
 - [66-data-authority.md](./66-data-authority.md) — Content / Shared State / Runtime Memory 三层 authority 清单
 - [67-shared-state-records.md](./67-shared-state-records.md) — MVP 核心 Shared State 的 Record 粒度、namespace/key、value shape 与约束
 - [68-content-fsdb.md](./68-content-fsdb.md) — PokeMan Content 的 FSDB table、record identity、引用编码与 JSON shape
+- [69-dialogue-web-component.md](./69-dialogue-web-component.md) — PokeMan Dialogue 模态式 Web Component、人物像素舞台、Conversation / History 模式与 Presentation ABI 落地
 - [70-map-only-implementation-plan.md](./70-map-only-implementation-plan.md) — Local Agent 的 Map-only 实施步骤、测试与验收计划
 - [71-pwa-map-implementation-plan.md](./71-pwa-map-implementation-plan.md) — Local Agent 的 PokeMan PWA Map-only 接入、Bundle/ESM 构建与 Chromium E2E 验收计划
 - [72-controls-composition.md](./72-controls-composition.md) — Map-only gameplay 的 private `base + map` controls composition
 - [90-scope-principles.md](./90-scope-principles.md) — MVP 非要求、设计原则与当前非目标
 
-`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`68` 是其后新增的技术设计，不回写 `DESIGN.md`。
+`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`69` 是其后新增的技术设计，不回写 `DESIGN.md`。
 
 当前 physical data canonical sources：
 
