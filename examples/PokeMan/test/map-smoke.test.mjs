@@ -13,7 +13,7 @@ async function json(path) {
   return JSON.parse(await readFile(new URL(path, root), "utf8"));
 }
 
-test("the parsed Game Entry boots product-private Base then Map from the player home", async () => {
+test("the parsed Game Entry declares Base, Map, and Dialogue from the player home", async () => {
   const game = parseGameEntryV1(await readFile(new URL("game.json", root), "utf8"));
   assert.deepEqual(game, {
     formatVersion: 1,
@@ -26,7 +26,7 @@ test("the parsed Game Entry boots product-private Base then Map from the player 
         characterName: "Player",
       },
     },
-    subsystems: [{ key: "base" }, { key: "map" }],
+    subsystems: [{ key: "base" }, { key: "map" }, { key: "dialogue" }],
   });
 
   assert.deepEqual(await json("launch.hostra.json"), {
@@ -34,6 +34,7 @@ test("the parsed Game Entry boots product-private Base then Map from the player 
     subsystems: [
       { key: "base", module: "subsystems/base.mjs" },
       { key: "map", module: "subsystems/map.mjs" },
+      { key: "dialogue", module: "subsystems/dialogue.mjs" },
     ],
   });
   const base = await readFile(new URL("subsystems/base.mjs", root), "utf8");

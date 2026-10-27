@@ -29,7 +29,15 @@ async function act(page, steps) {
   return steps.at(-1)?.expected;
 }
 
-test("staging PokeMan boots from /pwa/pokeman, moves, blocks NPC, transfers, and reloads", { timeout: 180_000 }, async () => {
+async function waitForDialogue(page, text) {
+  await page.waitForFunction((expected) => {
+    const view = document.querySelector("lr-dialogue-view");
+    return view?.shadowRoot.querySelector(".modal")?.hidden === false
+      && view.querySelector("lr-dialogue-text")?.getAttribute("text") === expected;
+  }, text, { timeout: 25_000 });
+}
+
+test("staging PokeMan boots, runs Professor Dialogue, resumes Map, and reloads", { timeout: 180_000 }, async () => {
   const fixture = JSON.parse(await readFile(new URL("../dist/staging/pwa/pokeman/pokeman-bundle.json", import.meta.url), "utf8"));
   const planner = createPokeManRoutePlanner(fixture);
   const product = await openProduct({ viewport: { width: 960, height: 720 } });
@@ -68,6 +76,30 @@ test("staging PokeMan boots from /pwa/pokeman, moves, blocks NPC, transfers, and
     assert.equal(state.mapId, before.mapId);
     assert.equal(state.x, before.x);
     assert.equal(state.y, before.y);
+
+    const toMap4 = planner.planToMap(state, 4);
+    state = await act(page, toMap4);
+    const professor = planner.planNpcCollision(state);
+    assert.equal(professor.npc.instanceId, "professor");
+    if (professor.travel.length > 0) state = await act(page, professor.travel);
+    state = await act(page, [professor.collision]);
+    await page.evaluate(() => { window.__stagingMapBeforeDialogue = document.querySelector("lr-map-view"); });
+    await page.keyboard.press("KeyZ");
+    await waitForDialogue(page, "你终于来了。");
+    assert.equal(await page.evaluate(() => document.querySelector("lr-map-view") === window.__stagingMapBeforeDialogue), true);
+    await page.keyboard.press("KeyX");
+    await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 25_000 });
+    await waitForMap(page, state);
+    assert.equal(await page.evaluate(() => document.querySelector("lr-map-view") === window.__stagingMapBeforeDialogue), true);
+    const move = [
+      { direction: 2, code: "ArrowDown", dx: 0, dy: 1 },
+      { direction: 4, code: "ArrowLeft", dx: -1, dy: 0 },
+      { direction: 6, code: "ArrowRight", dx: 1, dy: 0 },
+      { direction: 8, code: "ArrowUp", dx: 0, dy: -1 },
+    ].map((candidate) => ({ candidate, expected: planner.transition(state, candidate) }))
+      .find(({ expected }) => expected.mapId === state.mapId && (expected.x !== state.x || expected.y !== state.y));
+    assert.ok(move, "resumed Map must accept movement");
+    state = await act(page, [{ ...move.candidate, expected: move.expected }]);
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await waitForMap(page, initial);

@@ -13,22 +13,24 @@ import {
 const root = new URL("../", import.meta.url);
 const identity = (entry) => `${entry.kind}/${entry.namespace}/${entry.key}`;
 
-test("Desktop and PWA manifests bind exactly the declared Base plus Map topology", async () => {
+test("Desktop and PWA manifests bind exactly the declared Base, Map, and Dialogue topology", async () => {
   const game = parseGameEntryV1(await readFile(new URL("game.json", root), "utf8"));
   const pwa = parsePwaLaunchManifestV1(await readFile(new URL("launch.pwa.json", root), "utf8"));
   const hostra = JSON.parse(await readFile(new URL("launch.hostra.json", root), "utf8"));
   assert.equal(game.initial.subsystem, "base");
-  assert.deepEqual(game.subsystems.map(({ key }) => key), ["base", "map"]);
+  assert.deepEqual(game.subsystems.map(({ key }) => key), ["base", "map", "dialogue"]);
   assert.deepEqual(pwa, {
     formatVersion: 1,
     subsystems: [
       { key: "base", module: "subsystems/base.mjs" },
       { key: "map", module: "subsystems/map.mjs" },
+      { key: "dialogue", module: "subsystems/dialogue.mjs" },
     ],
   });
   assert.deepEqual(hostra.subsystems, [
     { key: "base", module: "subsystems/base.mjs" },
     { key: "map", module: "subsystems/map.mjs" },
+    { key: "dialogue", module: "subsystems/dialogue.mjs" },
   ]);
   assert.deepEqual(pwa.subsystems.map(({ key }) => key), game.subsystems.map(({ key }) => key));
 });
