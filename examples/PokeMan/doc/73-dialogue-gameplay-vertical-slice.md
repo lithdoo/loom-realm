@@ -598,7 +598,15 @@ failed({
 })
 ```
 
-其他 `FrameBusyError / FrameInactiveError / FrameClosedError / TypeError` 都是 product/programming invariant violation；不要 catch 后恢复旧 controls。允许它们进入 Frame handler failure path，或显式映射为稳定 product failure，但测试必须冻结所选结果。
+其他 `FrameBusyError / FrameInactiveError / FrameClosedError / TypeError` 都是 product/programming invariant violation。
+
+本 slice固定映射为：
+
+```text
+failed({ code: "POKEMAN_DIALOGUE_MAP_INVARIANT_FAILED" })
+```
+
+不得 catch 后恢复旧 controls。
 
 call success commit 后：
 
@@ -819,6 +827,38 @@ dialogueKey = "professor-vertical-slice"
 ```
 
 不得把 `npcId === characterId` 推广成通用规则；`rival-lab/rival-casual → Character rival` 仍属于后续 appearance resolver。
+
+## 17.1 Professor producer exact validation
+
+`scope.content.record("struct.NPC", "professor", ...)` 的 `value` 必须是 closed shape：
+
+```text
+exactly { name, sprite }
+
+name
+→ non-empty string
+
+sprite
+→ exactly { namespace, key }
+
+namespace → exactly "resource.Graphics"
+key       → exactly "Characters/Professor"
+```
+
+然后 `scope.content.resource(sprite.namespace, sprite.key, ...)` 必须返回：
+
+```text
+contentVersion
+→ ^sha256:[0-9a-f]{64}$
+```
+
+任一 Content read失败、record shape错误、sprite ref错误或 contentVersion错误：
+
+```text
+→ failed({ code: "POKEMAN_DIALOGUE_CONTENT_FAILED" })
+```
+
+不得 fallback 到硬编码 SHA、其他 NPC、Character record 或无版本 resource ref。
 
 # 18. Hard-coded validation script
 
@@ -1156,14 +1196,17 @@ Professor interaction被接受后，call 前必须先 `moveIntent=null`。
 
 ## 25.3 duplicate NPC event
 
-在 child call task 建立前的本地 race使用：
+重复保护只由当前 Activation 的 one-slot rendezvous承担：
 
 ```text
-dialogueTask !== null
-→ do not start a second call
+waiter armed + no event accepted yet
+→ first matching Professor NPCInteractEvent wins
+
+waiter already settled / disarmed
+→ duplicate callback no-op
 ```
 
-call accepted 后 Map 已 suspended，本身不会再收到 ordinary confirm。
+不维护 detached `dialogueTask` gate。call accepted 后 Map 已 suspended，本身也不会再收到 ordinary confirm。
 
 ## 25.4 stale / terminal cleanup
 
