@@ -12,33 +12,34 @@
 
 PokeMan 的 Dialogue Presentation 采用一个覆盖在 Map 等底层画面之上的 **Conversation Modal**。
 
-核心视觉结构：
+Modal 外壳在整个 Dialogue session 内保持稳定，但内部布局按模式切换：
 
 ```text
 backdrop
 └─ modal
-   ├─ character pane
-   │  └─ 当前人物的地图像素图
+   ├─ Conversation mode
+   │  ├─ character pane
+   │  │  └─ 当前人物的地图像素图
+   │  └─ content pane
+   │     ├─ speaker
+   │     ├─ text
+   │     ├─ choices
+   │     └─ continue indicator
    │
-   └─ content pane
-      ├─ Conversation mode
-      │  ├─ speaker
-      │  ├─ text
-      │  ├─ choices
-      │  └─ continue indicator
-      │
-      └─ History mode
+   └─ History mode
+      └─ history pane (100% modal content width)
          ├─ history header
          └─ history entries
 ```
 
 设计原则：
 
-1. **Modal 外壳稳定**：Conversation、Choice、History 切换时，backdrop、modal 几何和左侧人物区不重建、不跳动。
-2. **左侧是 character stage，不是 portrait thumbnail**：直接复用 Map 使用的 4×4 character sprite sheet，取正面静止帧并整数倍放大。
-3. **History 是同一 Conversation Modal 的模式**：切换 History 时只替换右侧内容，不切换 Scene，不创建第二个 modal。
-4. **Presentation-local state 留在 Web Component**：逐字显示、当前选项、滚动位置、History 当前可视 entry 等不进入 gameplay state。
-5. **Runtime ABI 保持不变**：PokeMan 只替换默认 Browser Presentation 的具体视觉实现，不向 `rpg-dialogue` 增加 PokeMan-specific API。
+1. **Modal shell 稳定**：Conversation、Choice、History 切换时，backdrop、modal 的位置、尺寸、边框和 stacking 不重建、不跳动。
+2. **Conversation 中人物区稳定**：当前台词、逐字显示和 Choice 切换时，左侧 character stage 保持稳定；它不是 portrait thumbnail，而是复用 Map 4×4 character sprite sheet 的人物舞台。
+3. **History 是同一 Modal 的全宽布局模式**：进入 History 后隐藏人物区和当前 Conversation 内容，History 占满 modal 内容区域；不切换 Scene，也不创建第二个 modal。
+4. **History 优先可读性而不是人物展示**：历史记录包含多 speaker、多轮消息，不使用单一左侧人物去代表整段历史。
+5. **Presentation-local state 留在 Web Component**：逐字显示、当前选项、滚动位置等不进入 gameplay state。
+6. **Runtime ABI 保持不变**：PokeMan 只替换默认 Browser Presentation 的具体视觉实现，不向 `rpg-dialogue` 增加 PokeMan-specific API。
 
 # 2. 非目标
 
@@ -101,16 +102,23 @@ PokeMan Web Component 不重排 Runtime tree identity；视觉布局通过 `lr-d
 </section>
 ```
 
-其中默认 slot 的 canonical direct children 使用 grid area 投影：
+其中默认 slot 的 canonical direct children 按 mode 投影：
 
 ```text
+Conversation mode
 lr-dialogue-characters    → character
 lr-dialogue-conversation  → content
-lr-dialogue-history       → content
+lr-dialogue-history       → hidden
+lr-dialogue-controls      → controls / hints
+
+History mode
+lr-dialogue-characters    → hidden
+lr-dialogue-conversation  → hidden
+lr-dialogue-history       → full modal content area
 lr-dialogue-controls      → controls / hints
 ```
 
-`lr-dialogue-history[visible="true"]` 与 Conversation 共享同一 `content` grid area。History 打开时由 `lr-dialogue-view` 观察该 attr，并在 host 上维护仅供 Presentation 使用的 mode，例如：
+`lr-dialogue-history[visible="true"]` 触发 History layout。History 打开时由 `lr-dialogue-view` 观察该 attr，并在 host 上维护仅供 Presentation 使用的 mode，例如：
 
 ```text
 data-mode="conversation"
@@ -123,14 +131,18 @@ data-mode="history"
 
 ## 5.1 桌面 / 横屏掌机
 
-推荐初始几何：
+Modal 外部几何在 Conversation / History 间不变：
 
 ```text
-modal width      = min(88vw, 960px)
-modal height     = min(68vh, 520px)
+modal width  = min(88vw, 960px)
+modal height = min(68vh, 520px)
+```
 
-character pane   = 32%
-content pane     = 68%
+Conversation mode 使用：
+
+```text
+character pane = 32%
+content pane   = 68%
 ```
 
 示意：
@@ -152,18 +164,54 @@ content pane     = 68%
 └────────────────────────────────────────────────────────────┘
 ```
 
-不使用 50/50。人物区是视觉锚点，正文区需要更大的可读空间。
+不使用 50/50。人物区是当前 Conversation 的视觉锚点，正文区需要更大的可读空间。
+
+History mode 改为单列全宽：
+
+```text
+history pane = 100%
+```
+
+示意：
+
+```text
+┌────────────────────────────────────────────────────────────┐
+│ HISTORY                                                    │
+│ ────────────────────────────────────────────────────────── │
+│                                                            │
+│ Professor                                                  │
+│ 你终于来了。                                               │
+│                                                            │
+│ Rival                                                      │
+│ 我已经等很久了。                                           │
+│                                                            │
+│ Professor                                                  │
+│ 现在开始吧。                                               │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+History 不保留左侧人物区。它展示的是多 speaker、多轮消息；单一人物舞台在这里既占空间，也会产生 speaker 归属歧义。
 
 ## 5.2 窄屏 fallback
 
-当可用宽度不足以可靠维持左右结构时，允许变为上下结构：
+Conversation mode 在可用宽度不足以可靠维持左右结构时，允许变为上下结构：
 
 ```text
 ┌────────────────────────────┐
 │       CHARACTER STAGE      │
 ├────────────────────────────┤
 │ speaker                    │
-│ dialogue / history         │
+│ dialogue / choices         │
+└────────────────────────────┘
+```
+
+History mode 仍然是单列全宽：
+
+```text
+┌────────────────────────────┐
+│ HISTORY                    │
+│ history entries            │
 └────────────────────────────┘
 ```
 
@@ -171,8 +219,9 @@ content pane     = 68%
 
 窄屏仍必须满足：
 
-- character stage 不消失；
-- History 不改变 modal 外壳；
+- Conversation mode 中 character stage 保留；
+- History mode 中 character stage 隐藏，history 使用完整可用宽度；
+- History 不改变 modal 外框；
 - Choice row 保持足够高度；
 - 文本不横向滚动。
 
@@ -213,8 +262,9 @@ PokeMan Dialogue 与地图像素资源保持同一风格：
 | Modal 最大宽度 | 960px |
 | Modal 宽度 | 88vw |
 | Modal 高度 | 58–68vh |
-| 左区 | 30–34% |
-| 右区 | 66–70% |
+| Conversation 左区 | 30–34% |
+| Conversation 右区 | 66–70% |
+| History 内容区 | 100% |
 | 外层 padding | 20–28px |
 | 内容区 padding | 24–32px |
 | 中文正文 | 18–22px |
@@ -226,6 +276,8 @@ PokeMan Dialogue 与地图像素资源保持同一风格：
 具体色值和字体在实现阶段通过 PokeMan screenshot qualification 调整，不在本文冻结为 compatibility surface。
 
 # 8. Character pane
+
+Character pane **只属于 Conversation mode**。进入 History 后该区域从视觉布局和可访问交互树中隐藏；History 不需要人物舞台。
 
 ## 8.1 资源复用
 
@@ -416,7 +468,7 @@ disabled
 
 ## 11.1 核心原则
 
-History 不创建新的 modal。
+History 不创建新的 modal，但会改变 modal **内部布局**。
 
 ```text
 Conversation
@@ -425,21 +477,28 @@ Conversation
 └──────────────┴───────────────────────────┘
 
 History
-┌──────────────┬───────────────────────────┐
-│ same stage   │ HISTORY + entries         │
-└──────────────┴───────────────────────────┘
+┌──────────────────────────────────────────┐
+│ HISTORY + entries                        │
+└──────────────────────────────────────────┘
 ```
 
-保持：
+保持不变：
 
 - backdrop；
 - modal position；
 - modal size；
-- character pane；
-- border / shadow；
-- overall stacking。
+- modal border / shadow；
+- overall stacking；
+- 当前 Dialogue session。
 
-只切换 content pane。
+History 打开后：
+
+- 隐藏 `lr-dialogue-characters`；
+- 隐藏当前 `lr-dialogue-conversation` 的视觉内容；
+- `lr-dialogue-history` 占满 modal 内容宽度；
+- Conversation 的 reveal / selection / scroll 等 Presentation-local state 保留，关闭 History 后恢复。
+
+这里稳定的是 **Modal shell**，不是内部两栏布局。
 
 ## 11.2 History entry
 
@@ -456,9 +515,11 @@ Professor
 现在开始吧。
 ```
 
-History 列表不重复渲染人物 sprite。左侧 character stage 已承担人物视觉信息。
+History 列表不渲染左侧人物舞台，也不为每条记录重复放大人物 sprite。speaker name 已足够表达归属，History 应优先提供连续阅读空间。
 
 entry 间使用 spacing / separator 区分，不把每条做成独立 card。
+
+未来如确有识别需求，可以讨论很小的 inline speaker marker，但它不能重新引入固定左侧 character pane。
 
 ## 11.3 打开位置
 
@@ -474,7 +535,7 @@ scrollTop = scrollHeight
 
 ## 11.4 History header
 
-History mode 的右侧 header：
+History mode 的 header：
 
 ```text
 HISTORY
@@ -487,45 +548,48 @@ Conversation mode 恢复 speaker header。
 
 不增加全局页面 title。
 
-## 11.5 左侧人物策略
+## 11.5 人物区
 
-第一版固定采用：
+History mode 明确不显示人物区。
 
-```text
-History 打开前的当前 active character
-→ History 期间保持不变
-```
+原因：
 
-这样 modal 完全稳定，也不要求 History entry 获得 Character resource identity。
+1. History 可能同时包含多个 speaker；
+2. 固定显示“进入 History 前的人物”会误导当前阅读语义；
+3. 根据滚动 entry 动态切换大人物会制造视觉噪音，并把日志浏览变成新的 selection system；
+4. 全宽文本更适合掌机和长中文记录。
 
-未来可选增强：
-
-```text
-History 当前主要可见 entry
-→ Presentation-local active entry
-→ 如果能无歧义解析对应 character presentation
-→ 左侧切换人物
-```
-
-该增强必须继续保持 Presentation-local，不能把滚动位置回写 Runtime。
+因此第一版不实现 History → character stage 的任何绑定。
 
 # 12. Conversation / History mode transition
 
-只做轻量 content transition：
+History 切换保持 Modal shell 不动，但允许内部 layout 从两栏变为单栏。
+
+推荐 transition：
 
 ```text
-conversation opacity 1 → 0
-history      opacity 0 → 1
-120–160ms
+enter History:
+character pane     opacity 1 → 0
+conversation pane  opacity 1 → 0
+history pane       opacity 0 → 1
+layout             32/68 → 100% history
+
+leave History:
+history pane       opacity 1 → 0
+layout             100% history → 32/68
+character pane     opacity 0 → 1
+conversation pane  opacity 0 → 1
 ```
 
-Modal、backdrop、character pane 不动画位移。
+视觉淡入淡出建议 120–160ms。grid 切换本身可以即时完成，不要求对列宽做复杂动画。
+
+Modal、backdrop 不移动、不缩放、不重新 mount。
 
 目标 mental model：
 
-> 玩家仍处于同一个 Dialogue session，只是查看当前 session 的历史记录。
+> 玩家仍处于同一个 Dialogue session，只是从“当前会话”切到“全宽历史记录”。
 
-避免使用 page slide、scene fade 或重新 mount modal。
+避免使用 page slide、scene fade 或重新创建 modal。
 
 # 13. Reveal 与 History 的组合状态
 
@@ -559,16 +623,16 @@ REVEALING
 
 | Element | PokeMan 职责 |
 | --- | --- |
-| `lr-dialogue-view` | backdrop、modal geometry、Conversation/History visual mode、slot layout |
-| `lr-dialogue-characters` | character stage structural container |
+| `lr-dialogue-view` | backdrop、modal geometry、Conversation 两栏 / History 全宽 mode、slot layout |
+| `lr-dialogue-characters` | Conversation-only character stage structural container；History 时隐藏 |
 | `lr-dialogue-character` | resource load、4×4 sheet crop、pixel render、active visual |
-| `lr-dialogue-conversation` | speaker、reveal coordination、choice selection、commit、正文滚动 |
+| `lr-dialogue-conversation` | speaker、reveal coordination、choice selection、commit、正文滚动；History 时视觉隐藏但保留 local state |
 | `lr-dialogue-text` | 当前可见文本 |
 | `lr-dialogue-choices` | choice list layout |
 | `lr-dialogue-choice` | row visual、selected / enabled state |
 | `lr-dialogue-controls` | compact control hints；不得占据主要正文空间 |
 | `lr-dialogue-control-hint` | action / label / enabled visual |
-| `lr-dialogue-history` | History viewport、scroll events、visible state |
+| `lr-dialogue-history` | History 全宽 viewport、scroll events、visible state |
 | `lr-dialogue-history-entry` | speaker + text entry |
 
 结构型 element 仍可使用简单 slot implementation，但 canonical tags 必须全部注册。
@@ -647,7 +711,7 @@ emitCustomEvent("submit", {
 - disabled choice 暴露 `aria-disabled="true"`；
 - selected choice 暴露 `aria-selected="true"`；
 - History 隐藏时不能继续暴露为可交互可访问内容；
-- History 打开时 Conversation visual content 应被隐藏并从交互语义中移除；
+- History 打开时 Conversation visual content 与 character stage 应被隐藏并从交互语义中移除；
 - 动画应尊重 `prefers-reduced-motion`；
 - 颜色不是 selection / disabled 的唯一信息源。
 
@@ -749,6 +813,9 @@ View
 ```text
 new conversation-id
 → mode = CONVERSATION
+→ show character pane
+→ show conversation pane
+→ hide history pane
 → selectedChoiceId = null
 → revealIndex = 0
 → conversationScroll = 0
@@ -766,10 +833,17 @@ commit + REVEALED + valid terminal state
 history visible false → true
 → mode = HISTORY
 → pause reveal
+→ hide character pane
+→ hide conversation pane
+→ history pane spans full modal content area
 → ensure latest/history requested position visible
 
 history visible true → false
 → mode = CONVERSATION
+→ hide history pane
+→ restore 32/68 Conversation layout
+→ show character pane
+→ show conversation pane
 → restore conversation scroll
 → resume reveal if needed
 ```
@@ -781,17 +855,19 @@ history visible true → false
 至少验证：
 
 - canonical tags 全部成功注册；
-- modal 左右结构存在且 History 切换不改变 modal bounding box；
+- Conversation mode 使用 character + content 两栏；
+- History mode 隐藏 character stage 和当前 Conversation visual content；
+- History pane 使用完整 modal 内容宽度；
+- Conversation ↔ History 切换不改变 modal bounding box；
 - `speaker-name` 正确投影；
 - text reveal 逐步显示；
 - revealing 时第一次 commit 只 reveal，不 submit；
 - revealed 后 commit 正确 submit；
 - choices next / previous / disabled / wrap；
 - choice submit payload exact；
-- History visible 切换只替换右区内容；
 - History 初始定位最新记录；
 - History scroll events；
-- History 打开 / 关闭保留 Conversation selection 和 reveal state；
+- History 打开 / 关闭保留 Conversation selection、scroll 和 reveal state；
 - resource sprite 使用 4×4 crop、direction=2、pattern=0；
 - image smoothing 关闭；
 - stale resource result 不覆盖新人物；
@@ -822,6 +898,7 @@ RPGDialogue controls
 1280×720 choices
 1280×720 history
 640×480 conversation
+640×480 history
 narrow viewport fallback
 ```
 
@@ -831,7 +908,8 @@ narrow viewport fallback
 - sprite 不模糊；
 - 中文正文可读；
 - choice 不被截断；
-- History 长列表可滚动；
+- History 不显示 character stage；
+- History 长列表使用完整内容宽度并可滚动；
 - Conversation ↔ History 外框几何稳定。
 
 # 22. 第一版验收
@@ -842,11 +920,12 @@ narrow viewport fallback
 - [ ] 不修改 RPG Dialogue Runtime / public API / Frozen ABI。
 - [ ] Dialogue 以 modal 覆盖底层地图。
 - [ ] Modal 在 Conversation / History 间保持同一位置和尺寸。
-- [ ] 左侧显示来自 Map character sheet 的正面静止像素人物。
+- [ ] Conversation mode 左侧显示来自 Map character sheet 的正面静止像素人物。
 - [ ] sprite 使用 pixelated / no smoothing。
-- [ ] 右侧 Conversation 支持 speaker、逐字显示、继续、choices。
-- [ ] History 在右侧显示 session entries，并默认定位最新记录。
-- [ ] History 切换保留左侧人物与 Conversation local state。
+- [ ] Conversation mode 右侧支持 speaker、逐字显示、继续、choices。
+- [ ] History mode 隐藏人物区和当前 Conversation visual content。
+- [ ] History 使用 100% modal 内容宽度显示 session entries，并默认定位最新记录。
+- [ ] History 打开 / 关闭保留 Conversation 的 reveal、selection 和 scroll local state。
 - [ ] semantic Render Events 与 `submit` Custom Event 完整兼容。
 - [ ] Presentation 资源纳入 PokeMan source → FSDB 同步和漂移检查。
 - [ ] Browser / qualification 测试覆盖真实 closed loop。
@@ -856,12 +935,12 @@ narrow viewport fallback
 
 第一版之后可按真实需求逐项增加：
 
-1. History 当前主要可见 speaker 驱动左侧 character stage；
-2. 多 character stage / active character 亮度切换；
-3. sprite idle animation；
-4. speaker-specific accent；
-5. 专用 portrait resource；
-6. expression / pose Presentation data；
+1. 多 character stage / active character 亮度切换；
+2. sprite idle animation；
+3. speaker-specific accent；
+4. 专用 portrait resource；
+5. expression / pose Presentation data；
+6. History 小型 inline speaker marker（仅在确有识别需求时；不恢复固定人物区）；
 7. History 搜索或更长 session virtualization；
 8. touch-specific affordance。
 
