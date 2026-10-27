@@ -127,6 +127,467 @@ data-mode="history"
 
 该 mode 不是 Runtime state，不通过事件回传。
 
+## 4.1 精确 Wireframe：四个 UI state
+
+PokeMan Presentation 把 UI 视图归一为四个互斥状态：
+
+```text
+REVEALING
+CONVERSATION
+CHOICES
+HISTORY
+```
+
+它们不是四个 Runtime mode。Runtime 仍然只有：
+
+```text
+CONVERSATION
+HISTORY
+```
+
+对应关系固定为：
+
+```text
+Runtime CONVERSATION
+├─ text reveal incomplete
+│  → UI REVEALING
+├─ text reveal complete + choices.length === 0
+│  → UI CONVERSATION
+└─ text reveal complete + choices.length > 0
+   → UI CHOICES
+
+Runtime HISTORY
+└─ history.visible === "true"
+   → UI HISTORY
+```
+
+因此：
+
+- `REVEALING / CONVERSATION / CHOICES` 都由 `lr-dialogue-conversation` 的 Presentation-local state 区分；
+- `HISTORY` 由 Runtime retained fact `lr-dialogue-history[visible="true"]` 决定；
+- `revealing` 不进入 Runtime、Renderer Store 或 Shared State；
+- `choices.length` 来自 canonical `lr-dialogue-choices` children，不创建额外状态 authority。
+
+### REVEALING
+
+条件：
+
+```text
+history.visible = false
+AND revealComplete = false
+```
+
+Wireframe：
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                      lr-dialogue-view                        │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ modal                                                  │  │
+│  │                                                        │  │
+│  │ ┌──────────────────┐  ┌─────────────────────────────┐ │  │
+│  │ │ characters       │  │ conversation                │ │  │
+│  │ │                  │  │ Professor                   │ │  │
+│  │ │   active sprite  │  │                             │ │  │
+│  │ │                  │  │ 你终于来▌                  │ │  │
+│  │ │                  │  │                             │ │  │
+│  │ │                  │  │ choices*                    │ │  │
+│  │ └──────────────────┘  └─────────────────────────────┘ │  │
+│  │                                                        │  │
+│  │ controls                                               │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+`choices*` 表示 canonical choices 如果存在仍然存在并可显示。原因是 Frozen Runtime 在 Conversation mode 中只要 `choices.length > 0`，`previous / next` 就是 enabled，并可能向 Conversation 发出 `choice-previous / choice-next`；Presentation 必须能够履行 selection 语义，不能因为文字仍在 reveal 就丢弃这些事件。
+
+此状态：
+
+- character pane：visible；
+- conversation pane：visible；
+- text：partial；
+- choices：若存在则 visible，可导航；
+- continue indicator：hidden；
+- history：hidden；
+- `commit`：立即 reveal all，**不得 submit**。
+
+### CONVERSATION
+
+条件：
+
+```text
+history.visible = false
+AND revealComplete = true
+AND choices.length === 0
+```
+
+Wireframe：
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│ ┌──────────────────┐  ┌───────────────────────────────────┐ │
+│ │ characters       │  │ conversation                      │ │
+│ │                  │  │ Professor                         │ │
+│ │   active sprite  │  │                                   │ │
+│ │                  │  │ 你终于来了。                      │ │
+│ │                  │  │                                   │ │
+│ │                  │  │                              ⌄    │ │
+│ └──────────────────┘  └───────────────────────────────────┘ │
+│ controls                                                     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+此状态：
+
+- text：完整；
+- choices container：仍然存在，但 children 为空；
+- continue indicator：visible；
+- `commit`：发出 `submit({ conversationId })`。
+
+### CHOICES
+
+条件：
+
+```text
+history.visible = false
+AND revealComplete = true
+AND choices.length > 0
+```
+
+Wireframe：
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│ ┌──────────────────┐  ┌───────────────────────────────────┐ │
+│ │ characters       │  │ conversation                      │ │
+│ │                  │  │ Professor                         │ │
+│ │   active sprite  │  │                                   │ │
+│ │                  │  │ 你愿意接受吗？                    │ │
+│ │                  │  │                                   │ │
+│ │                  │  │ ┌───────────────────────────────┐ │ │
+│ │                  │  │ │ 接受                      ›   │ │ │
+│ │                  │  │ ├───────────────────────────────┤ │ │
+│ │                  │  │ │ 拒绝                          │ │ │
+│ │                  │  │ └───────────────────────────────┘ │ │
+│ └──────────────────┘  └───────────────────────────────────┘ │
+│ controls                                                     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+此状态：
+
+- continue indicator：hidden；
+- `selectedChoiceId` 可以为 `null`；
+- `choice-next`：选择第一个 enabled 或下一个 enabled；
+- `choice-previous`：选择最后一个 enabled 或上一个 enabled；
+- `commit + selectedChoiceId = null`：no-op；
+- `commit + selected enabled choice`：发出 `submit({ conversationId, choiceId })`。
+
+### HISTORY
+
+条件：
+
+```text
+history.visible = true
+```
+
+Wireframe：
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                      lr-dialogue-view                        │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ modal                                                  │  │
+│  │                                                        │  │
+│  │ HISTORY                                                │  │
+│  │ ────────────────────────────────────────────────────── │  │
+│  │                                                        │  │
+│  │ Professor                                              │  │
+│  │ 你终于来了。                                           │  │
+│  │                                                        │  │
+│  │ Rival                                                  │  │
+│  │ 我已经等很久了。                                       │  │
+│  │                                                        │  │
+│  │ Professor                                              │  │
+│  │ 现在开始吧。                                           │  │
+│  │                                                        │  │
+│  │ controls                                               │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+此状态：
+
+- `lr-dialogue-characters`：layout / a11y hidden；
+- `lr-dialogue-conversation`：layout / a11y hidden，但 HTMLElement 与 local state 保留；
+- `lr-dialogue-history`：100% modal content width；
+- `previous / next`：只滚动 History；
+- `confirm`：Runtime disabled / no-op；
+- `history`：返回 Runtime CONVERSATION；
+- `cancel`：返回 Runtime CONVERSATION；
+- 打开后按 retained-before-event 顺序处理 `visible=true`，随后响应 `scroll-to-latest`。
+
+## 4.2 Canonical DOM 与 Shadow DOM 分区
+
+Runtime materialize 的 light DOM **不得改形**：
+
+```html
+<lr-dialogue-view version="0">
+  <lr-dialogue-characters>
+    <lr-dialogue-character
+      character-id="..."
+      display-name="..."
+      active="true|false">
+    </lr-dialogue-character>
+  </lr-dialogue-characters>
+
+  <lr-dialogue-conversation
+    conversation-id="..."
+    speaker-name="...">
+    <lr-dialogue-text text="..."></lr-dialogue-text>
+
+    <lr-dialogue-choices>
+      <lr-dialogue-choice
+        choice-id="..."
+        text="..."
+        enabled="true|false">
+      </lr-dialogue-choice>
+    </lr-dialogue-choices>
+  </lr-dialogue-conversation>
+
+  <lr-dialogue-controls>
+    <lr-dialogue-control-hint action="confirm" ...></lr-dialogue-control-hint>
+    <lr-dialogue-control-hint action="previous" ...></lr-dialogue-control-hint>
+    <lr-dialogue-control-hint action="next" ...></lr-dialogue-control-hint>
+    <lr-dialogue-control-hint action="history" ...></lr-dialogue-control-hint>
+    <lr-dialogue-control-hint action="cancel" ...></lr-dialogue-control-hint>
+  </lr-dialogue-controls>
+
+  <lr-dialogue-history visible="false|true">
+    <lr-dialogue-history-entry
+      entry-id="..."
+      speaker-name="..."
+      text="...">
+    </lr-dialogue-history-entry>
+  </lr-dialogue-history>
+</lr-dialogue-view>
+```
+
+PokeMan 只定义每个 canonical element 自己的 Shadow DOM。
+
+### `lr-dialogue-view`
+
+```text
+#shadow-root
+├─ .backdrop
+└─ .modal[role=dialog]
+   ├─ .surface
+   └─ <slot class="canonical-root">
+```
+
+`.modal` 是唯一稳定外框。slot 使用 layout flattening，使四个 canonical direct children 参与 modal grid；实现不得把 canonical nodes 从 `lr-dialogue-view` reparent 到别处。
+
+Conversation mode：
+
+```css
+grid-template-columns: 32% minmax(0, 68%);
+grid-template-rows: minmax(0, 1fr) auto;
+grid-template-areas:
+  "characters conversation"
+  "characters controls";
+```
+
+History mode：
+
+```css
+grid-template-columns: minmax(0, 1fr);
+grid-template-rows: minmax(0, 1fr) auto;
+grid-template-areas:
+  "history"
+  "controls";
+```
+
+`lr-dialogue-view` 用 `MutationObserver` 观察 direct child `lr-dialogue-history[visible]`，只更新 Shadow DOM 内部 `.modal` 的 private mode class / data；不向 Runtime 写任何 attr。
+
+### `lr-dialogue-characters`
+
+```text
+#shadow-root
+└─ .character-stage
+   └─ <slot>
+```
+
+规则：
+
+- 多个 `lr-dialogue-character` 可以同时存在；
+- 只把 `active="true"` 的 character 作为主要可见人物；
+- inactive characters 可以保留在 DOM，但不得抢占主要视觉空间；
+- 不根据 `speaker-name` 猜测 active character。
+
+### `lr-dialogue-character`
+
+```text
+#shadow-root
+└─ .character
+   ├─ canvas.sprite[aria-hidden=true]
+   └─ .fallback[aria-hidden=true]
+```
+
+`display-name` 可用于 accessibility / fallback，不要求在左侧重复显示姓名；当前 speaker 文本由 Conversation 右侧 header 表达。
+
+### `lr-dialogue-conversation`
+
+```text
+#shadow-root
+└─ .conversation
+   ├─ header.speaker
+   ├─ .body
+   │  └─ <slot>
+   │     ├─ lr-dialogue-text
+   │     └─ lr-dialogue-choices
+   └─ footer.status
+      └─ .continue-indicator
+```
+
+`lr-dialogue-conversation` 是唯一 Conversation interaction owner，持有：
+
+```text
+observedConversationId
+revealText
+revealIndex
+revealComplete
+selectedChoiceId
+conversationScroll
+revealTimer
+presented = true|false
+```
+
+它根据 private state 在自己的 Shadow DOM 内计算：
+
+```text
+REVEALING | CONVERSATION | CHOICES
+```
+
+不通过 LoomRealm Custom Event 上报该 phase。
+
+### `lr-dialogue-text`
+
+```text
+#shadow-root
+└─ span.text
+```
+
+canonical `text` attr 永远保存完整文本；可见 partial text 只由 Conversation 通过 local coordination 写入 WC-local rendering state。
+
+### `lr-dialogue-choices`
+
+```text
+#shadow-root
+└─ .choice-list[role=listbox]
+   └─ <slot>
+```
+
+容器始终存在；没有 choice 时为空。
+
+### `lr-dialogue-choice`
+
+```text
+#shadow-root
+└─ .choice[role=option]
+   ├─ .label
+   └─ .selection-marker
+```
+
+`selected` 不是 canonical attr。Conversation 通过 private method / local DOM coordination 设置 WC-local selection。
+
+### `lr-dialogue-controls`
+
+```text
+#shadow-root
+└─ footer.control-hints
+   └─ <slot>
+```
+
+五个 canonical hint node 始终存在。Presentation 可以隐藏 disabled hint 或降低其权重，但不能改写 `enabled` authority。
+
+### `lr-dialogue-history`
+
+```text
+#shadow-root
+└─ section.history
+   ├─ header.history-header
+   │  └─ h2 "History"
+   └─ .history-scroll
+      └─ <slot>
+```
+
+History 自己持有：
+
+```text
+pixel scroll position
+local focus
+virtualization state (future)
+```
+
+### `lr-dialogue-history-entry`
+
+```text
+#shadow-root
+└─ article.entry
+   ├─ .speaker
+   └─ .text
+```
+
+不显示人物大图，不把 `speaker-name` 解析成 Character reference。
+
+## 4.3 State ownership
+
+```text
+RPGDialogue Runtime
+├─ lifecycle: READY | ACTIVE | CLOSED
+├─ interaction mode: CONVERSATION | HISTORY
+├─ history.visible
+├─ choices / enabled facts
+└─ control-hint enabled facts
+
+lr-dialogue-view
+└─ derived visual mode: conversation | history
+
+lr-dialogue-conversation
+├─ reveal progress
+├─ selectedChoiceId
+├─ conversation pixel scroll
+└─ UI phase: REVEALING | CONVERSATION | CHOICES
+
+lr-dialogue-history
+└─ history pixel scroll / local focus
+```
+
+严禁形成以下反向 authority：
+
+```text
+WC local phase
+→ Runtime mode
+
+selectedChoiceId
+→ Renderer Store
+
+History pixel scroll
+→ Shared State
+```
+
+## 4.4 Input / event routing matrix
+
+| UI state | Runtime mode | `confirm` | `previous` | `next` | `history` | `cancel` |
+| --- | --- | --- | --- | --- | --- | --- |
+| REVEALING | CONVERSATION | `conversation.commit` → reveal all | 有 choices 时 `choice-previous` | 有 choices 时 `choice-next` | → HISTORY | 按 session cancelable |
+| CONVERSATION | CONVERSATION | `conversation.commit` → submit | no event | no event | → HISTORY | 按 session cancelable |
+| CHOICES | CONVERSATION | commit；无 selection no-op，有 selection submit | `choice-previous` | `choice-next` | → HISTORY | 按 session cancelable |
+| HISTORY | HISTORY | no-op | `history.scroll-up` | `history.scroll-down` | → CONVERSATION | → CONVERSATION |
+
+其中 REVEALING 如果当前 Conversation 自带 choices，selection navigation 仍必须工作；`commit` 永远先结束 reveal，不得在同一次 command 中继续 submit。
+
+
 # 5. Modal 布局
 
 ## 5.1 桌面 / 横屏掌机
@@ -855,64 +1316,104 @@ examples/PokeMan/
 
 PokeMan 不加载 `game-libs/rpg-dialogue/browser/rpg-dialogue.browser.js` 与 PokeMan implementation 两套同名 custom elements。一个 document 中同一 canonical tag 只能由一个实现注册。
 
-# 20. Implementation state machine
+# 20. Interaction state machine
 
-推荐最小 Presentation state：
-
-```text
-View
-├─ mode
-│  ├─ CONVERSATION
-│  └─ HISTORY
-│
-├─ conversation identity
-├─ revealIndex
-├─ revealComplete
-├─ selectedChoiceId
-├─ conversationScroll
-├─ historyScroll
-└─ character resource generation
-```
-
-主要 transition：
+本节只给实现状态机；Runtime / Presentation ownership 以 §4.3 为准。
 
 ```text
-new conversation-id
-→ mode = CONVERSATION
-→ show character pane
-→ show conversation pane
-→ hide history pane
-→ selectedChoiceId = null
-→ revealIndex = 0
-→ conversationScroll = 0
-→ start reveal
+                         new conversation-id
+                                  │
+                                  ▼
+                      ┌──────────────────────┐
+                      │      REVEALING       │
+                      │ mode=CONVERSATION    │
+                      │ revealComplete=false │
+                      └──────────┬───────────┘
+                                 │
+                    timer complete / commit
+                                 │
+                 ┌───────────────┴────────────────┐
+                 │                                │
+          choices.length=0                 choices.length>0
+                 │                                │
+                 ▼                                ▼
+      ┌────────────────────┐            ┌────────────────────┐
+      │    CONVERSATION    │            │      CHOICES       │
+      │ revealComplete=true│            │ revealComplete=true│
+      │ choices=0          │            │ choices>0          │
+      └─────────┬──────────┘            └─────────┬──────────┘
+                │                                 │
+                │ submit                          │ selected + submit
+                ▼                                 ▼
+          settle operation                  settle operation
 
-commit + REVEALING
-→ reveal all
-
-choice-next / choice-previous
-→ update selectedChoiceId
-
-commit + REVEALED + valid terminal state
-→ emit submit
-
-history visible false → true
-→ mode = HISTORY
-→ pause reveal
-→ hide character pane
-→ hide conversation pane
-→ history pane spans full modal content area
-→ ensure latest/history requested position visible
-
-history visible true → false
-→ mode = CONVERSATION
-→ hide history pane
-→ restore 32/68 Conversation layout
-→ show character pane
-→ show conversation pane
-→ restore conversation scroll
-→ resume reveal if needed
+REVEALING / CONVERSATION / CHOICES
+                │
+                │ controls.history()
+                ▼
+      ┌────────────────────┐
+      │      HISTORY       │
+      │ mode=HISTORY       │
+      │ visible=true       │
+      └─────────┬──────────┘
+                │
+                │ history() or cancel()
+                ▼
+      restore previous Conversation phase
+      (REVEALING / CONVERSATION / CHOICES)
 ```
+
+History 进入前必须保存的不是一个额外业务 state，而是当前 Conversation WC 已经持有的 local state：
+
+```text
+revealIndex
+revealComplete
+selectedChoiceId
+conversationScroll
+```
+
+### Transition table
+
+| From | Trigger | Guard | Action | To |
+| --- | --- | --- | --- | --- |
+| new Conversation | `conversation-id` changes | text non-empty | reset local state; start reveal | REVEALING |
+| new Conversation | `conversation-id` changes | text empty + no choices | mark revealed | CONVERSATION |
+| new Conversation | `conversation-id` changes | text empty + choices | mark revealed | CHOICES |
+| REVEALING | reveal timer completes | no choices | `revealComplete=true` | CONVERSATION |
+| REVEALING | reveal timer completes | has choices | `revealComplete=true` | CHOICES |
+| REVEALING | `commit` | no choices | reveal all; no submit | CONVERSATION |
+| REVEALING | `commit` | has choices | reveal all; no submit | CHOICES |
+| REVEALING | `choice-next/previous` | has choices | update `selectedChoiceId`; continue reveal | REVEALING |
+| CONVERSATION | `commit` | no choices | emit `submit({conversationId})` | settle |
+| CHOICES | `choice-next/previous` | enabled target exists | update `selectedChoiceId` | CHOICES |
+| CHOICES | `commit` | no selection | no-op | CHOICES |
+| CHOICES | `commit` | selected enabled | emit `submit({conversationId, choiceId})` | settle |
+| any Conversation phase | Runtime sets History visible | ACTIVE | pause reveal if needed; preserve local state; hide conversation/characters | HISTORY |
+| HISTORY | `scroll-to-latest` | after visible retained reconcile | scroll to newest entry | HISTORY |
+| HISTORY | `scroll-up/down` | history has entries | local scroll | HISTORY |
+| HISTORY | Runtime clears History visible | ACTIVE | restore layout; resume reveal if it was paused | previous Conversation phase |
+| any phase | new `conversation-id` | — | old reveal/selection/scroll state discarded | recompute from new Conversation |
+
+### Local coordination contract
+
+History open/close 不向 Conversation 发送新的 LoomRealm Render Event。PokeMan Presentation 使用 Window-local coordination：
+
+```text
+lr-dialogue-view observes history.visible
+→ view calls private/local presentation hook on lr-dialogue-conversation
+   setPresented(false | true)
+→ conversation pauses/resumes reveal timer
+```
+
+该 hook：
+
+- 不是 public ABI；
+- 不发 Session Event；
+- 不进入 Render Tree；
+- 不改变 `conversation-id`、choice attrs 或 History attrs；
+- 只控制 WC-local timer / visibility behavior。
+
+如果 `setPresented(false)` 时已经 `revealComplete=true`，只暂停视觉展示，不改变 phase。
 
 # 21. Testing strategy
 
