@@ -533,7 +533,7 @@ mutation
 Story Index
 ```
 
-使用 product-local hard-coded Conversations，只验证 RPGDialogue API 与 caller branching。
+使用 product-local hard-coded Conversations，只验证 RPGDialogue API、History、choice 和 Dialogue Subsystem 内部 branching。
 
 固定流程：
 
@@ -639,13 +639,14 @@ caller appendHistory
 
 ---
 
-# 20. Caller-owned branching
+# 20. Dialogue-owned branching
 
-Conversation B result 由普通 PokeMan JavaScript branching 处理。
+Conversation B result 由 **Dialogue Subsystem** 自己处理：
 
 ```text
 { type: "cancelled" }
-→ end interaction
+→ child conclusion = "cancelled"
+→ return completed(...)
 
 { type: "submitted", choiceId: "ready" }
 → open Conversation C-ready
@@ -654,13 +655,20 @@ Conversation B result 由普通 PokeMan JavaScript branching 处理。
 → open Conversation C-not-yet
 ```
 
-这里故意不使用 Dialogue graph。
+Map caller不解释 choiceId，也不决定 C。
 
-它证明 Frozen RPG Dialogue API 的设计边界：
+这里仍然故意不使用 Dialogue graph；只是把当前 hard-coded flow 放在正确的业务 owner 中。
 
-> RPG Dialogue 返回 interaction result；caller 决定下一步业务 flow。
+```text
+RPGDialogue
+→ 提供 Conversation interaction result
 
----
+PokeMan Dialogue Subsystem
+→ 拥有当前 Dialogue flow
+
+Map
+→ 只负责 NPC interaction → call Dialogue
+```
 
 # 21. Conversation C
 
@@ -680,23 +688,34 @@ Conversation B result 由普通 PokeMan JavaScript branching 处理。
 
 均无 choices。
 
-Conversation C 提交或 cancel 后：
+C 正常提交后，Dialogue Subsystem返回：
 
 ```text
-interaction complete
-→ dialogue.close()
-→ Dialogue RenderDomain removed
-→ Map remains live
-→ Map controls restored
+ready
+→ completed({
+     dialogueKey: "professor-vertical-slice",
+     conclusion: "ready"
+   })
+
+not-yet
+→ completed({
+     dialogueKey: "professor-vertical-slice",
+     conclusion: "not-yet"
+   })
 ```
 
-本 slice 不写 Shared State。
+任一 Conversation 的用户 cancel：
 
-不记录“玩家准备好了”。
+```text
+→ completed({
+     dialogueKey: "professor-vertical-slice",
+     conclusion: "cancelled"
+   })
+```
 
-不发 Quest/Event mutation。
+随后 child Frame return/close；Map由 Main resume到 fresh Activation。
 
----
+本 slice 不写 Shared State，不记录“玩家准备好了”，不发 Quest/Event mutation。
 
 # 22. History policy for this slice
 
@@ -766,52 +785,60 @@ PokeMan composition 不重复实现 History cancel precedence。
 
 ---
 
-# 24. Input router order
+# 24. Controls ownership across Frame call
 
-每个 valid `controls.event` 建议按以下顺序处理：
+不再存在同一 ControlsConsumer 内的 Map / Dialogue router。
 
-```text
-1. directions.acceptEvent(event)
-2. applyMapIntent()
-3. if action !== down or repeat=true:
-     stop semantic routing
-4. if activeDialogue !== null:
-     route Dialogue semantic command
-   else:
-     route Map semantic command
-```
-
-State：
+Map A1：
 
 ```text
-directions.acceptState(state)
-→ applyMapIntent()
+controls.state / event
+→ Map Activation-local Consumer
+→ Directional Tracker / map.controls.confirm()
 ```
 
-这样：
+call 前：
 
-- directional truth 始终更新；
-- Dialogue active 时 Map 始终 neutral；
-- semantic press 不 replay；
-- Dialogue 结束后可以立即恢复当前 held direction。
+```text
+moveIntent = null
+tracker.reset()
+consumer.close()
+```
 
----
+Dialogue child：
+
+```text
+controls.event
+→ Dialogue child Consumer
+→ RPGDialogueControls
+```
+
+Dialogue return后 Map A2：
+
+```text
+new Consumer
+new Directional Tracker
+initial neutral
+new controls.state rebuilds truth
+```
+
+这由 Frame authority切换 controls destination，而不是 product local active flag。
 
 # 25. Interaction race rules
 
-必须处理：
+## 25.1 repeated confirm
 
-## 24.1 repeated confirm
+一旦 child call accepted：
 
 ```text
-activeDialogue !== null
-→ south/start routes to Dialogue
-→ MUST NOT call map.controls.confirm()
+Map A1 suspended
+→ no ordinary controls delivery to Map
+→ south/start只可能进入 Dialogue child Consumer
 ```
 
-所以玩家在 Dialogue 中继续按确认不会重新触发 Professor NPC interaction。
+所以 Dialogue 中确认不会重新触发 Professor NPC interaction。
 
-## 24.2 movement in progress
+## 25.2 movement in progress
 
 RPGMap 已保证：
 
@@ -822,31 +849,32 @@ confirm while active movement
 
 PokeMan 不复制 Map busy logic。
 
-## 24.3 double NPC event
+Professor interaction被接受后，call 前必须先 `moveIntent=null`。
 
-即使未来出现 duplicate business notification：
+## 25.3 duplicate NPC event
+
+在 child call task 建立前的本地 race使用：
 
 ```text
 dialogueTask !== null
-OR activeDialogue !== null
-→ startProfessorDialogue no-op
+→ do not start a second call
 ```
 
-同一时刻不得创建第二个 RPGDialogue。
+call accepted 后 Map 已 suspended，本身不会再收到 ordinary confirm。
 
-## 24.4 stale async resolution
+## 25.4 stale / terminal cleanup
 
-如果 Frame 已 abort：
+如果 Map Frame terminal、Runtime failure或 child-call unwind发生：
 
 ```text
-Content reads reject/cancel
-RPGDialogue terminates
-task must not reopen Map/Dialogue state
+old Map Consumer remains closed
+old tracker remains discarded
+child Dialogue owns its own cleanup
 ```
 
-finally cleanup 必须 idempotent。
+不得在 terminal path 私自重建 Map controls。
 
----
+只有正常 child return + valid Map resume 后，才创建 A2 controls wiring。
 
 # 26. Render / Presentation composition
 
@@ -880,9 +908,9 @@ presentation.json
 
 ---
 
-# 27. Production topology remains unchanged
+# 27. Production topology after this slice
 
-完成后仍必须是：
+完成后 exact topology：
 
 ```json
 {
@@ -891,35 +919,23 @@ presentation.json
   },
   "subsystems": [
     { "key": "base" },
-    { "key": "map" }
+    { "key": "map" },
+    { "key": "dialogue" }
   ]
 }
 ```
 
-Hostra/PWA manifests 仍只安装：
+Hostra：
 
 ```text
-base
-map
+base     -> subsystems/base.mjs
+map      -> subsystems/map.mjs
+dialogue -> subsystems/dialogue.mjs
 ```
 
-区别只是：
+PWA 使用相同 subsystem topology，并必须把 `dialogue.mjs` 纳入 installed executable index。
 
-```text
-map executable
-→ production dependency @loomrealm-game/rpg-dialogue
-→ same Frame creates RPGDialogue when needed
-```
-
-不要因为看到 RPGDialogue 就新增：
-
-```text
-{ key: "dialogue" }
-```
-
-Subsystem。
-
----
+`base` 继续只拥有 unified controls producer lifetime；它不变成 Dialogue orchestrator。
 
 # 28. Initial spawn policy
 
@@ -949,45 +965,60 @@ player facing Professor
 
 # 29. Required tests
 
-至少增加 PokeMan-level tests 覆盖以下四层。
+至少覆盖五层。
 
-## 28.1 Placement
-
-证明：
+## 29.1 Topology / placement
 
 ```text
+game.json = base + map + dialogue
+launch.hostra = base + map + dialogue
+launch.pwa = base + map + dialogue
 Professor interactable=true
-other current fixtures unchanged
+other current NPC fixtures unchanged
 ```
 
-## 28.2 Product controls composition
-
-使用真实 Common Controls consumer semantics 或等价 focused harness，证明：
+## 29.2 Map child-call / Activation controls
 
 ```text
-Map active:
-south/start down → map.confirm
+Map A1:
+south/start → map.controls.confirm()
 
-Dialogue active:
-south/start → dialogue.confirm
-up → dialogue.previous
-down → dialogue.next
-select → dialogue.history
-east → dialogue.cancel
+Professor NPCInteractEvent
+→ exact frame.call("dialogue", input)
 
-repeat=true
-→ no semantic command
+before call:
+→ moveIntent=null
+→ A1 consumer closed
+→ A1 tracker reset/discarded
 
-Dialogue active
-→ Map moveIntent = null
+child active:
+→ old A1 delivery cannot affect Map
 
-Dialogue closes
-→ current tracker direction reapplied
+after child return:
+→ Map resumed under fresh A2
+→ A2 Consumer is a new instance
+→ A2 Tracker is a new instance
+→ A2 starts neutral
+→ only new A2 controls.state rebuilds held truth
 ```
 
-## 28.3 Producer
+## 29.3 Dialogue Subsystem
 
-使用真实 Content fixture 证明：
+```text
+exact frame.params validation
+one child-frame ControlsConsumer
+south/start → confirm
+up/down → previous/next
+select → history
+east → cancel
+repeat=true → no command
+RPGDialogue lifecycle / cleanup
+exact completed / failed child outcomes
+```
+
+## 29.4 Producer / dialogue flow
+
+使用真实 Content fixture：
 
 ```text
 struct.NPC/professor
@@ -997,33 +1028,32 @@ struct.NPC/professor
 → exact DialogueCharacterV0.data.sprite
 ```
 
-不得 hard-code version。
+并覆盖 A、History、B、ready/not-yet、Dialogue-owned branching、C、user cancel。
 
-## 28.4 Real gameplay vertical
+不得 hard-code contentVersion。
 
-真实 Chromium / WebProjector / PokeMan Presentation 下验证：
+## 29.5 Real Frame-stack gameplay vertical
 
 ```text
+base → map A1
 real Map visible
-→ Professor NPC visible
-→ player faces Professor
-→ semantic confirm
-→ real NPCInteractEvent
-→ real RPGDialogue
-→ real PokeMan Dialogue Web Components
-→ Conversation A
-→ Conversation B choices
-→ History
-→ choice result
-→ Conversation C branch
-→ Dialogue closes
-→ same Map remains live
-→ movement works again
+Professor NPC visible
+semantic confirm
+real NPCInteractEvent
+real frame.call("dialogue")
+Map A1 suspended
+Dialogue child is Top Active Frame
+real RPGDialogue
+real PokeMan Dialogue Web Components
+History / Choice work
+child returns
+Map A2 fresh Activation
+same Map RenderDomain / HTMLElement remains
+fresh Map controls work
+movement works again
 ```
 
-这才是本文件的核心 qualification。
-
----
+这次只证明两个 RenderDomain同 Window共存是不够的；必须验证真实 call / suspend / child / return / resume。
 
 # 30. Hostra / PWA evidence
 
@@ -1076,68 +1106,64 @@ Map tests
 
 # 32. Observable invariants
 
-整个 vertical slice 必须保持：
-
 ```text
-Map HTMLElement / RenderDomain
-→ Dialogue 打开期间保持 live
+Map RenderDomain / HTMLElement
+→ child Dialogue期间保持 live
 
-Dialogue active
-→ Map movement = neutral
+Map A1
+→ call前 moveIntent neutral
+→ controls wiring closed
+
+Dialogue child
+→ 唯一 Top Active Frame
+→ own ControlsConsumer
+→ own RPGDialogue
+→ own Dialogue flow
 
 History
-→ 不恢复 Map controls
+→ remains inside child Dialogue Frame
 
-Conversation result
-→ caller receives exact RPGDialogue result
+child completed
+→ child closes
+→ Map resumes fresh A2
 
-Dialogue close
-→ only Dialogue Domain closes
-
-Map
-→ remains current scene / same gameplay Frame
+Map A2
+→ fresh Consumer / Tracker
+→ neutral baseline
+→ same Map scene / Handler / RenderDomain
 
 second Professor interaction
-→ fresh RPGDialogue session
+→ new child Frame
+→ new RPGDialogue
 → fresh History
 ```
 
----
-
 # 33. Failure policy
-
-第一轮不是 production Story system，但不能静默吞 correctness failure。
 
 Unexpected：
 
 ```text
+frame.call target unavailable
+invalid Dialogue Frame input
 NPC content invalid
 resource resolve failure
 RPGDialogue open failure
 Presentation/session establishment failure
-unexpected branch value
+unexpected result / choice
+child Frame failed outcome
 ```
 
-必须进入 composition-owned failure path并使当前 PokeMan Map Frame fail-stop / surface test failure。
+必须进入明确 failure path；不能 `console.error` 后假装成功。
 
-不得：
+Map child call得到 `failed` 时不得重新创建正常 A2 gameplay controls然后继续。
+
+用户在 RPGDialogue 中的 `{ type: "cancelled" }` 是正常业务结果，由 Dialogue Subsystem转换成：
 
 ```text
-console.error + pretend success
-catch {} + continue
-fallback to fake sprite SHA
-fallback to fake Dialogue result
+completed({ conclusion:"cancelled" })
 ```
 
-User：
-
-```text
-cancelled
-```
-
-是正常业务 result，不属于 failure。
-
----
+不是 child failure。
 
 # 34. Explicit non-goals
 
@@ -1145,7 +1171,7 @@ cancelled
 
 ```text
 struct.Dialogue loader
-Dialogue graph runner
+generic Dialogue graph runner
 Choice.target
 Dialogue.mutation
 EventStateMutation
@@ -1154,105 +1180,107 @@ Relationship
 Quest
 Inventory
 Battle launch
-Map transfer from Dialogue
 persistent transcript
 Shared State Dialogue history
-speaker Character resolver
-generic NPC→Character resolver
+generic NPC→Dialogue mapping
+generic Character→NPC resolver
 rival appearance resolver
 multiple NPC Dialogue content
-pointer/touch Dialogue controls
+pointer/touch Dialogue gameplay
 physical key hint UI
 ```
 
-如果实现 Agent 开始设计这些内容，属于 scope creep。
+但与旧方案不同：
 
----
+> **独立 `dialogue` Subsystem、child Frame、其 ControlsConsumer 与 hard-coded flow 已属于本 slice 正式实现范围。**
 
 # 35. What this proves
 
-本 slice 成功后，我们获得的证据是：
+成功后获得的证据是：
 
 ```text
-Map Control Port
-+ NPC Interaction API
-+ Common Controls composition
-+ RPG Dialogue v1 Control Port
-+ RPG Dialogue Conversation/History API
-+ PokeMan character sprite producer
-+ PokeMan Dialogue Web Components
-+ LoomRealm multi-Domain Web Presentation
+RPGMap NPC Interaction
+→ canonical frame.call business boundary
+→ independent PokeMan Dialogue Subsystem
+→ child Frame Input authority
+→ RPGDialogue v1
+→ PokeMan Dialogue Web Components
+→ child return
+→ fresh Map Activation
 ```
 
-在真实 PokeMan 产品代码中可以组合工作。
-
-它**不证明**：
+同时证明：
 
 ```text
-PokeMan 正式 Dialogue subsystem 已设计完成
-Story graph 已设计完成
-Content Dialogue schema 已经适合 runtime runner
+Frame lifecycle
+Render lifecycle
+Controls Activation lifecycle
 ```
 
----
+没有被错误混为一谈。
+
+它仍不证明正式 `struct.Dialogue` graph runner / Story mutation设计已经完成。
 
 # 36. Exit criteria
 
-只有以下全部成立，本 vertical slice 才算完成：
-
 ```text
-[ ] Professor placement interactable=true
+[ ] production topology = base + map + dialogue
+[ ] dialogue.mjs 不再是 empty subsystem
+[ ] Professor interactable=true
 [ ] other NPC interaction scope unchanged
-[ ] @loomrealm-game/rpg-dialogue is production dependency
-[ ] production topology remains base + map
-[ ] only one ControlsConsumer exists in Map Frame
-[ ] Map confirm routes through RPGMapControls.confirm()
-[ ] Dialogue controls route through RPGDialogue.controls
-[ ] Dialogue active immediately neutralizes Map movement
-[ ] held direction truth continues tracking during Dialogue
-[ ] Map reactivation reapplies current tracker direction
-[ ] Professor sprite ref resolves through real Content API
+[ ] Map 不 import RPGDialogue
+[ ] Map 使用 frame.call("dialogue", exact input)
+[ ] @loomrealm-game/rpg-dialogue 是 production dependency
+[ ] Map A1 consumer 在 call 前关闭
+[ ] Map moveIntent 在 call 前 neutral
+[ ] A1 tracker reset/discard
+[ ] Dialogue child owns fresh ControlsConsumer
+[ ] child 是真实 Top Active Frame
+[ ] Map suspended期间不接 ordinary controls
+[ ] Professor sprite通过真实 Content API resolve
 [ ] no hard-coded contentVersion
-[ ] no Web Component Content query
 [ ] Conversation A works
-[ ] caller appendHistory works
-[ ] Conversation B choices work
-[ ] History shows prior entry
-[ ] History cancel returns same Conversation
-[ ] choice result reaches caller
-[ ] hard-coded caller branching opens correct Conversation C
-[ ] user cancel exits cleanly
-[ ] Dialogue Domain closes after interaction
-[ ] Map Domain/scene remains live
-[ ] player can move again
-[ ] second interaction creates fresh Dialogue session
-[ ] unexpected async failure is owned and not unhandled
+[ ] History works
+[ ] Conversation B choice works
+[ ] Dialogue Subsystem owns branching
+[ ] Conversation C works
+[ ] user cancel → normal completed child result
+[ ] unexpected failure → failed child outcome
+[ ] child close释放 Dialogue resources
+[ ] Map resumes fresh A2
+[ ] A2 uses new Consumer/Tracker
+[ ] A2 starts neutral
+[ ] old A1 State/Event不泄漏
+[ ] same Map RenderDomain / HTMLElement / scene remain live
+[ ] movement after resume works
+[ ] second interaction creates fresh child Frame
 [ ] Hostra qualification passes
+[ ] PWA dialogue executable installed
 [ ] PWA qualification passes
 [ ] Map tests pass
 [ ] RPG Dialogue v1 tests pass
 [ ] Game Control Ports tests pass
+[ ] relevant Frame / Call conformance regressions pass
 ```
-
----
 
 # 37. Next step after qualification
 
-只有本 vertical slice 通过后，再单独设计：
+本 vertical slice通过后，再设计正式：
 
 ```text
-PokeMan Dialogue subsystem / runner
+PokeMan Dialogue runner
 ```
 
 届时再决定：
 
-- `struct.Dialogue` 如何加载；
-- Line / Choice 如何依次执行；
-- `Choice.target` 的 exact semantics；
-- Character → current NPC appearance 如何由 Story/World context resolve；
-- mutation 在何时提交；
-- Dialogue 是否使用 child Frame；
-- History 是否进入 Shared State；
-- NPC interaction 如何映射 Dialogue key。
+- `struct.Dialogue` 如何读取；
+- Line sequence；
+- `Choice.target` exact semantics；
+- generic NPC → Dialogue mapping；
+- Character / appearance resolver；
+- mutation commit timing；
+- Story / World caller；
+- History persistence。
 
-这些决策不应倒灌到当前最小验证。
+**是否使用独立 Dialogue Subsystem / child Frame 已在本 slice 中确定，不再作为后续待决项。**
+
