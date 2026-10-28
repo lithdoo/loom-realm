@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { prepareHostraGame } from "@loomrealm/game-launcher-hostra";
+import { createBoundContentClient } from "@loomrealm/subsystem/host";
 import { createDesktopContentService, prepareDesktopContentView } from "../dist/index.js";
 
 const runnerPolicy = Object.freeze({ helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 1_000, terminationGraceMs: 100 });
@@ -18,11 +19,20 @@ async function fixture(resourceBytes = Buffer.from([0, 255, 1, 2])) {
   const struct = join(fsdbRoot, "[struct]角色");
   const extend = join(fsdbRoot, "[extend]角色");
   const group = join(fsdbRoot, "[group]队伍");
+  const mapStruct = join(fsdbRoot, "[struct]地图");
+  const tileGroup = join(fsdbRoot, "[group]Tile");
+  const backGroup = join(fsdbRoot, "[group]Back");
+  const objGroup = join(fsdbRoot, "[group]Obj");
+  const portalGroup = join(fsdbRoot, "[group]Portal");
+  const footholdGroup = join(fsdbRoot, "[group]Foothold");
   const resource = join(fsdbRoot, "[resource]图像");
   await Promise.all([
     mkdir(subsystems, { recursive: true }),
     mkdir(struct, { recursive: true }), mkdir(extend, { recursive: true }),
     mkdir(group, { recursive: true }), mkdir(join(resource, "ui", "icons"), { recursive: true }),
+    mkdir(mapStruct, { recursive: true }), mkdir(tileGroup, { recursive: true }),
+    mkdir(backGroup, { recursive: true }), mkdir(objGroup, { recursive: true }),
+    mkdir(portalGroup, { recursive: true }), mkdir(footholdGroup, { recursive: true }),
   ]);
   await Promise.all([
     writeFile(join(installationRoot, "game.json"), JSON.stringify({
@@ -39,6 +49,23 @@ async function fixture(resourceBytes = Buffer.from([0, 255, 1, 2])) {
     writeFile(join(group, ".info.meta"), '{"type":"object"}'),
     writeFile(join(group, ".desc.meta"), "队伍"),
     writeFile(join(group, "party.jsonl"), '{"hero":"hero"}\n'),
+    writeFile(join(mapStruct, ".info.meta"), '{"type":"object"}'),
+    writeFile(join(mapStruct, "100000000.json"), '{"name":"家","tilesetId":1}'),
+    writeFile(join(tileGroup, ".info.meta"), '{"type":"object"}'),
+    writeFile(join(tileGroup, ".desc.meta"), "Tile"),
+    writeFile(join(tileGroup, "100000000.jsonl"), '{"x":1,"y":1,"tile":14}\n{"x":2,"y":1,"tile":15}\n'),
+    writeFile(join(backGroup, ".info.meta"), '{"type":"object"}'),
+    writeFile(join(backGroup, ".desc.meta"), "Back"),
+    writeFile(join(backGroup, "100000000.jsonl"), '{"x":1,"y":0,"back":7}\n'),
+    writeFile(join(objGroup, ".info.meta"), '{"type":"object"}'),
+    writeFile(join(objGroup, ".desc.meta"), "Obj"),
+    writeFile(join(objGroup, "100000000.jsonl"), '\n'),
+    writeFile(join(portalGroup, ".info.meta"), '{"type":"object"}'),
+    writeFile(join(portalGroup, ".desc.meta"), "Portal"),
+    writeFile(join(portalGroup, "100000000.jsonl"), '{"x":3,"y":8,"target":"100000001"}\n'),
+    writeFile(join(footholdGroup, ".info.meta"), '{"type":"object"}'),
+    writeFile(join(footholdGroup, ".desc.meta"), "Foothold"),
+    writeFile(join(footholdGroup, "100000000.jsonl"), '{"x":0,"y":8}\n{"x":1,"y":8}\n'),
     writeFile(join(resource, ".desc.meta"), "图像"),
     writeFile(join(resource, "ui", "icons", "potion.png"), resourceBytes),
   ]);
@@ -131,6 +158,51 @@ test("prepared view serves deterministic manifest and the complete logical FSDB 
   assert.deepEqual(Buffer.from(await resource.arrayBuffer()), f.resourceBytes);
   assert.equal(resource.headers.get("content-type"), "image/png");
   assert.equal(resource.headers.get("x-loom-content-version"), hash(f.resourceBytes));
+});
+
+test("bound Subsystem ContentClient reads records, groups, and resources from the real service", async (t) => {
+  const f = await fixture(); t.after(() => f.cleanup());
+  const view = await prepareDesktopContentView(f.prepared);
+  const service = await createDesktopContentService({ view }); t.after(() => service.close());
+  const grant = service.createGrant({
+    permissions: ["records", "groups", "resources"],
+    expiresAtUnixMs: Date.now() + 60_000,
+  });
+  const access = service.access(grant);
+  const lifetime = new AbortController(); t.after(() => lifetime.abort());
+  const content = createBoundContentClient({ origin: access.origin, installationId: access.installationId, token: access.token }, lifetime.signal);
+
+  const hero = await content.record("struct.角色", "hero");
+  assert.deepEqual(hero.value, { name: "Hero" });
+
+  const party = await content.group("group.队伍", "party");
+  const groupBytes = Buffer.from('{"hero":"hero"}\n', "utf8");
+  assert.deepEqual(party.rows, [{ hero: "hero" }]);
+  assert.equal(party.contentVersion, hash(groupBytes));
+
+  const map = await content.record("struct.地图", "100000000");
+  assert.deepEqual(map.value, { name: "家", tilesetId: 1 });
+  const tileBytes = Buffer.from('{"x":1,"y":1,"tile":14}\n{"x":2,"y":1,"tile":15}\n', "utf8");
+  const tiles = await content.group("group.Tile", "100000000");
+  assert.deepEqual(tiles.rows, [{ x: 1, y: 1, tile: 14 }, { x: 2, y: 1, tile: 15 }]);
+  assert.equal(tiles.contentVersion, hash(tileBytes));
+  assert.deepEqual((await content.group("group.Back", "100000000")).rows, [{ x: 1, y: 0, back: 7 }]);
+  assert.deepEqual((await content.group("group.Obj", "100000000")).rows, []);
+  assert.deepEqual((await content.group("group.Portal", "100000000")).rows, [{ x: 3, y: 8, target: "100000001" }]);
+  assert.deepEqual((await content.group("group.Foothold", "100000000")).rows.length, 2);
+
+  const potion = await content.resource("resource.图像", "ui/icons/potion");
+  assert.deepEqual([...potion.bytes], [...f.resourceBytes]);
+  assert.equal(potion.mime, "image/png");
+
+  await assert.rejects(content.group("group.队伍", "missing"), (error) => error.code === "CONTENT_NOT_FOUND");
+  const denied = service.access(service.createGrant({ permissions: ["records"], expiresAtUnixMs: Date.now() + 60_000 }));
+  const deniedLifetime = new AbortController(); t.after(() => deniedLifetime.abort());
+  const deniedClient = createBoundContentClient({ origin: denied.origin, installationId: denied.installationId, token: denied.token }, deniedLifetime.signal);
+  await assert.rejects(deniedClient.group("group.队伍", "party"), (error) => error.code === "CONTENT_UNAVAILABLE");
+
+  lifetime.abort();
+  await assert.rejects(content.group("group.队伍", "party"), (error) => error.code === "CONTENT_CANCELLED");
 });
 
 test("trusted shell mints a document lifetime only for a real GET navigation", async (t) => {

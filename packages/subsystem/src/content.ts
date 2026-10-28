@@ -9,6 +9,11 @@ export interface ContentRecord {
   readonly contentVersion: string;
 }
 
+export interface ContentGroup {
+  readonly rows: readonly JsonValue[];
+  readonly contentVersion: string;
+}
+
 export interface ContentResource {
   readonly bytes: Uint8Array;
   readonly mime: string;
@@ -34,5 +39,6 @@ export class ContentReadError extends Error {
 
 export interface ContentClient {
   record(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentRecord>;
+  group(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentGroup>;
   resource(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentResource>;
 }

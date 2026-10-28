@@ -3,7 +3,7 @@
 > 状态：Accepted  
 > 日期：2026-09-08  
 > 影响范围：Readonly Content API、Desktop Content composition、FSDB core ownership、Subsystem/Renderer Content projection、M13/M14/M16 交付边界  
-> 更新：[ADR 0003](./0003-readonly-content-api.md) 的首次实现 realization 细节  
+> 更新：[ADR 0003](./0003-readonly-content-api.md) 的首次实现 realization 细节；2026-10 增补 `ContentClient.group()`（见文末更新记录）  
 > 实施基线：[M12 / 01](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M12_01_CONTENT_SERVICE.md) → [M12 / 05](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M12_05_QUALIFICATION_CLOSURE.md)
 
 ## 背景
@@ -161,3 +161,33 @@ PWA M16证明当前 logical Content contract无法保持跨平台等价
 ```
 
 实现困难、package symmetry、未来可能用途或测试便利都不是 reopen 理由。
+
+## 更新记录：2026-10 — Subsystem `ContentClient.group()`
+
+本 ADR 曾明确"不为 HTTP surface symmetry 预先发布 `group()`"。该决定针对的是**没有真实 consumer 时**的预防性发布；2026-10 出现真实分组读取 consumer（`lithdoo/adventure-island` 的 CMS 地图按 `[group]Tile/Back/Obj/Portal/Foothold` 组织，业务代码只能通过标准 Subsystem Content capability 访问安装内容），满足上文 reopen 条件中的"first real consumer 证明冻结 capability 缺少必要语义"，因此对 author surface 作**局部、有依据的修订**（[#119](https://github.com/lithdoo/loom-realm/issues/119)）：
+
+```text
+新增   ContentClient.group(namespace,key,{signal?}) → ContentGroup
+新增   ContentGroup { rows: readonly JsonValue[]; contentVersion }
+```
+
+边界不变：
+
+```text
+仍不提供 manifest()/head()/raw fetch/URL builder/bearer/filesystem path
+不引入 client-selected historical contentVersion
+不修改 Content API v1 group wire contract（GET /groups/{namespace}/{key}，NDJSON，早已冻结）
+不修改 FSDB on-disk JSONL layout
+Desktop bound client 与 PWA same-origin client 共用同一 createContentClient 实现
+```
+
+语义约束：
+
+```text
+namespace/key 均为单 logical segment（group key 不是 hierarchical ResourceKey）
+rows 按响应 JSONL 行序返回，不排序、不重建业务 id、不转换为按行编号 map
+contentVersion = full-body 200 bytes 的 sha256:<64 lowercase hex>（不是解析后数组的 hash）
+非 application/x-ndjson MIME、非法 JSON 行、不一致 version metadata → CONTENT_INVALID
+空合法 JSONL → 空 rows；正常末尾换行允许
+404 → CONTENT_NOT_FOUND；409 → CONTENT_CONFLICT；422 → CONTENT_INVALID（沿用既有错误映射）
+```

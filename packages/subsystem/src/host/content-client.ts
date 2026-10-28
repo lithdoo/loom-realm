@@ -2,6 +2,7 @@ import { parseJsonText, type JsonValue } from "@loomrealm/wire";
 import {
   ContentReadError,
   type ContentClient,
+  type ContentGroup,
   type ContentReadOptions,
   type ContentRecord,
   type ContentResource,
@@ -49,6 +50,21 @@ function mapStatus(status: number): ContentReadError {
   if (status === 409) return new ContentReadError("CONTENT_CONFLICT");
   if (status === 422) return new ContentReadError("CONTENT_INVALID");
   return new ContentReadError("CONTENT_UNAVAILABLE");
+}
+
+function ndjsonMediaType(response: Response): void {
+  const mime = response.headers.get("content-type");
+  const essence = mime?.split(";")[0]?.trim().toLowerCase();
+  if (mime === null || essence !== "application/x-ndjson") throw new ContentReadError("CONTENT_INVALID");
+}
+
+function parseNdjsonRows(text: string): JsonValue[] {
+  const rows: JsonValue[] = [];
+  for (const line of text.split("\n")) {
+    if (line.trim().length === 0) continue;
+    rows.push(parseJsonText(line));
+  }
+  return rows;
 }
 
 function contentVersion(response: Response): string {
@@ -107,6 +123,19 @@ function createContentClient(binding: ContentFetchBinding, lifetimeSignal: Abort
         try { value = parseJsonText(await response.text()); }
         catch { throw new ContentReadError("CONTENT_INVALID"); }
         return Object.freeze({ value, contentVersion: observedVersion });
+      });
+    },
+    group(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentGroup> {
+      segment(namespace); segment(key);
+      const signal = readOptions(options);
+      if (signal?.aborted || lifetimeSignal.aborted) return Promise.reject(new ContentReadError("CONTENT_CANCELLED"));
+      return readContent(`groups/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`, signal, async (response) => {
+        const observedVersion = contentVersion(response);
+        ndjsonMediaType(response);
+        let rows: JsonValue[];
+        try { rows = parseNdjsonRows(await response.text()); }
+        catch { throw new ContentReadError("CONTENT_INVALID"); }
+        return Object.freeze({ rows: Object.freeze(rows), contentVersion: observedVersion });
       });
     },
     resource(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentResource> {
