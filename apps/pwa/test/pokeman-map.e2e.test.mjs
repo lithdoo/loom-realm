@@ -73,6 +73,69 @@ async function waitForDialogue(page, text) {
   }, text, { timeout: 20_000 });
 }
 
+// Installs an observer that records the complete hidden transition history of
+// the live Dialogue modal/backdrop. Each mutation's resulting state is derived
+// from the MutationRecord itself (oldValue === null → attribute added → hidden
+// true; oldValue !== null → removed → false) so a transient false → true →
+// false flash inside a single MutationObserver batch cannot pass unnoticed.
+async function observeDialogueShell(page) {
+  await page.evaluate(() => {
+    const view = document.querySelector("lr-dialogue-view");
+    const modal = view.shadowRoot.querySelector(".modal");
+    const backdrop = view.shadowRoot.querySelector(".backdrop");
+    const history = { modal: [modal.hidden], backdrop: [backdrop.hidden] };
+    const derive = (record) => {
+      if (record.type !== "attributes" || record.attributeName !== "hidden") return;
+      const key = record.target === modal ? "modal" : "backdrop";
+      const next = record.oldValue === null;
+      if (history[key].at(-1) !== next) history[key].push(next);
+    };
+    const observer = new MutationObserver((records) => {
+      for (const record of records) derive(record);
+    });
+    observer.observe(modal, { attributes: true, attributeFilter: ["hidden"], attributeOldValue: true });
+    observer.observe(backdrop, { attributes: true, attributeFilter: ["hidden"], attributeOldValue: true });
+    window.__dialogueShellHiddenHistory = history;
+  });
+}
+
+// Self-check: prove the record-based derivation above catches a same-batch
+// transient flash on a scratch element before trusting it for the real shell.
+async function verifyDialogueObserverDetectsFlash(page) {
+  const probe = await page.evaluate(async () => {
+    const scratch = document.createElement("div");
+    document.body.append(scratch);
+    const transitions = [scratch.hidden];
+    const derive = (record) => {
+      if (record.type !== "attributes" || record.attributeName !== "hidden") return;
+      const next = record.oldValue === null;
+      if (transitions.at(-1) !== next) transitions.push(next);
+    };
+    const observer = new MutationObserver((records) => {
+      for (const record of records) derive(record);
+    });
+    observer.observe(scratch, { attributes: true, attributeFilter: ["hidden"], attributeOldValue: true });
+    scratch.hidden = true;
+    scratch.hidden = false;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    observer.disconnect();
+    scratch.remove();
+    return transitions;
+  });
+  assert.deepEqual(probe, [false, true, false],
+    "the hidden-transition observer must detect a same-batch transient flash, not only the final state");
+}
+
+async function assertDialogueNeverHidden(page, stage) {
+  const history = await page.evaluate(() => window.__dialogueShellHiddenHistory);
+  for (const [key, transitions] of Object.entries(history)) {
+    const firstVisible = transitions.indexOf(false);
+    assert.notEqual(firstVisible, -1, `${stage}: Dialogue ${key} must be visible (${transitions})`);
+    assert.equal(transitions.slice(firstVisible).includes(true), false,
+      `${stage}: Dialogue ${key} must never become hidden between Conversations (${transitions})`);
+  }
+}
+
 async function revealAndConfirm(page) {
   await page.keyboard.press("KeyZ");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 20_000 });
@@ -81,8 +144,11 @@ async function revealAndConfirm(page) {
 
 async function completeProfessorDialogue(page) {
   await waitForDialogue(page, "你终于来了。");
+  await verifyDialogueObserverDetectsFlash(page);
+  await observeDialogueShell(page);
   await revealAndConfirm(page);
   await waitForDialogue(page, "准备好出发了吗？");
+  await assertDialogueNeverHidden(page, "Conversation A → READY → B");
   await page.keyboard.press("KeyZ");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 20_000 });
   const conversationId = await page.locator("lr-dialogue-conversation").getAttribute("conversation-id");
@@ -98,10 +164,12 @@ async function completeProfessorDialogue(page) {
     return view?._mode === "conversation"
       && view.querySelector("lr-dialogue-conversation")?.getAttribute("conversation-id") === expectedId;
   }, conversationId, { timeout: 20_000 });
+  await assertDialogueNeverHidden(page, "Conversation B History open/close");
   await page.keyboard.press("ArrowDown");
   await page.waitForFunction(() => document.querySelector('lr-dialogue-choice[choice-id="ready"]')?.isSelected() === true, null, { timeout: 20_000 });
   await page.keyboard.press("KeyZ");
   await waitForDialogue(page, "很好，出发吧。");
+  await assertDialogueNeverHidden(page, "Conversation B → READY → C");
   await revealAndConfirm(page);
   await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 20_000 });
 }
@@ -190,12 +258,24 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     await page.evaluate(() => {
       window.__pokemanMapBeforeDialogue = document.querySelector("lr-map-view");
       window.__pokemanDialogueBeforeRepeat = null;
+      // Records the initial hidden state of every lr-dialogue-view at creation
+      // time, so a session's initial READY can be observed deterministically.
+      const births = [];
+      const originalCreateElement = document.createElement.bind(document);
+      document.createElement = function (localName, options) {
+        const element = originalCreateElement(localName, options);
+        if (localName === "lr-dialogue-view") births.push({ initialHidden: element.shadowRoot.querySelector(".modal").hidden });
+        return element;
+      };
+      window.__dialogueSessionBirths = births;
     });
     await page.keyboard.press("KeyZ");
     await waitForDialogue(page, "你终于来了。");
     assert.equal(await page.locator("lr-dialogue-view").count(), 1);
     assert.equal(await page.locator("game-controls-input").count(), 1);
     assert.equal(await page.evaluate(() => document.querySelector("lr-map-view") === window.__pokemanMapBeforeDialogue), true);
+    assert.equal((await page.evaluate(() => window.__dialogueSessionBirths)).at(-1).initialHidden, true,
+      "a fresh Dialogue session must be created from the initial hidden READY baseline");
     await page.evaluate(() => { window.__pokemanDialogueBeforeRepeat = document.querySelector("lr-dialogue-view"); });
     await completeProfessorDialogue(page);
     await waitForState(page, state);
@@ -219,6 +299,8 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     await waitForDialogue(page, "你终于来了。");
     assert.equal(await page.evaluate(() => document.querySelector("lr-dialogue-view") !== window.__pokemanDialogueBeforeRepeat), true,
       "second interaction must create a fresh Dialogue presentation");
+    assert.equal((await page.evaluate(() => window.__dialogueSessionBirths)).at(-1).initialHidden, true,
+      "the second fresh Dialogue session must start from the initial hidden READY baseline");
     await page.keyboard.press("Tab");
     await page.waitForFunction(() => document.querySelector("lr-dialogue-view")?._mode === "history", null, { timeout: 20_000 });
     assert.equal(await page.locator("lr-dialogue-history-entry").count(), 0, "second Dialogue session must start with fresh History");

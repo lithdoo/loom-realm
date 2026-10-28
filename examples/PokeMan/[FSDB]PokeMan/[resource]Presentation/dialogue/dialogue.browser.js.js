@@ -68,14 +68,18 @@
   class DialogueViewElement extends HTMLElement {
     constructor() {
       super();
+      // Presentation-local private facts (doc 74 §4.2). They are not public ABI,
+      // never reflected as canonical attributes, and never reported to Runtime.
       this._mode = "conversation";
-      this._presented = false;
+      this._controlsComplete = false;
+      this._interactionActive = false;
+      this._shellPresented = false;
       this._hasActiveCharacter = false;
       attach(this, `<style>
         :host { position: fixed; inset: 0; display: block; pointer-events: none; color: var(--pokeman-dialogue-text, #172033); font: var(--pokeman-dialogue-font, 400 18px/1.68 system-ui, sans-serif); }
         .backdrop { position: absolute; inset: 0; background: var(--pokeman-dialogue-backdrop, rgb(4 9 20 / .52)); backdrop-filter: blur(2px); }
-        .modal { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(88vw, 960px); height: min(68vh, 520px); box-sizing: border-box; padding: clamp(20px, 3vw, 28px); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "conversation" "controls"; gap: 0; overflow: hidden; border: 1px solid var(--pokeman-dialogue-border, rgb(85 105 145 / .2)); border-radius: var(--pokeman-dialogue-radius, 18px); background: var(--pokeman-dialogue-surface, rgb(249 251 255 / .97)); box-shadow: var(--pokeman-dialogue-shadow, 0 24px 70px rgb(0 0 0 / .34)); }
-        .modal.with-character { grid-template-columns: 32% minmax(0, 68%); grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "characters conversation" "characters controls"; }
+        .modal { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(88vw, 960px); height: min(68vh, 520px); box-sizing: border-box; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "conversation" "controls"; gap: 0; overflow: hidden; border: 1px solid var(--pokeman-dialogue-border, rgb(85 105 145 / .2)); border-radius: var(--pokeman-dialogue-radius, 18px); background: var(--pokeman-dialogue-surface, rgb(249 251 255 / .97)); box-shadow: var(--pokeman-dialogue-shadow, 0 24px 70px rgb(0 0 0 / .34)); }
+        .modal.with-character { grid-template-columns: 30% minmax(0, 70%); grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "characters conversation" "characters controls"; }
         .modal.history-mode { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "history" "controls"; }
         .surface { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(140deg, rgb(255 255 255 / .55), transparent 42%); }
         slot.canonical-root { display: contents; }
@@ -89,8 +93,10 @@
         .modal:not(.history-mode) ::slotted(lr-dialogue-history) { display: none; }
         .backdrop[hidden], .modal[hidden] { display: none; }
         @media (max-width: 640px) {
-          .modal { width: min(94vw, 960px); height: min(82vh, 520px); padding: 16px; border-radius: 14px; }
-          .modal.with-character { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(96px, 34%) minmax(0, 1fr) auto; grid-template-areas: "characters" "conversation" "controls"; }
+          .modal { width: min(94vw, 960px); height: min(82vh, 520px); padding: 16px 14px; border-radius: 14px; }
+        }
+        @media (max-width: 479px) {
+          .modal.with-character { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(88px, 30%) minmax(0, 1fr) auto; grid-template-areas: "characters" "conversation" "controls"; }
         }
         @media (prefers-reduced-motion: reduce) { .modal { scroll-behavior: auto; } }
       </style><div class="backdrop" hidden aria-hidden="true"></div><section class="modal" role="dialog" aria-modal="true" aria-label="对话" hidden><div class="surface" aria-hidden="true"></div><slot class="canonical-root"></slot></section>`);
@@ -98,6 +104,17 @@
 
     connectedCallback() {
       this._syncAll();
+    }
+
+    disconnectedCallback() {
+      // Presentation-local defensive lifecycle reset (doc 74 §4.6): a removed
+      // shell no longer carries interaction authority, and a later (possibly
+      // manual) reconnect must start from the initial hidden baseline. This is
+      // not a Runtime lifecycle authority; the real session boundary is the
+      // RenderDomain close that removes this view.
+      this._interactionActive = false;
+      this._shellPresented = false;
+      this._syncPresentation();
     }
 
     syncHistoryFrom(history) {
@@ -108,7 +125,9 @@
 
     syncControlsFrom(facts) {
       const complete = facts instanceof Map && facts.size === ACTIONS.length && ACTIONS.every((action) => facts.has(action));
-      this._presented = complete && ACTIONS.some((action) => facts.get(action) === true);
+      this._controlsComplete = complete;
+      this._interactionActive = complete && ACTIONS.some((action) => facts.get(action) === true);
+      if (this._interactionActive) this._shellPresented = true;
       this._syncPresentation();
     }
 
@@ -134,13 +153,15 @@
       modal.classList.toggle("history-mode", this._mode === "history");
       modal.classList.toggle("with-character", this._mode === "conversation" && this._hasActiveCharacter);
       modal.setAttribute("aria-label", this._mode === "history" ? "历史记录" : "对话");
-      modal.hidden = !this._presented;
-      backdrop.hidden = !this._presented;
-      modal.inert = !this._presented;
-      this.inert = !this._presented;
+      // Shell visibility follows only the shellPresented latch; inertness and
+      // the Conversation interaction gate follow interactionActive and mode.
+      modal.hidden = !this._shellPresented;
+      backdrop.hidden = !this._shellPresented;
+      modal.inert = !this._interactionActive;
+      this.inert = !this._interactionActive;
       const conversation = directChildren(this, "lr-dialogue-conversation")[0];
-      if (conversation && typeof conversation.setPresented === "function") {
-        conversation.setPresented(this._presented && this._mode === "conversation");
+      if (conversation && typeof conversation.setInteractionActive === "function") {
+        conversation.setInteractionActive(this._interactionActive && this._mode === "conversation");
       }
     }
   }
@@ -150,10 +171,11 @@
       super();
       this._presentedCharacter = null;
       attach(this, `<style>
-        :host { display: block; min-width: 0; min-height: 0; padding: 10px 22px 10px 0; box-sizing: border-box; }
-        .character-stage { position: relative; width: 100%; height: 100%; min-height: 140px; overflow: hidden; border-radius: calc(var(--pokeman-dialogue-radius, 18px) - 4px); background: var(--pokeman-dialogue-stage, linear-gradient(160deg, #e8eef8, #dce7f6)); }
+        :host { display: block; min-width: 0; min-height: 0; padding: 4px 12px 4px 0; box-sizing: border-box; }
+        .character-stage { position: relative; width: 100%; height: 100%; min-height: 140px; overflow: hidden; border-radius: calc(var(--pokeman-dialogue-radius, 18px) - 4px); background: var(--pokeman-dialogue-stage, linear-gradient(160deg, #edf2fa, #e3eaf6)); }
         ::slotted(lr-dialogue-character) { position: absolute; inset: 0; }
-        @media (max-width: 640px) { :host { padding: 0 0 12px; } .character-stage { min-height: 92px; } }
+        @media (max-width: 640px) { :host { padding: 4px 10px 4px 0; } .character-stage { min-height: 92px; } }
+        @media (max-width: 479px) { :host { padding: 0 0 8px; } }
       </style><div class="character-stage" aria-label="当前人物"><slot></slot></div>`);
       this._observer = new MutationObserver(() => this.syncActiveToView());
     }
@@ -188,28 +210,37 @@
       this._context = null;
       this._data = undefined;
       this._presented = false;
+      // Idempotent sprite-load coordinator state (doc 74 §6). The exact attempt
+      // key is: connection epoch + renderContext identity + namespace + key +
+      // contentVersion. Repeated triggers for the same attempt key must be a
+      // resource-layer no-op, including for a previously failed attempt.
+      this._connectionEpoch = 0;
+      this._attemptRef = null;
+      this._attemptContext = null;
+      this._attemptEpoch = -1;
       this._loadController = null;
       this._loadToken = 0;
-      this._spriteStatus = "fallback";
+      this._spriteStatus = "empty";
       attach(this, `<style>
         :host { display: block; width: 100%; height: 100%; }
         .character { width: 100%; height: 100%; display: grid; place-items: center; }
         .character[hidden] { display: none; }
-        canvas { display: block; width: auto; height: 55%; max-width: 88%; max-height: 82%; object-fit: contain; image-rendering: pixelated; }
+        canvas { display: block; width: auto; height: 70%; max-width: 100%; max-height: 100%; object-fit: contain; image-rendering: pixelated; }
         canvas[hidden], .fallback[hidden] { display: none; }
         .fallback { width: clamp(72px, 42%, 132px); aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; color: #45536d; background: rgb(255 255 255 / .7); box-shadow: inset 0 0 0 1px rgb(66 84 118 / .13); font-size: clamp(28px, 6vw, 52px); font-weight: 700; }
       </style><div class="character" hidden><canvas class="sprite" aria-hidden="true" hidden></canvas><div class="fallback" aria-hidden="true">?</div></div>`);
     }
 
     connectedCallback() {
+      this._connectionEpoch += 1;
       this._renderFallback();
       this.parentElement?.syncActiveToView?.();
-      this._startLoad();
+      this._ensureSpriteLoad();
     }
 
     disconnectedCallback() {
       this._cancelLoad();
-      this._showFallback();
+      if (this._spriteStatus === "loading") this._showFallback();
     }
 
     attributeChangedCallback(name) {
@@ -222,18 +253,18 @@
         throw new TypeError("Invalid WebPresentationContext");
       }
       this._context = context;
-      this._startLoad();
+      this._ensureSpriteLoad();
     }
 
     receiveRenderData(data) {
       this._data = data;
-      this._startLoad();
+      this._ensureSpriteLoad();
     }
 
     setPresentationActive(active) {
       this._presented = active;
       this.shadowRoot.querySelector(".character").hidden = !active;
-      if (active && this.isConnected) this._startLoad();
+      if (active && this.isConnected) this._ensureSpriteLoad();
     }
 
     _renderFallback() {
@@ -253,11 +284,44 @@
       this._loadController = null;
     }
 
-    async _startLoad() {
+    _sameAttempt(ref) {
+      return this._attemptRef !== null
+        && this._attemptEpoch === this._connectionEpoch
+        && this._attemptContext === this._context
+        && this._attemptRef.namespace === ref.namespace
+        && this._attemptRef.key === ref.key
+        && this._attemptRef.contentVersion === ref.contentVersion;
+    }
+
+    _ensureSpriteLoad() {
+      if (!this.isConnected) return;
+      const ref = parseSpriteData(this._data);
+      if (this._context === null || ref === null) {
+        // No loadable attempt: data/context became unusable. Any in-flight or
+        // previously successful attempt for other data is terminated, and an
+        // existing active character shows its fallback (doc 69 §8.1.4).
+        if (this._data !== undefined && (this._spriteStatus === "loading" || this._spriteStatus === "ready")) {
+          this._cancelLoad();
+          this._attemptRef = null;
+          this._showFallback();
+        }
+        return;
+      }
+      if (this._sameAttempt(ref)) {
+        // Same exact attempt key: loading must not be restarted or aborted, a
+        // ready canvas must not be cleared, and a failed attempt must not be
+        // retried by ordinary reconciliation (doc 74 §6.2/§6.4).
+        return;
+      }
+      this._startLoad(ref);
+    }
+
+    async _startLoad(ref) {
       this._cancelLoad();
       this._showFallback();
-      const ref = parseSpriteData(this._data);
-      if (!this.isConnected || this._context === null || ref === null) return;
+      this._attemptRef = ref;
+      this._attemptContext = this._context;
+      this._attemptEpoch = this._connectionEpoch;
       const token = this._loadToken;
       const controller = new AbortController();
       this._loadController = controller;
@@ -327,7 +391,7 @@
   class DialogueChoicesElement extends HTMLElement {
     constructor() {
       super();
-      attach(this, `<style>:host{display:block}.choice-list{display:grid;gap:8px;margin-top:18px}</style><div class="choice-list" role="listbox" aria-label="选择"><slot></slot></div>`);
+      attach(this, `<style>:host{display:block}.choice-list{display:grid;gap:8px;margin-top:12px}</style><div class="choice-list" role="listbox" aria-label="选择"><slot></slot></div>`);
     }
 
     connectedCallback() { this.parentElement?.syncDescendantFacts?.(); }
@@ -342,7 +406,7 @@
       this._selected = false;
       attach(this, `<style>
         :host { display: block; }
-        .choice { min-height: 44px; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid rgb(80 99 136 / .18); border-radius: 10px; background: rgb(237 242 251 / .72); overflow-wrap: anywhere; transition: border-color 140ms ease, background 140ms ease, transform 140ms ease; }
+        .choice { min-height: 44px; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid rgb(80 99 136 / .18); border-radius: 10px; background: rgb(237 242 251 / .72); overflow-wrap: anywhere; transition: border-color 140ms ease, background 140ms ease, transform 140ms ease; }
         .choice.selected { border-color: var(--pokeman-dialogue-accent, #456fd3); background: var(--pokeman-dialogue-selection, #e2ebff); box-shadow: inset 3px 0 0 var(--pokeman-dialogue-accent, #456fd3); }
         .choice.disabled { opacity: .45; }
         .marker { min-width: 1.2em; color: var(--pokeman-dialogue-accent, #456fd3); font-weight: 800; text-align: center; }
@@ -384,19 +448,19 @@
       this._revealText = "";
       this._revealTimer = undefined;
       this._observedConversationId = null;
-      this._presented = false;
+      this._interactionActive = false;
       this._phase = "REVEALING";
       attach(this, `<style>
         :host { display: block; min-width: 0; min-height: 0; }
-        .conversation { height: 100%; min-height: 0; box-sizing: border-box; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 4px 0 0 clamp(4px, 2vw, 18px); }
-        .speaker { color: var(--pokeman-dialogue-accent, #456fd3); font-size: .96em; font-weight: 700; letter-spacing: .01em; padding-bottom: 12px; border-bottom: 1px solid rgb(68 88 124 / .16); overflow-wrap: anywhere; }
+        .conversation { height: 100%; min-height: 0; box-sizing: border-box; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 2px 0 0 8px; }
+        .speaker { color: var(--pokeman-dialogue-accent, #456fd3); font-size: .96em; font-weight: 700; letter-spacing: .01em; padding-bottom: 8px; border-bottom: 1px solid rgb(68 88 124 / .16); overflow-wrap: anywhere; }
         .speaker:empty { display: none; }
-        .body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 8px 10px 0; scrollbar-gutter: stable; }
+        .body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px 4px 6px 0; scrollbar-gutter: stable; }
         .status { min-height: 26px; display: flex; justify-content: flex-end; align-items: center; }
         .continue { color: var(--pokeman-dialogue-accent, #456fd3); font-size: 24px; line-height: 1; animation: continue 720ms ease-in-out infinite alternate; }
         .continue[hidden] { display: none; }
         @keyframes continue { from { opacity: .42; transform: translateY(-2px); } to { opacity: 1; transform: translateY(2px); } }
-        @media (max-width: 640px) { .conversation { padding-left: 0; } .body { padding-top: 12px; } }
+        @media (max-width: 640px) { .conversation { padding-left: 0; } }
         @media (prefers-reduced-motion: reduce) { .continue { animation: none; } }
       </style><section class="conversation"><header class="speaker"></header><div class="body"><slot></slot></div><footer class="status"><span class="continue" aria-label="可以继续" hidden>⌄</span></footer></section>`);
       this._observer = new MutationObserver(() => this.syncDescendantFacts());
@@ -429,7 +493,7 @@
     receiveRenderEvent(event) {
       if (event === null || typeof event !== "object" || typeof event.name !== "string") return;
       this._events.push(event.name);
-      if (!this._presented) return;
+      if (!this._interactionActive) return;
       if (event.name === "choice-next") this._moveSelection(1);
       else if (event.name === "choice-previous") this._moveSelection(-1);
       else if (event.name === "commit") this._commit();
@@ -437,10 +501,10 @@
       else if (event.name === "scroll-down") this._scroll(1);
     }
 
-    setPresented(presented) {
-      if (this._presented === presented) return;
-      this._presented = presented;
-      if (!presented) this._stopRevealTimer();
+    setInteractionActive(active) {
+      if (this._interactionActive === active) return;
+      this._interactionActive = active;
+      if (!active) this._stopRevealTimer();
       else {
         this.syncDescendantFacts();
         this._startRevealTimer();
@@ -494,7 +558,7 @@
     }
 
     _startRevealTimer() {
-      if (!this._presented || this._revealComplete || this._revealText.length === 0 || this._revealTimer !== undefined) return;
+      if (!this._interactionActive || this._revealComplete || this._revealText.length === 0 || this._revealTimer !== undefined) return;
       if (reducedMotion()) { this._revealAll(); return; }
       const units = Array.from(this._revealText);
       this._revealTimer = window.setInterval(() => {
@@ -566,8 +630,8 @@
     constructor() {
       super();
       attach(this, `<style>
-        :host { display: block; padding: 14px 0 0; }
-        .control-hints { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 14px; padding-top: 12px; border-top: 1px solid rgb(68 88 124 / .13); }
+        :host { display: block; padding: 8px 0 0; }
+        .control-hints { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 14px; padding-top: 8px; border-top: 1px solid rgb(68 88 124 / .13); }
       </style><footer class="control-hints" aria-label="对话操作"><slot></slot></footer>`);
     }
 
@@ -597,7 +661,7 @@
         :host { display: inline-block; }
         .hint { display: inline-flex; align-items: center; gap: 6px; color: #52617a; font-size: 13px; font-weight: 650; letter-spacing: .02em; }
         .hint::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-        .hint.disabled { opacity: .32; }
+        .hint.disabled { opacity: .18; }
       </style><span class="hint"></span>`);
     }
 
@@ -627,9 +691,9 @@
       attach(this, `<style>
         :host { display: block; min-width: 0; min-height: 0; }
         .history { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
-        .history-header { padding-bottom: 12px; border-bottom: 1px solid rgb(68 88 124 / .16); }
+        .history-header { padding-bottom: 8px; border-bottom: 1px solid rgb(68 88 124 / .16); }
         h2 { margin: 0; color: var(--pokeman-dialogue-accent, #456fd3); font-size: 16px; line-height: 1.4; letter-spacing: .1em; }
-        .history-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px 8px 4px 0; scrollbar-gutter: stable; }
+        .history-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 8px 4px 0; scrollbar-gutter: stable; }
         .empty { min-height: 100%; display: grid; place-items: center; color: #68758b; font-size: 16px; }
         .empty[hidden] { display: none; }
       </style><section class="history" aria-labelledby="pokeman-dialogue-history-heading"><header class="history-header"><h2 id="pokeman-dialogue-history-heading">HISTORY</h2></header><div class="history-scroll"><slot></slot><p class="empty">暂无历史记录</p></div></section>`);
@@ -669,7 +733,7 @@
       super();
       attach(this, `<style>
         :host { display: block; }
-        .entry { padding: 14px 2px 16px; border-bottom: 1px solid rgb(68 88 124 / .11); }
+        .entry { padding: 10px 2px 12px; border-bottom: 1px solid rgb(68 88 124 / .11); }
         .speaker { margin: 0 0 4px; color: #33415a; font-size: 14px; font-weight: 750; overflow-wrap: anywhere; }
         .speaker:empty { display: none; }
         .text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }

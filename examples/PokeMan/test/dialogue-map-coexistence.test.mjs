@@ -299,9 +299,9 @@ test("Map and Dialogue coexist through retained WebProjector domains without dis
     removals: 0,
     mapReady: "ready",
     dialogueRetained: true,
-    dialogueHidden: true,
+    dialogueHidden: false,
     dialogueInert: true,
-  });
+  }, "v1.1: intermediate READY after an ACTIVE keeps the shell visible but inert");
 
   await page.evaluate(async () => { coexistenceQualification.teardownDialogue(); await coexistenceQualification.settle(); });
   const teardown = await page.evaluate(() => ({

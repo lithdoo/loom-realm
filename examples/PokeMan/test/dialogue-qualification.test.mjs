@@ -310,7 +310,8 @@ test("PokeMan closes RPGDialogue controls → WebProjector → canonical WC → 
       result: globalThis.firstDialogueResult,
     };
   });
-  assert.deepEqual(firstReady, { retained: true, hidden: true, inert: true, result: { type: "submitted", choiceId: "yes" } });
+  // v1.1: an intermediate READY after an ACTIVE keeps the shell visible and inert.
+  assert.deepEqual(firstReady, { retained: true, hidden: false, inert: true, result: { type: "submitted", choiceId: "yes" } });
 
   await page.evaluate(() => pokemanDialogueQualification.releaseFirst());
   await page.waitForFunction((oldId) => document.querySelector("lr-dialogue-conversation")?.getAttribute("conversation-id") !== oldId, firstId);
@@ -330,7 +331,7 @@ test("PokeMan closes RPGDialogue controls → WebProjector → canonical WC → 
     return {
       mode: view._mode,
       eventMode: history._lastEventMode,
-      paused: conversation._presented === false,
+      paused: conversation._interactionActive === false,
       index: conversation._revealIndex,
       historyMode: view.shadowRoot.querySelector(".modal").classList.contains("history-mode"),
       entries: [...history.children].map((entry) => entry.getAttribute("entry-id")),
@@ -351,7 +352,7 @@ test("PokeMan closes RPGDialogue controls → WebProjector → canonical WC → 
   assert.deepEqual(await page.evaluate(() => {
     const view = document.querySelector("lr-dialogue-view");
     return { hidden: view.shadowRoot.querySelector(".modal").hidden, inert: view.inert, retainedId: document.querySelector("lr-dialogue-conversation")?.getAttribute("conversation-id") };
-  }), { hidden: true, inert: true, retainedId: secondId });
+  }), { hidden: false, inert: true, retainedId: secondId }, "second intermediate READY keeps the shell visible and inert");
 
   await page.evaluate(() => pokemanDialogueQualification.releaseFinal());
   const result = await page.evaluate(() => pokemanDialogueQualification.finish());
