@@ -91,6 +91,7 @@ RPGDialogue.close() / RenderDomain close
 
 因此用户视觉上看到的是一个连续 Dialogue session，而不是每段台词都重新打开一次 modal。
 
+
 # 4. Shell visibility 与 interaction readiness 解耦
 
 ## 4.1 问题
@@ -114,9 +115,9 @@ all five hints disabled
 
 而 RPGDialogue 每个 Conversation settle 后都会进入 READY，因此连续 A/B/C 必然闪隐。
 
-## 4.2 v1.1 private state
+## 4.2 v1.1 private facts
 
-`lr-dialogue-view` 改为持有以下 Presentation-local private facts：
+`lr-dialogue-view` 固定维护以下 Presentation-local private facts：
 
 ```text
 controlsComplete: boolean
@@ -126,7 +127,7 @@ mode: conversation | history
 hasActiveCharacter: boolean
 ```
 
-其中：
+定义：
 
 ```text
 controlsComplete
@@ -137,10 +138,11 @@ interactionActive
   AND 至少一个 hint enabled=true
 
 shellPresented
-= 当前 lr-dialogue-view lifetime 内是否曾观察到 interactionActive=true
+= 当前 view connection/session presentation epoch 内
+  是否曾观察到 interactionActive=true
 ```
 
-`shellPresented` 是 WC-local latch：
+其中 `shellPresented` 是 **WC-local one-way latch**：
 
 ```text
 initial = false
@@ -149,31 +151,41 @@ first interactionActive=true
 → shellPresented=true
 
 later READY / all hints disabled
+→ interactionActive=false
 → shellPresented remains true
-
-lr-dialogue-view disconnect / RenderDomain close
-→ element lifetime ends
-→ latch naturally disappears
 ```
 
 不得新增 public `active` / `ready` / `presented` canonical attr。
 
-不得把该 latch 写入 Runtime、Renderer Store、Shared State 或 Session Event。
+不得把这些 private facts 写入 Runtime、Renderer Store、Shared State 或 Session Event。
 
-## 4.3 Exact visibility derivation
+## 4.3 Exact derivation and rendering
 
-固定：
+固定计算顺序：
+
+```text
+sync canonical control facts
+→ derive controlsComplete
+→ derive interactionActive
+→ if interactionActive=true:
+     latch shellPresented=true
+→ render shell / inert / Conversation activity
+```
+
+精确规则：
 
 ```text
 five hints incomplete
 AND shellPresented=false
 → shell hidden
+→ interaction inactive
 
 five hints complete
 AND all false
 AND shellPresented=false
 → initial READY
 → shell hidden
+→ interaction inactive
 
 five hints complete
 AND any true
@@ -186,39 +198,53 @@ AND all false
 AND shellPresented=true
 → intermediate READY
 → shell remains visible
-→ interaction disabled / inert
+→ interaction inactive
 
-view disconnects
-→ shell removed by DOM lifetime
+five hints temporarily incomplete
+AND shellPresented=true
+→ shell remains visible
+→ interaction inactive
 ```
 
-这样仍然避免 first-connect flash，同时不再在 A/B/C 之间隐藏 shell。
-
-## 4.4 READY 的交互规则
-
-中间 READY：
+Presentation rendering 必须按两个不同 authority 执行：
 
 ```text
-modal/backdrop visible
-view inert=true
-controls semantic facts remain disabled
-Conversation local reveal timer stopped
-pointer/touch remains non-gameplay
-no submit
-no history toggle
-no cancel
+modal.hidden
+backdrop.hidden
+→ controlled only by !shellPresented
+
+modal.inert
+view.inert
+→ controlled by !interactionActive
+
+Conversation interaction/reveal
+→ controlled by interactionActive && mode === "conversation"
 ```
 
-READY 不新增第五个用户可交互 UI state；它仍是四个 UI state 之外的正交 non-interactive shell condition。
+不得再用一个 `presented` boolean 同时表达“shell visible”和“Conversation 可交互”。
 
-## 4.5 Conversation presentation coordination
+## 4.4 State truth table
 
-原来的 `conversation.setPresented(boolean)` 语义应拆成或重命名为能够准确表达：
+v1.1 固定：
 
-```text
-shell visibility
-interaction/reveal activity
-```
+| Runtime / Presentation condition | shell | view/modal inert | Conversation interaction | active content |
+| --- | --- | --- | --- | --- |
+| initial READY before first ACTIVE | hidden | true | false | none exposed |
+| ACTIVE + CONVERSATION | visible | false | true | Conversation |
+| ACTIVE + HISTORY | visible | false | false | History |
+| intermediate READY after an ACTIVE | visible | true | false | retained Conversation shell |
+| RenderDomain / Dialogue close | removed | n/a | false | none |
+
+因此：
+
+- READY 不新增第五个用户可交互 UI state；
+- History 不能因为 Conversation 被暂停而把整个 view 设为 inert；
+- intermediate READY 只保留视觉 shell，不获得任何 command authority；
+- retained Conversation 在 intermediate READY 中可以继续显示最后一帧内容，但 reveal timer 必须停止。
+
+## 4.5 Conversation event / reveal gate
+
+原来的 `conversation.setPresented(boolean)` 不再适合同时表达 visibility 与 interaction。
 
 推荐 private seam：
 
@@ -226,20 +252,60 @@ interaction/reveal activity
 conversation.setInteractionActive(boolean)
 ```
 
-规则：
+或语义完全等价的 private implementation。
+
+固定：
 
 ```text
 interactionActive=true
 AND mode=conversation
-→ Conversation 可以 reveal / 响应 Render Event
+→ Conversation may:
+   - run reveal timer
+   - process commit
+   - process choice navigation
+   - process Presentation-local Render Events
 
 interactionActive=false
 OR mode=history
-→ stop reveal timer
-→ preserve revealIndex / selectedChoiceId / scroll
+→ Conversation must:
+   - stop reveal timer
+   - ignore interactive Render Events
+   - preserve revealIndex
+   - preserve selectedChoiceId
+   - preserve conversation scroll
 ```
 
-方法名不是 ABI，Agent 可选等价 private 实现，但不得再用“shell visible”间接代表“Conversation interaction active”。
+`DialogueConversationElement.receiveRenderEvent()` 的 gate 必须绑定 Conversation interaction-active fact，而不是 shell visibility。
+
+## 4.6 Fresh session / connection reset
+
+正常产品路径的真实 session boundary 是：
+
+```text
+RPGDialogue RenderDomain close
+→ Web Projector removes lr-dialogue-view
+→ old Presentation-local latch no longer participates
+
+later new Dialogue child/session
+→ new projected view
+→ shellPresented starts false again
+→ initial READY remains hidden until first ACTIVE
+```
+
+实现还必须对同一 custom-element object 的异常/manual reconnect 做 defensive reset：
+
+```text
+disconnectedCallback
+→ stop local timers/resources as applicable
+→ interactionActive=false
+→ shellPresented=false
+
+next connectedCallback
+→ start a fresh Presentation connection epoch
+→ synchronize canonical facts from initial=false baseline
+```
+
+这只是 WC-local defensive lifecycle；不得把 `disconnectedCallback` 解释成新的 Runtime lifecycle authority。
 
 # 5. Conversation 切换必须保持视觉连续
 
@@ -283,30 +349,54 @@ page/scene transition
 
 不要求在 READY 显示 loading spinner。正常 A→B 的 READY 时间应作为短暂 inert retained state。
 
+
 # 6. Character sprite 连续性
 
-当前 `lr-dialogue-character.receiveRenderData()` 每次都会重新 `_startLoad()`，而 `_startLoad()` 会先显示 fallback。若 A/B/C 使用完全相同的 versioned sprite ref，这会造成无意义的资源重取与人物闪动风险。
-
-v1.1 固定：
+当前 `lr-dialogue-character` 的加载入口不只来自 `receiveRenderData()`。现有实现中的：
 
 ```text
-new parsed sprite ref === current parsed sprite ref
-AND current status is loading or ready
-AND render context identity unchanged
-→ do not abort/restart load
-→ do not show fallback
-→ keep current canvas visible
+connectedCallback()
+receiveRenderContext()
+receiveRenderData()
+setPresentationActive(true)
 ```
 
-只有以下情况重新 load：
+都可能触发 `_startLoad()`。
+
+因此 v1.1 **禁止只在 receiveRenderData() 局部去重**；否则重复 active synchronization 仍可能 abort 当前请求、显示 fallback、重新获取相同资源。
+
+## 6.1 Single load coordinator
+
+所有触发路径必须汇入一个统一的 idempotent load coordinator，例如：
 
 ```text
-namespace changes
-key changes
-contentVersion changes
-render resource context changes
-element reconnect requires fresh acquisition
-previous load ended in fallback and a valid new acquisition opportunity arrives
+_ensureSpriteLoad()
+```
+
+方法名不是 ABI，但语义必须统一。
+
+它至少维护：
+
+```text
+current context identity
+current parsed sprite ref
+connection epoch
+current attempt key
+sprite status: empty | loading | ready | fallback
+```
+
+exact attempt key：
+
+```text
+connectionEpoch
++
+renderContext object identity
++
+namespace
++
+key
++
+contentVersion
 ```
 
 ref equality 必须比较 exact：
@@ -317,7 +407,90 @@ key
 contentVersion
 ```
 
-仍保留 69 的 stale rejection、AbortController、ImageBitmap cleanup、PNG/4x4 validation 与 fallback。
+## 6.2 Idempotence
+
+当：
+
+```text
+new attempt key === current attempt key
+AND status in {loading, ready}
+```
+
+固定：
+
+```text
+do not abort current request
+do not start a second resource request
+do not show fallback
+do not clear a ready canvas
+```
+
+因此以下重复动作都必须是资源层 no-op：
+
+```text
+receiveRenderData(same exact ref)
+receiveRenderContext(same exact context)
+setPresentationActive(true) when already active
+repeated canonical active="true" synchronization
+syncActiveToView() selecting the same character again
+```
+
+`setPresentationActive(false)` 只控制视觉 active state，不应因为人物暂时 inactive 就破坏已经 ready 的 canvas，也不应无条件 abort 相同资源 acquisition。
+
+## 6.3 Reload triggers
+
+只有以下情况允许生成新的 attempt key 并重新 load：
+
+```text
+namespace changes
+key changes
+contentVersion changes
+renderContext object identity changes
+disconnect → reconnect creates a new connection epoch
+previous data was invalid/null and later becomes a valid different effective ref
+```
+
+## 6.4 Failure retry boundary
+
+同一 connection epoch + 同一 render context + 同一 exact sprite ref 如果已经以 fallback 结束，普通 projection reconciliation **不得自动重试**。
+
+以下动作不是 retry authority：
+
+```text
+repeat receiveRenderData(same ref)
+repeat setPresentationActive(true)
+repeat active attr synchronization
+repeat syncActiveToView()
+```
+
+同一个失败 attempt 只有在以下真实新 acquisition opportunity 到来时才可重试：
+
+```text
+exact sprite ref changes
+render context identity changes
+disconnect → reconnect creates a new connection epoch
+```
+
+这样可以避免坏资源或暂时失败导致 reconcile loop / repeated activation 触发无界请求。
+
+## 6.5 Existing resource safety remains frozen
+
+仍保留 69 的：
+
+```text
+AbortController
+stale result rejection
+disconnect abort
+ImageBitmap cleanup
+exact contentVersion match
+PNG MIME validation
+4x4 sheet validation
+imageSmoothingEnabled=false
+fallback behavior
+```
+
+新的 idempotence 只能减少无意义 acquisition，不能放宽资源校验。
+
 
 # 7. Active-character layout v1.1
 
@@ -375,21 +548,83 @@ History
 → history 100% modal content width
 ```
 
-## 7.4 Narrow stacked breakpoint
+## 7.4 Responsive responsibilities must be split
 
-`640px` 不再触发上下布局。
-
-v1.1 第一版固定：
+现有 `max-width: 640px` 同时承担了：
 
 ```text
-viewport width >= 480px
-→ active-character layout remains horizontal
-
-viewport width < 480px
-→ stacked layout allowed
+small-viewport modal geometry
+font/radius compaction
+character stage min-height
+Conversation spacing
+active-character stacked layout
 ```
 
-建议 CSS：
+v1.1 禁止把这些职责机械地全部移动到 479px。
+
+必须拆成两类独立响应式规则：
+
+```text
+small-viewport density / geometry breakpoint
+→ <= 640px
+
+layout-orientation breakpoint
+→ <= 479px
+```
+
+因此：
+
+```text
+viewport > 640px
+→ normal shell geometry
+→ horizontal 30/70
+
+480px <= viewport <= 640px
+→ compact small-viewport shell/font/stage geometry
+→ STILL horizontal 30/70
+
+viewport <= 479px
+→ compact small-viewport shell/font/stage geometry
+→ stacked active-character layout allowed
+```
+
+## 7.5 Small-viewport geometry remains at <=640px
+
+v1.1 保留当前小视口中有价值的 compact behavior，独立于 stacked layout：
+
+```text
+@media (max-width: 640px)
+
+modal width  = min(94vw, 960px)
+modal height = min(82vh, 520px)
+modal padding = 16px
+modal radius = 14px
+
+PokeMan dialogue font
+= 400 16px/1.6 system-ui...
+
+character stage compact min-height
+≈ 92px
+
+Conversation/body spacing
+→ use the v1.1 compact spacing baseline
+```
+
+640×480 必须因此同时得到：
+
+```text
+more usable vertical modal area
++
+compact typography
++
+horizontal 30/70 character/conversation layout
+```
+
+不得为了“取消 640px stacked”而把 640×480 回退到 desktop 的较矮 68vh modal、18px font 或 140px stage minimum。
+
+## 7.6 Stacked layout only at <=479px
+
+真正 stacked 的第一版固定：
 
 ```css
 @media (max-width: 479px) {
@@ -402,6 +637,22 @@ viewport width < 480px
       "controls";
   }
 }
+```
+
+同时 stacked mode 必须把 character-host spacing 转成纵向 spacing，例如：
+
+```text
+characters padding
+→ 0 0 8px
+```
+
+并保证：
+
+```text
+character-stage min-height <= character grid row effective height
+stage does not overflow/crop the conversation
+controls remain visible
+choice rows remain usable
 ```
 
 360×480 作为 stacked qualification viewport。
@@ -593,6 +844,7 @@ apps/pwa/test/pokeman-staging.e2e.test.mjs
 
 ```text
 game-libs/rpg-dialogue Runtime / public API
+packages/renderer
 packages/subsystem
 packages/main
 common-controls
@@ -602,23 +854,64 @@ PokeMan subsystems/map.mjs
 
 除非发现与本文目标直接相关、可复现、且 Presentation-local 无法修复的 framework correctness bug；遇到这种情况应先停止并更新设计，而不是顺手扩大实现范围。
 
+
 # 14. Required browser qualification
 
 `examples/PokeMan/test/dialogue-presentation.browser.test.mjs` 至少新增/修改以下证明。
 
+**现有旧测试：**
+
+```text
+READY hides and inerts retained DOM while stopping background reveal
+```
+
+必须被替换/重命名为 v1.1 continuity contract；不得保留一个同时要求 intermediate READY hidden 的旧断言，再另外添加相反的新断言。
+
 ## 14.1 Initial READY remains hidden
 
 ```text
-fresh view
+fresh view / fresh connection epoch
 five hints complete + all false
 shellPresented has never latched
 → modal hidden
 → backdrop hidden
+→ view inert
+→ Conversation interaction inactive
 ```
 
 防止 first-connect flash。
 
-## 14.2 ACTIVE → READY continuity
+## 14.2 Exact state truth table
+
+浏览器测试必须分别证明：
+
+```text
+initial READY
+→ shell hidden
+→ inert
+→ Conversation inactive
+
+ACTIVE + CONVERSATION
+→ shell visible
+→ not inert
+→ Conversation active
+
+ACTIVE + HISTORY
+→ shell visible
+→ not inert
+→ Conversation inactive
+→ History active/full-width
+
+intermediate READY after ACTIVE
+→ shell visible
+→ inert
+→ Conversation inactive
+
+domain/view removal
+→ shell removed
+```
+
+## 14.3 ACTIVE → READY continuity
 
 ```text
 first ACTIVE
@@ -627,62 +920,126 @@ first ACTIVE
 all hints become false
 → modal still visible
 → backdrop still visible
-→ view inert
-→ conversation interaction inactive
+→ view/modal inert
+→ Conversation interaction inactive
 → modal rect unchanged
 → character stage rect unchanged
 ```
 
 并等待至少一个 reveal interval，证明 READY 不后台推进 reveal。
 
-## 14.3 READY → next ACTIVE continuity
+测试应观察 `hidden` attribute/property 的整个 transition，证明中间没有 `true` flash。
+
+## 14.4 READY → next ACTIVE continuity
 
 模拟下一 `conversation-id` / text 更新并重新 enabled controls：
 
 ```text
 same lr-dialogue-view
-same modal
+same modal HTMLElement
+same backdrop HTMLElement
 same character element/key when character unchanged
 same outer rect
 new reveal state resets
-shell never hidden during transition
+shell hidden never becomes true
 ```
 
-测试应通过同步 observation / MutationObserver 记录 `hidden` attribute 变化，证明不是“最终又 visible”而是中间从未 flash hidden。
+## 14.5 Fresh session re-arms initial hidden
 
-## 14.4 Sprite idempotence
+必须建立第二个 fresh view/session：
 
-同一 exact sprite ref 重复 `receiveRenderData()`：
+```text
+first session:
+ACTIVE → intermediate READY → close/remove
+
+second fresh view/session:
+all hints initially false
+→ modal hidden again
+→ shellPresented=false baseline restored
+
+second ACTIVE
+→ shell visible
+```
+
+如果测试人工 remove/reappend 同一 element，也要证明 reconnect 按 fresh Presentation connection epoch 重置 latch。
+
+## 14.6 Sprite idempotence covers every trigger
+
+不能只测试重复 `receiveRenderData()`。
+
+同一 exact attempt key 下分别重复：
+
+```text
+receiveRenderData(same ref)
+receiveRenderContext(same context)
+setPresentationActive(true)
+active="true" resynchronization / syncActiveToView()
+```
+
+都必须证明：
 
 ```text
 resource acquisition count remains 1
+loading request is not aborted/restarted
 ready canvas remains visible
 fallback does not reappear
 ```
 
-ref/contentVersion 改变时才触发新 acquisition。
+另外必须证明：
 
-## 14.5 Layout geometry
+```text
+contentVersion/ref change
+→ new acquisition
+
+context identity change
+→ new acquisition
+
+disconnect/reconnect
+→ new connection epoch + new acquisition
+
+same attempt previously failed to fallback
++ ordinary repeated reconciliation
+→ no automatic retry
+```
+
+## 14.7 Layout geometry and responsive split
 
 至少验证：
 
 ```text
-1280×720 → horizontal, ~30/70
-800×600  → horizontal, ~30/70
-640×480  → horizontal, ~30/70
-360×480  → stacked
+1280×720
+→ horizontal ~30/70
+→ normal shell geometry
+
+800×600
+→ horizontal ~30/70
+→ normal shell geometry
+
+640×480
+→ horizontal ~30/70
+→ compact <=640 shell geometry/font/stage rules still active
+
+360×480
+→ stacked
+→ compact <=640 rules still active
 ```
 
-并继续验证：
+不能只断言 `gridTemplateColumns`。
+
+还必须检查：
 
 ```text
-no active character → single full-width conversation
-History → full-width history
-modal always inside viewport
-choice rows not clipped
+modal is inside viewport
+modal height/width follows the correct responsive branch
+character stage stays inside its grid area
+Conversation has positive usable height
+choice rows are not clipped
+controls remain visible
+no active character → single full-width Conversation
+History → full-width History
 ```
 
-## 14.6 Density
+## 14.8 Density
 
 对 computed geometry 做稳定断言，而不是 screenshot-only：
 
@@ -740,23 +1097,34 @@ node apps/pwa/scripts/run-e2e.mjs staging
 
 如果实现时仓库脚本已变化，使用当前真实等价命令并在 PR 中报告 exact command；不得引用不存在的 script。
 
+
 # 17. Exit criteria
 
 ```text
-[ ] #118 的 continuity/layout/density scope 全部覆盖
+[ ] #118 的 continuity/layout/density/sprite-continuity scope 全部覆盖
 [ ] initial READY still hidden
 [ ] first ACTIVE opens shell once
+[ ] shell visibility and interaction readiness are separate private facts
 [ ] A→READY does not hide modal/backdrop
 [ ] READY remains inert
+[ ] READY ignores Conversation interaction events
 [ ] READY does not advance reveal in background
+[ ] ACTIVE History keeps shell interactive while Conversation is inactive
 [ ] READY→B keeps same shell geometry
 [ ] B→READY→C keeps same shell geometry
 [ ] final domain close removes Dialogue shell
-[ ] same sprite ref does not reload/fallback flash
+[ ] second fresh session re-arms initial hidden state
+[ ] disconnect/reconnect defensively resets Presentation latch
+[ ] sprite loading uses one idempotent coordinator across all trigger paths
+[ ] same sprite attempt key does not reload/fallback flash
+[ ] same failed sprite attempt does not auto-retry on ordinary reconciliation
+[ ] ref/context/reconnect changes create a new sprite acquisition opportunity
+[ ] <=640 compact shell/font/stage rules remain independent of layout orientation
 [ ] 1280×720 horizontal ~30/70
 [ ] 800×600 horizontal ~30/70
-[ ] 640×480 horizontal ~30/70
-[ ] 360×480 stacked
+[ ] 640×480 horizontal ~30/70 with compact <=640 geometry
+[ ] 360×480 stacked with compact <=640 geometry
+[ ] stacked character stage does not overflow/crop content
 [ ] no active character remains full-width Conversation
 [ ] History remains full width
 [ ] compact spacing baseline landed
@@ -764,7 +1132,9 @@ node apps/pwa/scripts/run-e2e.mjs staging
 [ ] Professor sprite stage ratio 68–72%
 [ ] semantic control hints unchanged
 [ ] reveal/choice/history behavior unchanged
+[ ] old READY-hidden browser assertion is replaced, not left contradictory
 [ ] source/FSDB Presentation exact sync preserved
+[ ] packages/renderer remains unchanged
 [ ] no RPGDialogue Runtime/public API change
 [ ] no Frame/Render ABI change
 [ ] no PokeMan gameplay subsystem change
