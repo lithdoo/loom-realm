@@ -74,23 +74,56 @@ async function waitForDialogue(page, text) {
 }
 
 // Installs an observer that records the complete hidden transition history of
-// the live Dialogue modal/backdrop. Checking only the final visible state could
-// not detect an intermediate hidden flash between Conversations A/B/C.
+// the live Dialogue modal/backdrop. Each mutation's resulting state is derived
+// from the MutationRecord itself (oldValue === null → attribute added → hidden
+// true; oldValue !== null → removed → false) so a transient false → true →
+// false flash inside a single MutationObserver batch cannot pass unnoticed.
 async function observeDialogueShell(page) {
   await page.evaluate(() => {
     const view = document.querySelector("lr-dialogue-view");
     const modal = view.shadowRoot.querySelector(".modal");
     const backdrop = view.shadowRoot.querySelector(".backdrop");
     const history = { modal: [modal.hidden], backdrop: [backdrop.hidden] };
-    const record = () => {
-      if (history.modal.at(-1) !== modal.hidden) history.modal.push(modal.hidden);
-      if (history.backdrop.at(-1) !== backdrop.hidden) history.backdrop.push(backdrop.hidden);
+    const derive = (record) => {
+      if (record.type !== "attributes" || record.attributeName !== "hidden") return;
+      const key = record.target === modal ? "modal" : "backdrop";
+      const next = record.oldValue === null;
+      if (history[key].at(-1) !== next) history[key].push(next);
     };
-    const observer = new MutationObserver(record);
-    observer.observe(modal, { attributes: true, attributeFilter: ["hidden"] });
-    observer.observe(backdrop, { attributes: true, attributeFilter: ["hidden"] });
+    const observer = new MutationObserver((records) => {
+      for (const record of records) derive(record);
+    });
+    observer.observe(modal, { attributes: true, attributeFilter: ["hidden"], attributeOldValue: true });
+    observer.observe(backdrop, { attributes: true, attributeFilter: ["hidden"], attributeOldValue: true });
     window.__dialogueShellHiddenHistory = history;
   });
+}
+
+// Self-check: prove the record-based derivation above catches a same-batch
+// transient flash on a scratch element before trusting it for the real shell.
+async function verifyDialogueObserverDetectsFlash(page) {
+  const probe = await page.evaluate(async () => {
+    const scratch = document.createElement("div");
+    document.body.append(scratch);
+    const transitions = [scratch.hidden];
+    const derive = (record) => {
+      if (record.type !== "attributes" || record.attributeName !== "hidden") return;
+      const next = record.oldValue === null;
+      if (transitions.at(-1) !== next) transitions.push(next);
+    };
+    const observer = new MutationObserver((records) => {
+      for (const record of records) derive(record);
+    });
+    observer.observe(scratch, { attributes: true, attributeFilter: ["hidden"], attributeOldValue: true });
+    scratch.hidden = true;
+    scratch.hidden = false;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    observer.disconnect();
+    scratch.remove();
+    return transitions;
+  });
+  assert.deepEqual(probe, [false, true, false],
+    "the hidden-transition observer must detect a same-batch transient flash, not only the final state");
 }
 
 async function assertDialogueNeverHidden(page, stage) {
@@ -111,6 +144,7 @@ async function revealAndConfirm(page) {
 
 async function completeProfessorDialogue(page) {
   await waitForDialogue(page, "你终于来了。");
+  await verifyDialogueObserverDetectsFlash(page);
   await observeDialogueShell(page);
   await revealAndConfirm(page);
   await waitForDialogue(page, "准备好出发了吗？");

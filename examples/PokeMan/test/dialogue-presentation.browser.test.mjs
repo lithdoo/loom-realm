@@ -60,19 +60,27 @@ async function pageFixture(t, { reduced = false } = {}) {
     globalThis.setHints = (fixture, enabled) => {
       for (const action of ["confirm", "previous", "next", "history", "cancel"]) setHint(fixture, action, enabled);
     };
-    // Records the complete hidden transition history of the shell. Checking only
-    // the final visible state cannot detect an intermediate hidden flash.
+    // Records the complete hidden transition history of the shell by deriving
+    // each mutation's resulting state from the MutationRecord itself. Reading
+    // element.hidden inside the callback could only ever see the batch-final
+    // state and would miss a same-batch false → true → false flash. For the
+    // reflected boolean hidden attribute: oldValue === null means the attribute
+    // was added (state true); oldValue !== null means it was removed (false).
     globalThis.observeShellHidden = (view) => {
       const modal = view.shadowRoot.querySelector(".modal");
       const backdrop = view.shadowRoot.querySelector(".backdrop");
       const transitions = { modal: [modal.hidden], backdrop: [backdrop.hidden] };
-      const record = () => {
-        if (transitions.modal.at(-1) !== modal.hidden) transitions.modal.push(modal.hidden);
-        if (transitions.backdrop.at(-1) !== backdrop.hidden) transitions.backdrop.push(backdrop.hidden);
+      const derive = (record) => {
+        if (record.type !== "attributes" || record.attributeName !== "hidden") return;
+        const key = record.target === modal ? "modal" : "backdrop";
+        const next = record.oldValue === null;
+        if (transitions[key].at(-1) !== next) transitions[key].push(next);
       };
-      const observer = new MutationObserver(record);
-      observer.observe(modal, { attributes: true, attributeFilter: ["hidden"] });
-      observer.observe(backdrop, { attributes: true, attributeFilter: ["hidden"] });
+      const observer = new MutationObserver((records) => {
+        for (const record of records) derive(record);
+      });
+      observer.observe(modal, { attributes: true, attributeFilter: ["hidden"], attributeOldValue: true });
+      observer.observe(backdrop, { attributes: true, attributeFilter: ["hidden"], attributeOldValue: true });
       return transitions;
     };
     globalThis.makeDialogueFixture = ({ text = "这是一段用于测试逐字显示的中文长文本。", choices = [], characters = [], historyEntries = [] } = {}) => {
@@ -371,6 +379,28 @@ test("intermediate READY ignores Conversation events, pauses reveal, and preserv
   });
   assert.equal(resumed.active, true);
   assert.ok(resumed.index > result.index, "the same Conversation resumes reveal from its retained index after ACTIVE returns");
+});
+
+test("shell hidden-transition observer detects a same-batch transient flash", async (t) => {
+  const page = await pageFixture(t);
+  const result = await page.evaluate(async () => {
+    const fixture = makeDialogueFixture({ text: "观察者自检：必须能捕获同批次的瞬时隐藏闪烁。" });
+    setHint(fixture, "confirm", true);
+    const modal = fixture.view.shadowRoot.querySelector(".modal");
+    if (modal.hidden !== false) throw new Error("precondition: shell must be presented before the probe");
+    const transitions = observeShellHidden(fixture.view);
+    // Inject the exact bug class the observer exists to catch: a transient
+    // hidden flash whose two attribute mutations land in ONE MutationObserver
+    // batch. A callback that only sampled element.hidden would see just [false].
+    modal.hidden = true;
+    modal.hidden = false;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return { history: structuredClone(transitions), finalHidden: modal.hidden };
+  });
+  assert.deepEqual(result.history.modal, [false, true, false],
+    "the record-based observer must capture the intermediate hidden=true of a same-batch flash");
+  assert.deepEqual(result.history.backdrop, [false], "an untouched sibling stays unrecorded");
+  assert.equal(result.finalHidden, false);
 });
 
 test("A → READY → B → READY → C keeps one continuous shell with no hidden flash", async (t) => {
