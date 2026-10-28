@@ -810,50 +810,69 @@ pointer/touch gameplay authority
 new portrait asset system
 ```
 
+
 # 13. Implementation landing
 
-实现 PR 优先只修改：
+## 13.1 Allowed implementation files
 
-```text
+The implementation PR must remain within this allowlist unless a concrete blocker is demonstrated and separately approved.
+
+Production source:
+
+~~~text
 examples/PokeMan/presentation/dialogue.browser.js
 examples/PokeMan/presentation/dialogue.css
+~~~
+
+Focused browser test:
+
+~~~text
 examples/PokeMan/test/dialogue-presentation.browser.test.mjs
-```
+~~~
 
-由于 source 与 FSDB Presentation 必须保持一致，还应通过现有：
+Generated FSDB outputs, produced only by the existing sync script:
 
-```text
-examples/PokeMan/scripts/sync-map-presentation.mjs
-```
-
-同步：
-
-```text
+~~~text
 [FSDB]PokeMan/[resource]Presentation/dialogue/dialogue.browser.js.js
 [FSDB]PokeMan/[resource]Presentation/dialogue/dialogue.css.css
-```
+~~~
 
-只有真实 closed-loop 产品 qualification 需要时，才扩：
+Required real-product regression tests:
 
-```text
+~~~text
 apps/pwa/test/pokeman-map.e2e.test.mjs
 apps/pwa/test/pokeman-staging.e2e.test.mjs
-```
+~~~
 
-不得修改：
+Do not create a second E2E harness. Extend the existing Professor route and staging path.
 
-```text
-game-libs/rpg-dialogue Runtime / public API
+## 13.2 Source → FSDB synchronization
+
+Source and FSDB Presentation must remain byte-for-byte synchronized through the existing script:
+
+~~~text
+examples/PokeMan/scripts/sync-map-presentation.mjs
+~~~
+
+Run the script using its repository-defined invocation; do not manually edit generated FSDB files as the source of truth.
+
+## 13.3 Forbidden files / boundaries
+
+The following are forbidden implementation targets for this UX fix:
+
+~~~text
 packages/renderer
+game-libs/rpg-dialogue Runtime / public API
 packages/subsystem
 packages/main
 common-controls
-PokeMan subsystems/dialogue.mjs
-PokeMan subsystems/map.mjs
-```
+examples/PokeMan/subsystems/dialogue.mjs
+examples/PokeMan/subsystems/map.mjs
+Dialogue graph / Story / Content business logic
+Frame / Call / Render ABI
+~~~
 
-除非发现与本文目标直接相关、可复现、且 Presentation-local 无法修复的 framework correctness bug；遇到这种情况应先停止并更新设计，而不是顺手扩大实现范围。
-
+Do not broaden scope to fix unrelated framework behavior. If a reproducible blocker cannot be fixed within the allowed Presentation files and existing test files, stop and report the evidence before changing the design or expanding scope.
 
 # 14. Required browser qualification
 
@@ -1050,36 +1069,63 @@ body / controls padding match compact baseline
 Professor sprite rendered height / stage height within 0.68–0.72
 ```
 
-# 15. Product E2E qualification
 
-建议扩现有真实 PWA E2E，至少对 Professor A→B→C 增加 continuity observation：
+# 15. Product E2E qualification — REQUIRED
 
-```text
+Real PWA continuity is a required acceptance gate, not a recommendation. The original defect was observed in the actual product path, so browser-component tests alone are insufficient.
+
+## 15.1 Required Professor A → B → C continuity observation
+
+MUST extend the existing test in:
+
+~~~text
+apps/pwa/test/pokeman-map.e2e.test.mjs
+~~~
+
+On the real Professor route:
+
+~~~text
 open A
 → install observer on lr-dialogue-view modal/backdrop hidden state
 → complete A
-→ wait B
+→ wait for B
 → assert no hidden=true transition
 
-choose ready/not-yet
+choose ready / not-yet
 → complete B
-→ wait C
+→ wait for C
 → assert no hidden=true transition
 
 complete/cancel final C
 → Dialogue element/domain finally disappears
-```
+~~~
 
-同时验证：
+Observe the full transition history, not only the final visible state. A test that checks only “modal is visible after B” does not satisfy this requirement.
 
-```text
+## 15.2 Required staging regression
+
+MUST retain or extend at least one real Dialogue continuity path in:
+
+~~~text
+apps/pwa/test/pokeman-staging.e2e.test.mjs
+~~~
+
+It must qualify the real staging build and assert that:
+
+~~~text
 same lr-map-view stays mounted
 Dialogue still overlays Map
 History full-width behavior unchanged
-second interaction creates fresh new Dialogue session
-```
+second interaction creates a fresh Dialogue session
+fresh session initial READY is hidden
+ACTIVE → intermediate READY → ACTIVE does not hide the shell
+~~~
 
-本优化不要求为视觉调整新建第二套 E2E harness。
+Do not substitute a unit-only or component-only test for the staging regression, and do not create a separate harness.
+
+## 15.3 Failure handling
+
+If the current E2E path cannot deterministically reach A → B → C, the implementation PR must report the exact blocker and evidence. Do not silently downgrade the required assertion to optional or remove the acceptance criterion.
 
 # 16. Required commands
 
@@ -1139,8 +1185,8 @@ node apps/pwa/scripts/run-e2e.mjs staging
 [ ] no Frame/Render ABI change
 [ ] no PokeMan gameplay subsystem change
 [ ] focused browser qualification passes
-[ ] real PWA Professor continuity path passes
-[ ] staging regression passes
+[ ] required real PWA Professor A→B→C hidden-transition observer passes
+[ ] required staging Dialogue continuity regression passes
 ```
 
 # 18. What this proves
