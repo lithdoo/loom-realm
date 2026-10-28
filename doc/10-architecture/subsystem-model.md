@@ -339,7 +339,7 @@ M11 Renderer Store internal-only；DOM/Canvas/WebGL presentation属于 M14。Ren
 
 ---
 
-## 9. Content Author Projection — M12 Frozen
+## 9. Content Author Projection — M12 Frozen（group 由 2026-10 修订增补）
 
 `SubsystemScope` exact新增：
 
@@ -347,22 +347,25 @@ M11 Renderer Store internal-only；DOM/Canvas/WebGL presentation属于 M14。Ren
 readonly content: ContentClient;
 ```
 
-M12 author root只暴露：
+author root暴露：
 
 ```text
 ContentClient.record(namespace,key,{signal?})
+ContentClient.group(namespace,key,{signal?})
 ContentClient.resource(namespace,hierarchicalResourceKey,{signal?})
-ContentRecord / ContentResource
+ContentRecord / ContentGroup / ContentResource
 ContentReadOptions
 ContentReadError / ContentReadErrorCode
 ```
+
+`group()` 是 2026-10 对 M12 冻结面的唯一增补（见 [ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md) 更新记录）：真实分组读取 consumer 出现后，Subsystem 通过标准 Content capability 读取 `[group]` JSONL。`namespace/key` 均为单 logical segment；`rows` 按响应 JSONL 行序返回，`contentVersion` 仍为 full-body bytes 的 `sha256:<64 lowercase hex>`。非 NDJSON MIME、非法 JSON 行或不一致 version metadata → `CONTENT_INVALID`。
 
 Author不提供：
 
 ```text
 installationId
 contentVersion request selector
-manifest()/group()/head()
+manifest()/head()
 raw fetch / Response / Headers
 URL builder / bearer
 filesystem path / FSDB handle
@@ -384,7 +387,7 @@ Returned JSON/`Uint8Array`必须与 internal cache ownership隔离；caller muta
 
 Business自行决定 fallback/retry/failed outcome。
 
-如果 M13出现第一个真实 `group()` author consumer，再显式最小 reopen；不得 raw Content/FSDB旁路。
+2026-10 第一个真实 `group()` author consumer 出现后，author surface 已按 [ADR 0030 更新记录](../decisions/0030-freeze-m12-content-preimplementation-closure.md) 显式最小 reopen 增补 `ContentClient.group()`；raw Content/FSDB 旁路仍然禁止。
 
 ---
 

@@ -28,6 +28,7 @@ export type {
 } from "./render.js";
 export type {
   ContentClient,
+  ContentGroup,
   ContentReadErrorCode,
   ContentReadOptions,
   ContentRecord,

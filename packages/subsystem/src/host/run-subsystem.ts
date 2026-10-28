@@ -174,7 +174,7 @@ function validateOptions(options: RunSubsystemOptions): void {
   ) {
     throw new TypeError("Invalid SubsystemDataBinding");
   }
-  if (options.content !== undefined && (options.content === null || typeof options.content !== "object" || typeof options.content.record !== "function" || typeof options.content.resource !== "function")) {
+  if (options.content !== undefined && (options.content === null || typeof options.content !== "object" || typeof options.content.record !== "function" || typeof options.content.group !== "function" || typeof options.content.resource !== "function")) {
     throw new TypeError("Invalid ContentClient");
   }
   if (
@@ -304,6 +304,7 @@ class SubsystemHost {
   private async bootstrap(): Promise<void> {
     const unavailableContent: ContentClient = Object.freeze({
       record: () => Promise.reject(new ContentReadError("CONTENT_UNAVAILABLE")),
+      group: () => Promise.reject(new ContentReadError("CONTENT_UNAVAILABLE")),
       resource: () => Promise.reject(new ContentReadError("CONTENT_UNAVAILABLE")),
     });
     const scope: SubsystemScope = Object.freeze({

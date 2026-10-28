@@ -170,6 +170,7 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
   const game = parseGameEntryV1(await readFile(path.join(exampleRoot, "game.json"), "utf8"));
   const content = Object.freeze({
     async record(namespace, key) { const value = fixture.records[`${namespace}/${key}`]; if (!value) throw new Error("record missing"); return { value, contentVersion: hash(Buffer.from(JSON.stringify(value))) }; },
+    async group() { throw new Error("group missing"); },
     async resource(namespace, key) { const value = resources.get(`${namespace}/${key}`); if (!value) throw new Error("resource missing"); return { ...value, bytes: Uint8Array.from(value.bytes) }; },
   });
 
