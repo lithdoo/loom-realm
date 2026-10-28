@@ -7,6 +7,8 @@
 > 本文只定义 PokeMan 的 Dialogue Web Presentation：视觉布局、Web Component 行为、Presentation-local state、人物 sprite 展示、Conversation / History 模式以及 Presentation 资源接入。固定 Dialogue 的业务数据模型见 [64-dialogue.md](./64-dialogue.md)；Content / FSDB 物理模型见 [68-content-fsdb.md](./68-content-fsdb.md)。**“implementation-ready”只指 Presentation implementation-ready，不表示 PokeMan 的 NPC → Dialogue gameplay integration 已完成设计或实现。**
 >
 > 本文不修改 `@loomrealm-game/rpg-dialogue` Runtime、public API 或 Frozen Presentation ABI。PokeMan 实现必须继续兼容现有 canonical `lr-dialogue-*` tags、attrs/data 和 Render Event / Custom Event 语义。
+>
+> **v1.1 override：**真实产品验证后的连续性、布局与视觉密度修正见 [74-dialogue-presentation-v1.1.md](./74-dialogue-presentation-v1.1.md)。当 74 与本文在 READY/modal visibility、active-character 30/70 layout、窄屏 breakpoint 或 spacing baseline 上冲突时，仅这些明确列出的条款以 74 为准；本文其余 Frozen contract 保持有效。
 
 # 1. 目标
 
