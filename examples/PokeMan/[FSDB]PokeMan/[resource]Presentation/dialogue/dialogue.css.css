@@ -1,7 +1,7 @@
 lr-dialogue-view {
   --pokeman-dialogue-backdrop: rgb(4 9 20 / 0.52);
   --pokeman-dialogue-surface: rgb(249 251 255 / 0.97);
-  --pokeman-dialogue-stage: linear-gradient(160deg, #e8eef8, #dce7f6);
+  --pokeman-dialogue-stage: linear-gradient(160deg, #edf2fa, #e3eaf6);
   --pokeman-dialogue-text: #172033;
   --pokeman-dialogue-accent: #456fd3;
   --pokeman-dialogue-selection: #e2ebff;
