@@ -429,7 +429,7 @@ slot.canonical-root {
 Conversation + active character：
 
 ```css
-grid-template-columns: 32% minmax(0, 68%);
+grid-template-columns: 30% minmax(0, 70%);
 grid-template-rows: minmax(0, 1fr) auto;
 grid-template-areas:
   "characters conversation"
@@ -566,10 +566,10 @@ revealComplete
 selectedChoiceId
 conversationScroll
 revealTimer
-presented = true|false
+interactionActive = true|false (drives Conversation event/reveal gate)
 ```
 
-`setPresented(false)` 必须停止 reveal timer；`setPresented(true)` 在同一 conversation、reveal 未完成时从原 `revealIndex` 继续。
+v1.1 不再使用 `setPresented()` 作为 visibility / interaction seam。Conversation 的 reveal timer 与 Render Event gate 由 private interaction-active gate 控制；gate 关闭时暂停并保留 `revealIndex`，重新打开时在同一 conversation 内继续。
 
 它根据 private state 在自己的 Shadow DOM 内计算：
 
@@ -627,7 +627,7 @@ history
 cancel
 ```
 
-只有五个 action 都已 materialize 后才允许推导 ACTIVE / READY；未完整 materialize 时一律保持 `presented=false`，防止 first-connect flash。
+只有五个 action 都已 materialize 后才允许推导 controlsComplete / interactionActive；未完整 materialize 时 interactionActive=false 且初始 shellPresented=false，防止 first-connect flash。shellPresented 的 latch/reset 规则以 74 §4 为准。
 
 ### `lr-dialogue-control-hint`
 
