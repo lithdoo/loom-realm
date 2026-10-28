@@ -7,6 +7,8 @@
 > 本文只定义 PokeMan 的 Dialogue Web Presentation：视觉布局、Web Component 行为、Presentation-local state、人物 sprite 展示、Conversation / History 模式以及 Presentation 资源接入。固定 Dialogue 的业务数据模型见 [64-dialogue.md](./64-dialogue.md)；Content / FSDB 物理模型见 [68-content-fsdb.md](./68-content-fsdb.md)。**“implementation-ready”只指 Presentation implementation-ready，不表示 PokeMan 的 NPC → Dialogue gameplay integration 已完成设计或实现。**
 >
 > 本文不修改 `@loomrealm-game/rpg-dialogue` Runtime、public API 或 Frozen Presentation ABI。PokeMan 实现必须继续兼容现有 canonical `lr-dialogue-*` tags、attrs/data 和 Render Event / Custom Event 语义。
+>
+> **v1.1 override：**真实产品验证后的连续性、布局与视觉密度修正见 [74-dialogue-presentation-v1.1.md](./74-dialogue-presentation-v1.1.md)。74 在以下内容上是唯一实施权威：shell visibility / interaction readiness、READY 与 History coordination、Conversation reveal gate、active-character 30/70 layout、<=640px compact geometry 与 <=479px stacked breakpoint、sprite load idempotence/retry、visual-density baseline，以及这些内容对应的 browser / product E2E qualification。本文中 §4.5、§5.1–§5.2、§12–§14、Transition table、Local coordination contract、§21.1–§21.2 若仍出现旧的 presented / setPresented、READY hidden、32/68 或 640px stacked 规则，均为 v1.0 历史描述，**不得按旧规则实施**，必须按 74 执行。其他未被 74 明确覆盖的 Frozen contract 继续有效。
 
 # 1. 目标
 
@@ -427,7 +429,7 @@ slot.canonical-root {
 Conversation + active character：
 
 ```css
-grid-template-columns: 32% minmax(0, 68%);
+grid-template-columns: 30% minmax(0, 70%);
 grid-template-rows: minmax(0, 1fr) auto;
 grid-template-areas:
   "characters conversation"
@@ -462,7 +464,7 @@ LoomRealm Web Projector 对 retained attrs 的 `setAttribute()` 是同步的，�
 
 ```text
 history.visible → view mode
-control-hint facts → view presented
+control-hint facts → derive interactionActive; latch shellPresented after first ACTIVE
 ```
 
 固定协调路径：
@@ -483,7 +485,7 @@ lr-dialogue-control-hint.attributeChangedCallback("action" | "enabled")
 → synchronously notify parent lr-dialogue-controls
 → controls re-read its five direct canonical hints
 → synchronously notify closest lr-dialogue-view
-→ view updates presented
+→ view updates interactionActive / shellPresented
 ```
 
 内部方法名可实现为例如：
@@ -492,7 +494,7 @@ lr-dialogue-control-hint.attributeChangedCallback("action" | "enabled")
 view.syncHistoryFrom(historyElement)
 controls.syncFactsToView()
 view.syncControlsFrom(controlFacts)
-conversation.setPresented(boolean)
+Conversation private interaction-active gate
 ```
 
 这些方法是 **bundle-private / Window-local implementation seam**：
@@ -564,10 +566,10 @@ revealComplete
 selectedChoiceId
 conversationScroll
 revealTimer
-presented = true|false
+interactionActive = true|false (drives Conversation event/reveal gate)
 ```
 
-`setPresented(false)` 必须停止 reveal timer；`setPresented(true)` 在同一 conversation、reveal 未完成时从原 `revealIndex` 继续。
+v1.1 不再使用 `setPresented()` 作为 visibility / interaction seam。Conversation 的 reveal timer 与 Render Event gate 由 private interaction-active gate 控制；gate 关闭时暂停并保留 `revealIndex`，重新打开时在同一 conversation 内继续。
 
 它根据 private state 在自己的 Shadow DOM 内计算：
 
@@ -625,7 +627,7 @@ history
 cancel
 ```
 
-只有五个 action 都已 materialize 后才允许推导 ACTIVE / READY；未完整 materialize 时一律保持 `presented=false`，防止 first-connect flash。
+只有五个 action 都已 materialize 后才允许推导 controlsComplete / interactionActive；未完整 materialize 时 interactionActive=false 且初始 shellPresented=false，防止 first-connect flash。shellPresented 的 latch/reset 规则以 74 §4 为准。
 
 ### `lr-dialogue-control-hint`
 
@@ -675,20 +677,23 @@ virtualization state (future)
 
 不显示人物大图，不把 `speaker-name` 解析成 Character reference。
 
+
 ## 4.3 State ownership
 
-```text
+~~~text
 RPGDialogue Runtime
 ├─ lifecycle: READY | ACTIVE | CLOSED
 ├─ interaction mode: CONVERSATION | HISTORY
 ├─ history.visible
 ├─ choices / enabled facts
-└─ control-hint enabled facts
+└─ canonical control-hint enabled facts
 
-lr-dialogue-view
-├─ derived visual mode: conversation | history
-└─ presented: true | false
-   └─ derived only from canonical control-hint enabled facts
+lr-dialogue-view (Presentation-local only)
+├─ mode: conversation | history
+├─ controlsComplete: boolean
+├─ interactionActive: boolean
+├─ shellPresented: boolean (one-way latch per connection/session epoch)
+└─ hasActiveCharacter: boolean
 
 lr-dialogue-conversation
 ├─ reveal progress
@@ -698,11 +703,15 @@ lr-dialogue-conversation
 
 lr-dialogue-history
 └─ history pixel scroll / local focus
-```
+~~~
+
+interactionActive is derived from a complete canonical control-hint set with at least one enabled action. shellPresented becomes true after the first interactionActive=true in the current Presentation connection/session epoch and remains true across intermediate READY projections.
+
+The exact derivation, shell visibility, inertness, event gates, and reset rules are frozen in [74-dialogue-presentation-v1.1.md](./74-dialogue-presentation-v1.1.md) §4. Do not reintroduce a single presented boolean as both shell visibility and interaction authority.
 
 严禁形成以下反向 authority：
 
-```text
+~~~text
 WC local phase
 → Runtime mode
 
@@ -711,7 +720,8 @@ selectedChoiceId
 
 History pixel scroll
 → Shared State
-```
+~~~
+
 
 ## 4.4 Input / event routing matrix
 
@@ -725,78 +735,21 @@ History pixel scroll
 其中 REVEALING 如果当前 Conversation 自带 choices，selection navigation 仍必须工作；`commit` 永远先结束 reveal，不得在同一次 command 中继续 submit。
 
 
-## 4.5 READY / ACTIVE 的 Modal visibility
 
-RPG Dialogue 在 Conversation settle 后进入 READY，但 RenderDomain 与上一轮 retained projection 会继续存在。因此 PokeMan Presentation 必须显式区分：
+## 4.5 READY / ACTIVE 的 Modal visibility — superseded by v1.1
 
-```text
-retained Dialogue tree exists
-≠
-active Dialogue modal should be visible
-```
+本节旧版 “any enabled hint → presented=true / all disabled → hidden” 规则已由 [74 §4](./74-dialogue-presentation-v1.1.md) 完整取代，**不得据本节旧规则实施**。
 
-Frozen Runtime 已提供足够的 retained facts：
+v1.1 的唯一规则：
 
-```text
-READY
-→ confirm=false
-→ previous=false
-→ next=false
-→ history=false
-→ cancel=false
+- initial READY（当前 epoch 尚未 ACTIVE）：shell hidden、view inert、Conversation inactive；
+- 首次 ACTIVE：shellPresented=true，显示 shell；
+- 后续 intermediate READY：shell 保持显示，但 modal/view inert，Conversation 事件被忽略且 reveal timer 暂停；
+- ACTIVE + HISTORY：shell 保持可见且可交互，Conversation inactive，由 History 接管交互；
+- RenderDomain / Dialogue close：shell 被移除；新的 session 从 initial hidden baseline 开始。
 
-ACTIVE / CONVERSATION or HISTORY
-→ 至少一个 control hint enabled=true
-```
+modal.hidden / backdrop.hidden 只由 shellPresented 控制；inert、Conversation Render Event gate 与 reveal timer 由 interactionActive 和 mode 控制。不得新增 public active / ready / presented canonical attr，也不得改变 Runtime、Render ABI 或 control-hint 语义。
 
-PokeMan v1 固定用五个 canonical `lr-dialogue-control-hint[action][enabled]` 推导 Presentation visibility：
-
-```text
-five canonical action hints not yet completely materialized
-→ presented = false
-
-all five canonical action hints present
-AND any enabled="true"
-→ presented = true
-
-all five canonical action hints present
-AND all enabled="false"
-→ presented = false
-```
-
-完整 action set 固定为：
-
-```text
-confirm
-previous
-next
-history
-cancel
-```
-
-推导必须走 §4.2 的 **同步 child → controls → view local coordination**，不得依赖父级 MutationObserver。
-
-这不是新的 lifecycle authority。WC 只是从 Runtime 已发布的 canonical facts 推导可见性。
-
-实现要求：
-
-- `lr-dialogue-view` 不增加 `active` / `ready` public attr；
-- 不通过 `conversation-id` 是否存在判断 ACTIVE，因为 READY 保留该 identity；
-- 不通过 History entries 是否为空判断 ACTIVE；
-- `presented=false` 时 backdrop / modal 使用 `hidden` 或等价语义退出 layout、pointer hit testing 与 accessibility tree；
-- view 在 `presented=false` 时同步调用 `conversation.setPresented(false)`，暂停仍未完成的 reveal；READY 不允许隐藏后继续后台推进 reveal；
-- view 在 `presented=true && mode=conversation` 时调用 `conversation.setPresented(true)`；
-- view 在 `mode=history` 时即使自身 presented=true，也调用 `conversation.setPresented(false)`；
-- 从 History 回 Conversation 或从 hidden 回 visible 时，只恢复同一 Conversation 的 local reveal state，不隐式 reveal all；
-- 下一次新的 `conversation-id` 到来后，Conversation 按 new identity 规则 reset。
-
-因此四个 UI state：
-
-```text
-REVEALING | CONVERSATION | CHOICES | HISTORY
-```
-
-只在 `presented=true` 时有视觉意义；READY 使用正交的 `presented=false`，不新增第五个交互 state。
 
 # 5. Modal 布局
 
@@ -812,8 +765,8 @@ modal height = min(68vh, 520px)
 Conversation **有 active character**：
 
 ```text
-character pane = 32%
-content pane   = 68%
+character pane = 30%
+content pane   = 70%
 ```
 
 ```text
@@ -851,7 +804,7 @@ character pane = hidden / no grid space
 - characters array 为空；
 - characters 存在但没有任何 `active="true"`。
 
-如果存在 active character，但其 sprite data/resource 失败，则 **不 collapse**：保留 32/68，并显示 character fallback。
+如果存在 active character，但其 sprite data/resource 失败，则 **不 collapse**：保留 30/70，并显示 character fallback。
 
 History 始终单列全宽：
 
@@ -861,33 +814,21 @@ history pane = 100%
 
 History 不保留左侧人物区。
 
-## 5.2 窄屏 fallback
 
-有 active character 的 Conversation 在可用宽度不足时允许变为上下结构：
+## 5.2 窄屏 fallback — responsive rules superseded by v1.1
 
-```text
-┌────────────────────────────┐
-│       CHARACTER STAGE      │
-├────────────────────────────┤
-│ speaker                    │
-│ dialogue / choices         │
-└────────────────────────────┘
-```
+本节原有“640px 可堆叠”的建议已被 [74 §7](./74-dialogue-presentation-v1.1.md) 取代。不要把所有 max-width: 640px 规则一起移动到 479px。
 
-无 active character 的 Conversation 仍然直接使用单列 content；不生成空 character stage。
+固定规则：
 
-History 仍是单列全宽。
+- >640px：normal shell geometry，active character 使用水平 30/70；
+- 480px–640px：保留 compact modal/font/stage geometry，仍使用水平 30/70；
+- <=479px：保留 compact geometry，active character 才允许切换为 stacked；
+- 无 active character：全宽 Conversation，不创建空 stage；
+- History：全宽 History，不保留人物栏。
 
-建议 breakpoint 从 `max-width: 640px` 开始验证，但最终以 screenshot qualification 为准。
+必须校验 1280×720、800×600、640×480、360×480 的 geometry、正文可用高度、Choice 与 controls 可见性；详见 74 §14.7。
 
-窄屏必须满足：
-
-- 有 active character 才保留 character stage；
-- 无 active character 不留空白 stage；
-- History 隐藏 character stage；
-- History 不改变 modal 外框；
-- Choice row 保持足够高度；
-- 文本不横向滚动。
 
 # 6. Backdrop 与层级
 
@@ -1454,125 +1395,94 @@ HISTORY
 - `scroll-to-latest` / `scroll-up` / `scroll-down` 在空列表上安全 no-op；
 - empty History 仍可通过 `history` 或 `cancel` 返回 Conversation。
 
+
 # 12. Conversation / History mode transition
 
-History 切换保持 Modal shell 不动，但内部 layout 会从当前 Conversation geometry 切到 100% History。
+本节保留 History 的产品行为约束；旧版 setPresented / 32/68 的实现细节由 [74 §4、§7](./74-dialogue-presentation-v1.1.md) 取代。
 
-当前 Conversation geometry 可能是：
+History 切换固定在同一 shell 内完成：
 
-```text
-with active character
-→ 32% character + 68% conversation
+~~~text
+ACTIVE + CONVERSATION
+→ History becomes active
+→ shell stays visible and non-inert
+→ Conversation interaction/reveal pauses
+→ character + Conversation hidden from layout/a11y
+→ History receives 100% content geometry
 
-without active character
-→ 100% conversation
-```
+History closes while Runtime remains ACTIVE
+→ same shell / modal geometry remains
+→ Conversation layout restored (30/70 if active character, otherwise full width)
+→ Conversation resumes from the same revealIndex / selection / scroll
+~~~
 
-进入 History：
+约束：
 
-```text
-1. history.visible attr 同步到达
-2. view 同步 mode = HISTORY
-3. conversation.setPresented(false)
-4. character / conversation 从 layout 与 a11y tree 隐藏
-5. history 立即获得 100% content geometry
-6. 可执行 120–180ms opacity transition
-7. 后续 scroll-to-latest Render Event 按最终 geometry 处理
-```
-
-离开 History：
-
-```text
-1. history.visible=false 同步到达
-2. view 同步 mode = CONVERSATION
-3. view 根据“当前是否有 active character”恢复：
-   - 32/68，或
-   - 100% conversation
-4. if view.presented=true:
-   conversation.setPresented(true)
-5. 恢复此前 reveal / selection / conversation scroll local state
-6. 可执行 120–180ms opacity transition
-```
-
-关键约束：
-
-- layout switch 本身是同步的，不等待 transition；
-- transition 只做视觉淡入淡出，不承担 state ordering；
-- character pane 只有实际存在时才参与 fade；
-- Modal、backdrop 不移动、不缩放、不重新 mount；
+- History 不能把整个 view/modal 设为 inert；History 是当前 ACTIVE mode 的交互 owner；
+- Conversation 暂停使用 v1.1 private interaction gate，不再通过旧 setPresented 推导；
+- layout switch 同步完成；transition 只负责视觉淡入淡出；
+- modal/backdrop 不移动、不缩放、不重新 mount；
 - 不做 page slide、scene fade 或第二个 modal。
 
-目标 mental model：
 
-> 玩家仍处于同一个 Dialogue session，只是从“当前会话”切到“历史记录”。
 
 # 13. Reveal 与 History 的组合状态
 
-Presentation 有两个正交维度：
+本节旧版 view.presented reveal gate 已由 [74 §4.4–§4.5](./74-dialogue-presentation-v1.1.md) 取代。v1.1 使用正交的 mode 与 interaction readiness：
 
-```text
-mode
-= CONVERSATION | HISTORY
+~~~text
+mode = CONVERSATION | HISTORY
+interactionActive = true | false
+~~~
 
-reveal
-= REVEALING | REVEALED
-```
+固定：
 
-PokeMan v1 固定：
+~~~text
+ACTIVE + CONVERSATION
+→ interactionActive=true
+→ Conversation may reveal / process Conversation Render Events
 
-```text
-REVEALING
-+ history.visible false → true
-→ view synchronously mode=HISTORY
-→ conversation.setPresented(false)
-→ stop reveal timer
-→ retain revealIndex
+ACTIVE + HISTORY
+→ shell visible, view not inert
+→ Conversation interactionActive=false
+→ stop reveal timer; preserve revealIndex, selectedChoiceId, scroll
+→ History owns active interaction
 
-history.visible true → false
-→ view synchronously mode=CONVERSATION
-→ if view.presented=true:
-     conversation.setPresented(true)
-→ resume from same revealIndex
-```
+intermediate READY after first ACTIVE
+→ shell remains visible but inert
+→ Conversation interactionActive=false
+→ stop reveal timer; ignore Conversation Render Events
 
-进入 History 不允许 reveal all，不重置 reveal progress。
+next ACTIVE + CONVERSATION
+→ same shell resumes
+→ same Conversation resumes from retained local state unless conversation-id changed
 
-READY visibility 与 History 使用同一个 Conversation presentation gate：
+new conversation-id
+→ reset reveal / selection according to existing 69 Conversation identity contract
+~~~
 
-```text
-conversation should run reveal timer
-iff
-view.presented === true
-AND
-view.mode === "conversation"
-```
+不要将 shell visibility 当成 reveal/interaction authority。唯一状态真值表与事件 gate 见 74 §4.4–§4.5。
 
-因此：
 
-- History 打开时 pause；
-- READY hidden 时 pause；
-- History 关闭且仍 ACTIVE 时 resume；
-- 下一轮新 conversation-id 则 reset，而不是 resume 旧文本。
-
-History / READY 的同步切换要求见 §4.2。
 
 # 14. Canonical element 职责
 
 | Element | PokeMan 职责 |
 | --- | --- |
-| `lr-dialogue-view` | backdrop、modal geometry、presented、Conversation/History mode、character/no-character layout、同步 local coordination |
-| `lr-dialogue-characters` | first-active selection、是否存在 active character 的视觉派生 |
-| `lr-dialogue-character` | exact Presentation sprite data、resource load、4×4 crop、fallback、pixel render |
-| `lr-dialogue-conversation` | speaker、reveal timer、choice selection、commit、正文 scroll、`setPresented()` |
-| `lr-dialogue-text` | 当前可见文本 |
-| `lr-dialogue-choices` | choice list structural container |
-| `lr-dialogue-choice` | row visual、selected / enabled state |
-| `lr-dialogue-controls` | 汇总完整五 action facts、semantic hints、同步通知 view |
-| `lr-dialogue-control-hint` | action / label / enabled visual，并同步通知 controls |
-| `lr-dialogue-history` | visible attr 同步通知 view、全宽 viewport、scroll events、empty state |
-| `lr-dialogue-history-entry` | speaker + text entry |
+| lr-dialogue-view | backdrop、modal geometry、shellPresented / interactionActive / mode、character/no-character layout、同步 local coordination |
+| lr-dialogue-characters | first-active selection、是否存在 active character 的视觉派生 |
+| lr-dialogue-character | exact Presentation sprite data、resource load、4×4 crop、fallback、pixel render |
+| lr-dialogue-conversation | speaker、reveal timer、choice selection、commit、正文 scroll、private interaction-active gate |
+| lr-dialogue-text | 当前可见文本 |
+| lr-dialogue-choices | choice list structural container |
+| lr-dialogue-choice | row visual、selected / enabled state |
+| lr-dialogue-controls | 汇总完整五 action facts、semantic hints、同步通知 view |
+| lr-dialogue-control-hint | action / label / enabled visual，并同步通知 controls |
+| lr-dialogue-history | visible attr 同步通知 view、全宽 viewport、scroll events、empty state |
+| lr-dialogue-history-entry | speaker + text entry |
 
-canonical tags 必须全部注册；不增加 PokeMan-only RenderNode tag。
+canonical tags 必须全部注册；不增加 PokeMan-only RenderNode tag。v1.1 private facts 和方法名不是 public ABI。
+
 
 # 15. Interaction ABI
 
@@ -1971,29 +1881,32 @@ selectedChoiceId
 conversationScroll
 ```
 
+
 ### Transition table
 
 | From | Trigger | Guard | Action | To |
 | --- | --- | --- | --- | --- |
-| new Conversation | `conversation-id` changes | text non-empty | reset local state; start reveal | REVEALING |
-| new Conversation | `conversation-id` changes | text empty + no choices | mark revealed | CONVERSATION |
-| new Conversation | `conversation-id` changes | text empty + choices | mark revealed | CHOICES |
-| REVEALING | reveal timer completes | no choices | `revealComplete=true` | CONVERSATION |
-| REVEALING | reveal timer completes | has choices | `revealComplete=true` | CHOICES |
-| REVEALING | `commit` | no choices | reveal all; no submit | CONVERSATION |
-| REVEALING | `commit` | has choices | reveal all; no submit | CHOICES |
-| REVEALING | `choice-next/previous` | has choices | update `selectedChoiceId`; continue reveal | REVEALING |
-| CONVERSATION | `commit` | no choices | emit `submit({conversationId})` | settle |
-| CHOICES | `choice-next/previous` | enabled target exists | update `selectedChoiceId` | CHOICES |
-| CHOICES | `commit` | no selection | no-op | CHOICES |
-| CHOICES | `commit` | selected enabled | emit `submit({conversationId, choiceId})` | settle |
-| any Conversation phase | Runtime sets History visible | ACTIVE | pause reveal if needed; preserve local state; hide conversation/characters | HISTORY |
-| HISTORY | `scroll-to-latest` | after visible retained reconcile | scroll to newest entry | HISTORY |
-| HISTORY | `scroll-up/down` | history has entries | local scroll | HISTORY |
-| HISTORY | Runtime clears History visible | ACTIVE | restore layout; resume reveal if it was paused | previous Conversation phase |
-| any phase | new `conversation-id` | — | old reveal/selection/scroll state discarded | recompute from new Conversation |
-| any active phase | all control hints become disabled | Runtime settled to READY | hide modal/backdrop; retain DOM but make inert | presented=false |
-| presented=false | any control hint becomes enabled | Runtime ACTIVE projection reconciled | show modal/backdrop; phase determined by current Conversation / History facts | REVEALING / CONVERSATION / CHOICES / HISTORY |
+| new Conversation | conversation-id changes | text non-empty | reset local state; start reveal | REVEALING |
+| new Conversation | conversation-id changes | text empty + no choices | mark revealed | CONVERSATION |
+| new Conversation | conversation-id changes | text empty + choices | mark revealed | CHOICES |
+| REVEALING | reveal timer completes | no choices | revealComplete=true | CONVERSATION |
+| REVEALING | reveal timer completes | has choices | revealComplete=true | CHOICES |
+| REVEALING | commit | no choices | reveal all; no submit | CONVERSATION |
+| REVEALING | commit | has choices | reveal all; no submit | CHOICES |
+| REVEALING | choice-next/previous | has choices | update selectedChoiceId; continue reveal | REVEALING |
+| CONVERSATION | commit | no choices | emit submit({conversationId}) | settle |
+| CHOICES | choice-next/previous | enabled target exists | update selectedChoiceId | CHOICES |
+| CHOICES | commit | no selection | no-op | CHOICES |
+| CHOICES | commit | selected enabled | emit submit({conversationId, choiceId}) | settle |
+| any Conversation phase | Runtime sets History visible | ACTIVE | shell stays visible; Conversation interaction/reveal pauses; History owns interaction | HISTORY |
+| HISTORY | scroll-to-latest | after visible retained reconcile | scroll to newest entry | HISTORY |
+| HISTORY | scroll-up/down | history has entries | local scroll | HISTORY |
+| HISTORY | Runtime clears History visible | ACTIVE | restore layout; resume Conversation if its interaction gate is active | previous Conversation phase |
+| any phase | new conversation-id | — | old reveal/selection/scroll state discarded | recompute from new Conversation |
+| initial READY before first ACTIVE | all five hints disabled | shell latch not yet set | keep modal/backdrop hidden and view inert | initial READY |
+| active phase | all five hints become disabled | shell was already presented | keep shell visible; set view inert; stop reveal; ignore Conversation events | intermediate READY |
+| intermediate READY | any canonical control hint becomes enabled | Runtime ACTIVE projection reconciled | remove inert; show mode-specific interaction owner without hiding shell | ACTIVE |
+| any state | Dialogue RenderDomain closes | — | remove Dialogue shell; clear Presentation-local lifecycle state | removed |
 
 ### Local coordination contract
 
@@ -2001,22 +1914,24 @@ History / READY coordination 不向 Conversation 发送新的 LoomRealm Render E
 
 固定同步路径：
 
-```text
+~~~text
 History attr change:
 lr-dialogue-history.attributeChangedCallback("visible")
 → view.syncHistoryFrom(history)
 → view recompute mode
-→ view sync conversation.setPresented(presented && mode==="conversation")
-```
+→ Conversation interaction active iff interactionActive && mode === "conversation"
+~~~
 
-```text
+~~~text
 Control fact change:
 lr-dialogue-control-hint.attributeChangedCallback("action"|"enabled")
 → controls.syncFactsToView()
 → view.syncControlsFrom(facts)
-→ view recompute presented
-→ view sync conversation.setPresented(presented && mode==="conversation")
-```
+→ derive controlsComplete / interactionActive
+→ latch shellPresented=true on first interactionActive=true
+→ modal/backdrop visibility follows shellPresented
+→ inertness / Conversation event gate / reveal timer follow interactionActive and mode
+~~~
 
 这些是 bundle-private Window-local hooks：
 
@@ -2029,7 +1944,9 @@ lr-dialogue-control-hint.attributeChangedCallback("action"|"enabled")
 
 禁止把 ordering-critical History/READY 切换放进 MutationObserver callback。
 
+
 # 21. Testing strategy
+
 
 ## 21.1 Web Component browser tests
 
@@ -2038,13 +1955,15 @@ lr-dialogue-control-hint.attributeChangedCallback("action"|"enabled")
 - canonical tags 全部成功注册；
 - 任一 tag collision 时在第一条 Dialogue define 前失败，零 partial registration；
 - classic script 无 ESM dependency；
-- canonical root slot 使用 `display: contents`；
-- control hints 尚未完整 materialize 时 modal hidden；
-- READY（完整五 hints 全 disabled）modal hidden + inert，且 reveal timer paused；
-- ACTIVE modal visible；
-- History visible attr 的同步 callback 在 `scroll-to-latest` 前完成最终 layout；
+- canonical root slot 使用 display: contents；
+- fresh connection epoch 的 initial READY（五 hints 完整且全 disabled）modal/backdrop hidden + inert；
+- first ACTIVE 显示 shell，之后的 intermediate READY 保持 shell visible 但 inert；
+- intermediate READY 时 Conversation Render Events 被忽略且 reveal timer paused；
+- ACTIVE modal visible；ACTIVE + HISTORY 时 shell 不 inert，History 是 interaction owner；
+- History visible attr 的同步 callback 在 scroll-to-latest 前完成最终 layout；
 - 不使用 MutationObserver 承担 History/READY ordering；
-- active character → 32/68；
+- active character → 30/70 at 1280×720, 800×600, 640×480；
+- 640×480 保留 compact modal/font/stage rules；360×480 才使用 stacked layout；
 - zero active character → full-width Conversation；
 - active character sprite failure → 保留 character pane + fallback；
 - 0 / 1 / 多 active 的 deterministic first-active；
@@ -2056,12 +1975,15 @@ lr-dialogue-control-hint.attributeChangedCallback("action"|"enabled")
 - empty History 显示“暂无历史记录”；
 - empty History scroll events safe no-op；
 - History open/close 保留 reveal / selection / scroll；
-- exact Character data schema，包括 `sha256:...` contentVersion；
+- exact Character data schema，包括 sha256 contentVersion；
 - PNG / 4×4 crop / no smoothing；
+- all sprite-load triggers share one idempotent coordinator；
+- same failed sprite attempt does not auto-retry on ordinary reconciliation；
 - stale resource result / abort / disconnected cleanup；
 - semantic control hints 无 physical key/gamepad glyph；
 - pointer/touch 不形成 gameplay authority；
 - reduced motion。
+
 
 ## 21.2 LoomRealm ABI closed-loop qualification
 
@@ -2091,8 +2013,10 @@ choice-next/previous → local selection
 CHOICES commit → exact choiceId result
 History open → retained visible reconcile → final layout → scroll-to-latest
 History cancel → return Conversation without submit
-READY settle → retained DOM remains but modal hidden/inert
-next Conversation → same live tree can become visible with reset local state
+initial READY → retained DOM may exist but modal hidden/inert before first ACTIVE
+ACTIVE → intermediate READY → shell stays visible/inert and Conversation reveal pauses
+next ACTIVE Conversation → same live tree/shell becomes interactive without hidden flash
+fresh second Dialogue session → initial READY hidden baseline is re-armed
 ```
 
 这是 **Presentation closed loop**。测试可以直接构造 RPGDialogue；不要求 production `dialogue.mjs` 已接线。

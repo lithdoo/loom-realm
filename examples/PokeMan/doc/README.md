@@ -22,9 +22,10 @@
 - [71-pwa-map-implementation-plan.md](./71-pwa-map-implementation-plan.md) — Local Agent 的 PokeMan PWA Map-only 接入、Bundle/ESM 构建与 Chromium E2E 验收计划
 - [72-controls-composition.md](./72-controls-composition.md) — Map-only gameplay 的 private `base + map` controls composition
 - [73-dialogue-gameplay-vertical-slice.md](./73-dialogue-gameplay-vertical-slice.md) — Professor NPC 的独立 Dialogue Subsystem / child-Frame 垂直切片：Map call、Activation controls、RPGDialogue、History/Choice、人物资源解析与 Map fresh resume
+- [74-dialogue-presentation-v1.1.md](./74-dialogue-presentation-v1.1.md) — Issue #118 的 Dialogue Presentation v1.1 优化：连续 session shell、READY inert-retain、30/70 横向人物布局、窄屏 breakpoint、紧凑 spacing 与人物 sprite 连续性
 - [90-scope-principles.md](./90-scope-principles.md) — MVP 非要求、设计原则与当前非目标
 
-`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`73` 是其后新增的技术设计，不回写 `DESIGN.md`。
+`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`74` 是其后新增的技术设计，不回写 `DESIGN.md`。
 
 当前 physical data canonical sources：
 
