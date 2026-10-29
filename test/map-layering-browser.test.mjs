@@ -2595,3 +2595,421 @@ test("bridgeLevel 2 is painted by lowered tile depth not a raised sprite stack",
   assert.ok(onBridge.sprite > onBridge.tileMax, "lowered bridge tiles must sit under the sprite");
   assert.ok(onBridge.sprite < 100_000, "must not use a permanent max z-index");
 });
+
+const PALETTE = Object.freeze([
+  Object.freeze([0, 0, 255, 255]),
+  Object.freeze([255, 0, 0, 255]),
+  Object.freeze([0, 255, 0, 255]),
+  Object.freeze([255, 255, 0, 255]),
+  Object.freeze([255, 0, 255, 255]),
+  Object.freeze([0, 255, 255, 255]),
+  Object.freeze([128, 128, 0, 255]),
+  Object.freeze([0, 128, 128, 255]),
+]);
+
+async function makePaletteTileset(page) {
+  return page.evaluate(async (colors) => {
+    const canvas = new OffscreenCanvas(colors.length * 32, 32);
+    const context = canvas.getContext("2d");
+    for (let index = 0; index < colors.length; index += 1) {
+      const [r, g, b] = colors[index];
+      context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+      context.fillRect(index * 32, 0, 32, 32);
+    }
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    return [...new Uint8Array(await blob.arrayBuffer())];
+  }, PALETTE);
+}
+
+function paletteTile({ x, y, colorIndex = 0, depth = 0, z = 0 } = {}) {
+  return regularTile({ x, y, z, depth, tileId: 384 + colorIndex });
+}
+
+function projectionWindow({ minTileX, minTileY = 0, width = 5, height = 5, visualEpoch, tiles, cameraX, mapWidth = 40, mapHeight = 20, sceneEpoch = 1 }) {
+  const projectionBounds = {
+    minTileX,
+    minTileY,
+    maxTileX: minTileX + width - 1,
+    maxTileY: minTileY + height - 1,
+  };
+  return viewData({
+    mapWidth,
+    mapHeight,
+    cameraX: cameraX ?? minTileX * 32,
+    cameraY: minTileY * 32,
+    visualEpoch,
+    sceneEpoch,
+    projectionBounds,
+    tiles,
+  });
+}
+
+async function ensureOracleView(page) {
+  await page.evaluate(() => {
+    if (window.__oracle) return;
+    const oracle = document.createElement("lr-map-view");
+    const sprite = document.createElement("lr-map-sprite");
+    oracle.style.cssText = "position:absolute;left:-12000px;top:0;visibility:hidden;pointer-events:none;";
+    oracle.append(sprite);
+    document.body.append(oracle);
+    const resources = window.__view._resources;
+    oracle.receiveRenderContext({ resources });
+    sprite.receiveRenderContext({ resources });
+    window.__oracle = oracle;
+    window.__oracleSprite = sprite;
+    window.__oracleSceneEpoch = 10_000;
+  });
+}
+
+async function paintOracleFullRaster(page, viewPayload) {
+  await ensureOracleView(page);
+  const sceneEpoch = await page.evaluate(({ view, sprite }) => {
+    window.__oracleSceneEpoch += 1;
+    const payload = { ...view, sceneEpoch: window.__oracleSceneEpoch };
+    const spritePayload = { ...sprite, sceneEpoch: window.__oracleSceneEpoch, visualEpoch: payload.visualEpoch, motionId: payload.motionId, bridgeLevel: payload.bridgeLevel ?? 0 };
+    window.__oracle.receiveRenderData(payload);
+    window.__oracleSprite.receiveRenderData(spritePayload);
+    return window.__oracleSceneEpoch;
+  }, { view: viewPayload, sprite: matchingSprite(viewPayload) });
+  await waitUntil(page, () => window.__oracle._acceptedVisualScene?.view.sceneEpoch === window.__oracleSceneEpoch
+    && window.__oracle._state === "VISIBLE"
+    && (window.__oracle._layers?.length ?? 0) > 0, `oracle full raster epoch ${sceneEpoch}`);
+}
+
+async function captureNormalizedLayers(page, host = "__view", bounds) {
+  return page.evaluate(({ hostName, world }) => {
+    const view = window[hostName];
+    const layers = [...(view._layers ?? [])]
+      .filter((layer) => layer?.canvas && !layer.canvas.hidden)
+      .sort((left, right) => left.depth - right.depth);
+    return layers.map((layer) => {
+      const width = world.width;
+      const height = world.height;
+      const out = new Uint8ClampedArray(width * height * 4);
+      const srcX0 = Math.max(layer.worldX, world.minX);
+      const srcY0 = Math.max(layer.worldY, world.minY);
+      const srcX1 = Math.min(layer.worldX + layer.canvas.width, world.minX + width);
+      const srcY1 = Math.min(layer.worldY + layer.canvas.height, world.minY + height);
+      if (srcX0 < srcX1 && srcY0 < srcY1) {
+        const data = layer.context.getImageData(srcX0 - layer.worldX, srcY0 - layer.worldY, srcX1 - srcX0, srcY1 - srcY0).data;
+        for (let row = 0; row < srcY1 - srcY0; row += 1) {
+          const destRow = ((srcY0 - world.minY + row) * width + (srcX0 - world.minX)) * 4;
+          const srcRow = row * (srcX1 - srcX0) * 4;
+          out.set(data.subarray(srcRow, srcRow + (srcX1 - srcX0) * 4), destRow);
+        }
+      }
+      return {
+        depth: layer.depth,
+        worldX: world.minX,
+        worldY: world.minY,
+        width,
+        height,
+        pixels: [...out],
+      };
+    });
+  }, { hostName: host, world: bounds });
+}
+
+function projectionPixelBounds(viewPayload) {
+  const bounds = viewPayload.projectionBounds;
+  return {
+    minX: bounds.minTileX * 32,
+    minY: bounds.minTileY * 32,
+    width: (bounds.maxTileX - bounds.minTileX + 1) * 32,
+    height: (bounds.maxTileY - bounds.minTileY + 1) * 32,
+  };
+}
+
+function firstPixelDiff(actual, expected) {
+  if (actual.depth !== expected.depth) return { kind: "depth", actual: actual.depth, expected: expected.depth };
+  if (actual.width !== expected.width || actual.height !== expected.height) {
+    return { kind: "size", actual: [actual.width, actual.height], expected: [expected.width, expected.height], depth: actual.depth };
+  }
+  const { width, pixels } = actual;
+  for (let index = 0; index < pixels.length; index += 4) {
+    if (
+      pixels[index] !== expected.pixels[index]
+      || pixels[index + 1] !== expected.pixels[index + 1]
+      || pixels[index + 2] !== expected.pixels[index + 2]
+      || pixels[index + 3] !== expected.pixels[index + 3]
+    ) {
+      const pixelIndex = index / 4;
+      return {
+        kind: "pixel",
+        depth: actual.depth,
+        x: pixelIndex % width,
+        y: Math.floor(pixelIndex / width),
+        actual: [pixels[index], pixels[index + 1], pixels[index + 2], pixels[index + 3]],
+        expected: [
+          expected.pixels[index],
+          expected.pixels[index + 1],
+          expected.pixels[index + 2],
+          expected.pixels[index + 3],
+        ],
+      };
+    }
+  }
+  return null;
+}
+
+function assertLayersPixelEqual(actualLayers, expectedLayers, label) {
+  assert.equal(actualLayers.length, expectedLayers.length, `${label}: depth layer count`);
+  for (let index = 0; index < actualLayers.length; index += 1) {
+    const diff = firstPixelDiff(actualLayers[index], expectedLayers[index]);
+    assert.equal(diff, null, `${label}: ${JSON.stringify(diff)}`);
+  }
+}
+
+async function assertMatchesFullRasterOracle(page, viewPayload, label) {
+  const bounds = projectionPixelBounds(viewPayload);
+  await paintOracleFullRaster(page, viewPayload);
+  const incremental = await captureNormalizedLayers(page, "__view", bounds);
+  const oracle = await captureNormalizedLayers(page, "__oracle", bounds);
+  assertLayersPixelEqual(incremental, oracle, label);
+}
+
+async function rasterCounters(page) {
+  return page.evaluate(() => {
+    const view = window.__view;
+    return {
+      shifts: view._projectionShifts,
+      allocations: view._surfaceAllocations,
+      resizes: view._surfaceResizes,
+      full: view._fullRasterPasses,
+      fullScene: view._fullRasterScenePasses,
+      fullNoOverlap: view._fullRasterNoOverlapPasses,
+      fullResize: view._fullRasterResizePasses,
+      fullFallback: view._fullRasterFallbackPasses,
+      incremental: view._incrementalRasterPasses,
+      dirty: view._dirtyCellDraws,
+      overlapSnapshots: view._overlapSnapshots,
+      overlapPixels: view._overlapSnapshotPixels,
+      overlapMaxPixels: view._overlapSnapshotMaxPixels,
+      overlapReadBytes: view._overlapReadBytes,
+      overlapWriteBytes: view._overlapWriteBytes,
+      overlapGetMs: view._overlapGetImageDataMs,
+      overlapPutMs: view._overlapPutImageDataMs,
+      overlapCopyMs: view._overlapCopyMs,
+      live: view._liveSurfaceCount,
+      pool: view._surfacePool.length,
+      active: view._layers.length,
+    };
+  });
+}
+
+function filledWindowTiles(minTileX, minTileY, width, height, colorIndex = 0, depth = 0, skip = null) {
+  const tiles = [];
+  for (let y = minTileY; y < minTileY + height; y += 1) {
+    for (let x = minTileX; x < minTileX + width; x += 1) {
+      if (skip && skip(x, y)) continue;
+      tiles.push(paletteTile({ x, y, colorIndex, depth }));
+    }
+  }
+  return tiles;
+}
+
+test("shifted projection clears deleted overlap tiles and matches full-raster oracle", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/blue", await makePaletteTileset(page));
+  const firstTiles = [
+    ...filledWindowTiles(0, 0, 5, 5, 0, 0, (x, y) => x === 2 && y === 2),
+    paletteTile({ x: 2, y: 2, colorIndex: 1, depth: 0 }),
+  ];
+  const first = projectionWindow({ minTileX: 0, visualEpoch: 1, tiles: firstTiles });
+  await paintPair(page, first);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "first shifted-delete window");
+  const secondTiles = filledWindowTiles(1, 0, 5, 5, 0, 0, (x, y) => x === 2 && y === 2);
+  const second = projectionWindow({ minTileX: 1, visualEpoch: 2, tiles: secondTiles });
+  await paintPair(page, second);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 2, "shifted delete accepted");
+  const hole = await cellPixel(page, 2, 2, 8, 8);
+  assert.deepEqual(hole, [0, 0, 0, 0], `deleted overlap cell must be transparent, got ${hole}`);
+  const kept = await cellPixel(page, 3, 2, 8, 8);
+  assert.deepEqual(kept, [...PALETTE[0]]);
+  await assertMatchesFullRasterOracle(page, second, "shifted delete");
+});
+
+test("shifted projection migrates tile depth without leaving stale pixels", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/blue", await makePaletteTileset(page));
+  const firstTiles = [
+    ...filledWindowTiles(0, 0, 5, 5, 0, 0, (x, y) => x === 2 && y === 1),
+    paletteTile({ x: 2, y: 1, colorIndex: 2, depth: 0 }),
+  ];
+  const first = projectionWindow({ minTileX: 0, visualEpoch: 1, tiles: firstTiles });
+  await paintPair(page, first);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "depth migrate first");
+  const secondTiles = [
+    ...filledWindowTiles(1, 0, 5, 5, 0, 0, (x, y) => x === 2 && y === 1),
+    paletteTile({ x: 2, y: 1, colorIndex: 2, depth: 32 }),
+  ];
+  const second = projectionWindow({ minTileX: 1, visualEpoch: 2, tiles: secondTiles });
+  await paintPair(page, second);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 2, "depth migrate second");
+  const depthPixels = await page.evaluate(() => {
+    const view = window.__view;
+    const byDepth = {};
+    for (const layer of view._layers) {
+      if (!layer.canvas || layer.canvas.hidden) continue;
+      const dx = 2 * 32 + 8 - layer.worldX;
+      const dy = 1 * 32 + 8 - layer.worldY;
+      if (dx < 0 || dy < 0 || dx >= layer.canvas.width || dy >= layer.canvas.height) {
+        byDepth[layer.depth] = [0, 0, 0, 0];
+        continue;
+      }
+      byDepth[layer.depth] = [...layer.context.getImageData(dx, dy, 1, 1).data];
+    }
+    return byDepth;
+  });
+  assert.deepEqual(depthPixels[0], [0, 0, 0, 0], `old depth must clear migrated cell: ${JSON.stringify(depthPixels)}`);
+  assert.deepEqual(depthPixels[32], [...PALETTE[2]], `new depth must draw migrated cell: ${JSON.stringify(depthPixels)}`);
+  await assertMatchesFullRasterOracle(page, second, "depth migrate");
+});
+
+test("shifted projection replaces cell visuals and sparse holes stay transparent", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/blue", await makePaletteTileset(page));
+  const firstTiles = [
+    ...filledWindowTiles(0, 0, 5, 5, 0, 0, (x, y) => (x === 1 && y === 1) || (x === 3 && y === 3)),
+    paletteTile({ x: 1, y: 1, colorIndex: 1, depth: 0 }),
+  ];
+  const first = projectionWindow({ minTileX: 0, visualEpoch: 1, tiles: firstTiles });
+  await paintPair(page, first);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "replace/sparse first");
+  const secondTiles = [
+    ...filledWindowTiles(1, 0, 5, 5, 0, 0, (x, y) => (x === 1 && y === 1) || (x === 3 && y === 3)),
+    paletteTile({ x: 1, y: 1, colorIndex: 3, depth: 0 }),
+  ];
+  const second = projectionWindow({ minTileX: 1, visualEpoch: 2, tiles: secondTiles });
+  await paintPair(page, second);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 2, "replace/sparse second");
+  assert.deepEqual(await cellPixel(page, 1, 1, 8, 8), [...PALETTE[3]]);
+  assert.deepEqual(await cellPixel(page, 3, 3, 8, 8), [0, 0, 0, 0]);
+  await assertMatchesFullRasterOracle(page, second, "visual replace + sparse hole");
+});
+
+test("shifted projection draws entering strip and matches full-raster oracle", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/blue", await makePaletteTileset(page));
+  const first = projectionWindow({
+    minTileX: 0,
+    visualEpoch: 1,
+    tiles: filledWindowTiles(0, 0, 5, 5, 0),
+  });
+  await paintPair(page, first);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "entering strip first");
+  const second = projectionWindow({
+    minTileX: 1,
+    visualEpoch: 2,
+    tiles: [
+      ...filledWindowTiles(1, 0, 4, 5, 0),
+      ...filledWindowTiles(5, 0, 1, 5, 4),
+    ],
+  });
+  await paintPair(page, second);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 2, "entering strip second");
+  assert.deepEqual(await cellPixel(page, 5, 2, 8, 8), [...PALETTE[4]]);
+  assert.deepEqual(await cellPixel(page, 2, 2, 8, 8), [...PALETTE[0]]);
+  await assertMatchesFullRasterOracle(page, second, "entering strip");
+});
+
+test("no-overlap projection shift fully redraws without leaking old pixels", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/blue", await makePaletteTileset(page));
+  const first = projectionWindow({
+    minTileX: 0,
+    visualEpoch: 1,
+    tiles: filledWindowTiles(0, 0, 5, 5, 1),
+  });
+  await paintPair(page, first);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "no-overlap first");
+  const before = await rasterCounters(page);
+  const second = projectionWindow({
+    minTileX: 8,
+    visualEpoch: 2,
+    tiles: filledWindowTiles(8, 0, 5, 5, 2),
+  });
+  await paintPair(page, second);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 2, "no-overlap second");
+  const after = await rasterCounters(page);
+  assert.equal(after.shifts - before.shifts, 1);
+  assert.ok(after.fullNoOverlap - before.fullNoOverlap >= 1, JSON.stringify({ before, after }));
+  assert.deepEqual(await cellPixel(page, 10, 2, 8, 8), [...PALETTE[2]]);
+  assert.deepEqual(await cellPixel(page, 2, 2, 8, 8), [0, 0, 0, 0]);
+  await assertMatchesFullRasterOracle(page, second, "no-overlap shift");
+});
+
+test("overlap snapshot bytes and timings are measured for known geometry", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/blue", await makePaletteTileset(page));
+  const first = projectionWindow({
+    minTileX: 0,
+    visualEpoch: 1,
+    tiles: filledWindowTiles(0, 0, 5, 5, 0),
+  });
+  await paintPair(page, first);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "overlap metric first");
+  const before = await rasterCounters(page);
+  const second = projectionWindow({
+    minTileX: 1,
+    visualEpoch: 2,
+    tiles: filledWindowTiles(1, 0, 5, 5, 0),
+  });
+  await paintPair(page, second);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 2, "overlap metric second");
+  const after = await rasterCounters(page);
+  const overlapTilesX = 4;
+  const overlapTilesY = 5;
+  const overlapPixels = overlapTilesX * 32 * overlapTilesY * 32;
+  assert.equal(after.overlapSnapshots - before.overlapSnapshots, 1);
+  assert.equal(after.overlapPixels - before.overlapPixels, overlapPixels);
+  assert.equal(after.overlapMaxPixels, Math.max(before.overlapMaxPixels, overlapPixels));
+  assert.equal(after.overlapReadBytes - before.overlapReadBytes, overlapPixels * 4);
+  assert.equal(after.overlapWriteBytes - before.overlapWriteBytes, overlapPixels * 4);
+  assert.ok(after.overlapGetMs - before.overlapGetMs >= 0);
+  assert.ok(after.overlapPutMs - before.overlapPutMs >= 0);
+  assert.equal(
+    Number((after.overlapCopyMs - before.overlapCopyMs).toFixed(6)),
+    Number(((after.overlapGetMs - before.overlapGetMs) + (after.overlapPutMs - before.overlapPutMs)).toFixed(6)),
+  );
+  assert.equal(after.dirty - before.dirty, 5, "only entering strip is dirty-drawn");
+  assert.equal(after.incremental - before.incremental, 1);
+  assert.equal(after.fullNoOverlap - before.fullNoOverlap, 0);
+  await assertMatchesFullRasterOracle(page, second, "overlap metric");
+});
+
+test("resize-driven projection redraw is counted separately from scene full raster", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/blue", await makePaletteTileset(page));
+  const first = projectionWindow({
+    minTileX: 0,
+    width: 3,
+    height: 3,
+    visualEpoch: 1,
+    tiles: filledWindowTiles(0, 0, 3, 3, 0),
+  });
+  await paintPair(page, first);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "resize metric first");
+  const before = await rasterCounters(page);
+  const second = projectionWindow({
+    minTileX: 0,
+    width: 8,
+    height: 8,
+    visualEpoch: 2,
+    tiles: filledWindowTiles(0, 0, 8, 8, 1),
+  });
+  await paintPair(page, second);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 2, "resize metric second");
+  const after = await rasterCounters(page);
+  assert.ok(after.resizes > before.resizes, JSON.stringify({ before, after }));
+  assert.ok(after.fullResize - before.fullResize >= 1 || after.fullFallback - before.fullFallback >= 1, JSON.stringify({ before, after }));
+  assert.equal(after.full - before.full, 0, "same scene must not bump scene full-raster counter");
+  await assertMatchesFullRasterOracle(page, second, "resize redraw");
+});

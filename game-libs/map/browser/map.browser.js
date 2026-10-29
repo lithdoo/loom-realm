@@ -589,9 +589,22 @@
       this._surfaceAllocations = 0;
       this._surfaceResizes = 0;
       this._fullRasterPasses = 0;
+      this._fullRasterScenePasses = 0;
+      this._fullRasterNoOverlapPasses = 0;
+      this._fullRasterResizePasses = 0;
+      this._fullRasterFallbackPasses = 0;
+      this._incrementalRasterPasses = 0;
       this._dirtyCellDraws = 0;
       this._projectionShifts = 0;
       this._cameraOnlyCommits = 0;
+      this._overlapSnapshots = 0;
+      this._overlapSnapshotPixels = 0;
+      this._overlapSnapshotMaxPixels = 0;
+      this._overlapReadBytes = 0;
+      this._overlapWriteBytes = 0;
+      this._overlapGetImageDataMs = 0;
+      this._overlapPutImageDataMs = 0;
+      this._overlapCopyMs = 0;
       this._surfacePool = [];
       this._liveSurfaces = new Set();
       this._liveSurfaceCount = 0;
@@ -984,6 +997,7 @@
       }
       if (sameScene) return this._rasterIncremental(prepared, groups, frames);
       this._fullRasterPasses += 1;
+      this._fullRasterScenePasses += 1;
       const layers = [];
       const currentStacks = stacksByCell(prepared.buckets);
       for (const [depth, tiles] of groups) {
@@ -1004,6 +1018,30 @@
       return layers;
     }
 
+    _recordOverlapSnapshot(pixels, getMs) {
+      this._overlapSnapshots += 1;
+      this._overlapSnapshotPixels += pixels;
+      if (pixels > this._overlapSnapshotMaxPixels) this._overlapSnapshotMaxPixels = pixels;
+      this._overlapReadBytes += pixels * 4;
+      this._overlapGetImageDataMs += getMs;
+      this._overlapCopyMs += getMs;
+    }
+
+    _recordOverlapRestore(pixels, putMs) {
+      this._overlapWriteBytes += pixels * 4;
+      this._overlapPutImageDataMs += putMs;
+      this._overlapCopyMs += putMs;
+    }
+
+    _cellIntersectsRect(x, y, rect) {
+      if (!rect) return false;
+      const x0 = x * TILE;
+      const y0 = y * TILE;
+      const x1 = x0 + TILE;
+      const y1 = y0 + TILE;
+      return x0 < rect.x1 && x1 > rect.x0 && y0 < rect.y1 && y1 > rect.y0;
+    }
+
     _rasterIncremental(prepared, groups, frames) {
       const previousByDepth = new Map(this._layers.map((layer) => [layer.depth, layer]));
       const previousStacks = stacksByCell(this._acceptedVisualScene.buckets);
@@ -1020,6 +1058,10 @@
       };
       const hasProjectionOverlap = projectionOverlap.x0 < projectionOverlap.x1 && projectionOverlap.y0 < projectionOverlap.y1;
       const layers = [];
+      let reusedAnyCell = false;
+      let sawResize = false;
+      let sawRestoredOverlap = false;
+      let drewAnyCell = false;
       for (const [depth, tiles] of groups) {
         const nextPixels = depthBounds(tiles);
         let layer = previousByDepth.get(depth);
@@ -1036,23 +1078,43 @@
         } : null;
         const hasOverlap = Boolean(overlap && overlap.x0 < overlap.x1 && overlap.y0 < overlap.y1);
         let snapshot = null;
+        let restoredThisLayer = false;
         if (previous && shifted && hasOverlap) {
+          const width = overlap.x1 - overlap.x0;
+          const height = overlap.y1 - overlap.y0;
+          const pixels = width * height;
+          const getStarted = performance.now();
           snapshot = layer.context.getImageData(
             overlap.x0 - oldWorldX,
             overlap.y0 - oldWorldY,
-            overlap.x1 - overlap.x0,
-            overlap.y1 - overlap.y0,
+            width,
+            height,
           );
+          this._recordOverlapSnapshot(pixels, performance.now() - getStarted);
         }
         const resized = this._resizeLayer(layer, nextPixels, false);
+        if (resized) sawResize = true;
         if (!previous || shifted || resized) {
           layer.context.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
-          if (snapshot && !resized) layer.context.putImageData(snapshot, overlap.x0 - layer.worldX, overlap.y0 - layer.worldY);
+          if (snapshot && !resized) {
+            const putStarted = performance.now();
+            layer.context.putImageData(snapshot, overlap.x0 - layer.worldX, overlap.y0 - layer.worldY);
+            this._recordOverlapRestore(snapshot.width * snapshot.height, performance.now() - putStarted);
+            restoredThisLayer = true;
+            sawRestoredOverlap = true;
+          }
         }
-        if (previous && !shifted && !resized) {
+        // Depth+cell membership: clear stale pixels restored from an overlap
+        // snapshot (or still present on an unshifted canvas) when the cell is
+        // no longer present at this depth in the new projection.
+        if (previous && !resized) {
+          const restoredRect = restoredThisLayer && hasOverlap ? overlap : null;
           for (const [key, stack] of previousStacks) {
             const sample = stack[0];
             if (!sample || sample.depth !== depth || currentStacks.has(key)) continue;
+            if (shifted) {
+              if (!restoredRect || !this._cellIntersectsRect(sample.x, sample.y, restoredRect)) continue;
+            }
             this._clearCell(layer, sample.x, sample.y);
           }
         }
@@ -1065,17 +1127,32 @@
           const inOverlap = hasOverlap
             && tile.x * TILE >= overlap.x0 && tile.y * TILE >= overlap.y0
             && (tile.x + 1) * TILE <= overlap.x1 && (tile.y + 1) * TILE <= overlap.y1;
-          const reusable = previous && !resized && inOverlap
+          const reusable = previous && !resized && Boolean(snapshot || !shifted) && inOverlap
             && sameTileStack(previousStacks.get(key), stack)
             && autotileFramesMatch(stack, previous.frames, frames);
-          if (reusable) continue;
+          if (reusable) {
+            reusedAnyCell = true;
+            continue;
+          }
           this._clearCell(layer, tile.x, tile.y);
           this._dirtyCellDraws += 1;
+          drewAnyCell = true;
           for (const item of stack) this._blitTile(layer, item, prepared, frames);
         }
         layer.projectionBounds = nextBounds;
         layer.frames = frames;
         layers.push(layer);
+      }
+      if (reusedAnyCell) {
+        this._incrementalRasterPasses += 1;
+      } else if (sawResize) {
+        this._fullRasterResizePasses += 1;
+      } else if (shifted && !sawRestoredOverlap) {
+        this._fullRasterNoOverlapPasses += 1;
+      } else if (drewAnyCell) {
+        this._fullRasterFallbackPasses += 1;
+      } else {
+        this._incrementalRasterPasses += 1;
       }
       prepared.incrementalLayers = true;
       prepared.retiredLayers = [...previousByDepth.values()];
