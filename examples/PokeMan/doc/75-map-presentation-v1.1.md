@@ -987,7 +987,9 @@ surface/resource ownership 必须 bounded：accepted scene、staging scene、in-
 - stagingVisualScene；
 - view-owned accepted player/NPC pixels；
 - scene-level atomic promote；
-- failure retains old scene。
+- same-scene NPC visual revision；
+- same target scene revision coalescing；
+- Runtime-commit / Presentation-promote failure boundary。
 
 此阶段重点是 ownership，不做 projection 性能重构。
 
@@ -995,19 +997,23 @@ surface/resource ownership 必须 bounded：accepted scene、staging scene、in-
 
 建立在 Phase 1 的 stable accepted scene 上：
 
-- persistent depth surfaces；
+- exact inclusive projectionBounds payload；
+- persistent but bounded depth surfaces；
 - same-scene projection shift；
 - entering/leaving dirty regions；
-- bounded allocations；
+- bounded allocation/reuse pool；
+- traversal-distance memory bound；
 - performance qualification。
 
 ### Phase 3 — #123 Facing responsiveness
 
 最后修改 Runtime movement contract：
 
-- immutable activeMove；
-- mutable facing；
+- immutable activeMove + travelDirection；
+- mutable facingDirection；
+- MapSnapshot.player.direction remains facing；
 - facing-only Render update；
+- step-transfer attemptedDirection remains travelDirection；
 - browser motion fingerprint 去除 direction immutability。
 
 ### Phase 4 — Integrated product qualification
