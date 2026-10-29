@@ -71,3 +71,8 @@ context.emitCustomEvent(
 | [emit-custom-event.md](./emit-custom-event.md) | `options`、`broadcast`、`channel` 的解析和两条发布路径 | 三个设备组件的采集细节、框架删除清单 |
 | [device-input-components.md](./device-input-components.md) | 三个 Web Component、复制后的采集行为、六个通道上的载荷 | 调用形状的一般规则、InputGate 的删除步骤 |
 | [remove-framework-user-input.md](./remove-framework-user-input.md) | 停掉框架采集和删除输入运行时的顺序 | 设备采样算法、`emitCustomEvent` 的字段语义 |
+
+
+## 6. 后续能力提案（不属于输入迁移顺序）
+
+[game-controls-input 全屏控制遮罩层提案](./game-controls-input-fullscreen-overlay.md) 描述在现有统一 Select 长按后显示全屏控制遮罩层，并由用户通过真实按钮交互进入或退出浏览器全屏。该提案不修改冻结的 Controls ABI，也不属于上文三份输入迁移分册的实施顺序；文档状态为 Proposed / Design / Not Implemented。
