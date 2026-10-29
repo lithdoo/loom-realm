@@ -8,13 +8,14 @@
     "barHeight", "contentWidth", "contentHeight", "columns", "rows",
     "logicalWidth", "logicalHeight", "scaleX", "scaleY", "mapName",
     "mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles",
-    "tiles", "cameraMotion", "bridgeLevel",
+    "projectionBounds", "tiles", "cameraMotion", "bridgeLevel",
   ];
   const SPRITE_KEYS = [
     "sceneEpoch", "visualEpoch", "motionId", "x", "y", "screenX", "screenY",
     "direction", "pattern", "sprite", "motion", "bridgeLevel",
   ];
   const RETRY_MS = [100, 200, 400];
+  const SURFACE_POOL_BUDGET = 4;
   const TILE = 32;
   const AUTOTILE_QUARTERS = [
     [27, 28, 33, 34], [5, 28, 33, 34], [27, 6, 33, 34], [5, 6, 33, 34],
@@ -184,6 +185,14 @@
     return true;
   }
 
+  function validProjectionBounds(bounds, data) {
+    return exactObject(bounds, ["minTileX", "minTileY", "maxTileX", "maxTileY"])
+      && Number.isSafeInteger(bounds.minTileX) && bounds.minTileX >= 0
+      && Number.isSafeInteger(bounds.minTileY) && bounds.minTileY >= 0
+      && Number.isSafeInteger(bounds.maxTileX) && bounds.maxTileX >= bounds.minTileX && bounds.maxTileX < data.mapWidth
+      && Number.isSafeInteger(bounds.maxTileY) && bounds.maxTileY >= bounds.minTileY && bounds.maxTileY < data.mapHeight;
+  }
+
   function assertMapViewData(data) {
     if (
       !exactObject(data, VIEW_KEYS)
@@ -200,6 +209,7 @@
       || !validRef(data.tileset)
       || !Array.isArray(data.autotiles) || data.autotiles.length !== 7
       || !data.autotiles.every((item) => item === null || validRef(item))
+      || !validProjectionBounds(data.projectionBounds, data)
       || !Array.isArray(data.tiles)
       || !validCameraMotion(data.cameraMotion)
       || (data.cameraMotion === null) !== (data.motionId === null)
@@ -227,6 +237,8 @@
     let previous = null;
     for (const tile of data.tiles) {
       if (!validTileTuple(tile, data)) throw new TypeError("Invalid MapViewRenderData");
+      if (tile[0] < data.projectionBounds.minTileX || tile[0] > data.projectionBounds.maxTileX
+        || tile[1] < data.projectionBounds.minTileY || tile[1] > data.projectionBounds.maxTileY) throw new TypeError("Invalid MapViewRenderData");
       if (previous && (tile[2] < previous[2]
         || (tile[2] === previous[2] && tile[1] < previous[1])
         || (tile[2] === previous[2] && tile[1] === previous[1] && tile[0] <= previous[0]))) {
@@ -385,6 +397,12 @@
     return true;
   }
 
+  function projectionBoundsEqual(left, right) {
+    return left === right || Boolean(left && right
+      && left.minTileX === right.minTileX && left.minTileY === right.minTileY
+      && left.maxTileX === right.maxTileX && left.maxTileY === right.maxTileY);
+  }
+
   function sameProjectedTile(left, right) {
     if (!left || !right || left.tileId !== right.tileId) return false;
     if (left.visual === right.visual) return true;
@@ -435,22 +453,6 @@
       if (!previousFrames || previousFrames.get(tile.visual[3]) !== nextFrames.get(tile.visual[3])) return false;
     }
     return true;
-  }
-
-  function overlapWorld(prev, next) {
-    const x0 = Math.max(prev.worldX, next.worldX);
-    const y0 = Math.max(prev.worldY, next.worldY);
-    const x1 = Math.min(prev.worldX + prev.canvas.width, next.worldX + next.canvas.width);
-    const y1 = Math.min(prev.worldY + prev.canvas.height, next.worldY + next.canvas.height);
-    if (x1 <= x0 || y1 <= y0) return null;
-    return { x0, y0, x1, y1 };
-  }
-
-  function tileInsideOverlap(tile, overlap) {
-    if (!overlap) return false;
-    const tx = tile.x * 32;
-    const ty = tile.y * 32;
-    return tx >= overlap.x0 && ty >= overlap.y0 && tx + 32 <= overlap.x1 && ty + 32 <= overlap.y1;
   }
 
   class ResourceHost extends HTMLElement {
@@ -585,7 +587,15 @@
       this._tileDrawCount = 0;
       this._tileClearCount = 0;
       this._tileResizeCount = 0;
+      this._surfaceAllocations = 0;
+      this._surfaceResizes = 0;
+      this._fullRasterPasses = 0;
+      this._dirtyCellDraws = 0;
+      this._projectionShifts = 0;
       this._cameraOnlyCommits = 0;
+      this._surfacePool = [];
+      this._liveSurfaces = new Set();
+      this._liveSurfaceCount = 0;
       this._acceptedIds = new Set();
     }
 
@@ -710,6 +720,11 @@
           this._acceptedVisualScene = undefined;
           this._stagingVisualScene = undefined;
           this._releaseAll();
+          for (const layer of [...this._liveSurfaces]) layer.canvas.remove();
+          this._layers = [];
+          this._surfacePool = [];
+          this._liveSurfaces.clear();
+          this._liveSurfaceCount = 0;
           for (const sprite of this._spriteChildren()) if (typeof sprite._releaseAll === "function") sprite._releaseAll();
         }
       });
@@ -853,6 +868,7 @@
           && this._acceptedVisualScene.view.visualEpoch === prepared.view.visualEpoch
           && resourceIdentity(this._acceptedVisualScene.view.tileset) === resourceIdentity(prepared.view.tileset)
           && autotileIdentitiesEqual(this._acceptedVisualScene.view.autotiles, prepared.view.autotiles)
+          && projectionBoundsEqual(this._acceptedVisualScene.view.projectionBounds, prepared.view.projectionBounds)
           && projectedTilesEqual(this._acceptedVisualScene.view.tiles, prepared.view.tiles)
           && this._acceptedVisualScene.view.bridgeLevel === prepared.view.bridgeLevel,
         );
@@ -899,15 +915,55 @@
       }, delay);
     }
 
+    _resizeLayer(layer, bounds, exact = false) {
+      const width = Math.max(1, exact ? bounds.width : Math.max(layer.canvas.width, bounds.width));
+      const height = Math.max(1, exact ? bounds.height : Math.max(layer.canvas.height, bounds.height));
+      const resized = layer.canvas.width !== width || layer.canvas.height !== height;
+      if (resized) {
+        this._tileResizeCount += 1;
+        this._surfaceResizes += 1;
+        layer.canvas.width = width;
+        layer.canvas.height = height;
+        layer.context = layer.canvas.getContext("2d", { alpha: true });
+        layer.context.imageSmoothingEnabled = false;
+      }
+      layer.worldX = bounds.minX;
+      layer.worldY = bounds.minY;
+      return resized;
+    }
+
     _makeLayer(depth, bounds) {
-      const canvas = document.createElement("canvas");
-      canvas.className = "tile-layer";
-      this._tileResizeCount += 1;
-      canvas.width = Math.max(1, bounds.width);
-      canvas.height = Math.max(1, bounds.height);
-      const context = canvas.getContext("2d", { alpha: true });
-      context.imageSmoothingEnabled = false;
-      return { canvas, context, worldX: bounds.minX, worldY: bounds.minY, depth };
+      let layer = this._surfacePool.pop();
+      if (!layer) {
+        const canvas = document.createElement("canvas");
+        canvas.className = "tile-layer";
+        layer = { canvas, context: canvas.getContext("2d", { alpha: true }), worldX: bounds.minX, worldY: bounds.minY, depth };
+        layer.context.imageSmoothingEnabled = false;
+        this._surfaceAllocations += 1;
+        this._liveSurfaces.add(layer);
+        this._liveSurfaceCount = this._liveSurfaces.size;
+      }
+      layer.depth = depth;
+      layer.canvas.hidden = true;
+      this._resizeLayer(layer, bounds, layer.canvas.width === 300 && layer.canvas.height === 150);
+      layer.context.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+      layer.projectionBounds = undefined;
+      layer.frames = undefined;
+      return layer;
+    }
+
+    _recycleLayer(layer) {
+      layer.canvas.hidden = true;
+      layer.canvas.remove();
+      layer.context.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+      layer.frames = undefined;
+      layer.projectionBounds = undefined;
+      if (this._surfacePool.length < SURFACE_POOL_BUDGET) {
+        this._surfacePool.push(layer);
+      } else {
+        this._liveSurfaces.delete(layer);
+        this._liveSurfaceCount = this._liveSurfaces.size;
+      }
     }
 
     _rasterDetached(prepared, sequence) {
@@ -917,68 +973,113 @@
         frames.set(slot, autotileFrameIndex(now, this._animationStartedAt, item.frameCount, item.durationMs));
       }
       const groups = [...prepared.buckets.entries()].sort(([left], [right]) => left - right);
-      const previousByDepth = new Map();
-      const previousStacks = new Map();
       const sameScene = Boolean(
-        this._accepted
-        && this._accepted.view.sceneEpoch === prepared.view.sceneEpoch
-        && resourceIdentity(this._accepted.view.tileset) === resourceIdentity(prepared.view.tileset)
-        && autotileIdentitiesEqual(this._accepted.view.autotiles, prepared.view.autotiles),
+        this._acceptedVisualScene
+        && this._acceptedVisualScene.view.sceneEpoch === prepared.view.sceneEpoch
+        && resourceIdentity(this._acceptedVisualScene.view.tileset) === resourceIdentity(prepared.view.tileset)
+        && autotileIdentitiesEqual(this._acceptedVisualScene.view.autotiles, prepared.view.autotiles),
       );
-      if (sameScene) {
-        for (const layer of this._layers) previousByDepth.set(layer.depth, layer);
-        for (const [key, stack] of stacksByCell(this._accepted.buckets)) previousStacks.set(key, stack);
-      }
-      const currentStacks = stacksByCell(prepared.buckets);
-      const layers = [];
       for (let index = 0; index < groups.length; index += 1) {
         const [depth, tiles] = groups[index];
+        for (const tile of tiles) fault("draw", { sequence, index, depth, tile, connected: false, hostHasCanvas: false });
+      }
+      if (sameScene) return this._rasterIncremental(prepared, groups, frames);
+      this._fullRasterPasses += 1;
+      const layers = [];
+      const currentStacks = stacksByCell(prepared.buckets);
+      for (const [depth, tiles] of groups) {
         const bounds = depthBounds(tiles);
         const layer = this._makeLayer(depth, bounds);
-        const previous = previousByDepth.get(depth);
-        let copied = null;
-        if (previous && previous.canvas.width > 0 && previous.canvas.height > 0) {
-          copied = overlapWorld(previous, layer);
-          if (copied) {
-            layer.context.drawImage(
-              previous.canvas,
-              copied.x0 - previous.worldX,
-              copied.y0 - previous.worldY,
-              copied.x1 - copied.x0,
-              copied.y1 - copied.y0,
-              copied.x0 - layer.worldX,
-              copied.y0 - layer.worldY,
-              copied.x1 - copied.x0,
-              copied.y1 - copied.y0,
-            );
-          }
+        const seen = new Set();
+        for (const tile of tiles) {
+          const key = cellKey(depth, tile.x, tile.y);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const stack = currentStacks.get(key) ?? [tile];
+          for (const item of stack) this._blitTile(layer, item, prepared, frames);
         }
-        if (copied) {
+        layer.projectionBounds = prepared.view.projectionBounds;
+        layer.frames = frames;
+        layers.push(layer);
+      }
+      return layers;
+    }
+
+    _rasterIncremental(prepared, groups, frames) {
+      const previousByDepth = new Map(this._layers.map((layer) => [layer.depth, layer]));
+      const previousStacks = stacksByCell(this._acceptedVisualScene.buckets);
+      const currentStacks = stacksByCell(prepared.buckets);
+      const previousBounds = this._acceptedVisualScene.view.projectionBounds;
+      const nextBounds = prepared.view.projectionBounds;
+      const shifted = !projectionBoundsEqual(previousBounds, nextBounds);
+      if (shifted) this._projectionShifts += 1;
+      const projectionOverlap = {
+        x0: Math.max(previousBounds.minTileX, nextBounds.minTileX) * TILE,
+        y0: Math.max(previousBounds.minTileY, nextBounds.minTileY) * TILE,
+        x1: (Math.min(previousBounds.maxTileX, nextBounds.maxTileX) + 1) * TILE,
+        y1: (Math.min(previousBounds.maxTileY, nextBounds.maxTileY) + 1) * TILE,
+      };
+      const hasProjectionOverlap = projectionOverlap.x0 < projectionOverlap.x1 && projectionOverlap.y0 < projectionOverlap.y1;
+      const layers = [];
+      for (const [depth, tiles] of groups) {
+        const nextPixels = depthBounds(tiles);
+        let layer = previousByDepth.get(depth);
+        const previous = layer;
+        if (layer) previousByDepth.delete(depth);
+        else layer = this._makeLayer(depth, nextPixels);
+        const oldWorldX = layer.worldX;
+        const oldWorldY = layer.worldY;
+        const overlap = previous && hasProjectionOverlap ? {
+          x0: Math.max(projectionOverlap.x0, oldWorldX, nextPixels.minX),
+          y0: Math.max(projectionOverlap.y0, oldWorldY, nextPixels.minY),
+          x1: Math.min(projectionOverlap.x1, oldWorldX + layer.canvas.width, nextPixels.minX + nextPixels.width),
+          y1: Math.min(projectionOverlap.y1, oldWorldY + layer.canvas.height, nextPixels.minY + nextPixels.height),
+        } : null;
+        const hasOverlap = Boolean(overlap && overlap.x0 < overlap.x1 && overlap.y0 < overlap.y1);
+        let snapshot = null;
+        if (previous && shifted && hasOverlap) {
+          snapshot = layer.context.getImageData(
+            overlap.x0 - oldWorldX,
+            overlap.y0 - oldWorldY,
+            overlap.x1 - overlap.x0,
+            overlap.y1 - overlap.y0,
+          );
+        }
+        const resized = this._resizeLayer(layer, nextPixels, false);
+        if (!previous || shifted || resized) {
+          layer.context.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+          if (snapshot && !resized) layer.context.putImageData(snapshot, overlap.x0 - layer.worldX, overlap.y0 - layer.worldY);
+        }
+        if (previous && !shifted && !resized) {
           for (const [key, stack] of previousStacks) {
             const sample = stack[0];
             if (!sample || sample.depth !== depth || currentStacks.has(key)) continue;
-            if (!tileInsideOverlap(sample, copied)) continue;
             this._clearCell(layer, sample.x, sample.y);
           }
         }
         const seen = new Set();
         for (const tile of tiles) {
-          fault("draw", { sequence, index, depth, tile, connected: layer.canvas.isConnected, hostHasCanvas: this.shadowRoot.contains(layer.canvas) });
           const key = cellKey(depth, tile.x, tile.y);
           if (seen.has(key)) continue;
           seen.add(key);
           const stack = currentStacks.get(key) ?? [tile];
-          const reusable = copied
-            && tileInsideOverlap(tile, copied)
+          const inOverlap = hasOverlap
+            && tile.x * TILE >= overlap.x0 && tile.y * TILE >= overlap.y0
+            && (tile.x + 1) * TILE <= overlap.x1 && (tile.y + 1) * TILE <= overlap.y1;
+          const reusable = previous && !resized && inOverlap
             && sameTileStack(previousStacks.get(key), stack)
-            && autotileFramesMatch(stack, previous?.frames, frames);
+            && autotileFramesMatch(stack, previous.frames, frames);
           if (reusable) continue;
-          if (copied && tileInsideOverlap(tile, copied)) this._clearCell(layer, tile.x, tile.y);
+          this._clearCell(layer, tile.x, tile.y);
+          this._dirtyCellDraws += 1;
           for (const item of stack) this._blitTile(layer, item, prepared, frames);
         }
+        layer.projectionBounds = nextBounds;
         layer.frames = frames;
         layers.push(layer);
       }
+      prepared.incrementalLayers = true;
+      prepared.retiredLayers = [...previousByDepth.values()];
       return layers;
     }
 
@@ -1027,6 +1128,9 @@
     _commitAtomic(prepared, sequence) {
       if (sequence !== this._sequence || !this.isConnected) {
         this._releasePreparationOwner(prepared.owner);
+        if (!prepared.reusesAcceptedLayers && !prepared.incrementalLayers) {
+          for (const layer of prepared.layers ?? []) this._recycleLayer(layer);
+        }
         return;
       }
       this._commitMotion(prepared, sequence);
@@ -1034,17 +1138,20 @@
       const outgoing = this._layers.slice();
       const incomingSprites = prepared.sprites.map((entry) => entry.visual).filter(Boolean);
       const outgoingSprites = (this._acceptedVisualScene?.sprites ?? []).map((entry) => entry.visual).filter(Boolean);
-      if (!prepared.reusesAcceptedLayers) {
+      if (prepared.incrementalLayers) {
+        for (const layer of prepared.retiredLayers ?? []) this._recycleLayer(layer);
+      } else if (!prepared.reusesAcceptedLayers) {
         for (const layer of outgoing) {
           layer.canvas.hidden = true;
           layer.canvas.remove();
+          if (!incoming.includes(layer)) this._recycleLayer(layer);
         }
       }
       for (const visual of outgoingSprites) visual.hidden = true;
       if (!prepared.reusesAcceptedLayers) {
         for (const layer of incoming) {
           layer.canvas.hidden = false;
-          this._world.insertBefore(layer.canvas, this._slot);
+          if (!layer.canvas.isConnected) this._world.insertBefore(layer.canvas, this._slot);
         }
       }
       for (const visual of incomingSprites) {
@@ -1053,6 +1160,7 @@
       }
       for (const visual of outgoingSprites) if (!incomingSprites.includes(visual)) visual.remove();
       this._layers = incoming;
+      this._liveSurfaceCount = this._liveSurfaces.size;
       this._promoteResources(prepared);
       this._accepted = prepared;
       this._acceptedVisualScene = prepared;

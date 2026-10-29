@@ -192,6 +192,15 @@ function inBounds(map: MapRecord, x: number, y: number) {
   return x >= 0 && y >= 0 && x < map.width && y < map.height;
 }
 
+function projectionBoundsPayload(bounds: TileProjectionBounds): Readonly<Record<string, number>> {
+  return Object.freeze({
+    minTileX: bounds.minTileX,
+    minTileY: bounds.minTileY,
+    maxTileX: bounds.maxTileX,
+    maxTileY: bounds.maxTileY,
+  });
+}
+
 function viewportPayload(
   loaded: LoadedMap,
   window: TileProjectionWindow,
@@ -227,6 +236,7 @@ function viewportPayload(
     cameraY,
     tileset: loaded.tilesetRef,
     autotiles: loaded.autotileRefs,
+    projectionBounds: projectionBoundsPayload(window.bounds),
     tiles: window.tiles,
     cameraMotion,
     bridgeLevel,
@@ -753,6 +763,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
                     cameraY: camera.cameraY,
                     cameraMotion: null,
                     motionId: null,
+                    projectionBounds: projectionBoundsPayload(nextWindow.bounds),
                     tiles: nextWindow.tiles,
                     bridgeLevel,
                   },
@@ -1024,6 +1035,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         };
         if (refresh) {
           viewportSet.visualEpoch = nextVisual;
+          viewportSet.projectionBounds = projectionBoundsPayload(nextWindow.bounds);
           viewportSet.tiles = nextWindow.tiles;
           playerSet.visualEpoch = nextVisual;
         }
@@ -1084,6 +1096,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
           const playerSet: Record<string, unknown> = { bridgeLevel: nextLevel };
           if (levelChanged) {
             viewportSet.visualEpoch = nextVisual;
+            viewportSet.projectionBounds = projectionBoundsPayload(nextWindow.bounds);
             viewportSet.tiles = nextWindow.tiles;
             viewportSet.cameraMotion = null;
             viewportSet.motionId = null;

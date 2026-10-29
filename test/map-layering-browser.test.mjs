@@ -45,7 +45,7 @@ function viewData({
   depth = 0, tileset = tilesetRef("v1"), autotiles = NULL_AUTOTILES, tiles,
   cameraX = 0, cameraY = 0, cameraMotion = null, sceneEpoch = 1, visualEpoch = 1,
   mapId = 1, viewportWidth = 640, viewportHeight = 480, mapWidth = 24, mapHeight = 18,
-  bridgeLevel = 0, columns = 20, rows = 14,
+  bridgeLevel = 0, columns = 20, rows = 14, projectionBounds,
 } = {}) {
   const tileList = tiles ?? [regularTile({ depth })];
   const barHeight = viewportHeight < 480 ? 24 : viewportHeight < 720 ? 32 : 48;
@@ -76,6 +76,7 @@ function viewData({
     cameraY,
     tileset,
     autotiles,
+    projectionBounds: projectionBounds ?? { minTileX: 0, minTileY: 0, maxTileX: mapWidth - 1, maxTileY: mapHeight - 1 },
     tiles: [...tileList]
       .sort((left, right) => left.z - right.z || left.y - right.y || left.x - right.x)
       .map((tile) => [tile.x, tile.y, tile.z, tile.tileId, tile.depth]),
@@ -1352,6 +1353,7 @@ test("late tileset decode catches up from receivedAt and skips MapView rAF", { t
     tileset: delayedRef,
     cameraX: 32,
     cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
+    projectionBounds: { minTileX: 1, minTileY: 0, maxTileX: 23, maxTileY: 17 },
     tiles: [regularTile({ x: 1, depth: 0 })],
   });
   await page.evaluate(({ viewPayload: view, spritePayload }) => {
@@ -1806,6 +1808,111 @@ test("camera-only update keeps tile canvas backing", { timeout: 30_000 }, async 
   assert.ok(info.afterRefresh.resizes > info.afterCamera.resizes, JSON.stringify(info));
 });
 
+test("exact sparse projectionBounds drive persistent incremental surfaces with bounded structural work", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const makeWindow = (minTileX, visualEpoch, depth = 0) => {
+    const projectionBounds = { minTileX, minTileY: 0, maxTileX: minTileX + 4, maxTileY: 4 };
+    const tiles = [];
+    for (let y = 0; y <= 4; y += 1) {
+      for (let x = minTileX; x <= minTileX + 4; x += 1) tiles.push(regularTile({ x, y, depth }));
+    }
+    return viewData({ mapWidth: 40, mapHeight: 10, cameraX: minTileX * 32, visualEpoch, projectionBounds, tiles });
+  };
+  const first = makeWindow(0, 1);
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: first, player: matchingSprite(first) });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "first exact projection accepted");
+  const before = await page.evaluate(() => {
+    window.__persistentSurface = window.__view._layers[0].canvas;
+    const view = window.__view;
+    return {
+      shifts: view._projectionShifts,
+      allocations: view._surfaceAllocations,
+      resizes: view._surfaceResizes,
+      full: view._fullRasterPasses,
+      dirty: view._dirtyCellDraws,
+      live: view._liveSurfaceCount,
+      size: [view._layers[0].canvas.width, view._layers[0].canvas.height],
+    };
+  });
+  for (let shift = 1; shift <= 20; shift += 1) {
+    const next = makeWindow(shift, shift + 1);
+    await page.evaluate(({ viewPayload, player, expected }) => {
+      window.__expectedProjectionEpoch = expected;
+      window.__view.receiveRenderData(viewPayload);
+      window.__sprite.receiveRenderData(player);
+    }, { viewPayload: next, player: matchingSprite(next), expected: shift + 1 });
+    await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === window.__expectedProjectionEpoch, `projection shift ${shift}`);
+  }
+  const after = await page.evaluate(() => {
+    const view = window.__view;
+    const layer = view._layers[0];
+    const sample = [...layer.context.getImageData(4 * 32 + 8, 4 * 32 + 8, 1, 1).data];
+    return {
+      shifts: view._projectionShifts,
+      allocations: view._surfaceAllocations,
+      resizes: view._surfaceResizes,
+      full: view._fullRasterPasses,
+      dirty: view._dirtyCellDraws,
+      live: view._liveSurfaceCount,
+      sameSurface: layer.canvas === window.__persistentSurface,
+      bounds: view._acceptedVisualScene.view.projectionBounds,
+      sample,
+    };
+  });
+  assert.deepEqual(before.size, [160, 160]);
+  assert.equal(after.shifts - before.shifts, 20);
+  assert.equal(after.allocations, before.allocations);
+  assert.equal(after.resizes, before.resizes);
+  assert.equal(after.full, before.full);
+  assert.equal(after.live, 1);
+  assert.equal(after.sameSurface, true);
+  assert.equal(after.dirty - before.dirty, 20 * 5, "only each entering five-cell strip is redrawn");
+  assert.deepEqual(after.bounds, { minTileX: 20, minTileY: 0, maxTileX: 24, maxTileY: 4 });
+  assert.deepEqual(after.sample, [0, 0, 255, 255]);
+});
+
+test("depth churn recycles through a fixed surface pool instead of growing with traversal distance", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const payload = (index) => viewData({
+    mapWidth: 40,
+    mapHeight: 10,
+    cameraX: index * 32,
+    visualEpoch: index + 1,
+    projectionBounds: { minTileX: index, minTileY: 0, maxTileX: index + 2, maxTileY: 2 },
+    tiles: [regularTile({ x: index, y: 0, depth: index * 32 })],
+  });
+  const first = payload(0);
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: first, player: matchingSprite(first) });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "first depth accepted");
+  for (let index = 1; index <= 20; index += 1) {
+    const next = payload(index);
+    await page.evaluate(({ viewPayload, player, expected }) => {
+      window.__expectedDepthEpoch = expected;
+      window.__view.receiveRenderData(viewPayload);
+      window.__sprite.receiveRenderData(player);
+    }, { viewPayload: next, player: matchingSprite(next), expected: index + 1 });
+    await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === window.__expectedDepthEpoch, `depth churn ${index}`);
+  }
+  const counters = await page.evaluate(() => ({
+    shifts: window.__view._projectionShifts,
+    allocations: window.__view._surfaceAllocations,
+    resizes: window.__view._surfaceResizes,
+    full: window.__view._fullRasterPasses,
+    live: window.__view._liveSurfaceCount,
+    active: window.__view._layers.length,
+    pool: window.__view._surfacePool.length,
+  }));
+  assert.deepEqual(counters, { shifts: 20, allocations: 2, resizes: 2, full: 1, live: 2, active: 1, pool: 1 });
+});
+
 test("camera-only resize fast path commits new origin, underlay, canvases, and sprite together", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
@@ -2210,6 +2317,10 @@ test("closed Map schema rejects extra keys, illegal or unordered tiles, and came
   assert.equal((await throwsReceive(page, wrongTuple)).threw, true);
   const legacyField = { ...base, chunks: [] };
   assert.equal((await throwsReceive(page, legacyField)).threw, true);
+  const { projectionBounds: omittedBounds, ...missingBounds } = base;
+  assert.equal((await throwsReceive(page, missingBounds)).threw, true);
+  assert.equal((await throwsReceive(page, { ...base, projectionBounds: { ...base.projectionBounds, extra: 1 } })).threw, true);
+  assert.equal((await throwsReceive(page, { ...base, projectionBounds: { minTileX: 1, minTileY: 0, maxTileX: 2, maxTileY: 2 } })).threw, true, "sparse tiles outside exact bounds are rejected rather than used to infer a rectangle");
   const camera = await throwsReceive(page, { ...base, cameraX: base.mapWidth * 32 });
   assert.equal(camera.threw, true);
   assert.equal(await page.evaluate(() => window.__view._accepted), undefined);

@@ -631,6 +631,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     const refreshUpdates = frame.updates.filter((update) => "tiles" in viewportSet(update));
     assert.ok(refreshUpdates.length >= 1, "expected a tiles refresh update");
     const latestRefresh = refreshUpdates.at(-1);
+    assert.deepEqual(Object.keys(viewportSet(latestRefresh).projectionBounds).sort(), ["maxTileX", "maxTileY", "minTileX", "minTileY"]);
     assert.ok(Math.max(...viewportSet(latestRefresh).tiles.map((tile) => tile[0])) > spawnMaxX);
     frame.abort();
     await frame.pending;
@@ -649,7 +650,9 @@ describe("map runtime walking", { concurrency: false }, () => {
     const layout = calculateLayout(640, 480);
     const camera = computeCamera(map, 10, 8, layout);
     const required = viewportTileBounds(map, camera.cameraX, camera.cameraY, layout);
-    const expected = projectTilesInBounds(map, tileset, expandTileBounds(required, 4, map)).map((tile) => [tile.x, tile.y, tile.z, tile.tileId, tile.depth]);
+    const expectedBounds = expandTileBounds(required, 4, map);
+    const expected = projectTilesInBounds(map, tileset, expectedBounds).map((tile) => [tile.x, tile.y, tile.z, tile.tileId, tile.depth]);
+    assert.deepEqual(view(frame.latestState()).projectionBounds, expectedBounds);
     assert.deepEqual(view(frame.latestState()).tiles, expected);
     frame.abort();
     await frame.pending;
