@@ -586,8 +586,8 @@ projectionBounds = {
 
 具体字段命名可在实现中保持与现有 Map data schema 风格一致，但以下 contract 冻结：
 
-- bounds 的 inclusive/exclusive 语义必须在 schema/test 中唯一明确；
-- bounds 必须与 Runtime 实际选中的 `TileProjectionWindow.bounds` 一致；
+- bounds 直接沿用现有 `TileProjectionBounds` 语义：`minTileX/minTileY/maxTileX/maxTileY` **全部为 inclusive tile indices**；
+- bounds 必须与 Runtime 实际选中的 `TileProjectionWindow.bounds` 完全一致；
 - Browser 用 bounds 计算 entering / leaving / overlap region；
 - `tiles[]` 只表达该 bounds 内实际 projected tile tuples，不承担 rectangle identity。
 
