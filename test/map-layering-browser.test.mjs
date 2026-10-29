@@ -3013,3 +3013,120 @@ test("resize-driven projection redraw is counted separately from scene full rast
   assert.equal(after.full - before.full, 0, "same scene must not bump scene full-raster counter");
   await assertMatchesFullRasterOracle(page, second, "resize redraw");
 });
+
+test("same projectionBounds with left-edge deletion remaps layer origin without shifting leftover tiles", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/blue", await makePaletteTileset(page));
+  const bounds = { minTileX: 0, minTileY: 0, maxTileX: 5, maxTileY: 4 };
+  const firstTiles = filledWindowTiles(1, 1, 3, 3, 1);
+  const first = viewData({
+    mapWidth: 20,
+    mapHeight: 12,
+    visualEpoch: 1,
+    projectionBounds: bounds,
+    tiles: firstTiles,
+  });
+  await paintPair(page, first);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "origin-minX first");
+  const geometryBefore = await page.evaluate(() => {
+    const layer = window.__view._layers[0];
+    return {
+      worldX: layer.worldX,
+      worldY: layer.worldY,
+      width: layer.canvas.width,
+      height: layer.canvas.height,
+      shifts: window.__view._projectionShifts,
+      resizes: window.__view._surfaceResizes,
+    };
+  });
+  // Drop the leftmost column so depthBounds.minX moves while canvas size stays via max(old,new).
+  const secondTiles = filledWindowTiles(2, 1, 2, 3, 1);
+  const second = viewData({
+    mapWidth: 20,
+    mapHeight: 12,
+    visualEpoch: 2,
+    projectionBounds: bounds,
+    tiles: secondTiles,
+  });
+  await paintPair(page, second);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 2, "origin-minX second");
+  const geometryAfter = await page.evaluate(() => {
+    const layer = window.__view._layers[0];
+    return {
+      worldX: layer.worldX,
+      worldY: layer.worldY,
+      width: layer.canvas.width,
+      height: layer.canvas.height,
+      shifts: window.__view._projectionShifts,
+      resizes: window.__view._surfaceResizes,
+    };
+  });
+  assert.equal(geometryBefore.worldX, 32);
+  assert.equal(geometryAfter.worldX, 64);
+  assert.equal(geometryAfter.width, geometryBefore.width, "canvas width must remain pooled/max sized");
+  assert.equal(geometryAfter.resizes, geometryBefore.resizes, "origin change alone must not resize the canvas");
+  assert.equal(geometryAfter.shifts, geometryBefore.shifts, "projectionBounds stayed equal");
+  assert.deepEqual(await cellPixel(page, 1, 2, 8, 8), [0, 0, 0, 0], "deleted left edge must be transparent");
+  assert.deepEqual(await cellPixel(page, 2, 2, 8, 8), [...PALETTE[1]], "remaining tile must keep its color at the correct world cell");
+  assert.deepEqual(await cellPixel(page, 3, 2, 8, 8), [...PALETTE[1]]);
+  await assertMatchesFullRasterOracle(page, second, "origin minX change");
+});
+
+test("same projectionBounds with top-edge deletion remaps layer origin without shifting leftover tiles", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/blue", await makePaletteTileset(page));
+  const bounds = { minTileX: 0, minTileY: 0, maxTileX: 5, maxTileY: 4 };
+  const firstTiles = filledWindowTiles(1, 1, 3, 3, 2);
+  const first = viewData({
+    mapWidth: 20,
+    mapHeight: 12,
+    visualEpoch: 1,
+    projectionBounds: bounds,
+    tiles: firstTiles,
+  });
+  await paintPair(page, first);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "origin-minY first");
+  const geometryBefore = await page.evaluate(() => {
+    const layer = window.__view._layers[0];
+    return {
+      worldX: layer.worldX,
+      worldY: layer.worldY,
+      width: layer.canvas.width,
+      height: layer.canvas.height,
+      shifts: window.__view._projectionShifts,
+      resizes: window.__view._surfaceResizes,
+    };
+  });
+  const secondTiles = filledWindowTiles(1, 2, 3, 2, 2);
+  const second = viewData({
+    mapWidth: 20,
+    mapHeight: 12,
+    visualEpoch: 2,
+    projectionBounds: bounds,
+    tiles: secondTiles,
+  });
+  await paintPair(page, second);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 2, "origin-minY second");
+  const geometryAfter = await page.evaluate(() => {
+    const layer = window.__view._layers[0];
+    return {
+      worldX: layer.worldX,
+      worldY: layer.worldY,
+      width: layer.canvas.width,
+      height: layer.canvas.height,
+      shifts: window.__view._projectionShifts,
+      resizes: window.__view._surfaceResizes,
+    };
+  });
+  assert.equal(geometryBefore.worldY, 32);
+  assert.equal(geometryAfter.worldY, 64);
+  assert.equal(geometryAfter.height, geometryBefore.height, "canvas height must remain pooled/max sized");
+  assert.equal(geometryAfter.resizes, geometryBefore.resizes, "origin change alone must not resize the canvas");
+  assert.equal(geometryAfter.shifts, geometryBefore.shifts, "projectionBounds stayed equal");
+  assert.deepEqual(await cellPixel(page, 2, 1, 8, 8), [0, 0, 0, 0], "deleted top edge must be transparent");
+  assert.deepEqual(await cellPixel(page, 2, 2, 8, 8), [...PALETTE[2]]);
+  assert.deepEqual(await cellPixel(page, 2, 3, 8, 8), [...PALETTE[2]]);
+  await assertMatchesFullRasterOracle(page, second, "origin minY change");
+});

@@ -1070,6 +1070,12 @@
         else layer = this._makeLayer(depth, nextPixels);
         const oldWorldX = layer.worldX;
         const oldWorldY = layer.worldY;
+        // depthBounds can move the layer origin even when projectionBounds are
+        // unchanged (e.g. deleting the left/top edge tile). Canvas size may stay
+        // put via max(old,new), so pixels must be remapped before reuse.
+        const originChanged = Boolean(previous)
+          && (oldWorldX !== nextPixels.minX || oldWorldY !== nextPixels.minY);
+        const needsPixelRemap = shifted || originChanged;
         const overlap = previous && hasProjectionOverlap ? {
           x0: Math.max(projectionOverlap.x0, oldWorldX, nextPixels.minX),
           y0: Math.max(projectionOverlap.y0, oldWorldY, nextPixels.minY),
@@ -1079,7 +1085,7 @@
         const hasOverlap = Boolean(overlap && overlap.x0 < overlap.x1 && overlap.y0 < overlap.y1);
         let snapshot = null;
         let restoredThisLayer = false;
-        if (previous && shifted && hasOverlap) {
+        if (previous && needsPixelRemap && hasOverlap) {
           const width = overlap.x1 - overlap.x0;
           const height = overlap.y1 - overlap.y0;
           const pixels = width * height;
@@ -1094,7 +1100,7 @@
         }
         const resized = this._resizeLayer(layer, nextPixels, false);
         if (resized) sawResize = true;
-        if (!previous || shifted || resized) {
+        if (!previous || needsPixelRemap || resized) {
           layer.context.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
           if (snapshot && !resized) {
             const putStarted = performance.now();
@@ -1112,7 +1118,7 @@
           for (const [key, stack] of previousStacks) {
             const sample = stack[0];
             if (!sample || sample.depth !== depth || currentStacks.has(key)) continue;
-            if (shifted) {
+            if (needsPixelRemap) {
               if (!restoredRect || !this._cellIntersectsRect(sample.x, sample.y, restoredRect)) continue;
             }
             this._clearCell(layer, sample.x, sample.y);
@@ -1127,7 +1133,7 @@
           const inOverlap = hasOverlap
             && tile.x * TILE >= overlap.x0 && tile.y * TILE >= overlap.y0
             && (tile.x + 1) * TILE <= overlap.x1 && (tile.y + 1) * TILE <= overlap.y1;
-          const reusable = previous && !resized && Boolean(snapshot || !shifted) && inOverlap
+          const reusable = previous && !resized && Boolean(snapshot || !needsPixelRemap) && inOverlap
             && sameTileStack(previousStacks.get(key), stack)
             && autotileFramesMatch(stack, previous.frames, frames);
           if (reusable) {
