@@ -55,6 +55,9 @@ interface ActiveMove {
   readonly id: number;
   readonly fromX: number;
   readonly fromY: number;
+  readonly toX: number;
+  readonly toY: number;
+  readonly travelDirection: Direction;
   readonly startPattern: 1 | 3;
   readonly durationMs: number;
   readonly kind: "walk" | "jump";
@@ -84,7 +87,7 @@ interface RenderFacts {
   readonly window: TileProjectionWindow;
   readonly x: number;
   readonly y: number;
-  readonly direction: Direction;
+  readonly facingDirection: Direction;
   readonly activeMove: ActiveMove | null;
   readonly playerRef: ResourceRef;
   readonly sceneEpoch: number;
@@ -249,7 +252,7 @@ function playerPayload(
   cameraY: number,
   motionId: number | null,
 ): RenderDomainState["roots"][number]["children"][number]["data"] {
-  const { x, y, direction, activeMove, playerRef, sceneEpoch, visualEpoch, layout, bridgeLevel } = facts;
+  const { x, y, facingDirection, activeMove, playerRef, sceneEpoch, visualEpoch, layout, bridgeLevel } = facts;
   if (activeMove) {
     const fromCamera = computeCamera(facts.loaded.map, activeMove.fromX, activeMove.fromY, layout);
     return {
@@ -260,7 +263,7 @@ function playerPayload(
       y,
       screenX: x * 32 - cameraX,
       screenY: y * 32 - cameraY,
-      direction,
+      direction: facingDirection,
       pattern: activeMove.startPattern,
       sprite: playerRef,
       motion: playerMotionPayload(activeMove, activeMove.fromX * 32 - fromCamera.cameraX, activeMove.fromY * 32 - fromCamera.cameraY),
@@ -275,7 +278,7 @@ function playerPayload(
     y,
     screenX: x * 32 - cameraX,
     screenY: y * 32 - cameraY,
-    direction,
+    direction: facingDirection,
     pattern: 0,
     sprite: playerRef,
     motion: null,
@@ -629,7 +632,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       let window!: TileProjectionWindow;
       let x = 0;
       let y = 0;
-      let direction: Direction = 2;
+      let facingDirection: Direction = 2;
       let nextMoveId = 1;
       let nextStartPattern: 1 | 3 = 1;
       let playerRef!: ResourceRef;
@@ -653,7 +656,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         window: overrides.window ?? window,
         x: overrides.x ?? x,
         y: overrides.y ?? y,
-        direction: overrides.direction ?? direction,
+        facingDirection: overrides.facingDirection ?? facingDirection,
         activeMove: overrides.activeMove === undefined ? activeMove : overrides.activeMove,
         playerRef: overrides.playerRef ?? playerRef,
         sceneEpoch: overrides.sceneEpoch ?? sceneEpoch,
@@ -677,7 +680,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         })));
       };
 
-      const currentSnapshot = (): MapSnapshot => Object.freeze({ mapId: current.mapId, player: Object.freeze({ x, y, direction }), npcs: Object.freeze(npcs.map(({ instanceId, npcId, x, y, direction, pattern, interactable }) => Object.freeze({ instanceId, npcId, x, y, direction, pattern, interactable }))) });
+      const currentSnapshot = (): MapSnapshot => Object.freeze({ mapId: current.mapId, player: Object.freeze({ x, y, direction: facingDirection }), npcs: Object.freeze(npcs.map(({ instanceId, npcId, x, y, direction, pattern, interactable }) => Object.freeze({ instanceId, npcId, x, y, direction, pattern, interactable }))) });
       const publishSnapshot = (fromMapId: number | null) => {
         const snapshot = currentSnapshot();
         api.entered(Object.freeze({ mapId: current.mapId, fromMapId, player: snapshot.player }), snapshot);
@@ -874,7 +877,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
             window: nextWindow,
             x: rule.targetX,
             y: rule.targetY,
-            direction: nextDirection,
+            facingDirection: nextDirection,
             activeMove: null,
             sceneEpoch: nextScene,
             visualEpoch: nextVisual,
@@ -890,7 +893,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
           window = nextWindow;
           x = rule.targetX;
           y = rule.targetY;
-          direction = nextDirection;
+          facingDirection = nextDirection;
           sceneEpoch = nextScene;
           visualEpoch = nextVisual;
           acceptedLayout = liveLayout;
@@ -919,9 +922,9 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       api.setCommands({
         enter: async (entry) => {
           assertCommandReady();
-          const target = mapEntry(entry, direction);
+          const target = mapEntry(entry, facingDirection);
           const rule: StepTransfer = { x, y, targetMapId: target.mapId, targetX: target.x, targetY: target.y, targetDirection: target.direction };
-          try { await beginTransfer(rule, direction); } catch (error) {
+          try { await beginTransfer(rule, facingDirection); } catch (error) {
             if (error instanceof RPGMapError) throw error;
             throw new RPGMapError("MAP_CONTENT_FAILED", error instanceof Error ? error.message : "Map entry failed");
           }
@@ -967,10 +970,19 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
 
       const publishBlocked = (nextDirection: Direction) => {
         const nextWindow = window.source === current ? window : standingWindow(current, x, y, sceneEpoch, visualEpoch);
-        replaceDomain(renderState(facts({ direction: nextDirection, window: nextWindow, activeMove: null })));
-        direction = nextDirection;
+        replaceDomain(renderState(facts({ facingDirection: nextDirection, window: nextWindow, activeMove: null })));
+        facingDirection = nextDirection;
         window = nextWindow;
         activeMove = null;
+        api.updateSnapshot(currentSnapshot());
+      };
+
+      const publishFacingUpdate = (nextFacingDirection: Direction) => {
+        if (runtimeEnded() || activeMove === null || nextFacingDirection === facingDirection) return;
+        updateDomain({
+          nodes: [{ key: PLAYER_KEY, data: { set: { direction: nextFacingDirection } as RenderDataSet } }],
+        });
+        facingDirection = nextFacingDirection;
         api.updateSnapshot(currentSnapshot());
       };
 
@@ -1054,7 +1066,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         visualEpoch = nextVisual;
         x = nextX;
         y = nextY;
-        direction = nextDirection;
+        facingDirection = nextDirection;
         activeMove = nextMove;
         api.updateSnapshot(currentSnapshot());
       };
@@ -1168,8 +1180,8 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         }
         const moveId = nextMoveId;
         const nextMove: ActiveMove = plan.kind === "jump"
-          ? { id: moveId, fromX: x, fromY: y, startPattern: nextStartPattern, durationMs: JUMP_DURATION_MS, kind: "jump", peakPx: plan.peakPx }
-          : { id: moveId, fromX: x, fromY: y, startPattern: nextStartPattern, durationMs: WALK_DURATION_MS, kind: "walk" };
+          ? { id: moveId, fromX: x, fromY: y, toX: plan.toX, toY: plan.toY, travelDirection: next, startPattern: nextStartPattern, durationMs: JUMP_DURATION_MS, kind: "jump", peakPx: plan.peakPx }
+          : { id: moveId, fromX: x, fromY: y, toX: plan.toX, toY: plan.toY, travelDirection: next, startPattern: nextStartPattern, durationMs: WALK_DURATION_MS, kind: "walk" };
         publishMovementUpdate(plan.toX, plan.toY, next, nextMove);
         nextMoveId += 1;
         stepTimer = setTimeout(() => {
@@ -1193,10 +1205,11 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
 
       const finishStep = (moveId: number) => {
         if (frame.signal.aborted || activeMove?.id !== moveId) return;
+        const completedMove = activeMove;
         stepTimer = null;
         const step = current.transfers.steps.find((rule) => rule.x === x && rule.y === y);
         if (step) {
-          startTransfer(step, direction);
+          startTransfer(step, completedMove.travelDirection);
           return;
         }
         const hadPendingResize = pendingLayout !== null;
@@ -1211,7 +1224,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
           return;
         }
         nextStartPattern = 1;
-        if (!resizeCommitted) publishMovementUpdate(x, y, direction, null);
+        if (!resizeCommitted) publishMovementUpdate(x, y, facingDirection, null);
       };
 
       unsubscribeViewport = scope.viewport.subscribe((value) => noteViewport(value));
@@ -1239,7 +1252,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         window: spawnWindow,
         x: input.x,
         y: input.y,
-        direction: initialDirection,
+        facingDirection: initialDirection,
         activeMove: null,
         playerRef,
         sceneEpoch: 1,
@@ -1254,7 +1267,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       window = spawnWindow;
       x = input.x;
       y = input.y;
-      direction = initialDirection;
+      facingDirection = initialDirection;
       npcs = initialNPCs;
       sceneEpoch = 1;
       visualEpoch = 1;
@@ -1266,10 +1279,17 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
       lastStarted = null;
       eventBusy = false;
       publishSnapshot(null);
-      api.setMoveIntentSink(() => { pumpMoveIntent(); });
+      api.setMoveIntentSink((intent) => {
+        try {
+          if (activeMove !== null && intent !== null) publishFacingUpdate(intent);
+          else pumpMoveIntent();
+        } catch (error) {
+          if (!(error instanceof RPGMapError && error.code === "MAP_COMMIT_FAILED")) fatalCommit(error);
+        }
+      });
       api.setConfirmSink(() => {
         if (runtimeEnded() || operationBusy() || confirmDispatching) return;
-        const { dx, dy } = stepDelta[direction];
+        const { dx, dy } = stepDelta[facingDirection];
         const targetX = x + dx;
         const targetY = y + dy;
         const target = npcs.find((npc) => npc.interactable && npc.x === targetX && npc.y === targetY);
@@ -1277,7 +1297,7 @@ async function runMapRuntime(scope: SubsystemScope, frame: Frame, api: RuntimeBr
         const event: NPCInteractEvent = Object.freeze({
           mapId: current.mapId,
           npc: Object.freeze({ instanceId: target.instanceId, npcId: target.npcId, x: target.x, y: target.y }),
-          player: Object.freeze({ x, y, direction }),
+          player: Object.freeze({ x, y, direction: facingDirection }),
         });
         confirmDispatching = true;
         try { api.npcInteract(event); } finally { confirmDispatching = false; }

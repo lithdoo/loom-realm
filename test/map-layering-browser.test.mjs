@@ -1727,6 +1727,78 @@ test("motion state machine keeps startedAt for same id/fingerprint and rejects d
   assert.equal(result.latestY, 1);
 });
 
+test("facing-only update paints a new sprite row before the active motion completes", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await warmPresentation(page);
+  const viewPayload = viewData({ depth: 0, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } });
+  const walking = walkingSprite({ id: 1, direction: 2 });
+  await page.evaluate(({ viewPayload: view, spritePayload }) => {
+    window.__facingRecords = [];
+    window.__loomrealmMovementQualification = (record) => window.__facingRecords.push(record);
+    window.__view.receiveRenderData(view);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload, spritePayload: walking });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.motionId === 1, "walking scene accepted");
+  await page.evaluate(() => {
+    const futureStart = performance.now() + 1_000;
+    window.__view._activeMotion.startedAt = futureStart;
+    window.__sprite._activeMotion.startedAt = futureStart;
+    window.__facingBefore = {
+      futureStart,
+      fingerprint: window.__view._activeMotion.fingerprint,
+      spriteFingerprint: window.__sprite._activeMotion.fingerprint,
+      visual: window.__view._acceptedVisualScene.sprites[0].visual,
+      view: structuredClone(window.__view._acceptedVisualScene.view),
+      motion: structuredClone(window.__view._acceptedVisualScene.sprites[0].data.motion),
+    };
+    window.__facingRecords.length = 0;
+  });
+  const acceptedSynchronously = await page.evaluate((spritePayload) => {
+    try {
+      window.__sprite.receiveRenderData({ ...spritePayload, direction: 6 });
+      return true;
+    } catch {
+      return false;
+    }
+  }, walking);
+  assert.equal(acceptedSynchronously, true);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.sprites[0]?.data.direction === 6
+    && window.__view._acceptedVisualScene.sprites[0].visual._cropKey.includes("|6|"), "right-facing row painted");
+  const result = await page.evaluate(() => {
+    const scene = window.__view._acceptedVisualScene;
+    const received = window.__facingRecords.find((record) => record.name === "presentation-received" && record.detail.element === "map-sprite");
+    const painted = window.__facingRecords.find((record) => record.name === "browser-facing-paint");
+    return {
+      sameVisual: scene.sprites[0].visual === window.__facingBefore.visual,
+      sameView: JSON.stringify(scene.view) === JSON.stringify(window.__facingBefore.view),
+      sameMotion: JSON.stringify(scene.sprites[0].data.motion) === JSON.stringify(window.__facingBefore.motion),
+      startedAtUnchanged: window.__view._activeMotion.startedAt === window.__facingBefore.futureStart,
+      spriteStartedAtUnchanged: window.__sprite._activeMotion.startedAt === window.__facingBefore.futureStart,
+      fingerprintUnchanged: window.__view._activeMotion.fingerprint === window.__facingBefore.fingerprint,
+      spriteFingerprintUnchanged: window.__sprite._activeMotion.fingerprint === window.__facingBefore.spriteFingerprint,
+      direction: scene.sprites[0].data.direction,
+      cropKey: scene.sprites[0].visual._cropKey,
+      receivedAt: received?.at,
+      paintedAt: painted?.at,
+      completesAt: window.__view._activeMotion.startedAt + window.__view._activeMotion.durationMs,
+    };
+  });
+  assert.equal(result.sameVisual, true);
+  assert.equal(result.sameView, true);
+  assert.equal(result.sameMotion, true);
+  assert.equal(result.startedAtUnchanged, true);
+  assert.equal(result.spriteStartedAtUnchanged, true);
+  assert.equal(result.fingerprintUnchanged, true);
+  assert.equal(result.spriteFingerprintUnchanged, true);
+  assert.equal(result.direction, 6);
+  assert.match(result.cropKey, /\|6\|1\|32x32$/);
+  assert.equal(Number.isFinite(result.receivedAt), true);
+  assert.equal(Number.isFinite(result.paintedAt), true);
+  assert.equal(result.receivedAt <= result.paintedAt, true);
+  assert.equal(result.paintedAt < result.completesAt, true);
+});
+
 test("null to null motion snaps without a timeline", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());

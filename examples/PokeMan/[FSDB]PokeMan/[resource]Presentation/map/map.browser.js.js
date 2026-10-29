@@ -367,7 +367,6 @@
       sprite.y,
       sprite.screenX,
       sprite.screenY,
-      sprite.direction,
       sprite.pattern,
     ]);
   }
@@ -1371,6 +1370,7 @@
       if (!Number.isInteger(frameWidth) || !Number.isInteger(frameHeight)) throw new TypeError("Character sheet must be 4 by 4");
       const cropKey = `${resourceIdentity(data.sprite)}|${data.direction}|${pattern}|${frameWidth}x${frameHeight}`;
       if (sprite._cropKey !== cropKey) {
+        const facingChanged = sprite._paintedDirection !== undefined && sprite._paintedDirection !== data.direction;
         sprite.width = frameWidth;
         sprite.height = frameHeight;
         const context = sprite._context ?? sprite.getContext("2d", { alpha: true });
@@ -1379,7 +1379,9 @@
         context.drawImage(spriteImage, pattern * frameWidth, ((data.direction - 2) / 2) * frameHeight, frameWidth, frameHeight, 0, 0, frameWidth, frameHeight);
         sprite._context = context;
         sprite._cropKey = cropKey;
+        if (facingChanged) qualify("browser-facing-paint", { element: "map-sprite", motionId: motion?.id ?? null, direction: data.direction });
       }
+      sprite._paintedDirection = data.direction;
       const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0);
       const left = screenX + prepared.geometry.originX + (32 - frameWidth) / 2;
       const top = screenY + prepared.geometry.originY + 32 - frameHeight;
@@ -1462,8 +1464,8 @@
     receiveRenderData(data) {
       assertMapSpriteData(data);
       const fingerprint = data.motion === null ? null : JSON.stringify([
-        data.motion.id, data.motion.durationMs, data.motion.fromY, data.motion.fromScreenX, data.motion.fromScreenY,
-        data.x, data.y, data.screenX, data.screenY, data.direction, data.pattern,
+        data.motion,
+        data.x, data.y, data.screenX, data.screenY, data.pattern,
       ]);
       if (this._activeMotion && data.motion && data.motion.id === this._activeMotion.id && fingerprint !== this._activeMotion.fingerprint) {
         throw new TypeError("Invalid map motion identity");

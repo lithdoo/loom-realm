@@ -300,6 +300,7 @@ describe("map runtime walking", { concurrency: false }, () => {
       emitEvent(payload) { return adapter.event(payload); },
       emitState(payload) { return adapter.state(payload); },
       controls: handler.controls,
+      getSnapshot: () => handler.getSnapshot(),
       states,
       updates,
       replaces,
@@ -407,16 +408,32 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.pending;
   });
 
-  test("walking input only updates intent until the completion boundary", async (t) => {
+  test("active walking updates facing immediately without restarting its trajectory", async (t) => {
     const frame = await startFrame(t);
     await frame.emitEvent(down("ArrowDown"));
-    const walkingStates = frame.states.length;
+    const walking = structuredClone(frame.latestState());
+    const walkingUpdateCount = frame.updates.length;
+    const stepTimer = frame.queued[0];
     await frame.emitEvent(down("ArrowRight"));
-    assert.equal(frame.states.length, walkingStates);
-    assert.equal(player(frame.latestState()).direction, 2);
-    assert.equal(player(frame.latestState()).y, 9);
+    const facing = frame.latestState();
+    assert.equal(frame.updates.length, walkingUpdateCount + 1);
+    assert.deepEqual(frame.updates.at(-1), {
+      nodes: [{ key: "player", data: { set: { direction: 6 } } }],
+    });
+    assert.deepEqual(view(facing), view(walking));
+    assert.deepEqual(
+      { ...player(facing), direction: undefined },
+      { ...player(walking), direction: undefined },
+    );
+    assert.equal(player(facing).direction, 6);
+    assert.equal(player(facing).motionId, 1);
+    assert.deepEqual(frame.getSnapshot().player, { x: 10, y: 9, direction: 6 });
+    assert.equal(frame.queued.length, 1);
+    assert.equal(frame.queued[0], stepTimer);
     frame.fireNextTimer();
-    assert.equal(player(frame.latestState()).direction, 6);
+    assert.equal(player(frame.latestState()).motionId, 2);
+    assert.equal(player(frame.latestState()).motion.fromScreenX, 304);
+    assert.equal(player(frame.latestState()).motion.fromScreenY, 208);
     assert.equal(player(frame.latestState()).x, 11);
     assert.equal(player(frame.latestState()).y, 9);
     frame.abort();
@@ -1619,6 +1636,35 @@ describe("map runtime transfer", { concurrency: false }, () => {
     assert.equal(player(frame.latestState()).y, 7);
     assert.equal(player(frame.latestState()).pattern, 0);
     assert.equal(player(frame.latestState()).motion, null);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("step transfer fallback keeps the completed travel direction after a mid-step facing change", async (t) => {
+    const frame = await startFrame(t, {
+      records: {
+        "struct.MapTransfer/1": {
+          id: 1,
+          steps: [{ x: 10, y: 9, targetMapId: 2, targetX: 4, targetY: 7, targetDirection: null }],
+          contacts: [],
+          edges: [],
+        },
+      },
+    });
+    await frame.emitEvent(down("ArrowDown"));
+    const motion = structuredClone(player(frame.latestState()).motion);
+    await frame.emitEvent(down("ArrowRight"));
+    assert.equal(player(frame.latestState()).direction, 6);
+    assert.deepEqual(player(frame.latestState()).motion, motion);
+    await frame.emitEvent(up("ArrowDown"));
+    await frame.emitEvent(up("ArrowRight"));
+    assert.equal(player(frame.latestState()).direction, 6);
+    frame.fireNextTimer();
+    await flush();
+    assert.equal(view(frame.latestState()).mapId, 2);
+    assert.equal(player(frame.latestState()).x, 4);
+    assert.equal(player(frame.latestState()).y, 7);
+    assert.equal(player(frame.latestState()).direction, 2);
     frame.abort();
     await frame.pending;
   });
