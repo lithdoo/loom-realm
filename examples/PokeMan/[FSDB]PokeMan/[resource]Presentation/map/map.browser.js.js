@@ -373,6 +373,18 @@
     return true;
   }
 
+  function projectedTilesEqual(left, right) {
+    if (left === right) return true;
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) {
+      const a = left[index];
+      const b = right[index];
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+      for (let field = 0; field < a.length; field += 1) if (a[field] !== b[field]) return false;
+    }
+    return true;
+  }
+
   function sameProjectedTile(left, right) {
     if (!left || !right || left.tileId !== right.tileId) return false;
     if (left.visual === right.visual) return true;
@@ -527,7 +539,7 @@
       super();
       const shadow = this.attachShadow({ mode: "open" });
       const style = document.createElement("style");
-      style.textContent = ":host{display:flex;flex-direction:column;position:relative;overflow:hidden;width:100vw;height:100vh;background:#000;color:#fff;font:14px/1.2 system-ui,sans-serif}.map-content{position:relative;flex:none;overflow:hidden;background:#000}.map-world{position:relative;transform-origin:0 0}.map-footer{box-sizing:border-box;flex:none;display:flex;align-items:center;padding:0 12px;background:#171717;color:#fff;white-space:nowrap;overflow:hidden}.map-name{overflow:hidden;text-overflow:ellipsis}.map-error{position:absolute;inset:0;z-index:2147483647;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.72);color:#ffb4b4;text-align:center}.map-error[aria-hidden=false]{display:flex}canvas.tile-layer{position:absolute;display:block;image-rendering:pixelated;pointer-events:none}canvas.tile-layer[hidden]{display:none}slot{display:contents}::slotted(lr-map-sprite){display:block;position:absolute;image-rendering:pixelated;pointer-events:none}";
+      style.textContent = ":host{display:flex;flex-direction:column;position:relative;overflow:hidden;width:100vw;height:100vh;background:#000;color:#fff;font:14px/1.2 system-ui,sans-serif}.map-content{position:relative;flex:none;overflow:hidden;background:#000}.map-world{position:relative;transform-origin:0 0}.map-footer{box-sizing:border-box;flex:none;display:flex;align-items:center;padding:0 12px;background:#171717;color:#fff;white-space:nowrap;overflow:hidden}.map-name{overflow:hidden;text-overflow:ellipsis}.map-error{position:absolute;inset:0;z-index:2147483647;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.72);color:#ffb4b4;text-align:center}.map-error[aria-hidden=false]{display:flex}canvas.tile-layer,canvas.sprite-visual{position:absolute;display:block;image-rendering:pixelated;pointer-events:none}canvas.tile-layer[hidden],canvas.sprite-visual[hidden]{display:none}slot{display:contents}::slotted(lr-map-sprite){display:block;position:absolute;visibility:hidden;image-rendering:pixelated;pointer-events:none}";
       this._style = style;
       this._layers = [];
       this._content = document.createElement("div");
@@ -559,6 +571,8 @@
       this._desiredView = undefined;
       this._desiredSprites = new Map();
       this._accepted = undefined;
+      this._acceptedVisualScene = undefined;
+      this._stagingVisualScene = undefined;
       this._raf = undefined;
       this._retry = undefined;
       this._autotileTimer = undefined;
@@ -660,6 +674,29 @@
       return `c:${sequence}`;
     }
 
+    _preparationOwner(sceneEpoch, sequence) {
+      const acceptedEpoch = this._acceptedVisualScene?.view.sceneEpoch;
+      if (acceptedEpoch === undefined || acceptedEpoch === sceneEpoch) return this._candidateOwner(sequence);
+      if (this._stagingVisualScene?.sceneEpoch !== sceneEpoch) {
+        if (this._stagingVisualScene) this._disown(this._stagingVisualScene.owner);
+        this._stagingVisualScene = {
+          sceneEpoch,
+          owner: `staging:${sceneEpoch}`,
+          latestSequence: sequence,
+          state: "PREPARING",
+        };
+      } else {
+        this._stagingVisualScene.latestSequence = sequence;
+        this._stagingVisualScene.state = "PREPARING";
+      }
+      return this._stagingVisualScene.owner;
+    }
+
+    _releasePreparationOwner(owner) {
+      if (this._stagingVisualScene?.owner === owner) return;
+      this._disown(owner);
+    }
+
     disconnectedCallback() {
       queueMicrotask(() => {
         if (!this.isConnected) {
@@ -669,6 +706,9 @@
           this._cancelRetry();
           this._activeMotion = null;
           this._state = "DISPOSED";
+          this._accepted = undefined;
+          this._acceptedVisualScene = undefined;
+          this._stagingVisualScene = undefined;
           this._releaseAll();
           for (const sprite of this._spriteChildren()) if (typeof sprite._releaseAll === "function") sprite._releaseAll();
         }
@@ -705,7 +745,7 @@
       if (!view || sequence !== this._sequence || !this.isConnected) return;
       const spriteChildren = this._spriteChildren();
       const spriteEntries = spriteChildren.map((child) => this._desiredSprites.get(child));
-      if (spriteEntries.some((entry) => !entry)) return;
+      if (spriteEntries.length === 0 || spriteEntries.some((entry) => !entry)) return;
       const player = spriteEntries[0];
       for (const entry of spriteEntries) {
         if (entry.data.sceneEpoch !== view.data.sceneEpoch || entry.data.visualEpoch !== view.data.visualEpoch || entry.data.bridgeLevel !== view.data.bridgeLevel) return;
@@ -737,13 +777,14 @@
         this._cameraOnlyCommits += 1;
         this._commitMotion(prepared, sequence);
         this._accepted = prepared;
+        this._acceptedVisualScene = prepared;
         this._state = "VISIBLE";
         this._cancelRaf();
         this._cancelAutotileTimer();
         this._tickAccepted(prepared, sequence, false);
         return;
       }
-      const owner = this._candidateOwner(sequence);
+      const owner = this._preparationOwner(view.data.sceneEpoch, sequence);
       let tiles;
       try {
         tiles = expandTiles(view.data);
@@ -767,18 +808,17 @@
         }
         preparedSprites = await Promise.all(spriteEntries.map(async (entry) => {
           const spriteId = resourceIdentity(entry.data.sprite);
-          entry.sprite._own(spriteId, owner);
-          return { sprite: entry.sprite, data: entry.data, receivedAt: entry.receivedAt, image: await entry.sprite._image(entry.data.sprite), resourceId: spriteId };
+          this._own(spriteId, owner);
+          return { sprite: entry.sprite, data: entry.data, receivedAt: entry.receivedAt, image: await this._image(entry.data.sprite), resourceId: spriteId };
         }));
       } catch {
-        this._disown(owner);
-        for (const entry of spriteEntries) entry.sprite._disown(owner);
+        this._releasePreparationOwner(owner);
+        if (this._stagingVisualScene?.owner === owner) this._stagingVisualScene.state = "FAILED";
         this._failPrepare(sequence);
         return;
       }
       if (sequence !== this._sequence || !this.isConnected || this._desiredView !== view) {
-        this._disown(owner);
-        for (const entry of spriteEntries) entry.sprite._disown(owner);
+        this._releasePreparationOwner(owner);
         return;
       }
       const autotiles = new Map();
@@ -787,8 +827,8 @@
         const layout = classifyAutotileLayout(image);
         const durationMs = autotileFrameDurationMs(ref);
         if (layout === "invalid" || durationMs === null) {
-          this._disown(owner);
-          for (const entry of spriteEntries) entry.sprite._disown(owner);
+          this._releasePreparationOwner(owner);
+          if (this._stagingVisualScene?.owner === owner) this._stagingVisualScene.state = "FAILED";
           this._failPrepare(sequence);
           return;
         }
@@ -802,22 +842,37 @@
         view: view.data,
         sprites: preparedSprites,
         pairReceivedAt: player ? Math.min(view.receivedAt, player.receivedAt) : view.receivedAt,
-        resourceIds: new Set(resources.uniqueRefs.keys()),
+        resourceIds: new Set([...resources.uniqueRefs.keys(), ...preparedSprites.map((entry) => entry.resourceId)]),
         owner,
         geometry,
       };
       try {
-        prepared.layers = this._rasterDetached(prepared, sequence);
-        if (player) prepared.spriteCanvas = this._rasterSpriteDetached(prepared);
+        prepared.reusesAcceptedLayers = Boolean(
+          this._acceptedVisualScene
+          && this._acceptedVisualScene.view.sceneEpoch === prepared.view.sceneEpoch
+          && this._acceptedVisualScene.view.visualEpoch === prepared.view.visualEpoch
+          && resourceIdentity(this._acceptedVisualScene.view.tileset) === resourceIdentity(prepared.view.tileset)
+          && autotileIdentitiesEqual(this._acceptedVisualScene.view.autotiles, prepared.view.autotiles)
+          && projectedTilesEqual(this._acceptedVisualScene.view.tiles, prepared.view.tiles)
+          && this._acceptedVisualScene.view.bridgeLevel === prepared.view.bridgeLevel,
+        );
+        if (prepared.reusesAcceptedLayers) {
+          prepared.layers = this._layers;
+          prepared.buckets = this._acceptedVisualScene.buckets;
+          prepared.tilesetImage = this._acceptedVisualScene.tilesetImage;
+          prepared.autotiles = this._acceptedVisualScene.autotiles;
+        } else {
+          prepared.layers = this._rasterDetached(prepared, sequence);
+        }
+        prepared.sprites = prepared.sprites.map((entry) => ({ ...entry, visual: this._rasterSpriteDetached(entry) }));
       } catch {
-        this._disown(owner);
-        for (const entry of spriteEntries) entry.sprite._disown(owner);
+        this._releasePreparationOwner(owner);
+        if (this._stagingVisualScene?.owner === owner) this._stagingVisualScene.state = "FAILED";
         this._failPrepare(sequence);
         return;
       }
       if (sequence !== this._sequence || !this.isConnected || this._desiredView !== view) {
-        this._disown(owner);
-        for (const entry of spriteEntries) entry.sprite._disown(owner);
+        this._releasePreparationOwner(owner);
         return;
       }
       this._commitAtomic(prepared, sequence);
@@ -927,12 +982,10 @@
       return layers;
     }
 
-    _rasterSpriteDetached(prepared) {
-      const player = prepared.sprites[0];
-      const sprite = player?.sprite;
-      const image = player?.image;
-      const data = player?.data;
-      if (!sprite || !image || !data) return undefined;
+    _rasterSpriteDetached(entry) {
+      const image = entry?.image;
+      const data = entry?.data;
+      if (!image || !data) return undefined;
       const motion = data.motion;
       const now = performance.now();
       const active = this._activeMotion;
@@ -940,6 +993,7 @@
       const progress = active && motion ? clamp((now - active.startedAt) / duration, 0, 1) : 1;
       const pattern = motion ? (progress < 0.5 ? data.pattern : (data.pattern + 1) % 4) : data.pattern;
       const canvas = document.createElement("canvas");
+      canvas.className = "sprite-visual";
       const frameWidth = image.width / 4;
       const frameHeight = image.height / 4;
       if (!Number.isInteger(frameWidth) || !Number.isInteger(frameHeight)) throw new TypeError("Character sheet must be 4 by 4");
@@ -949,7 +1003,9 @@
       context.imageSmoothingEnabled = false;
       context.clearRect(0, 0, frameWidth, frameHeight);
       context.drawImage(image, pattern * frameWidth, ((data.direction - 2) / 2) * frameHeight, frameWidth, frameHeight, 0, 0, frameWidth, frameHeight);
-      return { canvas, width: frameWidth, height: frameHeight, key: `${resourceIdentity(data.sprite)}|${data.direction}|${pattern}|${frameWidth}x${frameHeight}` };
+      canvas._context = context;
+      canvas._cropKey = `${resourceIdentity(data.sprite)}|${data.direction}|${pattern}|${frameWidth}x${frameHeight}`;
+      return canvas;
     }
 
     _promoteResources(prepared) {
@@ -966,45 +1022,41 @@
       }
       this._acceptedIds = nextIds;
       this._disown(prepared.owner);
-      for (const entry of prepared.sprites) {
-        entry.sprite._own(entry.resourceId, "accepted");
-        for (const identity of [...(entry.sprite._acceptedIds ?? [])]) {
-          if (identity === entry.resourceId) continue;
-          const owners = entry.sprite._owners.get(identity);
-          owners?.delete("accepted");
-          if (!owners || owners.size === 0) {
-            entry.sprite._release(identity);
-            entry.sprite._images.delete(identity);
-          }
-        }
-        entry.sprite._acceptedIds = new Set([entry.resourceId]);
-        entry.sprite._disown(prepared.owner);
-      }
     }
 
     _commitAtomic(prepared, sequence) {
       if (sequence !== this._sequence || !this.isConnected) {
-        this._disown(prepared.owner);
-        for (const entry of prepared.sprites) entry.sprite._disown(prepared.owner);
+        this._releasePreparationOwner(prepared.owner);
         return;
       }
       this._commitMotion(prepared, sequence);
       const incoming = prepared.layers;
       const outgoing = this._layers.slice();
-      for (const layer of outgoing) {
-        layer.canvas.hidden = true;
-        layer.canvas.remove();
+      const incomingSprites = prepared.sprites.map((entry) => entry.visual).filter(Boolean);
+      const outgoingSprites = (this._acceptedVisualScene?.sprites ?? []).map((entry) => entry.visual).filter(Boolean);
+      if (!prepared.reusesAcceptedLayers) {
+        for (const layer of outgoing) {
+          layer.canvas.hidden = true;
+          layer.canvas.remove();
+        }
       }
-      for (const layer of incoming) {
-        layer.canvas.hidden = false;
-        this._world.insertBefore(layer.canvas, this._slot);
+      for (const visual of outgoingSprites) visual.hidden = true;
+      if (!prepared.reusesAcceptedLayers) {
+        for (const layer of incoming) {
+          layer.canvas.hidden = false;
+          this._world.insertBefore(layer.canvas, this._slot);
+        }
       }
+      for (const visual of incomingSprites) {
+        visual.hidden = false;
+        this._world.insertBefore(visual, this._slot);
+      }
+      for (const visual of outgoingSprites) if (!incomingSprites.includes(visual)) visual.remove();
       this._layers = incoming;
-      if (prepared.spriteCanvas && prepared.sprites[0]) {
-        prepared.sprites[0].sprite._installCanvas(prepared.spriteCanvas.canvas, prepared.spriteCanvas.key);
-      }
       this._promoteResources(prepared);
       this._accepted = prepared;
+      this._acceptedVisualScene = prepared;
+      if (this._stagingVisualScene?.sceneEpoch === prepared.view.sceneEpoch) this._stagingVisualScene = undefined;
       this._state = "VISIBLE";
       this.dataset.mapVisualState = "ready";
       this._error.setAttribute("aria-hidden", "true");
@@ -1027,7 +1079,7 @@
         if (sameVisual) throw new TypeError("Invalid map motion identity");
         const remaining = Math.max(0, this._activeMotion.startedAt + (this._activeMotion.durationMs ?? duration) - now);
         const visibleCamera = this._lastPaintedCamera;
-        const visibleSprite = this._accepted?.sprites[0]?.sprite?._lastPaintedScreen;
+        const visibleSprite = this._acceptedVisualScene?.sprites[0]?.visual?._lastPaintedScreen;
         if (prepared.view.cameraMotion && visibleCamera) {
           prepared.view = {
             ...prepared.view,
@@ -1083,7 +1135,7 @@
         layer.canvas.style.top = `${bounds.minY - cameraY + prepared.geometry.originY}px`;
       }
       for (const [index, entry] of prepared.sprites.entries()) {
-        this._paintSprite(entry.data, prepared, index === 0 ? progress : 1, entry.sprite, entry.image, cameraX, cameraY, index !== 0);
+        this._paintSprite(entry.data, prepared, index === 0 ? progress : 1, entry.visual, entry.image, cameraX, cameraY, index !== 0, entry.sprite);
       }
       const previous = this._lastPaintedCamera;
       if (!previous || previous.x !== cameraX || previous.y !== cameraY) {
@@ -1196,8 +1248,8 @@
       layer.context.drawImage(item.image, frameX + visual[10], visual[11], 16, 16, dx + 16, dy + 16, 16, 16);
     }
 
-    _paintSprite(data, prepared, progress, spriteOverride, imageOverride, cameraX = prepared.view.cameraX, cameraY = prepared.view.cameraY, worldAnchored = false) {
-      const sprite = spriteOverride ?? this._spriteChild();
+    _paintSprite(data, prepared, progress, spriteOverride, imageOverride, cameraX = prepared.view.cameraX, cameraY = prepared.view.cameraY, worldAnchored = false, desiredNode) {
+      const sprite = spriteOverride;
       const spriteImage = imageOverride ?? prepared.sprites[0]?.image;
       if (!sprite || !spriteImage) return;
       const motion = data.motion;
@@ -1206,9 +1258,20 @@
       const screenX = motion ? Math.round(lerp(motion.fromScreenX, data.screenX, progress)) : worldAnchored ? data.x * TILE - cameraX : data.screenX;
       const screenY = motion ? Math.round(lerp(motion.fromScreenY, data.screenY, progress) - arc) : worldAnchored ? data.y * TILE - cameraY : data.screenY;
       const visualPixelY = motion ? Math.round(lerp(motion.fromY * 32, data.y * 32, progress)) : data.y * 32;
-      const size = sprite._blitPatternSync(spriteImage, data.direction, pattern, resourceIdentity(data.sprite));
-      const frameWidth = size.width;
-      const frameHeight = size.height;
+      const frameWidth = spriteImage.width / 4;
+      const frameHeight = spriteImage.height / 4;
+      if (!Number.isInteger(frameWidth) || !Number.isInteger(frameHeight)) throw new TypeError("Character sheet must be 4 by 4");
+      const cropKey = `${resourceIdentity(data.sprite)}|${data.direction}|${pattern}|${frameWidth}x${frameHeight}`;
+      if (sprite._cropKey !== cropKey) {
+        sprite.width = frameWidth;
+        sprite.height = frameHeight;
+        const context = sprite._context ?? sprite.getContext("2d", { alpha: true });
+        context.imageSmoothingEnabled = false;
+        context.clearRect(0, 0, frameWidth, frameHeight);
+        context.drawImage(spriteImage, pattern * frameWidth, ((data.direction - 2) / 2) * frameHeight, frameWidth, frameHeight, 0, 0, frameWidth, frameHeight);
+        sprite._context = context;
+        sprite._cropKey = cropKey;
+      }
       const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0);
       const left = screenX + prepared.geometry.originX + (32 - frameWidth) / 2;
       const top = screenY + prepared.geometry.originY + 32 - frameHeight;
@@ -1218,6 +1281,15 @@
       sprite.style.height = `${frameHeight}px`;
       sprite.style.zIndex = String(characterStackValue(depth));
       sprite._lastPaintedScreen = { x: screenX, y: screenY };
+      if (desiredNode) {
+        desiredNode._lastPaintedScreen = { x: screenX, y: screenY };
+        desiredNode._cropKey = cropKey;
+        desiredNode.style.left = `${left}px`;
+        desiredNode.style.top = `${top}px`;
+        desiredNode.style.width = `${frameWidth}px`;
+        desiredNode.style.height = `${frameHeight}px`;
+        desiredNode.style.zIndex = String(characterStackValue(depth));
+      }
       if (!sprite._reportedMotion || sprite._reportedMotion !== `${screenX},${screenY}`) {
         qualify("browser-first-motion-paint", {
           element: "map-sprite",
