@@ -63,7 +63,8 @@ moveIntent
 RPGMap Runtime
 ├─ logical map / x / y
 ├─ immutable activeMove trajectory
-├─ mutable facing direction
+│  └─ travelDirection
+├─ mutable facingDirection
 ├─ transfer authority
 ├─ NPC desired state
 └─ projection-window facts
@@ -96,8 +97,8 @@ projection-window shift
 → surfaces update incrementally
 
 facing change during active move
-→ activeMove trajectory remains stable
-→ facing may update immediately
+→ activeMove trajectory and travelDirection remain stable
+→ facingDirection may update immediately
 
 map transfer
 → old acceptedVisualScene remains complete
@@ -116,9 +117,9 @@ RPGMap Runtime 继续拥有：
 ```text
 current map identity
 logical player x / y
-activeMove trajectory
+activeMove trajectory / travelDirection
 moveIntent
-facing direction
+facingDirection
 collision / passability
 MapTransfer semantics
 terrain behavior
@@ -187,6 +188,7 @@ Map-specific DOM cloning in projector
 
 ## 4. Frozen state model
 
+
 ### 4.1 Runtime movement facts
 
 v1.1 明确区分：
@@ -194,6 +196,7 @@ v1.1 明确区分：
 ```text
 moveIntent
 activeMove
+activeMove.travelDirection
 facingDirection
 ```
 
@@ -206,11 +209,14 @@ moveIntent
 activeMove
 = immutable logical/visual trajectory of the current committed grid step
 
+activeMove.travelDirection
+= immutable direction actually used to plan and commit the current grid step
+
 facingDirection
 = current player-facing direction exposed to Presentation
 ```
 
-`activeMove` 一旦开始，以下 geometry 不得因新的 input 在中途改变：
+`activeMove` 一旦开始，以下 trajectory facts 不得因新的 input 在中途改变：
 
 ```text
 id
@@ -218,12 +224,49 @@ kind
 durationMs
 fromX / fromY
 target logical x / y
+travelDirection
 fromScreenX / fromScreenY
 jump parameters when applicable
 camera trajectory for that step
 ```
 
-`facingDirection` 可在 active step 中响应新的 directional intent。
+`facingDirection` 可在 active step 中响应新的 directional intent，但不得反向改变当前 step 的 logical trajectory、transfer attempted direction 或 collision plan。
+
+冻结语义：
+
+```text
+current step movement / step-transfer attemptedDirection
+→ activeMove.travelDirection
+
+player visual facing
+→ facingDirection
+
+next step planning
+→ latest moveIntent
+```
+
+例如：
+
+```text
+activeMove:
+  (10,8) → (10,9)
+  travelDirection = down
+
+mid-step:
+  moveIntent = right
+  facingDirection = right
+
+current step:
+  still finishes down
+
+step transfer at completion:
+  attemptedDirection = down
+
+next movement opportunity:
+  plan from latest moveIntent = right
+```
+
+`MapSnapshot.player.direction` 继续表示当前 player facing，即 `facingDirection`；`travelDirection` 保持 Runtime-private trajectory fact，不新增 public snapshot 字段，也不要求新增 generic Render ABI 字段。
 
 ### 4.2 Presentation scene facts
 
@@ -263,9 +306,10 @@ acceptedVisualScene
 
 canonical Render Tree 变化、target resources 到达、staging scene 创建都不能单独改变这一事实。
 
+
 ### 4.4 Staging scene rule
 
-只有 **scene replacement** 才需要 staging scene。
+只有 **scene replacement** 才建立新的 staging scene。
 
 典型条件：
 
@@ -273,18 +317,65 @@ canonical Render Tree 变化、target resources 到达、staging scene 创建都
 incoming sceneEpoch != acceptedVisualScene.sceneEpoch
 ```
 
-staging scene 必须在 offscreen/private surfaces 中完成：
+staging scene 的 identity 由目标 `sceneEpoch` 决定，而不是由每一条 Render revision 决定。
+
+同一个 target scene 在 prepare 期间继续收到新的 desired revision 时：
+
+```text
+same staging sceneEpoch
+→ coalesce into the existing stagingVisualScene
+→ advance latest desired revision
+→ preserve already-valid decoded resources / surfaces when identities remain valid
+→ do not restart the whole scene merely because visualEpoch/motion/facing changed
+```
+
+这条规则用于避免 held movement 或连续 Render updates 造成 staging starvation。
+
+staging scene 必须在 offscreen/private surfaces 中具备可提交的完整 target visual：
 
 ```text
 target tile resources
 target persistent depth surfaces
 target player visual
-all target NPC visuals
+complete target NPC visual set for the latest coherent revision
 required geometry
 first valid paint state
 ```
 
 任何一项未完成都不得 promote。
+
+### 4.5 Runtime commit vs Presentation promote
+
+Runtime 的 target scene commit 和 Presentation 的 visual promote 是两个不同 authority：
+
+```text
+Runtime replaceDomain(target)
+→ target logical scene is authoritative
+
+Presentation promoteVisualScene(target)
+→ target pixels become authoritative
+```
+
+因此 target prepare 期间允许暂时存在：
+
+```text
+Runtime logical scene = B
+acceptedVisualScene = A
+stagingVisualScene = B
+```
+
+这是有意的 visual-lag boundary，不得通过 Presentation 回滚 Runtime 来消除。
+
+如果 target staging 在 Browser Presentation 层失败：
+
+- 不新增 Presentation → Runtime ACK/FAIL ABI；
+- 不回滚 Runtime logical scene；
+- old accepted pixels 可继续作为 last-good visual fallback；
+- Presentation 必须进入明确的 failed visual state，并继续遵守其 bounded retry policy；
+- 后续同 `sceneEpoch` 的有效 desired revision 可以继续合并到同一 staging acquisition opportunity；
+- retry exhausted 后不得把 old pixels 宣称为当前 logical scene。
+
+如果实现发现现有 Presentation failure surface 无法表达这一状态，应在 Map Browser Presentation 内补齐明确 failed-state contract；不得为此修改 generic Frame/Render ABI。
 
 ---
 
@@ -382,35 +473,91 @@ B tiles + A NPC
 B tiles + partial B NPC set
 ```
 
-### 5.4 Transfer failure
 
-如果 target prepare 失败：
+### 5.4 Transfer / staging failure
+
+分两类：
+
+#### Runtime target preparation fails before `replaceDomain()`
 
 ```text
-acceptedVisualScene A
-→ remains complete and visible
+Runtime remains on scene A
+acceptedVisualScene A remains complete
 ```
 
-随后 Runtime 的既有 failure policy 决定 Frame outcome。
+继续使用既有 Runtime transfer failure policy。
 
-Presentation 不得为了“清理”而先破坏 A。
+#### Runtime has committed B, but Browser staging B fails
+
+```text
+Runtime logical scene = B
+acceptedVisualScene = A (last-good pixels only)
+stagingVisualScene = B failed/retrying
+```
+
+此时：
+
+- 不回滚 Runtime；
+- 不新增 Render acknowledgement；
+- 不先破坏 A；
+- Presentation failed/retry state 必须可观察；
+- 如果同一 B scene 后续 revision 到来，按 §4.4 coalescing 规则处理；
+- 只有完整 coherent B scene 可 promote。
+
+这条 contract 明确避免把 Browser resource/raster failure 错误解释为“Runtime 仍然处于 A”。
+
 
 ### 5.5 Canonical node removal
 
 old canonical sprite disconnected 时：
 
-- 可以停止继续接收 desired updates；
+- 可以停止继续接收该 canonical element 的 desired updates；
 - 不得立即释放 accepted scene 仍引用的 bitmap/surface；
 - resource release 必须遵守 visual-scene ownership；
-- 最后一个 owner 消失后才能真正 close/release。
+- 最后一个 visual/resource owner 消失后才能真正 close/release。
 
 不得使用固定毫秒数 retention timer。
+
+### 5.6 Same-scene NPC revisions
+
+RPGMap 已支持在 `sceneEpoch` 不变时通过 `setNPC(...)` 改变 NPC desired state，因此 v1.1 必须显式支持：
+
+```text
+same scene
+→ NPC add
+→ NPC remove
+→ NPC position change
+→ NPC direction/pattern change
+→ npcId / sprite resource replacement
+```
+
+这些不是 scene replacement，也不能要求重新 staging 整张地图。
+
+处理规则：
+
+```text
+same sceneEpoch
+→ acceptedVisualScene remains the same scene
+→ prepare only changed sprite visuals/resources
+→ atomically patch the accepted sprite set for one coherent desired revision
+→ tile surfaces remain untouched
+```
+
+如果某个 changed NPC resource 尚未 ready：
+
+- 旧 accepted sprite set 保持完整；
+- 不允许先移除旧 sprite 再等待 replacement；
+- changed sprite patch ready 后再一次提交；
+- unrelated player/tile/projection updates 继续按其各自 update class 处理。
+
+因此 `stagingVisualScene` 仍只用于 **sceneEpoch replacement**；same-scene NPC changes 使用 bounded same-scene visual revision，不创建第二个 full-scene staging state。
 
 ---
 
 ## 6. Issue #124 — Persistent incremental projection
 
-### 6.1 Keep the projection-window model
+
+### 6.1 Keep the projection-window model and expose exact bounds
 
 v1.1 不删除：
 
@@ -420,9 +567,31 @@ v1.1 不删除：
 - Runtime-owned tile selection；
 - `visualEpoch` 更新。
 
-当前四 tile prefetch margin 可以继续保留。
+当前四 tile prefetch margin 可以继续作为首选 margin，但 Runtime 仍可因 projection byte guard 降级到更小 margin。
 
 禁止把 margin 调大作为主修复。
+
+Browser incremental projection **不得从 sparse `tiles[]` 反推 projection rectangle**。空白 cells、不同 depth 和动态 margin 会让这种推导不可靠。
+
+因此 Map-specific Runtime → Browser RenderData 必须提供精确的 projection bounds，例如概念 shape：
+
+```text
+projectionBounds = {
+  minTileX,
+  minTileY,
+  maxTileX,
+  maxTileY
+}
+```
+
+具体字段命名可在实现中保持与现有 Map data schema 风格一致，但以下 contract 冻结：
+
+- bounds 的 inclusive/exclusive 语义必须在 schema/test 中唯一明确；
+- bounds 必须与 Runtime 实际选中的 `TileProjectionWindow.bounds` 一致；
+- Browser 用 bounds 计算 entering / leaving / overlap region；
+- `tiles[]` 只表达该 bounds 内实际 projected tile tuples，不承担 rectangle identity。
+
+这是 **RPGMap 自己的 RenderData schema 演进**，不属于 generic Render ABI 变化，不需要修改 `packages/renderer`。
 
 ### 6.2 Window change is not scene replacement
 
@@ -448,16 +617,25 @@ new visual scene
 
 因此不应触发完整 scene staging/promotion。
 
-### 6.3 Persistent depth surfaces
 
-同一 scene 中，每个 active depth 应尽量持有 persistent surface：
+### 6.3 Persistent but bounded depth surfaces
+
+同一 scene 中，应持有可复用的 depth surfaces：
 
 ```text
 acceptedVisualScene.depthSurfaces
-├─ depth N surface
-├─ depth N+1 surface
-└─ ...
+├─ active surfaces required by current projection
+└─ small bounded reusable pool
 ```
+
+这里：
+
+```text
+persistent
+!= immortal
+```
+
+tile visual depth 可随 world y / priority 变化，因此 surface 不能“见过一次就保留到 scene close”。
 
 projection shift 不应反复：
 
@@ -471,14 +649,25 @@ replace old canvas
 正常窗口滚动目标：
 
 ```text
-keep surface allocation
+keep/reuse active surface allocations
 → reuse overlapping pixels/cells
 → clear leaving region
 → raster entering strips / dirty cells
 → update world origin
+→ recycle surfaces whose depth band is no longer needed
 ```
 
-如果实现使用 ring buffer、fixed overscan surface、double-buffered persistent surfaces 或等价策略均可，只要满足本文性能/正确性 contract。
+允许 ring buffer、fixed overscan surface、double-buffered persistent surfaces、bounded surface pool 或等价策略，只要满足：
+
+```text
+live surface count
+→ bounded by current projection needs + fixed small reuse budget
+
+memory
+→ does not grow with total traversal distance
+```
+
+禁止用“整个 scene lifetime 永不释放 depth canvas”的方式换取 allocation counter 好看。
 
 ### 6.4 Dirty work proportionality
 
@@ -534,6 +723,8 @@ long same-scene walk
 → projectionShifts grows
 → surfaceAllocations does NOT grow linearly with projectionShifts
 → fullRasterPasses does NOT grow linearly with projectionShifts
+→ liveSurfaceCount remains bounded
+→ memory/surface ownership does NOT grow with total traversal distance
 ```
 
 ---
@@ -562,6 +753,7 @@ current movement 仍完成：
 
 不得改成 diagonal、折线或回滚 logical x/y。
 
+
 ### 7.2 Facing may update immediately
 
 active step 中收到不同 directional intent：
@@ -570,6 +762,7 @@ active step 中收到不同 directional intent：
 moveIntent = right
 facingDirection = right
 activeMove = unchanged
+activeMove.travelDirection = unchanged
 ```
 
 Runtime 应发布最小 Render update，使 player facing 可在下一次浏览器 paint 响应。
@@ -583,7 +776,10 @@ motionId
 tiles payload
 camera target
 activeMove id
+activeMove.travelDirection
 ```
+
+当前 step 的 transfer/collision semantics 仍使用 `activeMove.travelDirection`；只有下一次 movement planning 使用 latest `moveIntent`。
 
 ### 7.3 Motion fingerprint
 
@@ -607,23 +803,29 @@ direction
 Invalid map motion identity
 ```
 
-### 7.4 Next step authority
+
+### 7.4 Step completion and transfer authority
 
 current step complete 时：
 
 ```text
 finishStep()
-→ read latest moveIntent
-→ collision / transfer / NPC occupancy / terrain planning
+→ if this completed tile triggers step transfer:
+     attemptedDirection = activeMove.travelDirection
+→ otherwise read latest moveIntent
+→ collision / contact / edge / NPC occupancy / terrain planning
 → start next activeMove if valid
 ```
+
+`facingDirection` 不得替代 current step 的 travel direction 去决定 step-transfer fallback。
 
 原有 blocked semantics 保持：
 
 - same-value blocked intent 不得自旋重试；
 - neutral → direction 是新的真实 input opportunity；
 - changed direction 可触发新的尝试；
-- transfer 和 event ordering 不变。
+- contact/step/edge transfer ordering 不变；
+- `targetDirection: null` 的 fallback 必须使用该 transfer contract 原本要求的 attempted travel direction，而不是 mid-step 新 facing。
 
 ### 7.5 No speed hack
 
@@ -633,46 +835,85 @@ finishStep()
 
 ---
 
+
 ## 8. Presentation update taxonomy
 
-为了防止实现继续堆条件分支，v1.1 将 incoming updates 分成三类：
+为了防止实现继续堆条件分支，v1.1 将 incoming updates 分成三个顶层类别。
 
-### A. Motion/facing-only update
+### A. Motion / facing-only update
 
 条件示意：
 
 ```text
 same sceneEpoch
-same visual resources
-same projection tiles
-same motion trajectory or facing-only delta
-```
-
-处理：
-
-```text
-keep accepted surfaces
-→ update motion/facing
-→ RAF paint
-```
-
-### B. Same-scene projection update
-
-条件：
-
-```text
-same sceneEpoch
-projection/visualEpoch changed
-tile window changed
+same projection bounds/tiles
+same resource identities
+trajectory unchanged, or facing-only delta
 ```
 
 处理：
 
 ```text
 keep acceptedVisualScene
-→ incrementally shift/update persistent surfaces
-→ keep sprite visual ownership
-→ no scene staging
+→ keep persistent surfaces
+→ update motion/facing
+→ RAF paint
+```
+
+### B. Same-scene visual revision
+
+条件：
+
+```text
+same sceneEpoch
+but visual content/layout membership changed
+```
+
+它包括三个明确子类：
+
+#### B1. Projection shift
+
+```text
+projectionBounds / tiles changed
+→ incrementally shift/update persistent tile surfaces
+→ no full-scene staging
+```
+
+#### B2. Sprite-set/resource revision
+
+例如：
+
+```text
+setNPC add/remove/move
+NPC sprite resource identity change
+same-scene player/NPC visual resource revision
+```
+
+处理：
+
+```text
+prepare only affected sprite visuals/resources
+→ keep old accepted sprite set complete while preparing
+→ atomically patch one coherent sprite-set revision
+→ tile surfaces untouched
+```
+
+#### B3. Layout/global visual invalidation
+
+例如：
+
+```text
+viewport/layout change
+bridgeLevel/depth interpretation change
+other same-scene facts requiring broad surface invalidation
+```
+
+可以 rebuild affected visual surfaces，但：
+
+```text
+acceptedVisualScene identity remains
+sceneEpoch remains
+no target-scene staging transaction
 ```
 
 ### C. Scene replacement
@@ -687,13 +928,12 @@ sceneEpoch changed
 
 ```text
 keep old acceptedVisualScene
-→ prepare stagingVisualScene
-→ atomic promote
+→ create/update stagingVisualScene for target sceneEpoch
+→ coalesce newer same-scene target revisions
+→ atomic promote only when latest coherent target scene is complete
 ```
 
-不得通过越来越多 ad-hoc 条件替代这三个类别。
-
----
+不得通过越来越多 ad-hoc conditions 替代 A / B / C，也不得把所有 `visualEpoch` 变化一律当作 scene replacement。
 
 ## 9. Resource ownership
 
@@ -726,6 +966,8 @@ promote target
 ```
 
 same-scene projection shift 不应反复 release/redecode stable tileset/autotile/sprite resources。
+
+surface/resource ownership 必须 bounded：accepted scene、staging scene、in-flight preparation 与固定上限 reuse pool 之外，不得因历史 traversal/projection revisions 永久累积 owner。
 
 ---
 
@@ -791,6 +1033,7 @@ multiple transfers without NPC-first disappearance
 ```text
 game-libs/map/src/runtime.ts
 game-libs/map/src/semantics.ts          # only if contract/type constants need exact adjustment
+RPGMap MapView/Sprite RenderData schema # projectionBounds / exact Map-private facts only
 game-libs/map/browser/map.browser.js
 game-libs/map/browser/map.css           # only if visual-surface layout requires it
 game-libs/map/test/*
@@ -809,6 +1052,7 @@ packages/main
 common-controls
 Frame / Call ABI
 generic Render ABI
+packages/renderer Map-specific lifecycle behavior
 PokeMan content topology
 MapTransfer content
 NPC placement content
@@ -842,6 +1086,10 @@ old scene visible
 - target scene 0 / 1 / multiple NPC；
 - slow NPC resource；
 - target resource failure；
+- Runtime committed B + Browser staging B failure；
+- same target scene receives newer revisions while staging；
+- held movement must not starve target scene promotion；
+- same-scene setNPC add/remove/resource replacement；
 - disconnect/cleanup；
 - no stale staging promote。
 
@@ -852,8 +1100,12 @@ old scene visible
 断言：
 
 - projection window 确实变化多次；
+- exact projectionBounds 与 Runtime selected window 一致；
+- Browser 不从 sparse tiles[] 猜 rectangle；
 - surface allocation 不随每次 window shift 增长；
 - canvas resize 不随每次 window shift 增长；
+- live surface count 有明确上界；
+- 长距离 traversal 不造成 surface/memory owner 单调增长；
 - dirty work 只覆盖变化 region；
 - visual tile result 与 reference projection 完全一致；
 - animated autotile 正确；
@@ -884,10 +1136,12 @@ first facing paint
 
 并验证：
 
-- activeMove trajectory 未改变；
+- activeMove trajectory / travelDirection 未改变；
 - logical target tile 未改变；
-- next step uses latest intent；
-- transfer/collision semantics unchanged。
+- facingDirection 可以先于 step completion 更新；
+- step-transfer attemptedDirection 仍来自 activeMove.travelDirection；
+- next step uses latest moveIntent；
+- contact/step/edge transfer 与 collision semantics unchanged。
 
 ---
 
@@ -942,31 +1196,40 @@ Map v1.1 完成必须同时满足：
 ### Architecture
 
 - [ ] Runtime / Presentation authority 符合 §3。
-- [ ] activeMove、moveIntent、facingDirection 职责分离。
+- [ ] activeMove.travelDirection、moveIntent、facingDirection 职责分离。
+- [ ] MapSnapshot.player.direction 语义仍是 facingDirection。
 - [ ] acceptedVisualScene 是 complete visible scene 的唯一 Presentation authority。
 - [ ] stagingVisualScene 只用于 scene replacement。
 - [ ] canonical sprite DOM 不再是 accepted NPC pixels 的唯一 owner。
 - [ ] projection-window shift 不再被实现为 scene replacement。
+- [ ] same-scene NPC/layout/resource changes 归入 bounded visual revision，而不是 full-scene staging。
+- [ ] target staging same-scene revisions 可 coalesce，不会因 held movement 饥饿。
+- [ ] Runtime commit 与 Presentation promote failure boundary 已按 §4.5 保持单向 authority。
 
 ### #125
 
 - [ ] old tiles/player/NPC pixels survive until target scene is complete。
 - [ ] one atomic target visual promote。
-- [ ] transfer failure leaves old accepted scene intact。
+- [ ] Runtime pre-commit transfer failure leaves scene A intact。
+- [ ] Browser staging failure after Runtime commit does not roll Runtime back and preserves last-good pixels as fallback。
+- [ ] same-scene setNPC replacement never exposes partial sprite membership。
 - [ ] no fixed-delay NPC retention hack。
 - [ ] no WebProjector Map special case。
 
 ### #124
 
 - [ ] same-scene projection shift uses persistent/incremental surfaces。
+- [ ] exact projectionBounds are carried by Map-private RenderData and tested。
 - [ ] allocations/resizes/full-raster do not grow linearly with projection shifts。
-- [ ] 4-tile prefetch/budget model remains valid。
+- [ ] live surfaces/memory remain bounded with traversal distance。
+- [ ] 4-tile preferred prefetch / byte-budget fallback model remains valid。
 - [ ] long real-product walk no longer shows periodic hitch。
 
 ### #123
 
 - [ ] changed facing appears before active step completion。
-- [ ] active trajectory remains immutable。
+- [ ] active trajectory and travelDirection remain immutable。
+- [ ] step-transfer attemptedDirection uses activeMove.travelDirection。
 - [ ] next tile plan uses latest moveIntent。
 - [ ] direction is removed from immutable motion identity where necessary。
 - [ ] no game-speed workaround。
@@ -1028,12 +1291,13 @@ old scene sprites retained by unrelated timers/DOM hacks
 
 ```text
 moveIntent
-activeMove
+activeMove / travelDirection
 facingDirection
 acceptedVisualScene
 stagingVisualScene
-projectionWindow
-persistent surfaces
+same-scene visual revision
+projectionBounds
+bounded reusable surfaces
 ```
 
 ---
@@ -1067,9 +1331,10 @@ integrated qualification / documentation cleanup
 
 ---
 
+
 ## 17. Final contract summary
 
-v1.1 最终只需要记住四条：
+v1.1 最终只需要记住五条：
 
 ```text
 same-scene movement
@@ -1077,17 +1342,35 @@ same-scene movement
 → lightweight motion paint
 
 direction change
-→ keep active trajectory
-→ update facing promptly
+→ keep active trajectory + travelDirection
+→ update facingDirection promptly
+
+same-scene visual revision
+→ keep accepted scene identity
+→ atomically patch projection / sprite set / layout as the affected class requires
 
 projection boundary
-→ keep accepted scene and persistent surfaces
+→ use exact projectionBounds
+→ keep bounded reusable surfaces
 → incrementally update changed regions
 
 map transfer
 → keep complete old accepted scene
-→ prepare complete target staging scene
-→ atomic promote
+→ coalesce target revisions into one staging sceneEpoch
+→ atomic promote only when the coherent target scene is complete
 ```
 
-只要后续实现持续满足这四条，三个 Issue 就是在同一套闭环架构下被解决，而不是三个逐渐堆叠的补丁。
+以及一个 failure rule：
+
+```text
+Runtime logical commit
+!=
+Presentation visual promote
+
+Browser staging failure
+→ never rolls Runtime back
+→ keeps last-good pixels only as fallback
+→ exposes Presentation failure/retry state
+```
+
+只要后续实现持续满足这些规则，#123/#124/#125 就是在同一套闭环架构下被解决，而不是三个逐渐堆叠的补丁。
