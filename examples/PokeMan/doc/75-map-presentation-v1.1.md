@@ -2,7 +2,7 @@
 
 > 路径：`examples/PokeMan/doc/75-map-presentation-v1.1.md`
 >
-> 状态：**Design freeze candidate / implementation authority after merge**
+> 状态：**Design frozen / implementation-ready after merge**
 >
 > 关联 Issue：
 >
@@ -286,7 +286,7 @@ visualEpoch baseline
 map/resource identity
 geometry
 projection window
-persistent depth surfaces
+persistent-but-bounded depth surfaces
 player visual
 NPC visual snapshots
 accepted resource identities
@@ -335,7 +335,7 @@ staging scene 必须在 offscreen/private surfaces 中具备可提交的完整 t
 
 ```text
 target tile resources
-target persistent depth surfaces
+target bounded reusable depth surfaces
 target player visual
 complete target NPC visual set for the latest coherent revision
 required geometry
@@ -1039,7 +1039,7 @@ multiple transfers without NPC-first disappearance
 ```text
 game-libs/map/src/runtime.ts
 game-libs/map/src/semantics.ts          # only if contract/type constants need exact adjustment
-RPGMap MapView/Sprite RenderData schema # projectionBounds / exact Map-private facts only
+Map-private MapView/Sprite RenderData payload shape # projectionBounds / exact RPGMap facts only
 game-libs/map/browser/map.browser.js
 game-libs/map/browser/map.css           # only if visual-surface layout requires it
 game-libs/map/test/*
