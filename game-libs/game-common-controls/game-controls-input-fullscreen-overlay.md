@@ -52,7 +52,13 @@
 
 ### 2.2 遮罩层
 
-遮罩层由 `game-controls-input` 在当前 `ownerDocument` 中创建，使用固定定位覆盖游戏视口，并确保层级高于游戏表现。建议挂到 `document.body`，以避免被游戏局部容器的裁剪或堆叠上下文遮挡；组件卸载时必须移除。
+遮罩层必须使用原生 `<dialog>`，并通过 `showModal()` 打开，使其进入浏览器 top layer。**不能只依赖普通 DOM 的高 `z-index`**：`z-index` 受 stacking context 限制，无法让普通元素越过浏览器 top layer 中的 modal dialog、popover 或 fullscreen element。
+
+样式仍需设置足够高的防御性层级值，例如 `z-index: 2147483647`，并使用 `position: fixed; inset: 0` 覆盖视口；但这个数值不是“高于所有元素”的保证，top-layer 顺序才是关键。dialog 应覆盖整个可视区域，背景遮罩和内容均属于 dialog 自身。不要把遮罩层作为普通 `div` 仅挂到 `document.body` 后就认为它能压过所有堆叠上下文。
+
+全屏元素本身也会进入 top layer；若在 dialog 已打开时请求全屏，浏览器可能把 fullscreen element 排在现有 dialog 之上。因此，在 dialog 仍需显示的情况下，`fullscreenchange` 处理必须重新确认 dialog 的 top-layer 顺序：若全屏切换使游戏全屏元素覆盖了 dialog，则关闭并立即重新调用 `showModal()`，再恢复到当前有效按钮的焦点。实现时应避免把该内部重排误判为用户关闭面板；不要在 `close` 事件里无条件销毁遮罩状态。
+
+这能让遮罩层处于页面 DOM 和组件管理的 top-layer 元素之上；网页仍无法覆盖浏览器/操作系统的界面，也无法保证压过之后由其他代码新加入 top layer 的元素。组件卸载时必须关闭并移除 dialog，清理相关监听器。
 
 遮罩层包含两个原生按钮：
 
@@ -93,8 +99,9 @@ void document.exitFullscreen().catch(showFullscreenError);
 ### 2.4 状态同步与关闭
 
 - 监听 `document.fullscreenchange`，以 `document.fullscreenElement` 为唯一权威状态。
-- 用户按钮操作成功导致状态变化后，关闭遮罩层。
-- 如果用户通过浏览器 Esc 等方式在遮罩层打开时改变全屏状态，同步按钮状态并关闭遮罩层。
+- 用户按钮操作成功导致状态变化后，关闭遮罩层；若产品交互要求面板在切换后继续显示，则必须先完成 top-layer 重排，再更新按钮状态。
+- 本提案选择保持面板显示：fullscreenchange 后同步进入/退出按钮状态，并检查 dialog 是否仍在 top layer 最上方；必要时调用 `close()` 后立即 `showModal()` 以重新排到 fullscreen element 之上，同时恢复当前可用按钮焦点。该重排不得被当作用户主动关闭。
+- 如果用户通过浏览器 Esc 等方式改变全屏状态，先同步实际全屏状态，再按上述规则确保 dialog 的层级正确；用户可通过 Escape 或背景点击明确关闭面板。
 - 监听 `fullscreenerror`（若支持）并处理 Promise rejection；错误时遮罩层保持可见，供用户重试或关闭。
 - 不把全屏状态写入 `controls.state`、`controls.event` 或任何游戏业务状态。
 
@@ -122,7 +129,7 @@ Gamepad 可以可靠地用于唤出遮罩层，但 Gamepad API 轮询不等同�
 
 本提案的后续实现只允许修改 `@loomrealm-game/common-controls` 中现有 `game-controls-input` 的实现及其专属测试：
 
-- `browser/device-input.browser.ts`：组件内部的遮罩层 DOM、按钮事件、全屏状态监听与清理。
+- `browser/device-input.browser.ts`：组件内部的 modal dialog、top-layer 顺序维护、按钮事件、全屏状态监听与清理。
 - 如确有必要，可在同一组件内部增加私有辅助函数；不得为此新增第二个 Browser bundle 或公共输入通道。
 - 专属测试覆盖长按状态与 DOM 行为。
 
@@ -146,11 +153,13 @@ Gamepad 可以可靠地用于唤出遮罩层，但 Gamepad API 轮询不等同�
 4. 进入按钮的真实 click handler 直接调用 `document.documentElement.requestFullscreen()`；退出按钮的真实 click handler 直接调用 `document.exitFullscreen()`。
 5. 没有在长按计时器、Gamepad polling、`confirm()` 或合成 click 中调用全屏 API。
 6. 成功进入/退出、通过 Esc 退出、API 不支持、Promise rejection 等情况下，UI 都与实际 `fullscreenElement` 状态一致。
-7. API 请求失败时遮罩层保留并显示错误；用户可以关闭或重试。
-8. 原生按钮可通过鼠标/触摸点击，也可通过键盘焦点和 Enter/Space 激活；焦点在按钮上时不发生游戏键盘采集冲突。
-9. 组件卸载时移除遮罩层、document/window listeners 和计时器；重新挂载不会留下重复遮罩层或监听器。
-10. 现有 Controls ABI、六个 raw device channels、`game-controls-input` 的两个现有频道及其资格测试不变。
-11. 在目标 PWA 浏览器上分别验证键盘和手柄唤出遮罩层；明确记录纯手柄且无指针/键盘时不能保证进入全屏的限制。
+7. 遮罩层使用 `dialog.showModal()` 进入 top layer，并设置 `z-index: 2147483647` 作为防御性样式；不能只用普通 `div` 和高 `z-index`。
+8. 在进入和退出全屏时，验证 fullscreen element 不会把仍打开的 dialog 压到后面；必要时通过 close/showModal 重排 top-layer 顺序，并恢复焦点。
+9. API 请求失败时遮罩层保留并显示错误；用户可以关闭或重试。
+10. 原生按钮可通过鼠标/触摸点击，也可通过键盘焦点和 Enter/Space 激活；焦点在按钮上时不发生游戏键盘采集冲突。
+11. 组件卸载时关闭并移除 dialog、document/window listeners 和计时器；重新挂载不会留下重复遮罩层或监听器。
+12. 现有 Controls ABI、六个 raw device channels、`game-controls-input` 的两个现有频道及其资格测试不变。
+13. 在目标 PWA 浏览器上分别验证键盘和手柄唤出遮罩层；明确记录纯手柄且无指针/键盘时不能保证进入全屏的限制。
 
 ## 6. 参考
 
