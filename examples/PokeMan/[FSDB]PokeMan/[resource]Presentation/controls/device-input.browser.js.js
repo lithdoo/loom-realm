@@ -803,6 +803,22 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
 
   // browser/device-input.browser.ts
   var owners = /* @__PURE__ */ new WeakMap();
+  var SELECT_HOLD_MS = 800;
+  var overlayStyles = Object.freeze({
+    position: "fixed",
+    inset: "0",
+    width: "100vw",
+    height: "100vh",
+    maxWidth: "none",
+    maxHeight: "none",
+    margin: "0",
+    padding: "0",
+    border: "0",
+    boxSizing: "border-box",
+    background: "rgba(0, 0, 0, 0.78)",
+    color: "white",
+    zIndex: "2147483647"
+  });
   var DeviceInputElement = class extends HTMLElement {
     context;
     stopSource;
@@ -895,6 +911,18 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
     stopSource;
     refreshTimer;
     refreshPayload;
+    selectTimer;
+    selectDown = false;
+    selectTriggered = false;
+    overlayDocument;
+    overlay;
+    enterFullscreenButton;
+    exitFullscreenButton;
+    fullscreenStatus;
+    overlayOpen = false;
+    reorderingOverlay = false;
+    internalCloseEvents = 0;
+    fullscreenFailure;
     claimed = false;
     receiveRenderContext(context) {
       if (context === null || typeof context !== "object" || typeof context.emitCustomEvent !== "function") {
@@ -910,6 +938,8 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
       this.stopSource?.();
       this.stopSource = void 0;
       this.stopRefresh();
+      this.resetSelectHold();
+      this.destroyOverlay();
       const target = this.ownerDocument.defaultView;
       if (target !== null && this.claimed) {
         const registry = owners.get(target);
@@ -936,6 +966,7 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
     emit(publication) {
       if (publication.state !== null) {
         const state = publication.state;
+        this.updateSelectHold(state.down.includes("select"));
         this.context?.emitCustomEvent("input.state", state, { broadcast: "top-frame", channel: "controls.state" });
         if (state.down.length === 0) this.stopRefresh();
         else {
@@ -958,6 +989,246 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
       if (this.refreshTimer !== void 0) clearInterval(this.refreshTimer);
       this.refreshTimer = void 0;
       this.refreshPayload = void 0;
+    }
+    updateSelectHold(pressed) {
+      if (pressed === this.selectDown) return;
+      this.selectDown = pressed;
+      if (!pressed) {
+        this.cancelSelectTimer();
+        this.selectTriggered = false;
+        return;
+      }
+      this.selectTriggered = false;
+      this.selectTimer = setTimeout(() => {
+        this.selectTimer = void 0;
+        if (!this.isConnected || !this.selectDown || this.selectTriggered) return;
+        this.selectTriggered = true;
+        this.openOverlay();
+      }, SELECT_HOLD_MS);
+    }
+    cancelSelectTimer() {
+      if (this.selectTimer !== void 0) clearTimeout(this.selectTimer);
+      this.selectTimer = void 0;
+    }
+    resetSelectHold() {
+      this.cancelSelectTimer();
+      this.selectDown = false;
+      this.selectTriggered = false;
+    }
+    ensureOverlay() {
+      if (this.overlay !== void 0) return this.overlay;
+      const document = this.ownerDocument;
+      const dialog = document.createElement("dialog");
+      dialog.setAttribute("data-game-controls-fullscreen-overlay", "");
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.setAttribute("aria-label", "\u5168\u5C4F\u63A7\u5236");
+      dialog.tabIndex = -1;
+      Object.assign(dialog.style, overlayStyles);
+      const panel = document.createElement("section");
+      panel.setAttribute("aria-label", "\u5168\u5C4F\u64CD\u4F5C");
+      Object.assign(panel.style, {
+        position: "absolute",
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        display: "grid",
+        gap: "16px",
+        minWidth: "min(320px, calc(100vw - 32px))",
+        padding: "24px",
+        borderRadius: "12px",
+        boxSizing: "border-box",
+        background: "#171717",
+        boxShadow: "0 24px 80px rgba(0, 0, 0, 0.55)"
+      });
+      const title = document.createElement("h2");
+      title.textContent = "\u5168\u5C4F\u63A7\u5236";
+      Object.assign(title.style, { margin: "0", font: "600 20px/1.4 system-ui, sans-serif" });
+      const enter = document.createElement("button");
+      enter.type = "button";
+      enter.textContent = "\u8FDB\u5165\u5168\u5C4F";
+      const exit = document.createElement("button");
+      exit.type = "button";
+      exit.textContent = "\u9000\u51FA\u5168\u5C4F";
+      for (const button of [enter, exit]) {
+        Object.assign(button.style, {
+          minHeight: "48px",
+          padding: "10px 18px",
+          border: "2px solid currentColor",
+          borderRadius: "8px",
+          font: "600 16px/1.4 system-ui, sans-serif",
+          cursor: "pointer"
+        });
+      }
+      const status = document.createElement("p");
+      status.setAttribute("role", "status");
+      status.setAttribute("aria-live", "polite");
+      Object.assign(status.style, { minHeight: "1.4em", margin: "0", font: "14px/1.4 system-ui, sans-serif" });
+      panel.append(title, enter, exit, status);
+      dialog.append(panel);
+      document.body.append(dialog);
+      dialog.addEventListener("cancel", this.handleOverlayCancel);
+      dialog.addEventListener("click", this.handleOverlayClick);
+      dialog.addEventListener("close", this.handleOverlayClose);
+      enter.addEventListener("click", this.handleEnterFullscreen);
+      exit.addEventListener("click", this.handleExitFullscreen);
+      document.addEventListener("fullscreenchange", this.handleFullscreenChange);
+      document.addEventListener("fullscreenerror", this.handleFullscreenError);
+      this.overlayDocument = document;
+      this.overlay = dialog;
+      this.enterFullscreenButton = enter;
+      this.exitFullscreenButton = exit;
+      this.fullscreenStatus = status;
+      return dialog;
+    }
+    openOverlay() {
+      const dialog = this.ensureOverlay();
+      this.fullscreenFailure = void 0;
+      this.syncFullscreenState();
+      if (this.overlayOpen && dialog.open) {
+        this.focusFullscreenAction();
+        return;
+      }
+      try {
+        dialog.showModal();
+        this.overlayOpen = true;
+        this.focusFullscreenAction();
+      } catch (error) {
+        this.overlayOpen = false;
+        this.showFullscreenFailure("\u65E0\u6CD5\u663E\u793A\u5168\u5C4F\u63A7\u5236\u9762\u677F", error);
+      }
+    }
+    closeOverlay() {
+      const dialog = this.overlay;
+      this.overlayOpen = false;
+      if (dialog?.open === true) dialog.close();
+    }
+    destroyOverlay() {
+      const dialog = this.overlay;
+      const document = this.overlayDocument;
+      if (dialog === void 0 || document === void 0) return;
+      dialog.removeEventListener("cancel", this.handleOverlayCancel);
+      dialog.removeEventListener("click", this.handleOverlayClick);
+      dialog.removeEventListener("close", this.handleOverlayClose);
+      this.enterFullscreenButton?.removeEventListener("click", this.handleEnterFullscreen);
+      this.exitFullscreenButton?.removeEventListener("click", this.handleExitFullscreen);
+      document.removeEventListener("fullscreenchange", this.handleFullscreenChange);
+      document.removeEventListener("fullscreenerror", this.handleFullscreenError);
+      this.overlayOpen = false;
+      if (dialog.open) dialog.close();
+      dialog.remove();
+      this.overlayDocument = void 0;
+      this.overlay = void 0;
+      this.enterFullscreenButton = void 0;
+      this.exitFullscreenButton = void 0;
+      this.fullscreenStatus = void 0;
+      this.fullscreenFailure = void 0;
+      this.reorderingOverlay = false;
+      this.internalCloseEvents = 0;
+    }
+    handleOverlayCancel = (event) => {
+      event.preventDefault();
+      this.closeOverlay();
+    };
+    handleOverlayClick = (event) => {
+      if (event.target === this.overlay) this.closeOverlay();
+    };
+    handleOverlayClose = () => {
+      if (this.internalCloseEvents > 0) {
+        this.internalCloseEvents -= 1;
+        return;
+      }
+      this.overlayOpen = false;
+    };
+    handleEnterFullscreen = () => {
+      const document = this.overlayDocument;
+      const root = document?.documentElement;
+      const request = root?.requestFullscreen;
+      if (document === void 0 || root === void 0 || typeof request !== "function" || document.fullscreenEnabled === false) {
+        this.showFullscreenFailure("\u6B64\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u8FDB\u5165\u5168\u5C4F\u3002", void 0);
+        return;
+      }
+      this.fullscreenFailure = void 0;
+      this.syncFullscreenState();
+      try {
+        void request.call(root).catch((error) => {
+          this.showFullscreenFailure("\u8FDB\u5165\u5168\u5C4F\u5931\u8D25", error);
+        });
+      } catch (error) {
+        this.showFullscreenFailure("\u8FDB\u5165\u5168\u5C4F\u5931\u8D25", error);
+      }
+    };
+    handleExitFullscreen = () => {
+      const document = this.overlayDocument;
+      const exit = document?.exitFullscreen;
+      if (document === void 0 || typeof exit !== "function") {
+        this.showFullscreenFailure("\u6B64\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u9000\u51FA\u5168\u5C4F\u3002", void 0);
+        return;
+      }
+      this.fullscreenFailure = void 0;
+      this.syncFullscreenState();
+      try {
+        void exit.call(document).catch((error) => {
+          this.showFullscreenFailure("\u9000\u51FA\u5168\u5C4F\u5931\u8D25", error);
+        });
+      } catch (error) {
+        this.showFullscreenFailure("\u9000\u51FA\u5168\u5C4F\u5931\u8D25", error);
+      }
+    };
+    handleFullscreenChange = () => {
+      this.fullscreenFailure = void 0;
+      this.syncFullscreenState();
+      this.reorderOverlay();
+    };
+    handleFullscreenError = () => {
+      this.showFullscreenFailure("\u6D4F\u89C8\u5668\u672A\u80FD\u5B8C\u6210\u5168\u5C4F\u64CD\u4F5C\u3002", void 0);
+    };
+    fullscreenSupported() {
+      const document = this.overlayDocument;
+      return document !== void 0 && document.fullscreenEnabled !== false && typeof document.documentElement.requestFullscreen === "function";
+    }
+    syncFullscreenState() {
+      const document = this.overlayDocument;
+      const enter = this.enterFullscreenButton;
+      const exit = this.exitFullscreenButton;
+      const status = this.fullscreenStatus;
+      if (document === void 0 || enter === void 0 || exit === void 0 || status === void 0) return;
+      const fullscreen = document.fullscreenElement !== null;
+      const supported = this.fullscreenSupported();
+      enter.disabled = fullscreen || !supported;
+      exit.disabled = !fullscreen || typeof document.exitFullscreen !== "function";
+      if (!supported && !fullscreen) status.textContent = "\u6B64\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u5168\u5C4F\u529F\u80FD\u3002";
+      else if (this.fullscreenFailure !== void 0) status.textContent = this.fullscreenFailure;
+      else status.textContent = fullscreen ? "\u5F53\u524D\u5904\u4E8E\u5168\u5C4F\u72B6\u6001\u3002" : "\u5F53\u524D\u672A\u5904\u4E8E\u5168\u5C4F\u72B6\u6001\u3002";
+    }
+    showFullscreenFailure(prefix, error) {
+      const detail = error instanceof Error && error.message.length > 0 ? `\uFF1A${error.message}` : "";
+      this.fullscreenFailure = `${prefix}${detail}`;
+      this.syncFullscreenState();
+    }
+    focusFullscreenAction() {
+      const document = this.overlayDocument;
+      const dialog = this.overlay;
+      if (document === void 0 || dialog === void 0) return;
+      const preferred = document.fullscreenElement === null ? this.enterFullscreenButton : this.exitFullscreenButton;
+      const fallback = preferred?.disabled === false ? preferred : dialog;
+      fallback.focus({ preventScroll: true });
+    }
+    reorderOverlay() {
+      const dialog = this.overlay;
+      if (!this.overlayOpen || dialog?.open !== true || this.reorderingOverlay) return;
+      this.reorderingOverlay = true;
+      this.internalCloseEvents += 1;
+      try {
+        dialog.close();
+        dialog.showModal();
+        this.focusFullscreenAction();
+      } catch (error) {
+        this.overlayOpen = false;
+        this.showFullscreenFailure("\u65E0\u6CD5\u6062\u590D\u5168\u5C4F\u63A7\u5236\u9762\u677F\u5C42\u7EA7", error);
+      } finally {
+        this.reorderingOverlay = false;
+      }
     }
   };
   customElements.define("game-keyboard-input", GameKeyboardInputElement);
