@@ -29,6 +29,364 @@ function controls(events, owner = "controls") {
   return events.filter((event) => event.owner === owner);
 }
 
+const fullscreenOverlay = "dialog[data-game-controls-fullscreen-overlay]";
+
+async function openFullscreenOverlay(page) {
+  await page.keyboard.down("Tab");
+  await page.waitForSelector(`${fullscreenOverlay}[open]`, { timeout: 2_000 });
+  await page.keyboard.up("Tab");
+}
+
+async function installFullscreenMock(page, mode = "success") {
+  await page.evaluate((initialMode) => {
+    globalThis.fullscreenMock = {
+      mode: initialMode,
+      element: null,
+      enterCalls: 0,
+      exitCalls: 0,
+      enterInsideClick: [],
+      exitInsideClick: [],
+      clickDispatch: false,
+    };
+    document.addEventListener("click", () => { fullscreenMock.clickDispatch = true; }, true);
+    document.addEventListener("click", () => { fullscreenMock.clickDispatch = false; });
+    Object.defineProperty(document, "fullscreenEnabled", {
+      configurable: true,
+      get: () => fullscreenMock.mode !== "unsupported",
+    });
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      get: () => fullscreenMock.element,
+    });
+    Object.defineProperty(document.documentElement, "requestFullscreen", {
+      configurable: true,
+      value() {
+        fullscreenMock.enterCalls += 1;
+        fullscreenMock.enterInsideClick.push(fullscreenMock.clickDispatch);
+        if (fullscreenMock.mode === "reject-enter") return Promise.reject(new Error("enter denied"));
+        fullscreenMock.element = document.documentElement;
+        document.dispatchEvent(new Event("fullscreenchange"));
+        return Promise.resolve();
+      },
+    });
+    Object.defineProperty(document, "exitFullscreen", {
+      configurable: true,
+      value() {
+        fullscreenMock.exitCalls += 1;
+        fullscreenMock.exitInsideClick.push(fullscreenMock.clickDispatch);
+        if (fullscreenMock.mode === "reject-exit") return Promise.reject(new Error("exit denied"));
+        fullscreenMock.element = null;
+        document.dispatchEvent(new Event("fullscreenchange"));
+        return Promise.resolve();
+      },
+    });
+    if (initialMode === "unsupported") {
+      Object.defineProperty(document.documentElement, "requestFullscreen", { configurable: true, value: undefined });
+      Object.defineProperty(document, "exitFullscreen", { configurable: true, value: undefined });
+    }
+  }, mode);
+}
+
+test("Select short press stays silent and one 800ms keyboard hold opens only one overlay", async (t) => {
+  const page = await openPage(t, "<!doctype html><body><div id='surface' tabindex='0'></div></body>");
+  await installFullscreenMock(page);
+  await mount(page);
+  await page.locator("#surface").focus();
+  await page.keyboard.down("Tab");
+  await page.waitForTimeout(300);
+  await page.keyboard.up("Tab");
+  await page.waitForTimeout(550);
+  assert.equal(await page.locator(fullscreenOverlay).count(), 0);
+
+  await openFullscreenOverlay(page);
+  await page.waitForTimeout(900);
+  const result = await page.evaluate((selector) => ({
+    dialogs: document.querySelectorAll(selector).length,
+    open: document.querySelector(selector)?.open,
+    enterCalls: fullscreenMock.enterCalls,
+    exitCalls: fullscreenMock.exitCalls,
+  }), fullscreenOverlay);
+  assert.deepEqual(result, { dialogs: 1, open: true, enterCalls: 0, exitCalls: 0 });
+});
+
+test("keyboard and standard gamepad Select share one hold and gamepad can reopen independently", async (t) => {
+  const page = await openPage(t, "<!doctype html><body><div id='surface' tabindex='0'></div></body>");
+  await page.evaluate(() => {
+    globalThis.pad = {
+      index: 0, connected: true, mapping: "standard", axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ value: 0 })),
+    };
+    Object.defineProperty(navigator, "getGamepads", { configurable: true, value: () => [globalThis.pad] });
+  });
+  await installFullscreenMock(page);
+  await mount(page);
+  await page.locator("#surface").focus();
+  await page.keyboard.down("Tab");
+  await page.evaluate(() => { pad.buttons[8].value = 1; });
+  await page.waitForSelector(`${fullscreenOverlay}[open]`, { timeout: 2_000 });
+  await page.keyboard.up("Tab");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(900);
+  assert.equal(await page.locator(`${fullscreenOverlay}[open]`).count(), 0, "held gamepad Select must not retrigger");
+
+  await page.evaluate(() => { pad.buttons[8].value = 0; });
+  await page.waitForFunction(() => deviceEvents.some((event) =>
+    event.options.channel === "controls.event" && event.data.button === "select" && event.data.action === "up"
+  ));
+  await page.evaluate(() => { pad.buttons[8].value = 1; });
+  await page.waitForSelector(`${fullscreenOverlay}[open]`, { timeout: 2_000 });
+  assert.equal(await page.locator(fullscreenOverlay).count(), 1);
+  assert.deepEqual(await page.evaluate(() => [fullscreenMock.enterCalls, fullscreenMock.exitCalls]), [0, 0]);
+});
+
+test("blur, hidden page, disconnected input, and unmount cancel pending Select holds", async (t) => {
+  const blurPage = await openPage(t, "<!doctype html><body><div id='surface' tabindex='0'></div></body>");
+  await mount(blurPage);
+  await blurPage.locator("#surface").focus();
+  await blurPage.keyboard.down("Tab");
+  await blurPage.waitForTimeout(150);
+  await blurPage.evaluate(() => {
+    document.hasFocus = () => false;
+    window.dispatchEvent(new Event("blur"));
+  });
+  await blurPage.waitForTimeout(700);
+  assert.equal(await blurPage.locator(fullscreenOverlay).count(), 0, "blur");
+
+  const hiddenPage = await openPage(t, "<!doctype html><body><div id='surface' tabindex='0'></div></body>");
+  await hiddenPage.evaluate(() => {
+    globalThis.visibleState = "visible";
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibleState });
+  });
+  await mount(hiddenPage);
+  await hiddenPage.locator("#surface").focus();
+  await hiddenPage.keyboard.down("Tab");
+  await hiddenPage.waitForTimeout(150);
+  await hiddenPage.evaluate(() => {
+    globalThis.visibleState = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await hiddenPage.waitForTimeout(700);
+  assert.equal(await hiddenPage.locator(fullscreenOverlay).count(), 0, "hidden page");
+
+  const padPage = await openPage(t);
+  await padPage.evaluate(() => {
+    globalThis.pad = {
+      index: 4, connected: true, mapping: "standard", axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, (_, index) => ({ value: index === 8 ? 1 : 0 })),
+    };
+    Object.defineProperty(navigator, "getGamepads", { configurable: true, value: () => pad.connected ? [globalThis.pad] : [] });
+  });
+  await mount(padPage);
+  await padPage.waitForFunction(() => deviceEvents.some((event) => event.data.down?.includes("select")));
+  await padPage.waitForTimeout(150);
+  await padPage.evaluate(() => { pad.connected = false; });
+  await padPage.waitForFunction(() => deviceEvents.some((event) =>
+    event.options.channel === "controls.state" && event.data.down?.length === 0
+  ));
+  await padPage.waitForTimeout(700);
+  assert.equal(await padPage.locator(fullscreenOverlay).count(), 0, "disconnected input");
+
+  const unmountPage = await openPage(t, "<!doctype html><body><div id='surface' tabindex='0'></div></body>");
+  await mount(unmountPage);
+  await unmountPage.locator("#surface").focus();
+  await unmountPage.keyboard.down("Tab");
+  await unmountPage.waitForTimeout(150);
+  await unmountPage.evaluate(() => document.querySelector("game-controls-input").remove());
+  await unmountPage.waitForTimeout(700);
+  assert.equal(await unmountPage.locator(fullscreenOverlay).count(), 0, "unmount");
+});
+
+test("overlay is a viewport modal dialog, closes explicitly, and unmount removes DOM and listeners", async (t) => {
+  const page = await openPage(t, "<!doctype html><body><div id='surface' tabindex='0'></div></body>");
+  await page.evaluate(() => {
+    globalThis.overlayProbe = { show: 0, close: 0, fullscreenListeners: new Set() };
+    const showModal = HTMLDialogElement.prototype.showModal;
+    const close = HTMLDialogElement.prototype.close;
+    HTMLDialogElement.prototype.showModal = function () {
+      overlayProbe.show += 1;
+      return showModal.call(this);
+    };
+    HTMLDialogElement.prototype.close = function () {
+      overlayProbe.close += 1;
+      return close.call(this);
+    };
+    const add = document.addEventListener.bind(document);
+    const remove = document.removeEventListener.bind(document);
+    document.addEventListener = (type, listener, options) => {
+      if (type === "fullscreenchange" || type === "fullscreenerror") overlayProbe.fullscreenListeners.add(listener);
+      return add(type, listener, options);
+    };
+    document.removeEventListener = (type, listener, options) => {
+      if (type === "fullscreenchange" || type === "fullscreenerror") overlayProbe.fullscreenListeners.delete(listener);
+      return remove(type, listener, options);
+    };
+  });
+  await installFullscreenMock(page);
+  await mount(page);
+  await page.locator("#surface").focus();
+  await openFullscreenOverlay(page);
+  const modal = await page.evaluate((selector) => {
+    const dialog = document.querySelector(selector);
+    return {
+      tag: dialog.tagName,
+      open: dialog.open,
+      role: dialog.getAttribute("role"),
+      modal: dialog.getAttribute("aria-modal"),
+      position: dialog.style.position,
+      inset: dialog.style.inset,
+      width: dialog.style.width,
+      height: dialog.style.height,
+      zIndex: dialog.style.zIndex,
+      buttons: [...dialog.querySelectorAll("button")].map((button) => button.textContent),
+      active: document.activeElement?.textContent,
+      showCalls: overlayProbe.show,
+      listeners: overlayProbe.fullscreenListeners.size,
+    };
+  }, fullscreenOverlay);
+  assert.deepEqual(modal, {
+    tag: "DIALOG", open: true, role: "dialog", modal: "true", position: "fixed", inset: "0px",
+    width: "100vw", height: "100vh", zIndex: "2147483647", buttons: ["进入全屏", "退出全屏"],
+    active: "进入全屏", showCalls: 1, listeners: 2,
+  });
+  await page.locator(fullscreenOverlay).click({ position: { x: 4, y: 4 } });
+  assert.equal(await page.locator(`${fullscreenOverlay}[open]`).count(), 0);
+
+  await page.locator("#surface").focus();
+  await openFullscreenOverlay(page);
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(`${fullscreenOverlay}[open]`).count(), 0);
+
+  await page.locator("#surface").focus();
+  await openFullscreenOverlay(page);
+  await page.evaluate(() => document.querySelector("game-controls-input").remove());
+  const cleanup = await page.evaluate((selector) => ({
+    dialogs: document.querySelectorAll(selector).length,
+    listeners: overlayProbe.fullscreenListeners.size,
+  }), fullscreenOverlay);
+  assert.deepEqual(cleanup, { dialogs: 0, listeners: 0 });
+  await page.waitForTimeout(850);
+  assert.equal(await page.locator(fullscreenOverlay).count(), 0);
+});
+
+test("real button click handlers call fullscreen APIs synchronously and reorder the top layer", async (t) => {
+  const page = await openPage(t, "<!doctype html><body><div id='surface' tabindex='0'></div></body>");
+  await page.evaluate(() => {
+    globalThis.dialogOrder = [];
+    const showModal = HTMLDialogElement.prototype.showModal;
+    const close = HTMLDialogElement.prototype.close;
+    HTMLDialogElement.prototype.showModal = function () {
+      dialogOrder.push("show");
+      return showModal.call(this);
+    };
+    HTMLDialogElement.prototype.close = function () {
+      dialogOrder.push("close");
+      return close.call(this);
+    };
+  });
+  await installFullscreenMock(page);
+  await mount(page);
+  await page.locator("#surface").focus();
+  await openFullscreenOverlay(page);
+  await page.getByRole("button", { name: "进入全屏" }).click();
+  let state = await page.evaluate((selector) => {
+    const dialog = document.querySelector(selector);
+    return {
+      open: dialog.open,
+      order: [...dialogOrder],
+      calls: fullscreenMock.enterCalls,
+      insideClick: fullscreenMock.enterInsideClick,
+      enterDisabled: dialog.querySelector("button:nth-of-type(1)").disabled,
+      exitDisabled: dialog.querySelector("button:nth-of-type(2)").disabled,
+      active: document.activeElement?.textContent,
+      status: dialog.querySelector('[role="status"]').textContent,
+    };
+  }, fullscreenOverlay);
+  assert.deepEqual(state, {
+    open: true, order: ["show", "close", "show"], calls: 1, insideClick: [true],
+    enterDisabled: true, exitDisabled: false, active: "退出全屏", status: "当前处于全屏状态。",
+  });
+
+  await page.getByRole("button", { name: "退出全屏" }).click();
+  state = await page.evaluate((selector) => {
+    const dialog = document.querySelector(selector);
+    return {
+      open: dialog.open,
+      order: [...dialogOrder],
+      calls: fullscreenMock.exitCalls,
+      insideClick: fullscreenMock.exitInsideClick,
+      enterDisabled: dialog.querySelector("button:nth-of-type(1)").disabled,
+      exitDisabled: dialog.querySelector("button:nth-of-type(2)").disabled,
+      active: document.activeElement?.textContent,
+      status: dialog.querySelector('[role="status"]').textContent,
+    };
+  }, fullscreenOverlay);
+  assert.deepEqual(state, {
+    open: true, order: ["show", "close", "show", "close", "show"], calls: 1, insideClick: [true],
+    enterDisabled: false, exitDisabled: true, active: "进入全屏", status: "当前未处于全屏状态。",
+  });
+  await page.waitForTimeout(100);
+  assert.deepEqual(await page.evaluate(() => dialogOrder), ["show", "close", "show", "close", "show"]);
+
+  const beforeKeyboardActivation = await page.evaluate(() => deviceEvents.length);
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Space");
+  const keyboardActivation = await page.evaluate((from) => ({
+    enterCalls: fullscreenMock.enterCalls,
+    exitCalls: fullscreenMock.exitCalls,
+    enterInsideClick: fullscreenMock.enterInsideClick,
+    exitInsideClick: fullscreenMock.exitInsideClick,
+    controlEvents: deviceEvents.slice(from).filter((event) => event.options.channel === "controls.event").length,
+  }), beforeKeyboardActivation);
+  assert.deepEqual(keyboardActivation, {
+    enterCalls: 2,
+    exitCalls: 2,
+    enterInsideClick: [true, true],
+    exitInsideClick: [true, true],
+    controlEvents: 0,
+  });
+});
+
+test("browser fullscreen exit, fullscreenerror, unsupported API, and rejected promises keep UI truthful", async (t) => {
+  const page = await openPage(t, "<!doctype html><body><div id='surface' tabindex='0'></div></body>");
+  await installFullscreenMock(page, "reject-enter");
+  await mount(page);
+  await page.locator("#surface").focus();
+  await openFullscreenOverlay(page);
+  await page.getByRole("button", { name: "进入全屏" }).click();
+  await page.waitForFunction((selector) => document.querySelector(selector)?.textContent.includes("enter denied"), fullscreenOverlay);
+  assert.match(await page.locator(`${fullscreenOverlay} [role="status"]`).textContent(), /进入全屏失败.*enter denied/);
+  assert.equal(await page.locator(`${fullscreenOverlay}[open]`).count(), 1);
+
+  await page.evaluate(() => { fullscreenMock.mode = "success"; });
+  await page.getByRole("button", { name: "进入全屏" }).click();
+  await page.evaluate(() => {
+    fullscreenMock.element = null;
+    document.dispatchEvent(new Event("fullscreenchange"));
+  });
+  assert.equal(await page.getByRole("button", { name: "进入全屏" }).isEnabled(), true);
+  assert.equal(await page.getByRole("button", { name: "退出全屏" }).isDisabled(), true);
+  assert.equal(await page.locator(`${fullscreenOverlay}[open]`).count(), 1);
+  await page.evaluate(() => document.dispatchEvent(new Event("fullscreenerror")));
+  assert.equal(await page.locator(`${fullscreenOverlay} [role="status"]`).textContent(), "浏览器未能完成全屏操作。");
+
+  await page.evaluate(() => { fullscreenMock.mode = "success"; });
+  await page.getByRole("button", { name: "进入全屏" }).click();
+  await page.evaluate(() => { fullscreenMock.mode = "reject-exit"; });
+  await page.getByRole("button", { name: "退出全屏" }).click();
+  await page.waitForFunction((selector) => document.querySelector(selector)?.textContent.includes("exit denied"), fullscreenOverlay);
+  assert.match(await page.locator(`${fullscreenOverlay} [role="status"]`).textContent(), /退出全屏失败.*exit denied/);
+  assert.equal(await page.locator(`${fullscreenOverlay}[open]`).count(), 1);
+
+  const unsupported = await openPage(t, "<!doctype html><body><div id='surface' tabindex='0'></div></body>");
+  await installFullscreenMock(unsupported, "unsupported");
+  await mount(unsupported);
+  await unsupported.locator("#surface").focus();
+  await openFullscreenOverlay(unsupported);
+  assert.equal(await unsupported.getByRole("button", { name: "进入全屏" }).isDisabled(), true);
+  assert.equal(await unsupported.getByRole("button", { name: "退出全屏" }).isDisabled(), true);
+  assert.equal(await unsupported.locator(`${fullscreenOverlay} [role="status"]`).textContent(), "此浏览器不支持全屏功能。");
+});
+
 test("controls element publishes top-frame keyboard edges and prevents mapped defaults", async (t) => {
   const page = await openPage(t, "<!doctype html><body><div id='surface' tabindex='0'></div><button id='next'>next</button></body>");
   await mount(page);
