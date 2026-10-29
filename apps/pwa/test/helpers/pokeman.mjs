@@ -109,6 +109,14 @@ export function createPokeManRoutePlanner(fixture) {
     planToMap(start, targetMapId) {
       return plan(start, (state) => state.mapId === targetMapId, new Set([start.mapId, targetMapId]));
     },
+    planDistance(start, minimumDistance) {
+      if (!Number.isSafeInteger(minimumDistance) || minimumDistance <= 0) throw new TypeError("minimumDistance must be a positive integer");
+      return plan(
+        start,
+        (state) => state.mapId === start.mapId && Math.abs(state.x - start.x) + Math.abs(state.y - start.y) >= minimumDistance,
+        new Set([start.mapId]),
+      );
+    },
     planNpcCollision(start) {
       const placements = MAP_ONLY_NPC_PLACEMENTS[start.mapId] ?? [];
       for (const npc of placements) {
