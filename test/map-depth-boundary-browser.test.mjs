@@ -96,11 +96,23 @@ function staticSpriteData(visualEpoch) {
   };
 }
 
-async function waitUntil(page, predicate, label) {
-  const deadline = Date.now() + 10_000;
-  while (!(await page.evaluate(predicate))) {
-    if (Date.now() >= deadline) assert.fail(`Timed out waiting for ${label}`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+async function waitUntil(page, predicate, label, timeoutMs = 10_000) {
+  try {
+    await page.waitForFunction(predicate, { timeout: timeoutMs, polling: 25 });
+  } catch (cause) {
+    assert.fail(`Timed out waiting for ${label}: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+}
+
+async function closeBrowser(browser) {
+  if (!browser) return;
+  try {
+    await Promise.race([
+      browser.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("browser.close timed out")), 5_000)),
+    ]);
+  } catch {
+    try { browser.process()?.kill("SIGKILL"); } catch { /* already gone */ }
   }
 }
 
@@ -158,11 +170,12 @@ async function serveMapBrowser(t) {
     response.end("<!doctype html><html><body style=\"margin:0\"></body></html>");
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  t.after(() => new Promise((resolve) => server.close(() => resolve())));
 
   const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
-  t.after(() => browser.close());
+  t.after(() => closeBrowser(browser));
   const page = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1 });
+  page.setDefaultTimeout(10_000);
   const origin = `http://127.0.0.1:${server.address().port}`;
   await page.goto(origin);
   await page.addScriptTag({ url: `${origin}/map.browser.js` });
