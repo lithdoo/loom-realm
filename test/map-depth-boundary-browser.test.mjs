@@ -50,6 +50,7 @@ function viewData() {
     cameraY: 0,
     tileset,
     autotiles: [null, null, null, null, null, null, null],
+    projectionBounds: { minTileX: 0, minTileY: 0, maxTileX: 23, maxTileY: 17 },
     tiles: [[0, 0, 0, 384, 48]],
     cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
     bridgeLevel: 0,
@@ -281,7 +282,8 @@ test("superseded delayed candidate closes its stale bitmap after decode without 
     const view = window.__view;
     return view?._accepted?.view.visualEpoch === 2
       && view._accepted.view.tileset.contentVersion === "new"
-      && [...view._images.keys()].every((id) => id.endsWith("\u0000new"));
+      && [...view._images.keys()].some((id) => id.includes("Tilesets/blue") && id.endsWith("\u0000new"))
+      && [...view._images.keys()].every((id) => !id.endsWith("\u0000old"));
   }, "new candidate accepted before old decode completes");
 
   const beforeResolve = await page.evaluate(() => ({
@@ -293,8 +295,8 @@ test("superseded delayed candidate closes its stale bitmap after decode without 
   }));
   assert.equal(beforeResolve.visualEpoch, 2);
   assert.equal(beforeResolve.tilesetVersion, "new");
-  assert.ok(beforeResolve.images.every((id) => id.endsWith("\u0000new")), JSON.stringify(beforeResolve));
-  assert.ok(beforeResolve.bitmaps.every((id) => id.endsWith("\u0000new")), JSON.stringify(beforeResolve));
+  assert.ok(beforeResolve.images.every((id) => !id.endsWith("\u0000old")), JSON.stringify(beforeResolve));
+  assert.ok(beforeResolve.bitmaps.every((id) => !id.endsWith("\u0000old")), JSON.stringify(beforeResolve));
   assert.equal(beforeResolve.closes, 0);
 
   await page.evaluate(() => window.__resolveOldTileset());
@@ -309,8 +311,8 @@ test("superseded delayed candidate closes its stale bitmap after decode without 
   }));
   assert.equal(after.visualEpoch, 2);
   assert.equal(after.tilesetVersion, "new");
-  assert.ok(after.images.every((id) => id.endsWith("\u0000new")), JSON.stringify(after));
-  assert.ok(after.bitmaps.every((id) => id.endsWith("\u0000new")), JSON.stringify(after));
+  assert.ok(after.images.every((id) => !id.endsWith("\u0000old")), JSON.stringify(after));
+  assert.ok(after.bitmaps.every((id) => !id.endsWith("\u0000old")), JSON.stringify(after));
   assert.ok(after.closes >= 1, JSON.stringify(after));
   assert.equal(after.images.includes(identityOf(oldRef)), false);
   assert.equal(after.bitmaps.includes(identityOf(oldRef)), false);

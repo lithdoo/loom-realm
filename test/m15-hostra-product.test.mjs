@@ -43,6 +43,14 @@ function waitFor(check, label, timeout = 20_000) {
   });
 }
 
+function waitForAcceptedMapScene(page, timeout = 20_000) {
+  return page.waitForFunction(() => {
+    const view = document.querySelector("lr-map-view");
+    return view?.dataset.mapVisualState === "ready"
+      && view.shadowRoot?.querySelector("canvas.sprite-visual:not([hidden])") !== null;
+  }, null, { timeout });
+}
+
 async function events(file) {
   const source = await readFile(file, "utf8").catch(() => "");
   return source.trim() === "" ? [] : source.trim().split("\n").map((line) => JSON.parse(line));
@@ -538,7 +546,7 @@ test("Local Presentation fills six real Hostra viewports and keeps the footer vi
   await waitFor(() => context.pages().some((candidate) => /\/_lr\/window\//u.test(candidate.url())), "Local Hostra Window");
   const page = context.pages().find((candidate) => /\/_lr\/window\//u.test(candidate.url()));
   await page.waitForFunction(() => document.documentElement.dataset.loomrealmRenderer === "installed", null, { timeout: 30_000 });
-  await page.waitForSelector("lr-map-view lr-map-sprite", { timeout: 20_000 });
+  await waitForAcceptedMapScene(page);
 
   const matrix = [
     { width: 640, height: 480, contentHeight: 448, barHeight: 32, columns: 20, rows: 14 },
@@ -559,7 +567,7 @@ test("Local Presentation fills six real Hostra viewports and keeps the footer vi
     }, expected, { timeout: 10_000 });
     const actual = await page.evaluate(() => {
       const view = document.querySelector("lr-map-view");
-      const sprite = document.querySelector("lr-map-sprite");
+      const sprite = view.shadowRoot.querySelector("canvas.sprite-visual:not([hidden])");
       const content = view.shadowRoot.querySelector(".map-content");
       const footer = view.shadowRoot.querySelector(".map-footer");
       const world = view.shadowRoot.querySelector(".map-world");
@@ -694,7 +702,7 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
     throw new Error(`${cause.message}\n${JSON.stringify(state)}\n${browserMessages.join("\n")}\n${hostra.output()}\n${JSON.stringify(await events(eventLog))}`);
   }
   try {
-    await page.waitForSelector("lr-map-view lr-map-sprite", { timeout: 20_000 });
+    await waitForAcceptedMapScene(page);
   } catch (cause) {
     const state = await page.evaluate(() => ({ url: location.href, html: document.documentElement.outerHTML.slice(0, 4000), dataset: { ...document.documentElement.dataset } })).catch((error) => ({ error: error.message }));
     throw new Error(`${cause.message}\n${JSON.stringify(state)}\n${browserMessages.join("\n")}\n${hostra.output()}\n${JSON.stringify(await events(eventLog))}`);
@@ -762,7 +770,7 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
 
   await page.reload();
   await page.waitForFunction(() => document.documentElement.dataset.loomrealmRenderer === "installed", null, { timeout: 30_000 });
-  await page.waitForSelector("lr-map-view lr-map-sprite");
+  await waitForAcceptedMapScene(page);
   await setLogicalViewport(page, 640, 480);
   await waitFor(async () => (await events(eventLog)).filter(({ type }) => type === "document-bootstrap").length > firstDocuments, "fresh document bootstrap");
   const secondIdentity = await page.evaluate(() => document.documentElement.dataset.loomrealmRendererIdentity);
@@ -928,7 +936,7 @@ test("M15 movement latency harness records input-to-paint traces", { timeout: 90
   await waitFor(() => context.pages().some((candidate) => /\/_lr\/window\//u.test(candidate.url())), "latency Window");
   const page = context.pages().find((candidate) => /\/_lr\/window\//u.test(candidate.url()));
   await page.waitForFunction(() => document.documentElement.dataset.loomrealmRenderer === "installed", null, { timeout: 30_000 });
-  await page.waitForSelector("lr-map-view lr-map-sprite", { timeout: 20_000 });
+  await waitForAcceptedMapScene(page);
   await setLogicalViewport(page, 640, 480);
   await page.evaluate(() => {
     const records = [];
@@ -1006,7 +1014,7 @@ test(`M15 Hostra ${fullLatencyQualification ? "640/720/1080 full P95" : "640 PR 
   await waitFor(() => context.pages().some((candidate) => /\/_lr\/window\//u.test(candidate.url())), "128x8 Window");
   const page = context.pages().find((candidate) => /\/_lr\/window\//u.test(candidate.url()));
   await page.waitForFunction(() => document.documentElement.dataset.loomrealmRenderer === "installed", null, { timeout: 30_000 });
-  await page.waitForSelector("lr-map-view lr-map-sprite", { timeout: 20_000 });
+  await waitForAcceptedMapScene(page);
   await page.evaluate(() => {
     const records = [];
     globalThis.__loomrealmMovementRecords = records;

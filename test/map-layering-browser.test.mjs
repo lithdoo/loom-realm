@@ -45,7 +45,7 @@ function viewData({
   depth = 0, tileset = tilesetRef("v1"), autotiles = NULL_AUTOTILES, tiles,
   cameraX = 0, cameraY = 0, cameraMotion = null, sceneEpoch = 1, visualEpoch = 1,
   mapId = 1, viewportWidth = 640, viewportHeight = 480, mapWidth = 24, mapHeight = 18,
-  bridgeLevel = 0, columns = 20, rows = 14,
+  bridgeLevel = 0, columns = 20, rows = 14, projectionBounds,
 } = {}) {
   const tileList = tiles ?? [regularTile({ depth })];
   const barHeight = viewportHeight < 480 ? 24 : viewportHeight < 720 ? 32 : 48;
@@ -76,6 +76,7 @@ function viewData({
     cameraY,
     tileset,
     autotiles,
+    projectionBounds: projectionBounds ?? { minTileX: 0, minTileY: 0, maxTileX: mapWidth - 1, maxTileY: mapHeight - 1 },
     tiles: [...tileList]
       .sort((left, right) => left.z - right.z || left.y - right.y || left.x - right.x)
       .map((tile) => [tile.x, tile.y, tile.z, tile.tileId, tile.depth]),
@@ -171,6 +172,241 @@ test("Browser renders 0/1/N independent sprites, preserves static pattern, and r
   await page.evaluate(() => window.__sprite.remove());
   await waitUntil(page, () => document.querySelectorAll("lr-map-sprite").length === 0, "zero sprites supported");
   assert.equal(await page.evaluate(() => window.__view.dataset.mapVisualState), "ready");
+});
+
+test("scene replacement retains complete view-owned 0/1/N sprite sets until one atomic promote", { timeout: 60_000 }, async (t) => {
+  for (const [oldCount, targetCount] of [[0, 1], [1, 3], [3, 0]]) {
+    const page = await openPage();
+    t.after(() => page.close());
+    const first = viewData({ sceneEpoch: 1, visualEpoch: 1 });
+    const targetTileset = tilesetRef(`scene-2-${oldCount}-${targetCount}`);
+    const target = viewData({ sceneEpoch: 2, visualEpoch: 2, tileset: targetTileset, mapId: 2 });
+    await page.evaluate(({ viewPayload, player, npcs }) => {
+      const resources = window.__sprite._resources;
+      window.__expectedOldCount = npcs.length + 1;
+      for (const data of npcs) {
+        const node = document.createElement("lr-map-sprite");
+        node.receiveRenderContext({ resources });
+        window.__view.append(node);
+        node.receiveRenderData(data);
+      }
+      window.__view.receiveRenderData(viewPayload);
+      window.__sprite.receiveRenderData(player);
+    }, {
+      viewPayload: first,
+      player: matchingSprite(first),
+      npcs: Array.from({ length: oldCount }, (_, index) => matchingSprite(first, { x: index + 2, y: 2, screenX: (index + 2) * 32, screenY: 64, pattern: index % 4 })),
+    });
+    await waitUntil(page, () => window.__view._acceptedVisualScene?.sprites.length === window.__expectedOldCount, `old ${oldCount}-NPC scene accepted`);
+    await delayTileset(page, targetTileset);
+    await page.evaluate(({ viewPayload, player, npcs }) => {
+      const view = window.__view;
+      window.__oldAcceptedVisuals = view._acceptedVisualScene.sprites.map((entry) => entry.visual);
+      for (const node of [...view.children].slice(1)) node.remove();
+      view.receiveRenderData(viewPayload);
+      window.__sprite.receiveRenderData(player);
+      const resources = window.__sprite._resources;
+      for (const data of npcs) {
+        const node = document.createElement("lr-map-sprite");
+        node.receiveRenderContext({ resources });
+        view.append(node);
+        node.receiveRenderData(data);
+      }
+    }, {
+      viewPayload: target,
+      player: matchingSprite(target),
+      npcs: Array.from({ length: targetCount }, (_, index) => matchingSprite(target, { x: index + 3, y: 3, screenX: (index + 3) * 32, screenY: 96, pattern: (index + 1) % 4 })),
+    });
+    await waitForPendingImage(page, targetTileset);
+    const staged = await page.evaluate(() => ({
+      acceptedEpoch: window.__view._acceptedVisualScene.view.sceneEpoch,
+      stagingEpoch: window.__view._stagingVisualScene?.sceneEpoch,
+      oldVisualsConnected: window.__oldAcceptedVisuals.every((visual) => visual.isConnected && !visual.hidden),
+      visibleVisualCount: window.__view.shadowRoot.querySelectorAll("canvas.sprite-visual:not([hidden])").length,
+      canonicalCount: window.__view.querySelectorAll("lr-map-sprite").length,
+    }));
+    assert.deepEqual(staged, {
+      acceptedEpoch: 1,
+      stagingEpoch: 2,
+      oldVisualsConnected: true,
+      visibleVisualCount: oldCount + 1,
+      canonicalCount: targetCount + 1,
+    });
+    await settlePendingImage(page, targetTileset, "resolve");
+    await waitUntil(page, () => window.__view._acceptedVisualScene?.view.sceneEpoch === 2, `target ${targetCount}-NPC scene promoted`);
+    const promoted = await page.evaluate(() => ({
+      acceptedCount: window.__view._acceptedVisualScene.sprites.length,
+      visibleVisualCount: window.__view.shadowRoot.querySelectorAll("canvas.sprite-visual:not([hidden])").length,
+      oldVisualsReleased: window.__oldAcceptedVisuals.every((visual) => !visual.isConnected),
+      staging: window.__view._stagingVisualScene,
+    }));
+    assert.equal(promoted.acceptedCount, targetCount + 1);
+    assert.equal(promoted.visibleVisualCount, targetCount + 1);
+    assert.equal(promoted.oldVisualsReleased, true);
+    assert.equal(promoted.staging, undefined);
+  }
+});
+
+test("same-scene NPC add, slow replacement, and remove patch only the accepted sprite set", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const viewPayload = viewData({ sceneEpoch: 1, visualEpoch: 1 });
+  await page.evaluate(({ viewPayload: view, player }) => {
+    window.__view.receiveRenderData(view);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload, player: matchingSprite(viewPayload) });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.sprites.length === 1, "player-only scene accepted");
+  const slowRef = { namespace: "resource.Graphics", key: "Characters/slow-npc", contentVersion: "v1" };
+  await delayTileset(page, slowRef);
+  await page.evaluate(({ npc }) => {
+    const node = document.createElement("lr-map-sprite");
+    node.receiveRenderContext({ resources: window.__sprite._resources });
+    window.__view.append(node);
+    node.receiveRenderData(npc);
+    window.__sameSceneNpc = node;
+    window.__sameSceneTile = window.__view._layers[0].canvas;
+    window.__oldSameSceneVisuals = window.__view._acceptedVisualScene.sprites.map((entry) => entry.visual);
+  }, { npc: matchingSprite(viewPayload, { x: 2, y: 2, screenX: 64, screenY: 64, sprite: slowRef }) });
+  await waitForPendingImage(page, slowRef);
+  assert.deepEqual(await page.evaluate(() => ({
+    acceptedCount: window.__view._acceptedVisualScene.sprites.length,
+    oldComplete: window.__oldSameSceneVisuals.every((visual) => visual.isConnected && !visual.hidden),
+    staging: window.__view._stagingVisualScene,
+    tileSame: window.__view._layers[0].canvas === window.__sameSceneTile,
+  })), { acceptedCount: 1, oldComplete: true, staging: undefined, tileSame: true });
+  await settlePendingImage(page, slowRef, "resolve");
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.sprites.length === 2, "same-scene NPC add committed");
+  const replacementRef = { namespace: "resource.Graphics", key: "Characters/replacement", contentVersion: "v2" };
+  await delayTileset(page, replacementRef);
+  await page.evaluate((data) => {
+    window.__oldNpcVisual = window.__view._acceptedVisualScene.sprites[1].visual;
+    window.__expectedReplacementId = `${data.sprite.namespace}\u0000${data.sprite.key}\u0000${data.sprite.contentVersion}`;
+    window.__sameSceneNpc.receiveRenderData(data);
+  }, matchingSprite(viewPayload, { x: 3, y: 2, screenX: 96, screenY: 64, sprite: replacementRef, direction: 6 }));
+  await waitForPendingImage(page, replacementRef);
+  assert.equal(await page.evaluate(() => window.__oldNpcVisual.isConnected && !window.__oldNpcVisual.hidden), true);
+  await settlePendingImage(page, replacementRef, "resolve");
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.sprites[1]?.resourceId === window.__expectedReplacementId, "same-scene NPC replacement committed");
+  assert.equal(await page.evaluate(() => window.__view._layers[0].canvas === window.__sameSceneTile && !window.__oldNpcVisual.isConnected), true);
+  await page.evaluate(() => window.__sameSceneNpc.remove());
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.sprites.length === 1, "same-scene NPC remove committed");
+  assert.equal(await page.evaluate(() => window.__view._layers[0].canvas === window.__sameSceneTile && window.__view._stagingVisualScene === undefined), true);
+});
+
+test("same target scene coalesces newer revisions and recovers from a failed preparation", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const first = viewData({ sceneEpoch: 1, visualEpoch: 1 });
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: first, player: matchingSprite(first) });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.sceneEpoch === 1, "scene A accepted");
+  const failedRef = tilesetRef("target-fails");
+  await delayTileset(page, failedRef);
+  const target1 = viewData({ sceneEpoch: 2, visualEpoch: 2, mapId: 2, tileset: failedRef });
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: target1, player: matchingSprite(target1) });
+  await waitForPendingImage(page, failedRef);
+  const owner = await page.evaluate(() => window.__view._stagingVisualScene.owner);
+  const target2 = viewData({ sceneEpoch: 2, visualEpoch: 3, mapId: 2, tileset: failedRef, cameraX: 32 });
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: target2, player: matchingSprite(target2, { screenX: 32 }) });
+  assert.equal(await page.evaluate(() => window.__view._stagingVisualScene.owner), owner);
+  await settlePendingImage(page, failedRef, "reject");
+  await waitUntil(page, () => window.__view._stagingVisualScene?.state === "FAILED", "target staging failure observed");
+  assert.equal(await page.evaluate(() => window.__view._acceptedVisualScene.view.sceneEpoch), 1);
+  const recoveredRef = tilesetRef("target-recovers");
+  const target3 = viewData({ sceneEpoch: 2, visualEpoch: 4, mapId: 2, tileset: recoveredRef, cameraX: 32 });
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: target3, player: matchingSprite(target3, { screenX: 32 }) });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 4, "recovered target revision promoted");
+  assert.deepEqual(await page.evaluate(() => ({
+    sceneEpoch: window.__view._acceptedVisualScene.view.sceneEpoch,
+    staging: window.__view._stagingVisualScene,
+    state: window.__view.dataset.mapVisualState,
+  })), { sceneEpoch: 2, staging: undefined, state: "ready" });
+});
+
+test("held movement cannot starve staging; stale and disconnected staging results never promote", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const first = viewData({ sceneEpoch: 1, visualEpoch: 1 });
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: first, player: matchingSprite(first) });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.sceneEpoch === 1, "source scene accepted");
+  const delayedB = tilesetRef("held-b");
+  await delayTileset(page, delayedB);
+  const b1 = viewData({ sceneEpoch: 2, visualEpoch: 2, mapId: 2, tileset: delayedB });
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: b1, player: matchingSprite(b1) });
+  await waitForPendingImage(page, delayedB);
+  const stagingOwner = await page.evaluate(() => window.__view._stagingVisualScene.owner);
+  for (let motionId = 1; motionId <= 3; motionId += 1) {
+    const next = viewData({
+      sceneEpoch: 2,
+      visualEpoch: 2,
+      mapId: 2,
+      tileset: delayedB,
+      cameraX: motionId * 16,
+      cameraMotion: { id: motionId, durationMs: 250, fromCameraX: (motionId - 1) * 16, fromCameraY: 0 },
+    });
+    await page.evaluate(({ viewPayload, player }) => {
+      window.__view.receiveRenderData(viewPayload);
+      window.__sprite.receiveRenderData(player);
+    }, { viewPayload: next, player: matchingSprite(next, { ...walkingSprite({ id: motionId, screenX: motionId * 16, fromScreenX: (motionId - 1) * 16 }), sceneEpoch: 2, visualEpoch: 2 }) });
+  }
+  assert.deepEqual(await page.evaluate(() => ({
+    owner: window.__view._stagingVisualScene.owner,
+    acceptedEpoch: window.__view._acceptedVisualScene.view.sceneEpoch,
+    latestMotion: window.__view._desiredView.data.motionId,
+  })), { owner: stagingOwner, acceptedEpoch: 1, latestMotion: 3 });
+  await settlePendingImage(page, delayedB, "resolve");
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.motionId === 3, "latest held-movement target revision promoted");
+
+  const delayedC = tilesetRef("stale-c");
+  await delayTileset(page, delayedC);
+  const c = viewData({ sceneEpoch: 3, visualEpoch: 3, mapId: 3, tileset: delayedC });
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: c, player: matchingSprite(c) });
+  await waitForPendingImage(page, delayedC);
+  const d = viewData({ sceneEpoch: 4, visualEpoch: 4, mapId: 4, tileset: tilesetRef("fresh-d") });
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: d, player: matchingSprite(d) });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.sceneEpoch === 4, "newer scene D promoted");
+  await settlePendingImage(page, delayedC, "resolve");
+  assert.equal(await page.evaluate(() => window.__view._acceptedVisualScene.view.sceneEpoch), 4);
+
+  const delayedE = tilesetRef("disconnect-e");
+  await delayTileset(page, delayedE);
+  const e = viewData({ sceneEpoch: 5, visualEpoch: 5, mapId: 5, tileset: delayedE });
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: e, player: matchingSprite(e) });
+  await waitForPendingImage(page, delayedE);
+  await page.evaluate(() => window.__view.remove());
+  await settlePendingImage(page, delayedE, "resolve");
+  await waitUntil(page, () => window.__view._state === "DISPOSED", "staging view disposed");
+  assert.deepEqual(await page.evaluate(() => ({
+    accepted: window.__view._acceptedVisualScene,
+    staging: window.__view._stagingVisualScene,
+    resources: window.__view._owners.size,
+  })), { accepted: undefined, staging: undefined, resources: 0 });
 });
 
 test("static NPC follows the current camera at animation start, midpoint, and end", { timeout: 30_000 }, async (t) => {
@@ -332,7 +568,7 @@ async function waitPainted(page, tileZIndex, spriteZIndex = "65") {
 async function waitForPendingImage(page, ref, host = "__view") {
   const id = identityOf(ref);
   const deadline = Date.now() + 10_000;
-  while (!(await page.evaluate(({ imageId, host: name }) => window[name]._images.has(imageId), { imageId: id, host }))) {
+  while (!(await page.evaluate(({ imageId, host: name }) => window[name === "__sprite" ? "__view" : name]._images.has(imageId), { imageId: id, host }))) {
     if (Date.now() >= deadline) assert.fail(`Timed out waiting for pending image ${id}`);
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -341,10 +577,10 @@ async function waitForPendingImage(page, ref, host = "__view") {
 async function settlePendingImage(page, ref, outcome, host = "__view") {
   const id = identityOf(ref);
   await page.evaluate(async ({ imageId, outcome: next, host: name }) => {
-    const pending = window[name]._images.get(imageId);
+    const pending = window[name === "__sprite" ? "__view" : name]._images.get(imageId);
     const delayed = window.__mapLayering.delayed.get(imageId);
     if (!delayed) throw new Error(`delayed resource missing for ${imageId}`);
-    if (next === "resolve") delayed.resolve({ bytes: name === "__sprite" ? window.__mapLayering.characterBytes : window.__mapLayering.tilesetBytes, mime: "image/png" });
+    if (next === "resolve") delayed.resolve({ bytes: imageId.includes("Characters/") ? window.__mapLayering.characterBytes : window.__mapLayering.tilesetBytes, mime: "image/png" });
     else delayed.reject(new Error("stale tileset failed"));
     if (pending) await pending.then(() => undefined, () => undefined);
     else await delayed.promise.then(() => undefined, () => undefined);
@@ -450,7 +686,7 @@ async function paintAutotile(page, viewPayload) {
 
 async function spritePixel(page, x = 5, y = 5) {
   return page.evaluate(({ x: sampleX, y: sampleY }) => {
-    const canvas = document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas");
+    const canvas = window.__view._acceptedVisualScene.sprites[0].visual;
     return [...canvas.getContext("2d").getImageData(sampleX, sampleY, 1, 1).data];
   }, { x, y });
 }
@@ -537,7 +773,7 @@ async function warmPresentation(page) {
   await waitPainted(page, "0");
   await page.evaluate(async ({ tilesetId, spriteId }) => {
     const tileset = window.__view._images.get(tilesetId);
-    const sprite = window.__sprite._images.get(spriteId);
+    const sprite = window.__view._images.get(spriteId);
     if (!tileset || !sprite) throw new Error("warmPresentation missing decoded images");
     await tileset;
     await sprite;
@@ -876,13 +1112,13 @@ test("walking uses four pattern source rects and swaps at half step", { timeout:
     spritePayload: walkingSprite({ pattern: 1, screenY: 0, fromScreenY: 0, y: 0, fromY: 0 }),
   });
   await waitUntil(page, () => {
-    const canvas = document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas");
+    const canvas = window.__view._acceptedVisualScene?.sprites[0]?.visual;
     if (!canvas) return false;
     const [r, g] = canvas.getContext("2d").getImageData(5, 5, 1, 1).data;
     return r === 0 && g === 255;
   }, "startPattern 1 first half");
   await waitUntil(page, () => {
-    const [r, g, b] = document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data;
+    const [r, g, b] = window.__view._acceptedVisualScene.sprites[0].visual.getContext("2d").getImageData(5, 5, 1, 1).data;
     return r === 0 && g === 0 && b === 255;
   }, "startPattern 1 second half");
 
@@ -894,11 +1130,11 @@ test("walking uses four pattern source rects and swaps at half step", { timeout:
     spritePayload: walkingSprite({ pattern: 3, screenY: 0, fromScreenY: 0, y: 0, fromY: 0, id: 2 }),
   });
   await waitUntil(page, () => {
-    const [r, g] = document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data;
+    const [r, g] = window.__view._acceptedVisualScene.sprites[0].visual.getContext("2d").getImageData(5, 5, 1, 1).data;
     return r === 255 && g === 255;
   }, "startPattern 3 first half");
   await waitUntil(page, () => {
-    const [r, g, b] = document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data;
+    const [r, g, b] = window.__view._acceptedVisualScene.sprites[0].visual.getContext("2d").getImageData(5, 5, 1, 1).data;
     return r === 255 && g === 0 && b === 0;
   }, "startPattern 3 second half");
 });
@@ -950,7 +1186,7 @@ test("standing latest state snaps pattern 0 and cancels motion", { timeout: 30_0
   }, { viewPayload: viewData({ depth: 0 }), spritePayload: spriteData(1) });
   await waitUntil(page, () => {
     const sprite = document.querySelector("lr-map-sprite");
-    const canvas = sprite?.shadowRoot?.querySelector("canvas");
+    const canvas = window.__view._acceptedVisualScene?.sprites[0]?.visual;
     if (!sprite || !canvas) return false;
     const [r, g, b] = canvas.getContext("2d").getImageData(5, 5, 1, 1).data;
     return getComputedStyle(sprite).top === "32px" && sprite._raf === undefined && r === 255 && g === 0 && b === 0;
@@ -1013,7 +1249,7 @@ test("newer walking replaces old motion and standing cancel still wins", { timeo
   }, { viewPayload: viewData({ depth: 0 }), spritePayload: spriteData(2) });
   await waitUntil(page, () => {
     const sprite = document.querySelector("lr-map-sprite");
-    const canvas = sprite?.shadowRoot?.querySelector("canvas");
+    const canvas = window.__view._acceptedVisualScene?.sprites[0]?.visual;
     if (!sprite || !canvas) return false;
     const [r, g, b] = canvas.getContext("2d").getImageData(5, 5, 1, 1).data;
     return getComputedStyle(sprite).top === "64px" && sprite._raf === undefined && r === 255 && g === 0 && b === 0;
@@ -1117,6 +1353,7 @@ test("late tileset decode catches up from receivedAt and skips MapView rAF", { t
     tileset: delayedRef,
     cameraX: 32,
     cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
+    projectionBounds: { minTileX: 1, minTileY: 0, maxTileX: 23, maxTileY: 17 },
     tiles: [regularTile({ x: 1, depth: 0 })],
   });
   await page.evaluate(({ viewPayload: view, spritePayload }) => {
@@ -1490,6 +1727,78 @@ test("motion state machine keeps startedAt for same id/fingerprint and rejects d
   assert.equal(result.latestY, 1);
 });
 
+test("facing-only update paints a new sprite row before the active motion completes", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await warmPresentation(page);
+  const viewPayload = viewData({ depth: 0, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } });
+  const walking = walkingSprite({ id: 1, direction: 2 });
+  await page.evaluate(({ viewPayload: view, spritePayload }) => {
+    window.__facingRecords = [];
+    window.__loomrealmMovementQualification = (record) => window.__facingRecords.push(record);
+    window.__view.receiveRenderData(view);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload, spritePayload: walking });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.motionId === 1, "walking scene accepted");
+  await page.evaluate(() => {
+    const futureStart = performance.now() + 1_000;
+    window.__view._activeMotion.startedAt = futureStart;
+    window.__sprite._activeMotion.startedAt = futureStart;
+    window.__facingBefore = {
+      futureStart,
+      fingerprint: window.__view._activeMotion.fingerprint,
+      spriteFingerprint: window.__sprite._activeMotion.fingerprint,
+      visual: window.__view._acceptedVisualScene.sprites[0].visual,
+      view: structuredClone(window.__view._acceptedVisualScene.view),
+      motion: structuredClone(window.__view._acceptedVisualScene.sprites[0].data.motion),
+    };
+    window.__facingRecords.length = 0;
+  });
+  const acceptedSynchronously = await page.evaluate((spritePayload) => {
+    try {
+      window.__sprite.receiveRenderData({ ...spritePayload, direction: 6 });
+      return true;
+    } catch {
+      return false;
+    }
+  }, walking);
+  assert.equal(acceptedSynchronously, true);
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.sprites[0]?.data.direction === 6
+    && window.__view._acceptedVisualScene.sprites[0].visual._cropKey.includes("|6|"), "right-facing row painted");
+  const result = await page.evaluate(() => {
+    const scene = window.__view._acceptedVisualScene;
+    const received = window.__facingRecords.find((record) => record.name === "presentation-received" && record.detail.element === "map-sprite");
+    const painted = window.__facingRecords.find((record) => record.name === "browser-facing-paint");
+    return {
+      sameVisual: scene.sprites[0].visual === window.__facingBefore.visual,
+      sameView: JSON.stringify(scene.view) === JSON.stringify(window.__facingBefore.view),
+      sameMotion: JSON.stringify(scene.sprites[0].data.motion) === JSON.stringify(window.__facingBefore.motion),
+      startedAtUnchanged: window.__view._activeMotion.startedAt === window.__facingBefore.futureStart,
+      spriteStartedAtUnchanged: window.__sprite._activeMotion.startedAt === window.__facingBefore.futureStart,
+      fingerprintUnchanged: window.__view._activeMotion.fingerprint === window.__facingBefore.fingerprint,
+      spriteFingerprintUnchanged: window.__sprite._activeMotion.fingerprint === window.__facingBefore.spriteFingerprint,
+      direction: scene.sprites[0].data.direction,
+      cropKey: scene.sprites[0].visual._cropKey,
+      receivedAt: received?.at,
+      paintedAt: painted?.at,
+      completesAt: window.__view._activeMotion.startedAt + window.__view._activeMotion.durationMs,
+    };
+  });
+  assert.equal(result.sameVisual, true);
+  assert.equal(result.sameView, true);
+  assert.equal(result.sameMotion, true);
+  assert.equal(result.startedAtUnchanged, true);
+  assert.equal(result.spriteStartedAtUnchanged, true);
+  assert.equal(result.fingerprintUnchanged, true);
+  assert.equal(result.spriteFingerprintUnchanged, true);
+  assert.equal(result.direction, 6);
+  assert.match(result.cropKey, /\|6\|1\|32x32$/);
+  assert.equal(Number.isFinite(result.receivedAt), true);
+  assert.equal(Number.isFinite(result.paintedAt), true);
+  assert.equal(result.receivedAt <= result.paintedAt, true);
+  assert.equal(result.paintedAt < result.completesAt, true);
+});
+
 test("null to null motion snaps without a timeline", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
@@ -1569,6 +1878,111 @@ test("camera-only update keeps tile canvas backing", { timeout: 30_000 }, async 
   assert.equal(info.afterCamera.left, "-32px");
   assert.ok(info.afterRefresh.draws > info.afterCamera.draws, JSON.stringify(info));
   assert.ok(info.afterRefresh.resizes > info.afterCamera.resizes, JSON.stringify(info));
+});
+
+test("exact sparse projectionBounds drive persistent incremental surfaces with bounded structural work", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const makeWindow = (minTileX, visualEpoch, depth = 0) => {
+    const projectionBounds = { minTileX, minTileY: 0, maxTileX: minTileX + 4, maxTileY: 4 };
+    const tiles = [];
+    for (let y = 0; y <= 4; y += 1) {
+      for (let x = minTileX; x <= minTileX + 4; x += 1) tiles.push(regularTile({ x, y, depth }));
+    }
+    return viewData({ mapWidth: 40, mapHeight: 10, cameraX: minTileX * 32, visualEpoch, projectionBounds, tiles });
+  };
+  const first = makeWindow(0, 1);
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: first, player: matchingSprite(first) });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "first exact projection accepted");
+  const before = await page.evaluate(() => {
+    window.__persistentSurface = window.__view._layers[0].canvas;
+    const view = window.__view;
+    return {
+      shifts: view._projectionShifts,
+      allocations: view._surfaceAllocations,
+      resizes: view._surfaceResizes,
+      full: view._fullRasterPasses,
+      dirty: view._dirtyCellDraws,
+      live: view._liveSurfaceCount,
+      size: [view._layers[0].canvas.width, view._layers[0].canvas.height],
+    };
+  });
+  for (let shift = 1; shift <= 20; shift += 1) {
+    const next = makeWindow(shift, shift + 1);
+    await page.evaluate(({ viewPayload, player, expected }) => {
+      window.__expectedProjectionEpoch = expected;
+      window.__view.receiveRenderData(viewPayload);
+      window.__sprite.receiveRenderData(player);
+    }, { viewPayload: next, player: matchingSprite(next), expected: shift + 1 });
+    await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === window.__expectedProjectionEpoch, `projection shift ${shift}`);
+  }
+  const after = await page.evaluate(() => {
+    const view = window.__view;
+    const layer = view._layers[0];
+    const sample = [...layer.context.getImageData(4 * 32 + 8, 4 * 32 + 8, 1, 1).data];
+    return {
+      shifts: view._projectionShifts,
+      allocations: view._surfaceAllocations,
+      resizes: view._surfaceResizes,
+      full: view._fullRasterPasses,
+      dirty: view._dirtyCellDraws,
+      live: view._liveSurfaceCount,
+      sameSurface: layer.canvas === window.__persistentSurface,
+      bounds: view._acceptedVisualScene.view.projectionBounds,
+      sample,
+    };
+  });
+  assert.deepEqual(before.size, [160, 160]);
+  assert.equal(after.shifts - before.shifts, 20);
+  assert.equal(after.allocations, before.allocations);
+  assert.equal(after.resizes, before.resizes);
+  assert.equal(after.full, before.full);
+  assert.equal(after.live, 1);
+  assert.equal(after.sameSurface, true);
+  assert.equal(after.dirty - before.dirty, 20 * 5, "only each entering five-cell strip is redrawn");
+  assert.deepEqual(after.bounds, { minTileX: 20, minTileY: 0, maxTileX: 24, maxTileY: 4 });
+  assert.deepEqual(after.sample, [0, 0, 255, 255]);
+});
+
+test("depth churn recycles through a fixed surface pool instead of growing with traversal distance", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const payload = (index) => viewData({
+    mapWidth: 40,
+    mapHeight: 10,
+    cameraX: index * 32,
+    visualEpoch: index + 1,
+    projectionBounds: { minTileX: index, minTileY: 0, maxTileX: index + 2, maxTileY: 2 },
+    tiles: [regularTile({ x: index, y: 0, depth: index * 32 })],
+  });
+  const first = payload(0);
+  await page.evaluate(({ viewPayload, player }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(player);
+  }, { viewPayload: first, player: matchingSprite(first) });
+  await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === 1, "first depth accepted");
+  for (let index = 1; index <= 20; index += 1) {
+    const next = payload(index);
+    await page.evaluate(({ viewPayload, player, expected }) => {
+      window.__expectedDepthEpoch = expected;
+      window.__view.receiveRenderData(viewPayload);
+      window.__sprite.receiveRenderData(player);
+    }, { viewPayload: next, player: matchingSprite(next), expected: index + 1 });
+    await waitUntil(page, () => window.__view._acceptedVisualScene?.view.visualEpoch === window.__expectedDepthEpoch, `depth churn ${index}`);
+  }
+  const counters = await page.evaluate(() => ({
+    shifts: window.__view._projectionShifts,
+    allocations: window.__view._surfaceAllocations,
+    resizes: window.__view._surfaceResizes,
+    full: window.__view._fullRasterPasses,
+    live: window.__view._liveSurfaceCount,
+    active: window.__view._layers.length,
+    pool: window.__view._surfacePool.length,
+  }));
+  assert.deepEqual(counters, { shifts: 20, allocations: 2, resizes: 2, full: 1, live: 2, active: 1, pool: 1 });
 });
 
 test("camera-only resize fast path commits new origin, underlay, canvases, and sprite together", { timeout: 30_000 }, async (t) => {
@@ -1900,10 +2314,11 @@ test("scene A to B to C evicts stale bitmaps and keeps the resource cache bounde
     owners: [...window.__view._owners.entries()].map(([identity, owners]) => [identity, [...owners]]),
     closes: window.__bitmapCloses,
   }));
-  assert.equal(cache.images.length, 1);
-  assert.equal(cache.bitmaps.length, 1);
-  assert.ok(cache.images[0].includes("v3"));
-  assert.ok(cache.bitmaps[0].includes("v3"));
+  assert.equal(cache.images.length, 2);
+  assert.equal(cache.bitmaps.length, 2);
+  assert.ok(cache.images.some((identity) => identity.includes("Tilesets/blue") && identity.includes("v3")));
+  assert.ok(cache.bitmaps.some((identity) => identity.includes("Tilesets/blue") && identity.includes("v3")));
+  assert.ok(cache.images.some((identity) => identity.includes("Characters/red")), "accepted sprite resources are view-owned");
   assert.ok(cache.closes >= 2, JSON.stringify(cache));
   assert.ok(cache.owners.every(([, owners]) => owners.includes("accepted")));
 });
@@ -1946,7 +2361,8 @@ test("stale superseded candidate bitmap is closed and cannot overwrite accepted"
     closes: window.__bitmapCloses,
   }));
   assert.equal(after.visualEpoch, 2);
-  assert.ok(after.images.every((identity) => identity.includes("new")));
+  assert.ok(after.images.some((identity) => identity.includes("Tilesets/blue") && identity.includes("new")));
+  assert.equal(after.images.some((identity) => identity.includes("old")), false);
   assert.ok(after.closes >= 1, JSON.stringify(after));
 });
 
@@ -1973,6 +2389,10 @@ test("closed Map schema rejects extra keys, illegal or unordered tiles, and came
   assert.equal((await throwsReceive(page, wrongTuple)).threw, true);
   const legacyField = { ...base, chunks: [] };
   assert.equal((await throwsReceive(page, legacyField)).threw, true);
+  const { projectionBounds: omittedBounds, ...missingBounds } = base;
+  assert.equal((await throwsReceive(page, missingBounds)).threw, true);
+  assert.equal((await throwsReceive(page, { ...base, projectionBounds: { ...base.projectionBounds, extra: 1 } })).threw, true);
+  assert.equal((await throwsReceive(page, { ...base, projectionBounds: { minTileX: 1, minTileY: 0, maxTileX: 2, maxTileY: 2 } })).threw, true, "sparse tiles outside exact bounds are rejected rather than used to infer a rectangle");
   const camera = await throwsReceive(page, { ...base, cameraX: base.mapWidth * 32 });
   assert.equal(camera.threw, true);
   assert.equal(await page.evaluate(() => window.__view._accepted), undefined);

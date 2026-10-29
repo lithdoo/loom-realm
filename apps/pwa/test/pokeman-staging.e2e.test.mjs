@@ -5,6 +5,12 @@ import { openProduct } from "./helpers/browser.mjs";
 import { createPokeManRoutePlanner } from "./helpers/pokeman.mjs";
 
 const initial = Object.freeze({ mapId: 3, x: 3, y: 8, direction: 2 });
+const movements = Object.freeze([
+  Object.freeze({ direction: 2, code: "ArrowDown", dx: 0, dy: 1 }),
+  Object.freeze({ direction: 4, code: "ArrowLeft", dx: -1, dy: 0 }),
+  Object.freeze({ direction: 6, code: "ArrowRight", dx: 1, dy: 0 }),
+  Object.freeze({ direction: 8, code: "ArrowUp", dx: 0, dy: -1 }),
+]);
 
 async function waitForMap(page, target) {
   await page.waitForFunction((state) => {
@@ -27,6 +33,102 @@ async function act(page, steps) {
     await waitForMap(page, step.expected);
   }
   return steps.at(-1)?.expected;
+}
+
+function responsiveFacingPlan(planner, state) {
+  for (const first of movements) {
+    const afterFirst = planner.transition(state, first);
+    if (afterFirst.mapId !== state.mapId || Math.abs(afterFirst.x - state.x) + Math.abs(afterFirst.y - state.y) !== 1) continue;
+    for (const second of movements) {
+      if (first.dx * second.dx + first.dy * second.dy !== 0) continue;
+      const afterSecond = planner.transition(afterFirst, second);
+      if (afterSecond.mapId === state.mapId && Math.abs(afterSecond.x - afterFirst.x) + Math.abs(afterSecond.y - afterFirst.y) === 1) {
+        return { first, second, afterFirst, afterSecond };
+      }
+    }
+  }
+  throw new Error(`No perpendicular staging route from ${JSON.stringify(state)}`);
+}
+
+async function installAtomicPromoteProbe(page) {
+  await page.evaluate(() => {
+    const view = document.querySelector("lr-map-view");
+    const originalCommit = view._commitAtomic.bind(view);
+    window.__stagingAtomicPromotes = [];
+    view._commitAtomic = function (prepared, sequence) {
+      const oldScene = this._acceptedVisualScene;
+      const replacement = oldScene && oldScene.view.sceneEpoch !== prepared.view.sceneEpoch;
+      const oldVisuals = oldScene?.sprites.map((entry) => entry.visual).filter(Boolean) ?? [];
+      const incomingVisuals = prepared.sprites.map((entry) => entry.visual).filter(Boolean);
+      const before = replacement ? {
+        oldMapId: oldScene.view.mapId,
+        targetMapId: prepared.view.mapId,
+        oldNpcCount: Math.max(0, oldVisuals.length - 1),
+        oldCount: oldVisuals.length,
+        targetCount: incomingVisuals.length,
+        oldVisible: oldVisuals.every((visual) => visual.isConnected && !visual.hidden),
+        targetDetached: incomingVisuals.length === this._spriteChildren().length && incomingVisuals.every((visual) => !visual.isConnected),
+        visibleBefore: this.shadowRoot.querySelectorAll("canvas.sprite-visual:not([hidden])").length,
+      } : null;
+      const result = originalCommit(prepared, sequence);
+      if (before && this._acceptedVisualScene === prepared) {
+        window.__stagingAtomicPromotes.push({
+          ...before,
+          visibleAfter: this.shadowRoot.querySelectorAll("canvas.sprite-visual:not([hidden])").length,
+          oldReleased: oldVisuals.every((visual) => !visual.isConnected),
+          targetVisible: incomingVisuals.every((visual) => visual.isConnected && !visual.hidden),
+        });
+      }
+      return result;
+    };
+  });
+}
+
+async function qualifyResponsiveFacing(page, planner, state) {
+  const plan = responsiveFacingPlan(planner, state);
+  await page.keyboard.down(plan.first.code);
+  await page.waitForFunction((target) => {
+    const player = document.querySelector("lr-map-sprite")?._latestData;
+    return player?.motion !== null && player.x === target.x && player.y === target.y && player.direction === target.direction;
+  }, plan.afterFirst, { timeout: 25_000 });
+  const before = await page.evaluate(() => {
+    const view = document.querySelector("lr-map-view");
+    const visual = view._acceptedVisualScene.sprites[0].visual;
+    window.__stagingFacingVisual = visual;
+    return {
+      player: structuredClone(document.querySelector("lr-map-sprite")._latestData),
+      view: structuredClone(view._latestData),
+      startedAt: view._activeMotion.startedAt,
+    };
+  });
+  await page.keyboard.down(plan.second.code);
+  await page.waitForFunction(({ direction, motionId }) => {
+    const view = document.querySelector("lr-map-view");
+    const player = document.querySelector("lr-map-sprite")?._latestData;
+    return player?.direction === direction && player.motionId === motionId
+      && view?._acceptedVisualScene?.sprites[0]?.visual?._cropKey.includes(`|${direction}|`);
+  }, { direction: plan.second.direction, motionId: before.player.motionId }, { timeout: 25_000 });
+  const facing = await page.evaluate(() => {
+    const view = document.querySelector("lr-map-view");
+    return {
+      player: structuredClone(document.querySelector("lr-map-sprite")._latestData),
+      view: structuredClone(view._latestData),
+      startedAt: view._activeMotion.startedAt,
+      sameVisual: view._acceptedVisualScene.sprites[0].visual === window.__stagingFacingVisual,
+    };
+  });
+  assert.deepEqual({ ...facing.player, direction: before.player.direction }, before.player);
+  assert.deepEqual(facing.view, before.view);
+  assert.equal(facing.startedAt, before.startedAt);
+  assert.equal(facing.sameVisual, true);
+  await page.keyboard.up(plan.first.code);
+  await page.waitForFunction(({ motionId, target }) => {
+    const player = document.querySelector("lr-map-sprite")?._latestData;
+    return player?.motionId !== null && player.motionId !== motionId && player.x === target.x && player.y === target.y;
+  }, { motionId: before.player.motionId, target: plan.afterSecond }, { timeout: 25_000 });
+  await page.keyboard.up(plan.second.code);
+  await waitForMap(page, plan.afterSecond);
+  return plan.afterSecond;
 }
 
 async function waitForDialogue(page, text) {
@@ -133,9 +235,11 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     assert.equal(map.value.tileset_id, 3);
     assert.equal(map.value.width, 31);
 
-    const map2 = planner.planToMap(initial, 2);
-    assert.equal(map2.length, 1);
-    let state = await act(page, map2);
+    await installAtomicPromoteProbe(page);
+    let state = await qualifyResponsiveFacing(page, planner, initial);
+    const map2 = planner.planToMap(state, 2);
+    assert.ok(map2.length > 0);
+    state = await act(page, map2);
     assert.equal(state.mapId, 2);
 
     const collision = planner.planNpcCollision(state);
@@ -148,20 +252,39 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
 
     const toMap4 = planner.planToMap(state, 4);
     state = await act(page, toMap4);
+    await page.waitForFunction(() => document.querySelector("lr-map-view")?._acceptedVisualScene?.view.mapId === 4, null, { timeout: 25_000 });
+    const atomicPromotes = await page.evaluate(() => window.__stagingAtomicPromotes);
+    assert.ok(atomicPromotes.length >= 2, `staging must observe the real 3->2 and 2->4 scene promotes: ${JSON.stringify(atomicPromotes)}`);
+    assert.equal(atomicPromotes.some((record) => record.oldNpcCount > 0), true);
+    for (const record of atomicPromotes) {
+      assert.equal(record.oldVisible, true, `${record.oldMapId}->${record.targetMapId}: old pixels remain visible until promote`);
+      assert.equal(record.targetDetached, true, `${record.oldMapId}->${record.targetMapId}: target pixels are complete before promote`);
+      assert.equal(record.visibleBefore, record.oldCount);
+      assert.equal(record.visibleAfter, record.targetCount);
+      assert.equal(record.oldReleased, true);
+      assert.equal(record.targetVisible, true);
+    }
     const professor = planner.planNpcCollision(state);
     assert.equal(professor.npc.instanceId, "professor");
     if (professor.travel.length > 0) state = await act(page, professor.travel);
     state = await act(page, [professor.collision]);
 
     // The real staging build must contain the updated v1.1 Presentation.
-    const stagedDialogue = await page.evaluate(async (id) => {
-      const response = await fetch(`/pwa/pokeman/_lr/v1/games/${encodeURIComponent(id)}/resources/resource.Presentation/dialogue/dialogue.browser.js`);
-      return { status: response.status, body: await response.text() };
+    const stagedPresentation = await page.evaluate(async (id) => {
+      const load = async (key) => {
+        const response = await fetch(`/pwa/pokeman/_lr/v1/games/${encodeURIComponent(id)}/resources/resource.Presentation/${key}`);
+        return { status: response.status, body: await response.text() };
+      };
+      return { dialogue: await load("dialogue/dialogue.browser.js"), map: await load("map/map.browser.js") };
     }, installationId);
-    assert.equal(stagedDialogue.status, 200);
-    assert.match(stagedDialogue.body, /_shellPresented/, "staged Presentation must carry the v1.1 shell latch");
-    assert.match(stagedDialogue.body, /setInteractionActive/, "staged Presentation must carry the v1.1 interaction gate");
-    assert.match(stagedDialogue.body, /30% minmax\(0, 70%\)/, "staged Presentation must carry the v1.1 30/70 layout");
+    assert.equal(stagedPresentation.dialogue.status, 200);
+    assert.match(stagedPresentation.dialogue.body, /_shellPresented/, "staged Presentation must carry the v1.1 shell latch");
+    assert.match(stagedPresentation.dialogue.body, /setInteractionActive/, "staged Presentation must carry the v1.1 interaction gate");
+    assert.match(stagedPresentation.dialogue.body, /30% minmax\(0, 70%\)/, "staged Presentation must carry the v1.1 30/70 layout");
+    assert.equal(stagedPresentation.map.status, 200);
+    assert.match(stagedPresentation.map.body, /_acceptedVisualScene/, "staged Map must own accepted visual scenes");
+    assert.match(stagedPresentation.map.body, /projectionBounds/, "staged Map must carry exact projection bounds");
+    assert.match(stagedPresentation.map.body, /browser-facing-paint/, "staged Map must carry responsive-facing qualification paint");
 
     await page.evaluate(() => {
       window.__stagingMapBeforeDialogue = document.querySelector("lr-map-view");

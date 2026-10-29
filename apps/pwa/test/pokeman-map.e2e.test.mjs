@@ -12,6 +12,13 @@ const executablePaths = Object.freeze({
   dialogue: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-dialogue-subsystem.mjs"),
 });
 
+const movements = Object.freeze([
+  Object.freeze({ direction: 2, code: "ArrowDown", dx: 0, dy: 1 }),
+  Object.freeze({ direction: 4, code: "ArrowLeft", dx: -1, dy: 0 }),
+  Object.freeze({ direction: 6, code: "ArrowRight", dx: 1, dy: 0 }),
+  Object.freeze({ direction: 8, code: "ArrowUp", dx: 0, dy: -1 }),
+]);
+
 async function mapSnapshot(page) {
   return page.evaluate(() => {
     const view = document.querySelector("lr-map-view");
@@ -53,6 +60,124 @@ async function runActions(page, actions, history) {
     await waitForState(page, action.expected);
   }
   return actions.at(-1)?.expected ?? null;
+}
+
+function responsiveFacingPlan(planner, state) {
+  for (const first of movements) {
+    const afterFirst = planner.transition(state, first);
+    if (afterFirst.mapId !== state.mapId || Math.abs(afterFirst.x - state.x) + Math.abs(afterFirst.y - state.y) !== 1) continue;
+    for (const second of movements) {
+      if (first.dx * second.dx + first.dy * second.dy !== 0) continue;
+      const afterSecond = planner.transition(afterFirst, second);
+      if (afterSecond.mapId === state.mapId && Math.abs(afterSecond.x - afterFirst.x) + Math.abs(afterSecond.y - afterFirst.y) === 1) {
+        return { first, second, afterFirst, afterSecond };
+      }
+    }
+  }
+  throw new Error(`No perpendicular facing qualification route from ${JSON.stringify(state)}`);
+}
+
+async function installMapContinuityProbe(page) {
+  await page.evaluate(() => {
+    const view = document.querySelector("lr-map-view");
+    const originalCommit = view._commitAtomic.bind(view);
+    window.__mapAtomicPromotes = [];
+    window.__mapFacingRecords = [];
+    const previousQualification = window.__loomrealmMovementQualification;
+    window.__loomrealmMovementQualification = (record) => {
+      if (typeof previousQualification === "function") previousQualification(record);
+      window.__mapFacingRecords.push(record);
+    };
+    view._commitAtomic = function (prepared, sequence) {
+      const oldScene = this._acceptedVisualScene;
+      const replacement = oldScene && oldScene.view.sceneEpoch !== prepared.view.sceneEpoch;
+      const oldVisuals = oldScene?.sprites.map((entry) => entry.visual).filter(Boolean) ?? [];
+      const incomingVisuals = prepared.sprites.map((entry) => entry.visual).filter(Boolean);
+      const before = replacement ? {
+        oldMapId: oldScene.view.mapId,
+        targetMapId: prepared.view.mapId,
+        oldSpriteCount: oldVisuals.length,
+        oldNpcCount: Math.max(0, oldVisuals.length - 1),
+        targetSpriteCount: incomingVisuals.length,
+        oldCompleteAndVisible: oldVisuals.every((visual) => visual.isConnected && !visual.hidden),
+        targetCompleteAndDetached: incomingVisuals.length === this._spriteChildren().length
+          && incomingVisuals.every((visual) => !visual.isConnected),
+        visibleBefore: this.shadowRoot.querySelectorAll("canvas.sprite-visual:not([hidden])").length,
+        stagingEpoch: this._stagingVisualScene?.sceneEpoch ?? null,
+      } : null;
+      const result = originalCommit(prepared, sequence);
+      if (before && this._acceptedVisualScene === prepared) {
+        window.__mapAtomicPromotes.push({
+          ...before,
+          visibleAfter: this.shadowRoot.querySelectorAll("canvas.sprite-visual:not([hidden])").length,
+          targetAccepted: this._acceptedVisualScene.view.sceneEpoch === prepared.view.sceneEpoch,
+          oldReleased: oldVisuals.every((visual) => !visual.isConnected),
+          targetVisible: incomingVisuals.every((visual) => visual.isConnected && !visual.hidden),
+        });
+      }
+      return result;
+    };
+  });
+}
+
+async function qualifyResponsiveFacing(page, planner, state, history) {
+  const plan = responsiveFacingPlan(planner, state);
+  history.push({ code: `${plan.first.code}(down)`, expected: plan.afterFirst });
+  await page.keyboard.down(plan.first.code);
+  await page.waitForFunction((target) => {
+    const player = document.querySelector("lr-map-sprite")?._latestData;
+    return player?.motion !== null && player?.x === target.x && player?.y === target.y && player?.direction === target.direction;
+  }, plan.afterFirst, { timeout: 20_000 });
+  const before = await page.evaluate(() => {
+    const view = document.querySelector("lr-map-view");
+    const player = document.querySelector("lr-map-sprite")._latestData;
+    const visual = view._acceptedVisualScene.sprites[0].visual;
+    window.__responsiveFacingVisual = visual;
+    window.__mapFacingRecords.length = 0;
+    return {
+      player: structuredClone(player),
+      view: structuredClone(view._latestData),
+      startedAt: view._activeMotion.startedAt,
+      cropKey: visual._cropKey,
+    };
+  });
+  await page.keyboard.down(plan.second.code);
+  await page.waitForFunction(({ direction, motionId }) => {
+    const view = document.querySelector("lr-map-view");
+    const player = document.querySelector("lr-map-sprite")?._latestData;
+    const visual = view?._acceptedVisualScene?.sprites[0]?.visual;
+    return player?.direction === direction && player?.motionId === motionId && visual?._cropKey.includes(`|${direction}|`)
+      && window.__mapFacingRecords.some((record) => record.name === "browser-facing-paint" && record.detail.direction === direction);
+  }, { direction: plan.second.direction, motionId: before.player.motionId }, { timeout: 20_000 });
+  const facing = await page.evaluate(() => {
+    const view = document.querySelector("lr-map-view");
+    const player = document.querySelector("lr-map-sprite")._latestData;
+    const visual = view._acceptedVisualScene.sprites[0].visual;
+    const paint = window.__mapFacingRecords.find((record) => record.name === "browser-facing-paint");
+    return {
+      player: structuredClone(player),
+      view: structuredClone(view._latestData),
+      sameVisual: visual === window.__responsiveFacingVisual,
+      startedAt: view._activeMotion.startedAt,
+      paintAt: paint.at,
+    };
+  });
+  assert.deepEqual({ ...facing.player, direction: before.player.direction }, before.player, "facing-only update must preserve the committed trajectory");
+  assert.deepEqual(facing.view, before.view, "facing-only update must not mutate MapView trajectory or projection facts");
+  assert.equal(facing.sameVisual, true);
+  assert.equal(facing.startedAt, before.startedAt, "facing-only update must preserve the active Browser timeline");
+  await page.keyboard.up(plan.first.code);
+  await page.waitForFunction(({ motionId, target }) => {
+    const player = document.querySelector("lr-map-sprite")?._latestData;
+    return player?.motionId !== null && player.motionId !== motionId && player.x === target.x && player.y === target.y;
+  }, { motionId: before.player.motionId, target: plan.afterSecond }, { timeout: 20_000 });
+  const nextReceivedAt = await page.evaluate((motionId) => window.__mapFacingRecords.find((record) => record.name === "presentation-received"
+    && record.detail.element === "map-sprite" && record.detail.motionId !== motionId)?.at, before.player.motionId);
+  assert.equal(facing.paintAt < nextReceivedAt, true, "first facing paint must precede current-step completion/next-step presentation");
+  await page.keyboard.up(plan.second.code);
+  await waitForState(page, plan.afterSecond);
+  history.push({ code: `${plan.second.code}(active facing)`, expected: plan.afterSecond });
+  return plan.afterSecond;
 }
 
 async function assertNpcProjection(page, mapId) {
@@ -222,11 +347,15 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     });
     await assertNpcProjection(page, 3);
 
+    await installMapContinuityProbe(page);
+    let state = await qualifyResponsiveFacing(page, planner, initial, history);
+    assert.equal(state.mapId, 3);
+
     // The initial contact transfer must enter Map 2 once and remain there,
     // rather than immediately bouncing back to Map 3.
-    const toMap2 = planner.planToMap(initial, 2);
-    assert.equal(toMap2.length, 1);
-    let state = await runActions(page, toMap2, history);
+    const toMap2 = planner.planToMap(state, 2);
+    assert.ok(toMap2.length > 0);
+    state = await runActions(page, toMap2, history);
     await page.waitForTimeout(500);
     let observed = await mapSnapshot(page);
     assert.deepEqual({ mapId: observed.mapId, x: observed.player.x, y: observed.player.y }, { mapId: 2, x: 8, y: 7 });
@@ -320,6 +449,41 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
       assert.equal(observed.failure, null);
       if ([4, 5, 7, 8].includes(targetMapId)) await assertNpcProjection(page, targetMapId);
     }
+
+    const longTraversal = planner.planDistance(state, 20);
+    assert.ok(longTraversal.length >= 20, "Map 7 qualification must cross multiple projection boundaries");
+    state = await runActions(page, longTraversal, history);
+    const continuity = await page.evaluate(() => {
+      const view = document.querySelector("lr-map-view");
+      return {
+        promotes: window.__mapAtomicPromotes,
+        surfaces: {
+          shifts: view._projectionShifts,
+          allocations: view._surfaceAllocations,
+          resizes: view._surfaceResizes,
+          fullPasses: view._fullRasterPasses,
+          live: view._liveSurfaceCount,
+          liveSet: view._liveSurfaces.size,
+          active: view._layers.length,
+          pool: view._surfacePool.length,
+        },
+      };
+    });
+    assert.ok(continuity.promotes.length >= 6, "real route must observe every cross-map atomic promote");
+    assert.equal(continuity.promotes.some((record) => record.oldNpcCount > 0), true, "at least one transfer must retain old NPC pixels");
+    for (const record of continuity.promotes) {
+      assert.equal(record.oldCompleteAndVisible, true, `${record.oldMapId}->${record.targetMapId}: old scene must remain complete before promote`);
+      assert.equal(record.targetCompleteAndDetached, true, `${record.oldMapId}->${record.targetMapId}: target scene must be complete and detached before promote`);
+      assert.equal(record.visibleBefore, record.oldSpriteCount);
+      assert.equal(record.visibleAfter, record.targetSpriteCount);
+      assert.equal(record.targetAccepted, true);
+      assert.equal(record.oldReleased, true);
+      assert.equal(record.targetVisible, true);
+    }
+    assert.ok(continuity.surfaces.shifts >= 2, "long Map 7 traversal must perform multiple incremental projection shifts");
+    assert.equal(continuity.surfaces.live, continuity.surfaces.liveSet);
+    assert.ok(continuity.surfaces.pool <= 4, "surface reuse pool must remain fixed-budget");
+    assert.ok(continuity.surfaces.live <= continuity.surfaces.active + 4, "live surfaces must be bounded by active depths plus the pool budget");
 
     const routes = await page.evaluate(async (id) => {
       const requests = {

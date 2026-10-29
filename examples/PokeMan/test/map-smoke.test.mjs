@@ -74,6 +74,20 @@ test("Map and Dialogue presentation are resolved from PokeMan Content resources"
   await access(new URL("[resource]Presentation/page.css.css", fsdbRoot));
 });
 
+test("PokeMan carries the exact generic RPGMap v1.1 Presentation without a product-only movement workaround", async () => {
+  const source = await readFile(new URL("../../game-libs/map/browser/map.browser.js", root));
+  const generated = await readFile(new URL("[resource]Presentation/map/map.browser.js.js", fsdbRoot));
+  assert.deepEqual(generated, source, "checked-in PokeMan Map Presentation must exactly match the generic source");
+  const presentation = source.toString("utf8");
+  assert.match(presentation, /_acceptedVisualScene/);
+  assert.match(presentation, /_rasterIncremental/);
+  assert.match(presentation, /projectionBounds/);
+  assert.match(presentation, /browser-facing-paint/);
+  const productMap = await readFile(new URL("subsystems/map.mjs", root), "utf8");
+  assert.doesNotMatch(productMap, /activeMove|travelDirection|facingDirection|browser-facing-paint/,
+    "responsive facing and trajectory continuity must remain generic RPGMap authority");
+});
+
 test("the required maps have valid dimensions and resolvable tileset graphics", async () => {
   for (const mapId of requiredMapIds) {
     const map = await json(`[FSDB]PokeMan/[struct]Map/${mapId}.json`);

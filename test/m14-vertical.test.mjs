@@ -248,11 +248,11 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
   await waitFor(() => activeMapControls && mapRoot(latestView)?.data?.viewportWidth === 800, "initial map Render state");
   await browserDelivery;
   await waitFor(async () => (await sampleVisibleTilePixel(page, 400, 268))[3] === 255, "initial Canvas paint");
-  await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas")?.getContext("2d")?.getImageData(5, 5, 1, 1).data[3] === 255), "initial player paint");
+  await waitFor(() => page.evaluate(() => document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.sprite-visual")?.getContext("2d")?.getImageData(5, 5, 1, 1).data[3] === 255), "initial player paint");
   const initial = await page.evaluate(async () => {
     const view = document.querySelector("lr-map-view"); const sprite = document.querySelector("lr-map-sprite");
     view.instance = 1; sprite.instance = 2;
-    return { size: [getComputedStyle(view).width, getComputedStyle(view).height], children: view.children.length, tags: [view.tagName, sprite.tagName], player: [...sprite.shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data] };
+    return { size: [getComputedStyle(view).width, getComputedStyle(view).height], children: view.children.length, tags: [view.tagName, sprite.tagName], player: [...view.shadowRoot.querySelector("canvas.sprite-visual").getContext("2d").getImageData(5, 5, 1, 1).data] };
   });
   initial.tile = await sampleVisibleTilePixel(page, 400, 268);
   assert.deepEqual(initial.size, ["800px", "600px"]); assert.equal(initial.children, 2); assert.deepEqual(initial.tags, ["LR-MAP-VIEW", "LR-MAP-SPRITE"]); assert.deepEqual(initial.tile, fixture.expectedPixels.tile385); assert.deepEqual(initial.player, fixture.expectedPixels.playerDown);
@@ -269,8 +269,8 @@ test("M14 checked-in game traverses Main, Presentation Events, Render, Content a
   activeMapControls.setMoveIntent(null);
   const moved = mapRoot(latestView);
   assert.equal(moved.data.cameraX, 0); assert.deepEqual([moved.children[0].data.screenX, moved.children[0].data.screenY, moved.children[0].data.direction], [352, 256, 6]);
-  await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data[2] === 240), "right-facing player crop");
-  assert.deepEqual(await page.evaluate(() => [...document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data]), fixture.expectedPixels.playerRight);
+  await waitFor(() => page.evaluate(() => document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.sprite-visual")?.getContext("2d")?.getImageData(5, 5, 1, 1).data[2] === 240), "right-facing player crop");
+  assert.deepEqual(await page.evaluate(() => [...document.querySelector("lr-map-view").shadowRoot.querySelector("canvas.sprite-visual").getContext("2d").getImageData(5, 5, 1, 1).data]), fixture.expectedPixels.playerRight);
   assert.deepEqual(await page.evaluate(() => [document.querySelector("lr-map-view").instance, document.querySelector("lr-map-sprite").instance]), [1, 2]);
   activeMapControls.setMoveIntent(6);
   await waitFor(() => mapRoot(latestView)?.children[0]?.data?.direction === 6, "blocked movement render"); await new Promise((resolve) => setTimeout(resolve, 20));
@@ -335,7 +335,10 @@ test("map view clears full state and delayed same-resource decode paints only la
   const page = await browser.newPage(); await page.goto(server.origin);
   await page.addScriptTag({ url: `${server.origin}/presentation/map/map.browser.js` });
   const result = await evaluateWithTimeout(page, async ({ bytes, version }) => {
-    const view = document.createElement("lr-map-view"); document.body.append(view);
+    const view = document.createElement("lr-map-view");
+    const sprite = document.createElement("lr-map-sprite");
+    view.append(sprite);
+    document.body.append(view);
     let release; const gate = new Promise((resolve) => { release = resolve; });
     view.receiveRenderContext({ resources: { async resource() { await gate; return { bytes: Uint8Array.from(bytes), mime: "image/png", contentVersion: version }; } } });
     const tileset = { namespace: "resource.Graphics", key: "Tilesets/m14_tileset", contentVersion: version };
@@ -349,11 +352,18 @@ test("map view clears full state and delayed same-resource decode paints only la
         scaleX: 1, scaleY: 1, mapName: "1",
         mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0,
         tileset, autotiles,
+        projectionBounds: { minTileX: localX, minTileY: 0, maxTileX: localX, maxTileY: 0 },
         tiles: sourceIndex === null ? [] : [[localX, 0, 0, tileId, 0]],
         cameraMotion: null,
         bridgeLevel: 0,
       };
     };
+    const spritePayload = (visualEpoch) => ({
+      sceneEpoch: 1, visualEpoch, motionId: null,
+      x: 0, y: 0, screenX: 0, screenY: 0,
+      direction: 2, pattern: 0, sprite: tileset,
+      motion: null, bridgeLevel: 0,
+    });
     const sample = (sx, sy) => {
       const canvases = [...view.shadowRoot.querySelectorAll("canvas.tile-layer")].filter((canvas) => !canvas.hidden);
       for (const canvas of canvases) {
@@ -392,7 +402,9 @@ test("map view clears full state and delayed same-resource decode paints only la
       }
     };
     view.receiveRenderData(viewPayload(1, 0, 384, 0));
+    sprite.receiveRenderData(spritePayload(1));
     view.receiveRenderData(viewPayload(2, 1, 385, 1));
+    sprite.receiveRenderData(spritePayload(2));
     release();
     const latest = await waitForSample(
       () => sample(37, 5),
@@ -401,6 +413,7 @@ test("map view clears full state and delayed same-resource decode paints only la
     );
     const stale = sample(5, 5);
     view.receiveRenderData(viewPayload(3, 0, 0, null));
+    sprite.receiveRenderData(spritePayload(3));
     const cleared = await waitForSample(
       () => sample(37, 5),
       (pixel) => pixel[3] === 0,

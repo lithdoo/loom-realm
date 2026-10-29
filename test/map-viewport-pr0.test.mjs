@@ -309,6 +309,7 @@ function projectCurrentMapView({
     cameraY: camera.cameraY,
     tileset: resourceRef(`Tilesets/${tileset.tileset_name}`),
     autotiles: tileset.autotile_names.map((name) => (name === null ? null : resourceRef(`Autotiles/${name}`))),
+    projectionBounds: bounds,
     tiles,
     cameraMotion,
     bridgeLevel: 0,

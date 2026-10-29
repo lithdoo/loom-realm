@@ -111,6 +111,7 @@ test("Map and Dialogue coexist through retained WebProjector domains without dis
         node("history-intro", "lr-dialogue-history-entry", { "entry-id": "intro", "speaker-name": "博士", text: "欢迎" }),
       ]),
     ]);
+    const mapResource = { namespace: "resource.Graphics", key: "Tilesets/Poke Centre interior", contentVersion: expectedTilesetVersion };
     const mapRoot = node("viewport", "lr-map-view", {}, {
       sceneEpoch: 1,
       visualEpoch: 1,
@@ -132,12 +133,26 @@ test("Map and Dialogue coexist through retained WebProjector domains without dis
       mapHeight: 21,
       cameraX: 0,
       cameraY: 0,
-      tileset: { namespace: "resource.Graphics", key: "Tilesets/Poke Centre interior", contentVersion: expectedTilesetVersion },
+      tileset: mapResource,
       autotiles: [null, null, null, null, null, null, null],
+      projectionBounds: { minTileX: 0, minTileY: 0, maxTileX: 39, maxTileY: 20 },
       tiles: [[0, 0, 0, 387, 0]],
       cameraMotion: null,
       bridgeLevel: 0,
-    });
+    }, [node("player", "lr-map-sprite", {}, {
+      sceneEpoch: 1,
+      visualEpoch: 1,
+      motionId: null,
+      x: 0,
+      y: 0,
+      screenX: 0,
+      screenY: 0,
+      direction: 2,
+      pattern: 0,
+      sprite: mapResource,
+      motion: null,
+      bridgeLevel: 0,
+    })]);
     let revision = 1;
     let includeDialogue = true;
     const snapshot = () => ({
