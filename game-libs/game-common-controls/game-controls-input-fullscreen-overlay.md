@@ -99,8 +99,8 @@ void document.exitFullscreen().catch(showFullscreenError);
 ### 2.4 状态同步与关闭
 
 - 监听 `document.fullscreenchange`，以 `document.fullscreenElement` 为唯一权威状态。
-- 用户按钮操作成功导致状态变化后，关闭遮罩层；若产品交互要求面板在切换后继续显示，则必须先完成 top-layer 重排，再更新按钮状态。
-- 本提案选择保持面板显示：fullscreenchange 后同步进入/退出按钮状态，并检查 dialog 是否仍在 top layer 最上方；必要时调用 `close()` 后立即 `showModal()` 以重新排到 fullscreen element 之上，同时恢复当前可用按钮焦点。该重排不得被当作用户主动关闭。
+- 用户按钮操作成功导致状态变化后，遮罩层保持显示，直到用户通过 Escape 或点击背景明确关闭；fullscreenchange 后同步进入/退出按钮状态。
+- 同时检查 dialog 是否仍在 top layer 最上方；必要时调用 `close()` 后立即 `showModal()` 以重新排到 fullscreen element 之上，并恢复当前可用按钮焦点。该重排不得被当作用户主动关闭。
 - 如果用户通过浏览器 Esc 等方式改变全屏状态，先同步实际全屏状态，再按上述规则确保 dialog 的层级正确；用户可通过 Escape 或背景点击明确关闭面板。
 - 监听 `fullscreenerror`（若支持）并处理 Promise rejection；错误时遮罩层保持可见，供用户重试或关闭。
 - 不把全屏状态写入 `controls.state`、`controls.event` 或任何游戏业务状态。
