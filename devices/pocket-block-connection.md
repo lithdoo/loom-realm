@@ -24,38 +24,70 @@
 
 ## 3. 连接方式
 
-### 方式 A：局域网（mDNS，IP 会变，以 mDNS 为准）
+### 3.1 推荐流程：ZeroTier 探路 → 内网优先，ZeroTier 兜底
+
+思路：ZeroTier 地址固定（172.24.0.139），内网快但 IP 会变。先用 ZeroTier 建立通道，读出掌机当前的内网 IP，内网能通就切内网并断开 ZeroTier；内网不通就留在 ZeroTier。全程只保留一条 transport，后续命令免 `-s` 纠结。
 
 ```powershell
-& C:\Users\lithd\platform-tools\adb.exe mdns services
+$adb = "C:\Users\lithd\platform-tools\adb.exe"
+
+# 1) 先连固定的 ZeroTier 地址
+& $adb connect 172.24.0.139:5555
+
+# 2) 经 ZeroTier 通道读掌机 wlan0 的内网 IP（会变，勿硬编码）
+$lan = (& $adb -s 172.24.0.139:5555 shell "ip -f inet addr show wlan0" |
+    Select-String -Pattern 'inet\s+(\d+\.\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
+# → 形如 192.168.31.x
+
+# 3) 尝试内网直连并验证
+& $adb connect "${lan}:5555"
+$model = & $adb -s "${lan}:5555" shell getprop ro.product.model   # → Pocket Block
+
+# 4) 二选一：内网通→用内网；不通→退回 ZeroTier
+if ($model -match 'Pocket Block') {
+    & $adb disconnect 172.24.0.139:5555   # 内网优先，断开 ZeroTier 通道
+} else {
+    & $adb disconnect "${lan}:5555"       # 内网不可用，留在 ZeroTier
+}
+& $adb devices -l   # 确认只剩一条 transport
+```
+
+> 注意第 3 步 `${lan}:5555` 的花括号写法，原因见 §8。
+> 若主机与掌机不在同一局域网，步骤 3 会连不上（超时），流程自动落到 ZeroTier，属预期行为。
+
+### 3.2 兜底：mDNS（ZeroTier 整体不通时）
+
+ZeroTier 空闲后对端路径可能失效（实测 10-30 出现单向不通：设备→主机通、主机→设备超时，有流量触发后路径重建恢复，17ms 级）。若 3.1 第 1 步就连不上，改用 mDNS 发现：
+
+```powershell
+& $adb mdns services
 # 输出形如：adb-BW0112PA30004600	_adb._tcp	192.168.31.x:5555
-& C:\Users\lithd\platform-tools\adb.exe connect 192.168.31.x:5555
+& $adb connect 192.168.31.x:5555
 ```
 
-历史 IP：192.168.31.5（10-27）→ 192.168.31.6（10-29）。**不要硬编码 IP**，每次先 `mdns services`。
+历史 IP：192.168.31.5（10-27）→ 192.168.31.6（10-29 起）。**不要硬编码 IP**，每次以 mDNS 或 ZeroTier 通道读出的为准。
 
-### 方式 B：ZeroTier（跨网段可用，延迟抖动大）
-
-```powershell
-& C:\Users\lithd\platform-tools\adb.exe connect 172.24.0.139:5555
-```
+### 3.3 ZeroTier 备注
 
 | 节点 | ZeroTier 地址 |
 |---|---|
 | 掌机（tun0） | **172.24.0.139/16** |
 | Windows 主机 | 172.24.137.107/16（网络 `272f5eae16956013`） |
 
-- 实测 ping 17–258ms，TCP 5555 可达，adb/shell 正常。
+- 实测 ping 17–258ms（抖动大），TCP 5555 可达，adb/shell 正常；设备端 ZeroTier 应用为 `com.zerotier.one`。
 - ⚠️ `219.139.217.130` **不是**这台设备的 ZeroTier 地址（不在托管网段 172.24.0.0/16 内，流量会被丢给默认网关），勿使用。
+- ZeroTier 排障顺序：主机侧 `Get-Service`（ZeroTierOneService）→ 设备侧 `ip addr show tun0` 与 `ps -A | grep zerotier`（经内网/mDNS 通道执行）→ 两侧各 ping 对方 ZeroTier 地址定位断向。
 
-### 多 transport 注意
+### 3.4 多 transport 注意
 
-两个地址可能同时在线（同一台设备两条连接）。此时所有命令必须带 `-s`：
+若因排障需要两条连接并存，所有命令必须带 `-s`：
 
 ```powershell
-& C:\Users\lithd\platform-tools\adb.exe devices -l   # 先看序列号
-& C:\Users\lithd\platform-tools\adb.exe -s 172.24.0.139:5555 shell getprop ro.product.model
+& $adb devices -l   # 先看序列号
+& $adb -s 192.168.31.6:5555 shell getprop ro.product.model
 ```
+
+日常按 3.1 的流程结束时只留一条，避免混淆。
 
 ## 4. 连接验证（三条 getprop）
 
@@ -113,6 +145,7 @@ python C:\Users\lithd\AppData\Local\Temp\cdp_eval.py <pageId> <exprfile>
 ## 8. PowerShell 陷阱
 
 - 不要写内联 `python -c "..."`——PowerShell 会吃掉 `$?`、引号和正则。**一律存成文件再运行**（上文 `cdp_eval.py <pageId> <exprfile>` 的用法就是为此设计）。
+- 变量拼端口必须写 `"${lan}:5555"`：`$lan:5555` 会被 PowerShell 当作驱动器/作用域限定符解析，结果为空或报错。
 - adb shell 里带管道/grep 的命令整体加引号，让管道在设备端执行：
 
 ```powershell
@@ -121,7 +154,7 @@ python C:\Users\lithd\AppData\Local\Temp\cdp_eval.py <pageId> <exprfile>
 
 ## 9. 验收清单（新 agent 照做）
 
-1. `adb mdns services` → 记下地址（或直接用 ZeroTier 172.24.0.139:5555）
+1. 按 §3.1 流程连接：ZeroTier 探路 → 内网优先 → 单通道收尾（ZeroTier 不通则走 §3.2 mDNS）
 2. `adb connect` → `devices -l` 确认 `product:Pocket_Block`
 3. getprop 三连（§4）
 4. `forward` → `http://127.0.0.1:9222/json` 拿到页面列表
