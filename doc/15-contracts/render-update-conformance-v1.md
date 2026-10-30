@@ -525,7 +525,7 @@ hostra-pwa-same-render-application-trace
 
 ---
 
-## 22. Pre-release Correction / Compatibility Boundary
+## 22. Conformance Revision / Compatibility Boundary
 
 任何实现声明 Render Update v1 conformant，必须满足 fixtureSetRevision 2 的全部 relevant role obligations。
 
