@@ -6,7 +6,7 @@
 >
 > 相关设计：[Map v1.1](./75-map-presentation-v1.1.md)
 >
-> 相关后续：[PR #128 — 固定世界坐标投影缓存提案](https://github.com/lithdoo/loom-realm/pull/128)、[PR #129 — 增量投影正确性与性能验证方案](https://github.com/lithdoo/loom-realm/pull/129)、[PR #131 — stale-pixel 修复](https://github.com/lithdoo/loom-realm/pull/131)
+> 相关后续：[PR #128 — 固定世界坐标投影缓存提案](https://github.com/lithdoo/loom-realm/pull/128)、[PR #129 — 增量投影正确性与性能验证方案](https://github.com/lithdoo/loom-realm/pull/129)、[PR #131 — stale-pixel 修复](https://github.com/lithdoo/loom-realm/pull/131)。共享架构优化见 [PR #135](https://github.com/lithdoo/loom-realm/pull/135)。
 
 ---
 
