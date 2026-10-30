@@ -12,7 +12,7 @@ import {
   type RendererPeerConnectOptions,
   type RendererPeerConnectOutcome,
 } from "@loomrealm/renderer-control";
-import { utf8ByteLength, type JsonValue } from "@loomrealm/wire";
+import type { JsonValue } from "@loomrealm/wire";
 import { RendererRenderStore } from "./internal/render-store.js";
 import { renderQualification } from "./internal/render-qualification.js";
 import {
@@ -87,9 +87,6 @@ interface QueuedPresentationEvent {
 }
 
 const acceptedDataMessage = Object.freeze({ kind: "accepted" } as const);
-const MAX_STAGED_PRESENTATION_EVENTS = 256;
-const MAX_PRESENTATION_PUBLICATIONS = 256;
-
 function sameIdentity(
   left: DesiredDataIdentity | null,
   right: DesiredDataIdentity,
@@ -113,39 +110,31 @@ function bestEffortCloseCarrier(value: unknown): void {
 }
 
 function validatePresentationEventName(value: unknown): string {
-  return validatePresentationText(value, 128, "name");
+  return validatePresentationText(value, "name");
 }
 
 function validatePresentationChannel(value: unknown): string {
-  return validatePresentationText(value, 256, "channel");
+  return validatePresentationText(value, "channel");
 }
 
-function validatePresentationText(value: unknown, limit: number, label: string): string {
+function validatePresentationText(value: unknown, label: string): string {
   if (typeof value !== "string") throw new TypeError(`Invalid Web Presentation custom event ${label}`);
-  let bytes = 0;
   for (let index = 0; index < value.length; index += 1) {
     const codeUnit = value.charCodeAt(index);
     if (codeUnit <= 0x1f || codeUnit === 0x7f) {
       throw new TypeError(`Invalid Web Presentation custom event ${label}`);
     }
-    if (codeUnit <= 0x7f) {
-      bytes += 1;
-    } else if (codeUnit <= 0x7ff) {
-      bytes += 2;
-    } else if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
       if (!(next >= 0xdc00 && next <= 0xdfff)) {
         throw new TypeError(`Invalid Web Presentation custom event ${label}`);
       }
-      bytes += 4;
       index += 1;
     } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
       throw new TypeError(`Invalid Web Presentation custom event ${label}`);
-    } else {
-      bytes += 3;
     }
   }
-  if (bytes < 1 || bytes > limit) throw new TypeError(`Invalid Web Presentation custom event ${label}`);
+  if (value.length === 0) throw new TypeError(`Invalid Web Presentation custom event ${label}`);
   return value;
 }
 
@@ -183,67 +172,114 @@ function validatePresentationOptions(value: unknown): { readonly broadcast: bool
   return Object.freeze({ broadcast, channel });
 }
 
-function validatePresentationData(value: unknown): JsonObject {
-  let members = 0;
-  const visit = (candidate: unknown, depth: number): JsonValue => {
-    if (depth > 64) throw new TypeError("Invalid Web Presentation custom event data");
+interface PresentationJsonCloneFrame {
+  readonly source: object;
+  readonly target: Record<string, JsonValue> | JsonValue[];
+  readonly entries: readonly { readonly key: string | number; readonly value: unknown }[];
+  next: number;
+}
+
+function clonePresentationJson(value: unknown): JsonValue {
+  const primitive = (candidate: unknown): JsonValue | undefined => {
     if (candidate === null || typeof candidate === "boolean" || typeof candidate === "string") return candidate;
-    if (typeof candidate === "number") {
-      if (!Number.isFinite(candidate)) throw new TypeError("Invalid Web Presentation custom event data");
-      return candidate;
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+    return undefined;
+  };
+  const direct = primitive(value);
+  if (direct !== undefined || value === null) return direct as JsonValue;
+  if (typeof value !== "object") throw new TypeError("Invalid Web Presentation custom event data");
+
+  const active = new WeakSet<object>();
+  const completed = new WeakMap<object, Record<string, JsonValue> | JsonValue[]>();
+  const inspect = (source: object): Omit<PresentationJsonCloneFrame, "source" | "next"> => {
+    if (Array.isArray(source)) {
+      const keys = Reflect.ownKeys(source);
+      if (keys.length !== source.length + 1 || !keys.includes("length")) {
+        throw new TypeError("Invalid Web Presentation custom event data");
+      }
+      const entries: Array<{ readonly key: number; readonly value: unknown }> = [];
+      for (let index = 0; index < source.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(source, String(index));
+        if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+          throw new TypeError("Invalid Web Presentation custom event data");
+        }
+        entries.push({ key: index, value: descriptor.value });
+      }
+      return { target: new Array<JsonValue>(source.length), entries };
     }
-    if (typeof candidate !== "object") throw new TypeError("Invalid Web Presentation custom event data");
-    if (Array.isArray(candidate)) {
-      members += candidate.length;
-      if (members > 16_384) throw new TypeError("Invalid Web Presentation custom event data");
-      return Object.freeze(candidate.map((child) => visit(child, depth + 1)));
-    }
-    const prototype = Object.getPrototypeOf(candidate);
+    const prototype = Object.getPrototypeOf(source);
     if (prototype !== Object.prototype && prototype !== null) {
       throw new TypeError("Invalid Web Presentation custom event data");
     }
-    const keys = Reflect.ownKeys(candidate);
-    if (keys.some((key) => typeof key !== "string")) {
-      throw new TypeError("Invalid Web Presentation custom event data");
-    }
-    members += keys.length;
-    if (members > 16_384) throw new TypeError("Invalid Web Presentation custom event data");
-    const output: Record<string, JsonValue> = {};
-    for (const key of keys as string[]) {
-      const descriptor = Object.getOwnPropertyDescriptor(candidate, key);
+    const entries: Array<{ readonly key: string; readonly value: unknown }> = [];
+    for (const key of Reflect.ownKeys(source)) {
+      if (typeof key !== "string") throw new TypeError("Invalid Web Presentation custom event data");
+      const descriptor = Object.getOwnPropertyDescriptor(source, key);
       if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
         throw new TypeError("Invalid Web Presentation custom event data");
       }
-      output[key] = visit(descriptor.value, depth + 1);
+      entries.push({ key, value: descriptor.value });
     }
-    return Object.freeze(output);
+    return { target: Object.create(null) as Record<string, JsonValue>, entries };
   };
-  const snapshot = visit(value, 1);
-  if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-    throw new TypeError("Invalid Web Presentation custom event data");
+  const assign = (
+    target: Record<string, JsonValue> | JsonValue[],
+    key: string | number,
+    child: JsonValue,
+  ): void => {
+    if (Array.isArray(target)) target[key as number] = child;
+    else target[key as string] = child;
+  };
+
+  const root = inspect(value);
+  active.add(value);
+  completed.set(value, root.target);
+  const stack: PresentationJsonCloneFrame[] = [{
+    source: value,
+    target: root.target,
+    entries: root.entries,
+    next: 0,
+  }];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    if (frame.next >= frame.entries.length) {
+      Object.freeze(frame.target);
+      active.delete(frame.source);
+      stack.pop();
+      continue;
+    }
+    const entry = frame.entries[frame.next++]!;
+    const childPrimitive = primitive(entry.value);
+    if (childPrimitive !== undefined || entry.value === null) {
+      assign(frame.target, entry.key, childPrimitive as JsonValue);
+      continue;
+    }
+    if (typeof entry.value !== "object") throw new TypeError("Invalid Web Presentation custom event data");
+    if (active.has(entry.value)) throw new TypeError("Invalid Web Presentation custom event data");
+    const prior = completed.get(entry.value);
+    if (prior !== undefined) {
+      assign(frame.target, entry.key, prior as JsonValue);
+      continue;
+    }
+    const nested = inspect(entry.value);
+    active.add(entry.value);
+    completed.set(entry.value, nested.target);
+    assign(frame.target, entry.key, nested.target as JsonValue);
+    stack.push({ source: entry.value, target: nested.target, entries: nested.entries, next: 0 });
   }
-  const encoded = JSON.stringify(snapshot);
-  if (utf8ByteLength(encoded) > 262_144) {
+  return root.target as JsonValue;
+}
+
+function validatePresentationData(value: unknown): JsonObject {
+  const snapshot = clonePresentationJson(value);
+  if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot)) {
     throw new TypeError("Invalid Web Presentation custom event data");
   }
   return snapshot as JsonObject;
 }
 
 function detachedFrozenJson<T>(value: T): T {
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map((child) => detachedFrozenJson(child))) as T;
-  }
-  const output: Record<string, unknown> = {};
-  for (const key of Object.keys(value)) {
-    Object.defineProperty(output, key, {
-      configurable: true,
-      enumerable: true,
-      value: detachedFrozenJson((value as Record<string, unknown>)[key]),
-      writable: true,
-    });
-  }
-  return Object.freeze(output) as T;
+  return clonePresentationJson(value) as T;
 }
 
 function validateRendererDataBinding(
@@ -309,8 +345,10 @@ class ControlHolder implements RendererControlHolder {
   private presentationAttachmentToken: object | null = null;
   private presentationEmitNodeEvent: ((event: RendererPresentationNodeEvent) => void) | null = null;
   private presentationForwardDepth = 0;
-  private readonly stagedPresentationEvents: AcceptedPresentationEvent[] = [];
-  private readonly presentationPublications: QueuedPresentationEvent[] = [];
+  private stagedPresentationEvents: Array<AcceptedPresentationEvent | undefined> = [];
+  private stagedPresentationHead = 0;
+  private presentationPublications: Array<QueuedPresentationEvent | undefined> = [];
+  private presentationPublicationHead = 0;
   private presentationPublicationEpoch = 1;
   private presentationPublicationPumping = false;
   private readonly presentationSource: RendererPresentationSource = Object.freeze({
@@ -760,7 +798,6 @@ class ControlHolder implements RendererControlHolder {
       });
     }
     if (this.presentationForwardDepth > 0) {
-      if (this.stagedPresentationEvents.length >= MAX_STAGED_PRESENTATION_EVENTS) return;
       this.stagedPresentationEvents.push(accepted);
       return;
     }
@@ -768,10 +805,14 @@ class ControlHolder implements RendererControlHolder {
   }
 
   private flushStagedPresentationInputs(): void {
-    while (this.stagedPresentationEvents.length > 0) {
-      const staged = this.stagedPresentationEvents.shift();
+    while (this.stagedPresentationHead < this.stagedPresentationEvents.length) {
+      const index = this.stagedPresentationHead++;
+      const staged = this.stagedPresentationEvents[index];
+      this.stagedPresentationEvents[index] = undefined;
       if (staged !== undefined) this.enqueuePresentationEvent(staged);
     }
+    this.stagedPresentationEvents = [];
+    this.stagedPresentationHead = 0;
   }
 
   private enqueuePresentationEvent(event: AcceptedPresentationEvent): void {
@@ -779,7 +820,6 @@ class ControlHolder implements RendererControlHolder {
       this.presentationFrameGate.offer(event.event);
       return;
     }
-    if (this.presentationPublications.length >= MAX_PRESENTATION_PUBLICATIONS) return;
     this.presentationPublications.push(Object.freeze({
       epoch: this.presentationPublicationEpoch,
       event,
@@ -791,8 +831,10 @@ class ControlHolder implements RendererControlHolder {
     if (this.presentationPublicationPumping) return;
     this.presentationPublicationPumping = true;
     try {
-      while (this.presentationPublications.length > 0) {
-        const queued = this.presentationPublications.shift();
+      while (this.presentationPublicationHead < this.presentationPublications.length) {
+        const index = this.presentationPublicationHead++;
+        const queued = this.presentationPublications[index];
+        this.presentationPublications[index] = undefined;
         if (queued === undefined || queued.epoch !== this.presentationPublicationEpoch) continue;
         try {
           if (queued.event.kind === "publication") {
@@ -802,16 +844,26 @@ class ControlHolder implements RendererControlHolder {
           // Publication failure is presentation-local and does not alter authority.
         }
       }
+      this.presentationPublications = [];
+      this.presentationPublicationHead = 0;
     } finally {
       this.presentationPublicationPumping = false;
-      if (this.presentationPublications.length > 0) void this.pumpPresentationEvents();
+      if (this.presentationPublicationHead < this.presentationPublications.length) void this.pumpPresentationEvents();
     }
   }
 
   private retirePresentationPublications(): void {
     this.presentationPublicationEpoch += 1;
-    this.presentationPublications.length = 0;
-    this.stagedPresentationEvents.length = 0;
+    for (let index = this.presentationPublicationHead; index < this.presentationPublications.length; index += 1) {
+      this.presentationPublications[index] = undefined;
+    }
+    for (let index = this.stagedPresentationHead; index < this.stagedPresentationEvents.length; index += 1) {
+      this.stagedPresentationEvents[index] = undefined;
+    }
+    this.presentationPublications = [];
+    this.presentationPublicationHead = 0;
+    this.stagedPresentationEvents = [];
+    this.stagedPresentationHead = 0;
   }
 
   private readPresentation(): RendererPresentationView | null {
