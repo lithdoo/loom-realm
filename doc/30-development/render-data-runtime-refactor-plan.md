@@ -25,8 +25,9 @@
 5. 同一对象图不重复执行完整 JSON validation、depth/member/byte accounting、clone/freeze 和 serialization。
 6. 必要的 caller/framework ownership isolation、candidate isolation、COW、atomic commit、revision continuity 和 Event ordering 必须保留。
 7. 性能收益必须由 Issue #133 同类真实 workload 和通用大型 Render fixture 证明，不能仅凭删除代码推断。
+8. 当前项目尚未形成需要维护的实质公开部署兼容边界；本次允许对现有同一 protocol/profile identity 做首次正式发布前纠正。历史 fixed caps 即使已经写入当前 Frozen/Active 文档，也不因此自动获得继续存在的架构正当性；是否保留只看它是否属于 Framework correctness。
 
-本计划本身不修改任何 Frozen/Active Contract，不改变 Renderer Data Profile identity，也不激活新的 Conformance revision。
+本计划 PR 本身仍只修改 planning 文档，不直接修改 Frozen/Active Contract 或 Conformance。后续实施允许在保持现有 identity 的前提下直接修订协议语义，不要求为本次 pre-release correction 新建版本或 migration；但必须留下清晰的 revision record，并保证 Contract、implementation、tests/Conformance 最终以一致状态进入 `main`。
 
 ## 2. Framework / Developer 责任边界
 
@@ -51,7 +52,7 @@
 #### Reconnect 与恢复必须保留的 identity / baseline 规则
 
 - Same-generation carrier replacement（同一 Session / subsystem / DataAuthority generation / profile 下 carrier A → B）不创建新的 wire Domain / Node lifetime；Domain/Node one-shot history 继续有效，只重置 carrier-local publication cursor 与 baseline。
-- Fresh DataAuthority generation 创建新的 wire identity universe。Subsystem-owned business Domain 可以继续存在，但必须通过新 generation 的 Registry + current Snapshots 重新导出。
+- Fresh DataAuthority generation 创建新的 wire identity universe。Subsystem-owned business Domain 可以继续存在，但必须通过新 generation 的 Registry + current Snapshots 重新导出。所有 generation-scoped wire identity metadata（包括 retired Domain IDs、Node consumed-key history、live-tag history 与 carrier revision/baseline state）必须重新初始化，不得从旧 generation 继承；相同字符串在新 generation 中是新的 wire identity。
 - Fresh Render carrier 的 Render namespace 首条消息必须是当前完整 Registry；每个 current Domain 在新 carrier 上均从 unbaselined 开始，第一条 authoritative state message 必须是 current Snapshot，之后才允许 Patch。
 - Old carrier revision、old Renderer Store 或旧 Patch cursor 不得作为 fresh carrier 的 Patch base；fresh Snapshot 才建立新 carrier 的 authoritative baseline。
 - Old carrier 上未进入 ordered-send boundary 的 Event 不得迁移或 replay。尚未 emitted 的 authoritative desired state 只能按既有 Registry / Snapshot coalescing 规则重新 materialize 为当前状态，不得迁移旧 Patch 历史。
@@ -59,7 +60,7 @@
 
 ### 2.2 默认 Runtime 候选删除项
 
-以下现有行为需要逐项审计；若没有明确 protocol/framework owner，则从默认 Runtime 热路径移除：
+以下现有行为需要逐项审计。判断标准不是“当前 Frozen Contract 是否已经写了这个数字”，因为当前协议本身正是本次纠正对象；判断标准是该检查是否为 Framework 自身正确运行所必需。不是 Framework invariant 的固定容量限制应从默认 Runtime 与对应 protocol/profile 语义中一并移除：
 
 - message UTF-8 bytes 上限；
 - JSON nesting depth 上限；
@@ -89,6 +90,17 @@ Presentation 历史数字需要明确纳入 inventory，而不是只按通用 Re
 - 开发、测试、CI 或显式启用的 production diagnostics。
 
 该能力不应成为 Data/Render 默认热路径依赖，也不应改变 wire contract。
+
+### 2.4 Developer / Product 自有资源策略不属于本次删除范围
+
+“Framework 不自设通用容量上限”不等于禁止开发者或具体 Product 对自己的数据做资源选择。应用层可以基于自身体验、算法或目标设备能力主动限制/裁剪数据，例如 Map projection 的 `VIEW_DATA_GUARD`、Tile Band 选择、业务分页或开发者自定义 payload policy。
+
+边界是：
+
+- 这些策略由拥有该业务语义的一层定义、测量和修改；
+- generic Wire/Data/Render Runtime 不替应用层重复执行同一业务预算，也不把某个 Product 的数字升级成全平台协议上限；
+- PR #134 的 Map projection payload 优化继续独立，不因本计划删除 Framework caps 而被顺手删除或放宽；
+- 如果应用策略触发裁剪/拒绝，应以应用自己的 API/业务语义表现，不伪装成通用 Data protocol violation。
 
 ## 3. 当前实现热点与需要验证的假设
 
@@ -143,6 +155,15 @@ Presentation 历史数字需要明确纳入 inventory，而不是只按通用 Re
 - carrier.send 的真实 rejection 保留 transport/carrier failure 语义；
 - 审计现有 pending-send count cap 是否仅为人为容量限制；若是，则删除，而不是改成 byte budget。
 
+删除 `MAX_PENDING_SENDS` 后采用显式 serialized writer queue / drain loop，而不是靠新的 admission budget：
+
+- `send()` 对本次 application unit 只 encode 一次，然后以 O(1) 方式入队；
+- 同一方向最多一个 physical `carrier.send()` in flight；
+- `send()` 返回的 Promise 自然表达 transport backpressure：只有对应 physical send 成功或 terminal 后才 settle；Framework 不因为队列长度主动拒绝一个本来合法的 send；
+- 调用方如果持续生产且不等待 Promise，pending work 可以随真实工作量增长，这是调用方/平台实际资源选择，不由 Framework 用固定数字提前裁决；
+- terminal first-wins 后，所有尚未开始的 queue records 必须 once-settle，并立即释放 message/payload/closure 引用；已开始的 physical send 按既有 terminal race 语义结算；
+- queue 采用 head-index/deque/ring 之类不会随 backlog 产生 `Array.shift()` O(N) 搬移的结构。
+
 需要额外关注：不能为了移除 cap 而让 terminal 路径长期保留无用引用；queue / promise chain 的释放行为需要测试覆盖。
 
 ### 3.4 `packages/subsystem/src/internal/render-manager.ts`
@@ -180,7 +201,9 @@ developer input
 - 保留 Registry / desired-state coalescing；
 - Event barrier 语义保持；
 - 不因框架自行设定的 queue capacity 丢弃已接受 Event；
-- structural operation 仍需保证最终 Tree invariants，但避免每个 op 后整棵 Tree 重扫。
+- structural operation 仍需保证最终 Tree invariants，但避免每个 op 后整棵 Tree 重扫；
+- publication queue 不再以固定长度决定 accept/drop/peer invalidation：authoritative desired state 仍只按既有 coalescing 语义收敛，Event 一旦被 API 接受就保持 FIFO/barrier obligation，直到成功进入 ordered-send boundary、因 stale/applicability 规则失效，或 current carrier terminal；
+- queue 数据结构必须支持 O(1) head removal，并维护必要的 per-domain barrier/tail metadata，避免每次 enqueue/dequeue 为寻找 Event barrier 或可 coalesce work 扫描整个 backlog。
 
 ### 3.5 `packages/renderer/src/internal/render-store.ts`
 
@@ -204,7 +227,8 @@ Carrier adapter 应保持 transport 层职责：
 - 可将 `Array.shift()` 队列改为 head-index / ring-buffer，避免反复搬移；
 - terminal/finish 时清空已积压引用，pending waiter once-settle；
 - `postMessage` / port 实际失败传播真实 transport failure；
-- 不新增 message-count / retained-byte cap，也不因人为 capacity 关闭 carrier 或静默丢消息。
+- 不新增 message-count / retained-byte cap，也不因人为 capacity 关闭 carrier 或静默丢消息；
+- queue backlog 只表示真实尚未消费的 carrier units；如果平台最终因真实内存/MessagePort/Host 能力失败，传播真实 transport/platform failure，而不是预先映射成 Framework capacity error。
 
 ## 4. 目标执行路径
 
