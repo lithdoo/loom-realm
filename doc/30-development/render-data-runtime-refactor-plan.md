@@ -217,7 +217,7 @@ Renderer Store 当前已经存在 update-only COW fast path，应在此基础上
 - 删除仅为历史 node/depth/member/payload caps 服务的 `validateData` / byte/depth scan；
 - 不重新验证未变化的 generic data subtree；
 - 保留 consumed key、stable tag、revision continuity 与 atomic commit；
-- catch-all 不应把所有本地异常都映射成 peer `protocol-fatal`；本地 candidate failure 若导致已消费的 authoritative stream 无法继续证明 continuity，必须退休当前 Data carrier 并通过 fresh baseline 恢复，但错误仍标记为 local implementation failure，而不是 peer protocol violation。
+- catch-all 不应把所有本地异常都映射成 peer `protocol-fatal`；authoritative candidate 的本地 mechanics failure 应传播为 existing `local-fatal`，退休 current Data carrier 并通过 fresh baseline 恢复，而不是 peer protocol violation。
 
 ### 3.6 `apps/pwa/src/message-port-carrier.ts`
 
@@ -251,7 +251,7 @@ carrier application unit
 - malformed JSON / wrong type / closed-schema violation 仍是协议错误；
 - continuity / Patch precondition failure 仍按 authoritative continuity 处理；
 - generic business data 不在默认 Runtime 中做额外 strict schema 审查；
-- inbound candidate 的本地异常必须丢弃 candidate 并保持 current state/revision 不变；如果后续消息的 base continuity 已无法证明，则退休当前 Data carrier，走 fresh Registry + Snapshot recovery，而不是继续应用后续 Patch。
+- inbound authoritative candidate 的本地 mechanics 异常必须丢弃 candidate 并保持 current state/revision 不变；由于该 application unit 已从 carrier stream 消费而 authoritative revision 未 commit，直接以 `local-fatal` 退休 current Data carrier，走 fresh Registry + Snapshot recovery，不尝试在同一 stream 猜测后续 continuity。
 
 ### 4.2 Outbound Data
 
@@ -300,14 +300,11 @@ discard candidate
 keep current state and revision
 report actual failure class
 
-if authoritative continuity is still provable:
-    continue under the existing stream state
-else:
-    retire current Data carrier as a local implementation failure
-    recover through fresh Registry + current Snapshots
+retire current Data carrier as a local implementation failure
+recover through fresh Registry + current Snapshots
 ~~~
 
-本地 candidate failure 不能伪装成 peer protocol-fatal。由于失败消息可能已经从 carrier stream 被消费，只有在能证明后续 Patch base 仍连续时才允许继续；不能证明时必须退休当前 Data carrier，不能让后续 Patch 基于未提交 revision 继续执行。
+本地 candidate failure 不能伪装成 peer protocol-fatal。对 authoritative Snapshot/Patch，失败消息已经从 carrier stream 被消费但 revision 未 commit，因此不在同一 carrier 上继续猜测后续 base；直接 local-fatal retire，并以 fresh Registry + current Snapshots 恢复。
 
 局部 update 不应触发与本次修改无关的完整 Snapshot validation/stringify。
 
@@ -533,7 +530,7 @@ Phase 0 必须产出 revision ledger，至少逐项记录：
 - revision continuity；
 - update-only unchanged subtree identity reuse；
 - structural invalid candidate 不污染 current state；
-- local candidate exception 后，若 authoritative continuity 不可证明则 retire current Data carrier 并 fresh-baseline recovery；不得误报 peer protocol-fatal；
+- authoritative local candidate exception 后直接以 local-fatal retire current Data carrier 并 fresh-baseline recovery；不得误报 peer protocol-fatal，也不得继续消费同一 stream 的后续 Patch；
 - Renderer presentation-local failure 不自动使 authoritative Store 或 Data carrier 失效。
 
 ### Phase 4 — Data writer / PWA carrier
@@ -607,7 +604,7 @@ Phase 6 是同步/记录闭环，不是兼容性审批 gate。
 - fresh generation 建立新的 wire identity universe，并通过 Registry + current Snapshots 重新导出仍存活的 business Domains；旧 generation 的 retired Domain IDs、consumed Node keys、live-tag history、revision/baseline metadata 不得泄漏到新 generation；相同 key/domainId 字符串在新 generation 可作为 fresh wire identity 使用；
 - fresh carrier 首条 Render namespace message 为 Registry，current Domains 先 Snapshot baseline，之后才可 Patch；
 - old carrier revision / stale Renderer Store 不可作为 fresh carrier Patch base；old Event 不 replay，old unsent Event 不跨 carrier 迁移；
-- candidate 本地异常后，continuity 可证明时才允许继续；否则 retire Data carrier 并 fresh-baseline recovery，且错误分类仍为 local implementation failure；
+- authoritative candidate 本地 mechanics 异常后 current state/revision 保持不变，但 current Data carrier 进入 local-fatal 并 fresh-baseline recovery；不得继续同一 stream，也不得归咎 peer；
 - Data carrier failure 不自动终止 Runtime、unwind Frame、修改 Main/Input authority 或销毁 business RenderDomain；
 - Renderer presentation-local failure 不自动否定 authoritative Render Store；Subsystem authoring failure 只失败对应 operation；
 - invalid Wire representation 在异步 authoring API acceptance 边界失败，不得等到后台 publication 才暴露；
@@ -737,4 +734,3 @@ Agent 可以在一个 PR 中按上述顺序分 commit，也可以使用 stack；
 
 满足上述约束后，Agent 不需要再为这些架构问题请求逐项设计决策；可以按 Phase 0→6 直接实施、测试、修复回归、收集 qualification evidence，并在遇到**新的** Contract 冲突或无法满足 PASS 条件时才停止并上报。
 
-达到这些条件后再开始代码改造。
