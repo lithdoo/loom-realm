@@ -1,5 +1,5 @@
 import type { JsonValue } from "@loomrealm/wire";
-import { assertJsonValue, jsonDepth, parseJsonText, stringifyJson, utf8ByteLength } from "@loomrealm/wire";
+import { parseJsonText, stringifyJson } from "@loomrealm/wire";
 import type { DataProtocolFamily, RendererDataMessageV3 } from "./model.js";
 import {
   validateRenderDomains,
@@ -9,15 +9,11 @@ import {
 } from "./render-codec.js";
 import { validateViewportState } from "./viewport-codec.js";
 import {
-  MAX_PRESENTATION_MESSAGE_DEPTH,
   validatePresentationEvent,
   validatePresentationInterest,
 } from "./presentation-codec.js";
 import {
-  assertBoundedJson,
   fail,
-  MAX_JSON_DEPTH,
-  MAX_MESSAGE_BYTES,
   object,
   stringValue,
 } from "./validation-common.js";
@@ -34,10 +30,6 @@ export function protocolFamilyOfType(type: string): DataProtocolFamily {
 function typeOfObject(raw: unknown): string {
   const o = object(raw, "profile", "message");
   return stringValue(o.type, "profile", "type");
-}
-
-function messageDepthLimit(type: unknown): number {
-  return type === "presentation.event" ? MAX_PRESENTATION_MESSAGE_DEPTH : MAX_JSON_DEPTH;
 }
 
 function validateByType(raw: unknown): RendererDataMessageV3 {
@@ -66,38 +58,31 @@ function outboundAllowed(role: DataRole, type: string): boolean {
 
 export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV3 {
   if (typeof raw !== "string") fail("profile", "carrier application unit must be string");
-  if (utf8ByteLength(raw) > MAX_MESSAGE_BYTES) fail("profile", "message byte limit exceeded");
   let parsed: JsonValue;
   try {
     parsed = parseJsonText(raw);
   } catch (cause) {
-    fail("profile", `invalid JSON: ${String(cause)}`);
+    fail("profile", "invalid JSON: " + String(cause));
   }
-  const parsedTypeHint = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, JsonValue>).type
-    : undefined;
-  const maxDepth = messageDepthLimit(parsedTypeHint);
-  if (jsonDepth(parsed) > maxDepth) fail("profile", "JSON depth limit exceeded");
-  assertBoundedJson(parsed, "profile", maxDepth);
   const message = validateByType(parsed);
-  const t = (message as { type: string }).type;
-  if (!inboundAllowed(role, t)) {
-    fail(protocolFamilyOfType(t), "message direction invalid for role");
+  const type = (message as { type: string }).type;
+  if (!inboundAllowed(role, type)) {
+    fail(protocolFamilyOfType(type), "message direction invalid for role");
   }
   return message;
 }
 
 export function encodeForRole(message: RendererDataMessageV3, role: DataRole): string {
-  const validated = validateByType(message);
-  const t = (validated as { type: string }).type;
-  if (!outboundAllowed(role, t)) {
-    fail(protocolFamilyOfType(t), "outbound direction invalid for role");
+  // Encode once first. This both snapshots caller-owned input and enforces the
+  // Wire JSON representation without a separate full-tree preflight. Validate
+  // the detached parsed representation so getters/Proxies cannot change the
+  // object between validation and publication.
+  const encoded = stringifyJson(message as unknown as JsonValue);
+  const parsed = parseJsonText(encoded);
+  const validated = validateByType(parsed);
+  const type = (validated as { type: string }).type;
+  if (!outboundAllowed(role, type)) {
+    fail(protocolFamilyOfType(type), "outbound direction invalid for role");
   }
-  assertJsonValue(validated as unknown);
-  if (jsonDepth(validated as unknown as JsonValue) > messageDepthLimit(t)) {
-    fail("profile", "JSON depth limit exceeded");
-  }
-  const text = stringifyJson(validated as unknown as JsonValue);
-  if (utf8ByteLength(text) > MAX_MESSAGE_BYTES) fail("profile", "message byte limit exceeded");
-  return text;
+  return encoded;
 }
