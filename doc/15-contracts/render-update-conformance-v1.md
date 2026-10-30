@@ -266,14 +266,16 @@ snapshot-invalid-tree-no-partial-commit
 Required：
 
 ```text
-zindex-min
-zindex-max
-zindex-below-min
-zindex-above-max
+zindex-min-safe-integer-valid
+zindex-max-safe-integer-valid
+zindex-below-min-safe-integer-rejected
+zindex-above-max-safe-integer-rejected
 higher-zindex-above-lower
 same-zindex-domainid-utf8-lexical-tiebreak
 registry-order-not-stacking-order
 ```
+
+`zindex-min-safe-integer-valid` / `zindex-max-safe-integer-valid` 分别使用 `Number.MIN_SAFE_INTEGER` / `Number.MAX_SAFE_INTEGER`；相邻范围外值拒绝。任何 int32-only implementation 都不 conformant。
 
 Conformance只比较 logical ordering，不比较 DOM/CSS implementation details。
 
@@ -382,6 +384,9 @@ update-key-not-allowed
 update-tag-not-allowed
 update-children-not-allowed
 generic-data-empty-key-valid
+update-data-set-empty-key-valid
+update-data-remove-empty-key-valid
+render-manager-data-empty-key-authoring-valid
 ```
 
 ---
