@@ -124,6 +124,17 @@ Protocol conformance 不再定义统一的 message byte、JSON depth、identifie
 
 具体数字属于实现/产品 qualification input，不属于跨实现 wire conformance fixture。
 
+Revision 2 必须包含以下 resource-budget fixtures：
+
+- inbound-resource-budget-exhaustion-no-partial-commit-and-retire;
+- inbound-resource-exhaustion-is-not-peer-protocol-violation;
+- outbound-resource-budget-exhaustion-no-partial-application-unit;
+- candidate-growth-budget-enforced-without-full-tree-preflight;
+- legacy-data-262144-byte-threshold-not-wire-reject-when-local-budget-allows;
+- legacy-node-16384-threshold-not-wire-reject-when-local-budget-allows;
+- legacy-tree-depth-30-threshold-not-wire-reject-when-local-budget-allows;
+- legacy-patch-4096-ops-threshold-not-wire-reject-when-local-budget-allows.
+
 ---
 
 ## 5. Wire / Closed Schema
@@ -478,7 +489,7 @@ domain-removal-discards-pending-unsent-domain-messages
 retained-event-is-coalescing-barrier
 no-ack-wait
 no-event-replay
-outbound-preflight-before-send
+outbound-bounded-serialization-before-send
 ```
 
 Sender 本地产生非法 v1 message 是 implementation/programming failure；不得依赖 Renderer 宽容解析。
@@ -514,9 +525,9 @@ hostra-pwa-same-render-application-trace
 
 ---
 
-## 22. Frozen Compatibility Boundary
+## 22. Pre-release Correction / Compatibility Boundary
 
-任何实现声明 Render Update v1 conformant，必须满足 fixtureSetRevision 1 的全部 relevant role obligations。
+任何实现声明 Render Update v1 conformant，必须满足 fixtureSetRevision 2 的全部 relevant role obligations。
 
 以下 protocol change 必须新版本：
 
@@ -529,7 +540,6 @@ Snapshot one-shot semantics
 Patch algebra/atomicity/no-op rules
 Event barrier/drop behavior
 zIndex order
-local resource-budget behavior
 application-unit encoding
 failure/recovery
 ```
