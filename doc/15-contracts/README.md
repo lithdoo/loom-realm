@@ -14,7 +14,7 @@
 - [Frame / Call v1](./frame-call-protocol-v1.md) · [Conformance](./frame-call-conformance-v1.md)
 - [Main ⇄ Renderer Control v2](./main-renderer-control-v2.md) · [v1 historical contract](./main-renderer-control-v1.md)
 - [Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)
-- [Renderer Data Profile `/3`](./renderer-data-profile-v3.md) · [v2 historical contract](./renderer-data-profile-v2.md) · [v1 pre-release correction](./renderer-data-profile-v1.md) — `/3` identity and message set remain current; framework-defined common byte/depth/queue capacity caps are removed by the proposed pre-release correction. Profile v1's separate four-child correction remains under ADR0037; its conformance revision 4 is a candidate.
+- [Renderer Data Profile `/3`](./renderer-data-profile-v3.md) · [v2 historical contract](./renderer-data-profile-v2.md) · [v1 pre-release correction](./renderer-data-profile-v1.md) — `/3` message set remains current; removal of framework-defined common byte/depth/queue capacity caps is a proposed pre-release correction subject to ADR0039's same-identity compatibility gate. Profile v1's separate four-child correction remains under ADR0037; its conformance revision 4 is a candidate.
 - [Viewport State v1](./viewport-state-v1.md) · [Conformance](./viewport-state-conformance-v1.md)
 - [Game Common Controls Input v1](./game-common-controls-input-v1.md) · [Framework User Input v1 historical contract](./user-input-v1.md)
 - [Render Update v1](./render-update-v1.md) · [Conformance](./render-update-conformance-v1.md) — pre-release removal of framework-imposed capacity caps under ADR0039; wire identity remains `/1` subject to the compatibility gate, conformance fixture revision 2 candidate
