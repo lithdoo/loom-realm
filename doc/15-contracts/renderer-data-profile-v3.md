@@ -59,3 +59,11 @@ Data protocol family 增加 `presentation`。well-formed 但 stale/ineligible �
 Developer-owned input、getter/Proxy、JSON serialization 或普通本地 handler operation 抛出的异常，应在对应 API / role boundary 报告，不得自动升级为 peer protocol-fatal 或关闭整个 Data peer。已通过 schema 检查的 inbound authoritative message 若在 candidate mutation 中发生意外本地异常，必须丢弃 candidate；如果无法继续证明 revision continuity，可以以 local implementation failure 退休当前 Data peer，但不得归咎于远端协议。真实 carrier.send / receive failure 按 transport failure 处理。
 
 本 Profile 不定义 common message-byte/depth、candidate、retained-state、queue count 或 queue-byte budget，也不引入 local-resource-exhaustion / ResourceBudgetExceeded。所有失败仍须遵守 no-partial-commit、no-partial-send 和 once-settle；不新增 wire message 或 `/4` identity。业务 handler throw/reject 仍在本地 role boundary 隔离，不得变成 Data protocol-fatal。
+
+## 5. Pre-release capacity-cap correction / compatibility gate
+
+本次删除 common message-byte / JSON-depth gate、generic queue capacity 和容量触发的 Presentation Event drop，会改变旧实现对部分 workload 的 accept/reject/delivery 行为。不得声称这些变化对旧 /3 peer 完全不可观察。
+
+保持 /3 identity 的前提是 release owner 确认首次正式发布前不存在 deployed old-cap /3 peers、independent implementations、rolling upgrade / rollback cohorts 或 persisted compatibility obligations。若任何一项存在，必须停止 same-identity correction，另行提交 profile version / migration ADR。
+
+若兼容核查通过，可以在首次正式发布前通过 ADR0039 对 /3 作明确 correction；在实现和 qualification 完成前，本文件中的 correction 仍是 proposed，不代表已激活或已实现。
