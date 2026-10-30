@@ -73,16 +73,13 @@ export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV
 }
 
 export function encodeForRole(message: RendererDataMessageV3, role: DataRole): string {
-  // Encode once first. This both snapshots caller-owned input and enforces the
-  // Wire JSON representation without a separate full-tree preflight. Validate
-  // the detached parsed representation so getters/Proxies cannot change the
-  // object between validation and publication.
-  const encoded = stringifyJson(message as unknown as JsonValue);
-  const parsed = parseJsonText(encoded);
-  const validated = validateByType(parsed);
+  // Schema validation is shallow with respect to opaque application data.
+  // Wire encoding then validates and serializes the complete object graph in
+  // one pass, avoiding a stringify -> parse -> full payload scan round-trip.
+  const validated = validateByType(message);
   const type = (validated as { type: string }).type;
   if (!outboundAllowed(role, type)) {
     fail(protocolFamilyOfType(type), "outbound direction invalid for role");
   }
-  return encoded;
+  return stringifyJson(message as unknown as JsonValue);
 }
