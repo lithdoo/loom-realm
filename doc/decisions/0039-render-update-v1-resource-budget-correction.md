@@ -22,7 +22,7 @@ Issue #133 的真实物理机诊断表明，Render Data 路径不仅承担重复
 
 该决定只适用于 pre-release correction。首次正式发布之后，改变已发布的 wire-observable schema、authority、ordering、revision、atomicity、failure 或 recovery semantics，必须走新协议版本和迁移。
 
-兼容性门槛：合并/冻结 revised-v1 之前，必须确认没有需要与旧 hard-limit /1 实现混合互操作的已部署 peer、外部对接者、rolling/rollback cohort 或持久化协议承诺。现有 ADR0022 的首次冻结前证据与 ADR0037 的首次发布前 direct-correction 先例可作为 provenance，但必须由当前 release owner 在 qualification ledger 中复核。若发现真实混版/旧 peer 互操作义务，STOP same-identity correction，改为显式 protocol version / migration ADR；不得声称旧 peer 可识别新 limits。
+兼容性门槛：合并/冻结 revised-v1 之前，必须确认没有需要与旧 hard-limit /1 实现混合互操作的已部署 peer、外部对接者、rolling/rollback cohort 或持久化协议承诺。现有 ADR0022 的首次冻结前证据与 ADR0037 的首次发布前 direct-correction 先例可作为 provenance；本 ADR 同时 supersedes ADR0037 中“common 1MiB/depth64 与 Render limits 不修改”的范围声明，但必须由当前 release owner 在 qualification ledger 中复核。若发现真实混版/旧 peer 互操作义务，STOP same-identity correction，改为显式 protocol version / migration ADR；不得声称旧 peer 可识别新 limits。
 
 ### 2. 删除协议级固定 numeric hard limits
 
