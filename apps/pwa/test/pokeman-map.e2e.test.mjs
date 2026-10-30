@@ -175,7 +175,7 @@ async function beginRenderDataDiagnostic(page, context) {
   });
   const session = await context.newCDPSession(page);
   await session.send("Tracing.start", {
-    categories: "devtools.timeline,v8,blink.user_timing,disabled-by-default-v8.cpu_profiler",
+    categories: "toplevel,devtools.timeline,v8,blink.user_timing,disabled-by-default-v8.cpu_profiler",
     options: "sampling-frequency=10000",
     transferMode: "ReturnAsStream",
   });
