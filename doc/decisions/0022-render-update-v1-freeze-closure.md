@@ -1,7 +1,7 @@
 # ADR 0022：Render Update v1 freeze closure
 
- > 状态：Accepted  
- > 日期：2026-08-21  
+> 状态：Accepted  
+> 日期：2026-08-21  
 > 影响范围：Render Update Protocol v1、Render Update Conformance v1、未来 `@loomrealm/data` Render codec/validator、Subsystem RenderManager、Renderer Render Store、M8/M11 qualification  
 > 依赖：[Render Update Protocol v1](../15-contracts/render-update-v1.md)、[Renderer Data Application Profile v1](../15-contracts/renderer-data-profile-v1.md)、Wire package design `packages/wire/DESIGN.md`  
 > 不改变：四种 Render message kind、Subsystem-owned Render authority、Frame/Input/Content boundary、无 ACK/NACK/replay/resync 的方向
