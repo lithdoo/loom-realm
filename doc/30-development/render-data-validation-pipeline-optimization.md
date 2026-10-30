@@ -31,7 +31,7 @@ Issue #133 的真实物理机诊断显示，projection refresh 的主要 CPU 成
 3. 将必要的检查融合到实际解析、序列化、Patch 应用和提交过程，避免“先完整扫描，再做真正工作”。
 4. 对开发者控制的可信应用数据采用 operation-first / error-first 路径；失败时在明确边界捕获，并保证状态提交原子性。
 5. 将更严格的 JSON / Schema / 业务数据审查设计为独立、opt-in 的能力，不默认进入生产热路径。
-6. 保留当前已冻结协议的可观察行为；不在本 PR 静默放宽现有 Render Update v1 契约。
+6. 按 ADR0039 在首次发布前修订 Render Update v1 的固定 numeric hard limits，以 local resource budgets 取代统一协议数字；保留 authority、revision、atomicity、identity、Event 和 exact-schema 等协议不变量。
 
 本 PR 不再要求建立一个覆盖所有数据的强制 ValidatedImmutableJson 类型，也不要求仅为严格验证而对所有应用数据执行全量深复制和深冻结。
 
@@ -110,7 +110,8 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 | Patch 前置条件、状态一致性、失败原子性 | 必须 | Framework |
 | 实际序列化所需的可表示性检查 | 必须在操作中完成 | Framework |
 | 防止无界输入、队列和资源耗尽的硬边界 | 必须，按协议/平台 threat model | Framework |
-| 当前 Frozen Contract 明确规定的 JSON 表示和 hard limits | 必须，直至正式修订 | Framework / Protocol |
+| 当前正式契约规定的 JSON 表示和 framework invariants | 必须 | Framework / Protocol |
+| message / depth / count / payload 等 numeric capacity | 不再定义统一协议数字；必须配置有限 local budget | Host / Product / Runtime |
 | 游戏/业务 Schema 与字段语义 | 不默认执行 | Developer |
 | 跨字段业务约束、领域数值范围 | 不默认执行 | Developer |
 | 对整个应用对象图重复执行 strict JSON audit | 不默认执行 | Opt-in Strict Validation |
@@ -118,30 +119,25 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 
 **关键区别：** 业务 Schema 检查不是协议 envelope 检查；开发者选择不启用业务严格验证，不等于可以绕过 current wire contract、identity/revision 或资源保护。
 
-## 5. Frozen Contract 兼容边界
+## 5. Render Update v1 pre-release resource-budget correction
 
-当前 [Render Update v1](../15-contracts/render-update-v1.md) 已冻结以下可观察约束：
+[ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md) 已授权在首次正式发布前修订 Render Update v1 的 numeric hard-limit policy，并将修订后的 conformance fixtureSetRevision 升为 2。协议 identity 暂保持 loomrealm.render-update / 1；这不是对已发布 wire 的静默变更。
 
-- Render data 必须符合当前 Wire JSON representation；
-- message、data、depth、member、node、tree 等 hard limits；
-- Patch 每个 operation 后的 bounded candidate 约束；
-- Snapshot / Patch 的 isolated candidate 与 atomic commit；
-- representation/schema/limit failure 的 protocol-fatal 行为。
+修订后不再将以下数字定义为跨实现 protocol accept/reject thresholds：message bytes、JSON depth、identifier byte length、Registry/Node/operation counts、tree depth、attrs member/key/value limits、data array/object counts、data payload bytes 与 relative depth。
 
-这些要求见 Render Update v1 §10、§12、§16、§18、§19。
+协议继续强制：
 
-本 PR **不修改**这些已冻结的 accept/reject、retire、limit 或 state outcome。不能用“开发者负责”作为理由，在实现中静默删除既有协议限制。
+- Wire JSON representation 与 exact closed protocol schema；
+- authority、identity、generation、revision、lifecycle 与 one-shot semantics；
+- Patch operation preconditions、ordered application、candidate isolation 与 atomic commit；
+- final candidate 的 parent/sibling/reachability/cycle/identity invariants；
+- Event semantics、failure classification 与 recovery boundaries。
 
-但 Frozen Contract 也不意味着实现必须为同一数据重复完整扫描多次：
+固定数字改为 Host / Product / Runtime 明确、有限、可审计的 local resource budgets。Inbound budget exhaustion 不得 partial commit，必须 retire 当前 carrier，但诊断为 local-resource-exhaustion 而非 peer protocol violation；outbound budget exhaustion 不得发送部分 message。v1 不做 budget negotiation，产品部署必须记录 peer budget compatibility。
 
-- 一项限制应在真正需要时检查；
-- 可以在实际编码时一次性执行 bounded serialization 与字节计量；
-- Patch 每个 op 的限制可通过精确的局部/增量 accounting 执行；
-- 不应在每次 Patch 前额外 stringify 与本次操作无关的完整 Snapshot；
-- 结构性操作仍需执行其确实影响的 tree invariants。
+本次同一 /1 pre-release correction 的合并门槛是确认不存在必须与旧 hard-limit /1 peer 混合互操作的已部署/外部/rolling/rollback 义务。若存在，STOP same-identity correction，改走显式 protocol version / migration ADR。
 
-如果后续决定将现有 Render Update v1 的某项 hard limit / strict representation 检查降为可选，必须单独提交 contract correction / ADR，明确兼容义务、accept/reject/failure 变化和 qualification impact。本 PR 不预先作出该协议变更。
-
+---
 ## 6. 当前热路径与改造方向
 
 以下路径基于当前 main；实现 PR 开工时必须重新核对代码与调用关系。
@@ -164,7 +160,7 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 - 避免在同一个输入值上重复执行结构 walk、copy、freeze；
 - 不要求所有业务 data 都先转换为强制 ValidatedJson wrapper；
 - 如果现有 API 必须隔离 caller mutation，应明确选择 ownership transfer、必要复制或开发者约定，不能把“深冻结”当成免费验证；
-- 对每个 Patch operation 保留当前 Frozen Contract 要求的中间状态限制和原子提交。
+- 对每个 Patch operation 保留顺序语义、前置条件和原子提交；固定 numeric intermediate caps 移除，资源峰值由 local budget 在实际增长过程中保护。
 
 ### 6.2 RenderManager：完整 Snapshot probe
 
@@ -173,9 +169,9 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 改造方向：
 
 - 不要为了每次小 Patch 预先完整 stringify 一个并未发送的 Snapshot；
-- 只有在实际构造/发送 Snapshot 时才对该 Snapshot 执行必要的 message bound；
-- Patch 的限制在 Patch 编码/发送时检查；
-- 如需维护当前 Frozen Contract 的总量限制，使用由实际更新维护的精确 accounting；不能使用低估值或未经证明的缓存；
+- 只有在实际构造/发送 Snapshot 时才执行 bounded serialization 与 local outbound budget；
+- Patch 的实际编码和工作量受 local outbound/operation budget 约束；
+- 如需维护 local resource budget，使用由实际更新维护的精确 accounting；不能使用低估值或未经证明的缓存；
 - 不得将完整 Snapshot 的业务正确性扫描伪装成 message-size guard。
 
 ### 6.3 Data Codec：把检查融合到实际 parse / encode
@@ -198,7 +194,7 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 
 改造方向：
 
-- Decode：先检查原始 carrier string 的 message byte bound，再 parse；随后一次性执行当前协议所需的 discriminator、direction、exact message schema、字段约束和 Render hard limits。
+- Decode：先按 local inbound budget 对原始 carrier string 做 bounded gate，再 parse；随后一次性执行 discriminator、direction、exact message schema 与 framework-owned field/identity checks。Parser work/depth 也受 local budget 约束。
 - 不要把 JSON.parse 生成的 parser-owned JSON 当成任意可执行 JavaScript 对象，再重复做 getter/proxy/accessor 审查。
 - Encode：对框架 envelope / 协议字段执行必要检查；在实际 bounded serializer 中完成可表示性检查和精确 byte accounting，不先完整 assert/depth walk 再 stringify。
 - stringifyJson 的 public contract 和 frozen compact JSON semantics 必须保持；不能通过 unchecked public serializer 逃避协议约束。
@@ -210,8 +206,8 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 
 改造方向：
 
-- 新 Snapshot：按 Frozen Contract 构造 isolated candidate，执行一次必要的完整 baseline / tree / data bounded validation，再 atomic commit。
-- Update-only Patch：对每个 operation 的目标、delta 和受影响状态执行必要检查；通过精确增量 accounting 维护当前 Frozen Contract 的 per-op hard bounds。
+- 新 Snapshot：构造 isolated candidate，执行一次必要的 framework baseline / tree / identity invariant validation；candidate resource growth 由 local budget 保护，再 atomic commit。
+- Update-only Patch：对每个 operation 的目标、delta 和受影响状态执行必要检查；通过精确增量 accounting 维护 local candidate/operation resource budget；不再维护固定协议级 per-op hard bounds。
 - data-only Patch 不应无条件重新 stringify 全部未变化的 node.data。
 - Insert / Remove / Move 等结构操作仍需检查其影响的 identity、reachability、parent、tree depth 和 node count；不承诺消除所有 tree work。
 - 失败 Patch 不改变 revision、zIndex、tree 或 current presentation。
@@ -278,9 +274,9 @@ current committed state
 ### 9.1 Frozen Contract 行为等价
 
 - 合法消息的 accept / commit 结果保持一致；
-- 非法 envelope、方向、identity、revision、hard limit 仍按当前契约拒绝；
+- 非法 envelope、方向、identity、revision、framework invariant 仍按协议拒绝；local resource exhaustion 独立分类，不作为 peer protocol invalid；
 - protocol-fatal / authoritative-continuity failure 的 retire 语义不变；
-- Patch 每个 op 的 intermediate bound 保持；
+- Patch operation 顺序与前置条件保持；local resource budget 在资源增长时执行；
 - 失败时旧 state / revision / presentation 不变；
 - Snapshot + Patch 序列结果与 reference full snapshot 相同。
 
@@ -295,7 +291,7 @@ current committed state
 ### 9.3 错误与资源边界
 
 - malformed carrier / oversized raw message 在进入业务处理前被拒绝；
-- bounded serializer 在超过 byte cap 时停止继续生成输出；
+- bounded serializer 在 local outbound budget 耗尽时停止继续生成输出；
 - getter / Proxy trap 等异常在 authoring boundary 明确失败，不产生 partial commit；
 - cyclic / unsupported value 在实际编码时产生确定错误；
 - Patch 中间超限不能靠后续 op 缩回；
@@ -320,11 +316,11 @@ current committed state
 
 - 普通小 Patch 不触发与本次操作无关的完整 Snapshot stringify；
 - 同一 encode/decode 路径不重复完整验证同一 subtree；
-- Patch 的 hard bounds 通过局部/增量方式满足，而不是重复全树预检；
+- local resource budgets 通过局部/增量方式满足，而不是重复全树预检；
 - 每条实际发送消息仍执行一次必要的 bounded serialization；
 - 默认 Runtime 不执行 opt-in business strict validation。
 
-毫秒阈值必须由目标运行环境基准制定。不得通过删除 Frozen Contract 限制、样本过滤或弱化失败语义获得 PASS。
+毫秒阈值必须由目标运行环境基准制定。不得通过取消 bounded resource protection、样本过滤或弱化失败语义获得 PASS。
 
 ## 10. 实施顺序
 
@@ -342,11 +338,11 @@ current committed state
 
 ### Phase 1 — Remove redundant work without changing the contract
 
-先合并 wire/data codec 的重复 traversal，并让实际 bounded serialization 同时完成必要的字节计量。所有 Frozen Contract accept/reject 行为保持不变。
+先合并 wire/data codec 的重复 traversal，并让实际 bounded serialization 同时完成必要的字节计量。protocol invariants 与 failure/atomicity semantics 保持不变；numeric caps 按 ADR0039 改为 local resource budgets。
 
 ### Phase 2 — RenderManager operation-first update
 
-移除与当前 Patch 无关的 Snapshot 预检；在实际 Snapshot/Patch encode 时执行必要 message bound。保留 candidate isolation、每个 op 的 hard bounds 与 atomic commit。
+移除与当前 Patch 无关的 Snapshot 预检；在实际 Snapshot/Patch encode 时执行必要 message bound。保留 candidate isolation、operation preconditions、local resource budgets 与 atomic commit。
 
 ### Phase 3 — Renderer Store incremental enforcement
 
@@ -373,7 +369,7 @@ Map 专项 PR #134 负责：
 
 - 将框架强制检查限制在 runtime / protocol / resource safety 所必需的范围；
 - 移除 Realm 通用数据通路的重复与无关全量预检；
-- 保持 Frozen Render Update v1 的当前可观察约束；
+- 保持修订后 Render Update v1 的 authority、identity、revision、atomicity 与 Event 可观察语义；
 - 为未来 opt-in Strict Validation 留出独立边界。
 
 架构层不得识别 Map tag 或 Tile tuple；Map 层不得绕过通用协议约束。两项改造独立评审，集成时共同使用 Issue #133 的物理机工作负载复测。
@@ -383,12 +379,12 @@ Map 专项 PR #134 负责：
 - [ ] Framework Responsibility and Validation Boundary 已进入 Current Architecture 文档。
 - [ ] Developer Authority、Minimal Runtime Enforcement、Opt-in Strictness 三项原则有明确规范定义。
 - [ ] 未将应用业务 Schema / 业务正确性检查强制放入默认 Runtime。
-- [ ] 未静默改变 Render Update v1 的 schema、hard limits、failure classification 或 atomicity。
+- [ ] Render Update v1 numeric hard limits 已按 ADR0039 正式改为 local resource-budget policy；protocol invariants 与 failure/atomicity semantics 保持。
 - [ ] 原始消息大小在 parse 前受限；实际序列化执行 bounded byte guard。
 - [ ] 普通小 Patch 不再完整 stringify 与本次操作无关的 Snapshot。
 - [ ] Data Codec 不再对同一 subtree 重复完整 traversal。
 - [ ] Renderer Store data-only Patch 不再无条件重新扫描全部未变化 data。
-- [ ] 每个 Patch op 的 Frozen Contract intermediate bounds 仍得到满足。
+- [ ] Patch operation 依序执行，candidate resource growth 始终受 local budget 约束，失败不 partial commit。
 - [ ] 失败 Patch 不改变已提交状态。
 - [ ] 可选 Strict Validation 与默认 Runtime Guard 在代码依赖和测试上可分离。
 - [ ] 所有 wire/data/subsystem/renderer 现有测试通过。
@@ -401,7 +397,7 @@ Map 专项 PR #134 负责：
 - 将所有应用对象包装成强制 ValidatedImmutableJson public abstraction。
 - 仅为严格验证而强制深复制或深冻结所有应用数据。
 - 通过全局 disableValidation 开关绕过当前协议。
-- 静默放宽 Render Update v1 已冻结的 JSON representation / hard limits / failure semantics。
+- 未经正式 ADR / compatibility gate / conformance revision / qualification 而变更已发布 Render Update v1 wire semantics。
 - 信任跨 MessagePort / JSON 的 sender-side brand 或 WeakMap metadata。
 - 为 Map 增加通用协议例外。
 - 在本 PR 实现 Map Tile Band / fixed-world Canvas cache。
