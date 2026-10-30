@@ -6,7 +6,7 @@
 > fixtureSetRevision：2  
 > 适用协议：`loomrealm.render-update / 1`  
 > 依赖：[Render Update Protocol v1](./render-update-v1.md)、[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)、[ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md)  
-> 最近复核：2026-08-21
+> 最近复核：2026-10-30
 
 本文定义修订后 Render Update v1 的可观察语义与 conformance obligations；与主协议冲突时以主协议为准。
 
