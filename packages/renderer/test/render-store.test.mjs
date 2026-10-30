@@ -114,6 +114,7 @@ test("failed Patch leaves the committed replica unchanged", () => {
   assert.equal(disposition.kind, "protocol-fatal");
   assert.equal(JSON.stringify(store.snapshotForQualification().domains[0]), before);
 });
+const percentile = (values, fraction) => [...values].sort((left, right) => left - right)[Math.max(0, Math.ceil(values.length * fraction) - 1)];
 
 test("unexpected local candidate mechanics failure propagates without committing", () => {
   const store = new RendererRenderStore(1);
@@ -229,6 +230,64 @@ test("update-only Patch shares untouched large data and clones the path once", (
   assert.equal(after.data.n, 2);
   assert.equal(after.attrs.x, "9");
   assert.equal(store.snapshotForQualification().domains[0].revision, 2);
+});
+
+test("large indexed Store separates update-only path cost from structural candidate cost", () => {
+  const store = new RendererRenderStore(1);
+  store.beginCarrier();
+  store.onDomains(domains("d1"));
+  const large = { values: Array.from({ length: 20_000 }, (_, index) => index) };
+  const children = Array.from({ length: 4_096 }, (_, index) => node(`leaf-${index}`, [], "sprite", {}, { value: index }));
+  const snapshotStart = performance.now();
+  store.onSnapshot(snapshot("d1", 1, [node("root", children, "group", {}, { large })]));
+  const snapshotMs = performance.now() - snapshotStart;
+  const baselineRoot = store.snapshotForQualification().domains[0].roots[0];
+  const retainedLarge = baselineRoot.data.large;
+  const retainedFirstChild = baselineRoot.children[0];
+  const updateOnly = [];
+  for (let revision = 2; revision <= 201; revision += 1) {
+    const start = performance.now();
+    const disposition = store.onPatch({
+      type: "render.patch",
+      domainId: "d1",
+      baseRevision: revision - 1,
+      revision,
+      ops: [{ op: "update", key: "leaf-4095", data: { set: { value: revision } } }],
+    });
+    updateOnly.push(performance.now() - start);
+    assert.deepEqual(disposition, { kind: "accepted" });
+  }
+  const afterUpdates = store.snapshotForQualification().domains[0];
+  assert.equal(afterUpdates.roots[0].data.large, retainedLarge);
+  assert.equal(afterUpdates.roots[0].children[0], retainedFirstChild);
+  const structuralStart = performance.now();
+  assert.deepEqual(store.onPatch({
+    type: "render.patch",
+    domainId: "d1",
+    baseRevision: 201,
+    revision: 202,
+    ops: [{ op: "insert", parentKey: "root", beforeKey: null, node: node("inserted") }],
+  }), { kind: "accepted" });
+  const structuralMs = performance.now() - structuralStart;
+  const report = {
+    totalNodes: 4_097,
+    changedNodes: 1,
+    unchangedNodes: 4_096,
+    targetToRootPathNodes: 2,
+    samples: updateOnly.length,
+    snapshotMs,
+    updateOnlyMs: {
+      p50: percentile(updateOnly, 0.5),
+      p95: percentile(updateOnly, 0.95),
+      p99: percentile(updateOnly, 0.99),
+      max: Math.max(...updateOnly),
+    },
+    structuralPatchMs: structuralMs,
+    unchangedLargeDataIdentityReused: afterUpdates.roots[0].data.large === retainedLarge,
+  };
+  process.stdout.write(`RENDERER_STORE_BENCH ${JSON.stringify(report)}\n`);
+  assert.equal(report.unchangedLargeDataIdentityReused, true);
+  assert.ok(report.updateOnlyMs.p95 < report.structuralPatchMs);
 });
 
 test("zIndex-only Patch reuses roots identity", () => {
