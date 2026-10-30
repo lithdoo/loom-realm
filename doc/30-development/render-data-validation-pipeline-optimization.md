@@ -4,7 +4,7 @@
 >
 > 架构准则：[Framework Responsibility and Validation Boundary](../10-architecture/framework-validation-boundary.md)
 >
-> 决策记录：[ADR 0038 — Developer Authority and Minimal Runtime Enforcement](../decisions/0038-developer-authority-minimal-runtime-enforcement.md)
+> 决策记录：[ADR 0038 — Developer Authority and Minimal Runtime Enforcement](../decisions/0038-developer-authority-minimal-runtime-enforcement.md) · [ADR 0039 — Render Update v1 Resource-Budget Correction](../decisions/0039-render-update-v1-resource-budget-correction.md)
 >
 > 触发证据：[Issue #133 — Map 投影窗口刷新卡顿来自整表瓦片的 JSON 校验](https://github.com/lithdoo/loom-realm/issues/133)
 >
