@@ -47,7 +47,7 @@ ADR 记录“为什么”；Current 可实现事实以 Architecture / Formal Con
 36. [ADR 0036：Viewport child 独立于 Input（Profile-v2 方案由 ADR0037 修订）](./0036-viewport-state-and-renderer-data-profile-v2.md)
 37. [ADR 0037：首次发布前直接修正 Profile v1，取消 v2 current 路线](./0037-direct-profile-v1-preimplementation-viewport-correction.md)
 38. [ADR 0038：Developer Authority and Minimal Runtime Enforcement](./0038-developer-authority-minimal-runtime-enforcement.md)
-39. [ADR 0039：Render Update v1 Pre-release Resource-Budget Correction](./0039-render-update-v1-resource-budget-correction.md)
+39. [ADR 0039：Render Update v1 Local Resource-Budget Policy Correction](./0039-render-update-v1-resource-budget-correction.md)
 
 ## Current supersession relationships
 
