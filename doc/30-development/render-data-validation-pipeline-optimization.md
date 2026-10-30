@@ -156,7 +156,7 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 改造方向：
 
 - 先按 API 契约明确 caller 与 RenderManager 的 ownership / mutation 约定；
-- 仅执行 Patch operation、协议和当前 hard limits 所要求的检查；
+- 仅执行 Patch operation、协议和 local resource budget 所要求的检查；
 - 避免在同一个输入值上重复执行结构 walk、copy、freeze；
 - 不要求所有业务 data 都先转换为强制 ValidatedJson wrapper；
 - 如果现有 API 必须隔离 caller mutation，应明确选择 ownership transfer、必要复制或开发者约定，不能把“深冻结”当成免费验证；
