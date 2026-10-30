@@ -46,6 +46,7 @@ ADR 记录“为什么”；Current 可实现事实以 Architecture / Formal Con
 35. [ADR 0035：RenderDomain existing-node authoritative update](./0035-render-domain-existing-node-update.md)
 36. [ADR 0036：Viewport child 独立于 Input（Profile-v2 方案由 ADR0037 修订）](./0036-viewport-state-and-renderer-data-profile-v2.md)
 37. [ADR 0037：首次发布前直接修正 Profile v1，取消 v2 current 路线](./0037-direct-profile-v1-preimplementation-viewport-correction.md)
+38. [ADR 0038：Render Data Runtime 首次发布前同 identity 修正](./0038-render-data-runtime-pre-release-correction.md)
 
 ## Current supersession relationships
 
@@ -66,6 +67,9 @@ ADR0016
 
 ADR0025 → ADR0036 → ADR0037
     Viewport addition and corrected four-child renderer-data /1
+
+ADR0022 / ADR0025 / ADR0035 / ADR0037 → ADR0038
+    Render Data capacity ownership, runtime hot path and pre-release same-identity correction
 
 ADR0003 → ADR0030
     Content / FSDB core ownership
@@ -110,6 +114,8 @@ ADR0016
 ```
 
 Viewport correction 追加 ADR0036→0037，并由 [Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md) 与 [Viewport State v1](../15-contracts/viewport-state-v1.md) formalize。
+
+Render Data Runtime 的 current capacity/failure/generation correction 由 ADR0038 覆盖旧 ADR 中的 capacity-specific wording；原 authority/lifecycle/product-boundary decisions 保持有效。
 
 ### Content
 
