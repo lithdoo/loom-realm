@@ -604,7 +604,7 @@ Phase 6 是同步/记录闭环，不是兼容性审批 gate。
 - carrier loss / fresh baseline recovery；
 - caller-owned input mutation isolation；
 - same-generation carrier replacement 保留 wire Domain/Node one-shot history，只重置 carrier-local baseline/cursor；
-- fresh generation 建立新的 wire identity universe，并通过 Registry + current Snapshots 重新导出仍存活的 business Domains；
+- fresh generation 建立新的 wire identity universe，并通过 Registry + current Snapshots 重新导出仍存活的 business Domains；旧 generation 的 retired Domain IDs、consumed Node keys、live-tag history、revision/baseline metadata 不得泄漏到新 generation；相同 key/domainId 字符串在新 generation 可作为 fresh wire identity 使用；
 - fresh carrier 首条 Render namespace message 为 Registry，current Domains 先 Snapshot baseline，之后才可 Patch；
 - old carrier revision / stale Renderer Store 不可作为 fresh carrier Patch base；old Event 不 replay，old unsent Event 不跨 carrier 迁移；
 - candidate 本地异常后，continuity 可证明时才允许继续；否则 retire Data carrier 并 fresh-baseline recovery，且错误分类仍为 local implementation failure；
@@ -625,6 +625,9 @@ Phase 6 是同步/记录闭环，不是兼容性审批 gate。
 - Render/Event data > 256 KiB；
 - attrs / JSON members / array elements 超过旧阈值；
 - identity/tag/Event strings 超过旧 byte threshold；
+- `zIndex` 超过旧 int32 范围但仍是 signed safe integer；
+- DataRuntime controlled backlog 超过旧 1024 pending sends；
+- Presentation controlled backlog 超过旧 256 pending Event 阈值且不因容量 drop；
 - Presentation Interest 超过旧 128 Frames、每 Frame 64 Channels、4096 Frame/channel pairs；
 - Presentation Channel 超过旧 256 UTF-8 bytes；
 - Presentation Event identity/name strings 超过旧 128 / 256 UTF-8 byte caps；
@@ -636,7 +639,12 @@ Phase 6 是同步/记录闭环，不是兼容性审批 gate。
 
 ### 8.3 Performance evidence
 
-使用 Issue #133 同等 PokeMan Map 路线，同时增加业务无关的大型 RenderNode.data fixture。
+使用 Issue #133 同等 PokeMan Map 路线，同时增加业务无关的大型 RenderNode.data fixture。Map 自有 `VIEW_DATA_GUARD` / projection policy 继续由 Map 层拥有，不得为了让 Runtime benchmark 通过而删除。
+
+最终 PASS 同时需要两组证据：
+
+1. **Issue #133 diagnostic closure**：1920×1080 同类窗口 refresh 的主线程 Long Task 不再落在 100ms 以上；Worker refresh step callback 不再占 100ms 以上；并重新记录窗口移动次数、两侧 Long Task/帧间隔、Worker step、tiles 数以及 CPU profile 中 validation/stringify 占比。该组证据证明原热点被消除，但不替代正式资格。
+2. **Current full/native Performance Qualification**：按 `doc/30-development/performance.md` 的当前 SSOT 完整运行。当前门槛为 ordinary P95 ≤50ms（640×480 / 1280×720 / 1920×1080），refresh P95 分别 ≤50ms / ≤75ms / ≤100ms，且满足当期 sample count、invalid ratio、pixel/correctness 与 memory guard。若 SSOT 在实施期间合法更新，以最终 subject 所引用的 current profile 为准。
 
 至少记录：
 
@@ -647,7 +655,9 @@ Phase 6 是同步/记录闭环，不是兼容性审批 gate。
 - changed subtree 与 unchanged subtree 大小；
 - Subsystem Worker 与 Renderer 端 P50/P95/P99；
 - heap allocation / GC；
-- camera-only / motion-only Patch 与真正 Snapshot refresh 分开统计。
+- camera-only / motion-only Patch 与真正 Snapshot refresh 分开统计；
+- update-only Patch 的 node/path visit counter，证明 cost 随 touched path/subtree 增长而不是随 unrelated whole-tree size 增长；
+- writer/publication backlog enqueue/dequeue cost 与 terminal reference release。
 
 结构性验收：
 
@@ -682,22 +692,23 @@ Phase 6 是同步/记录闭环，不是兼容性审批 gate。
 
 ## 9. Follow-up PR 切分建议
 
-本计划 PR 合并后，实现应拆分，避免再次把设计、协议激活和大规模实现混进同一个 PR：
+本计划 PR 合并后，Agent 可以按模块拆分 implementation，但这些 PR 建议作为 stacked PR / integration branch 组织，避免 `main` 出现半套协议：
 
-1. **Wire/Data traversal PR**：single-pass encode/decode pipeline 与 capacity-preflight 清理。
-2. **RenderManager PR**：ownership traversal、indexed COW、probe removal、queue semantics。
-3. **Renderer Store PR**：indexed update-only candidate、structural final validation、failure classification。
-4. **Carrier/Data writer PR**：writer/MessagePort queue 实现与 terminal reference cleanup。
-5. **Qualification PR**：Issue #133 workload、historical-cap regression、性能证据。
-6. **Normative activation PR**：compatibility gate 通过后再修改 Contract/ADR/Conformance。
+1. **Protocol correction record PR/commit**：cap/invariant matrix、同 identity pre-release revision ledger 与目标 Contract delta（可作为 stack 底座，不单独形成长期不一致的 `main` subject）。
+2. **Wire/Data traversal PR**：single-pass encode/decode pipeline、hard-cap/preflight 清理、`zIndex` safe-integer 语义。
+3. **RenderManager PR**：ownership traversal、indexed COW、generation-scoped identity metadata、probe removal、无固定容量 publication queue。
+4. **Renderer Store PR**：indexed update-only candidate、structural candidate index + final single validation、local-vs-protocol failure classification。
+5. **Carrier/Data writer PR**：explicit serialized drain loop、MessagePort deque、terminal reference cleanup。
+6. **Qualification PR**：historical-cap/generation/failure/backlog regression、Issue #133 diagnostic、current full/native performance evidence。
+7. **Normative closure PR/commit**：最终同步 Contract/ADR/Conformance/revision ledger 与实现 SHA/evidence。
 
-每个实现 PR 都必须能独立解释：删除了什么工作、保留了什么 invariant、用什么测试证明没有语义回退。
+Agent 可以在一个 PR 中按上述顺序分 commit，也可以使用 stack；关键约束是最终进入 `main` 的 subject 一次性闭环。每个阶段都必须能独立解释：删除了什么工作、保留了什么 invariant、用什么测试证明没有语义回退。
 
 ## 10. 本计划明确不做
 
 - 不在本 PR 修改源码；
 - 不在本 PR 修改 Contract、ADR、Conformance fixture catalog；
-- 不在本 PR 修改 protocol/profile identity；
+- 不在本 PR 修改 protocol/profile identity；后续本次 correction 也保持现有 identity，不做版本迁移；
 - 不引入 ResourceBudgetPolicy / ResourceBudgetExceeded；
 - 不引入 ACK/NACK、resync、history replay；
 - 不把 JSON wire representation 放宽成任意 JavaScript object；
@@ -707,24 +718,23 @@ Phase 6 是同步/记录闭环，不是兼容性审批 gate。
 
 ## 11. 完成定义
 
-本计划进入实施阶段前，需要达成以下共识：
+本计划进入 Agent 实施阶段前，需要达成以下共识；除 revision ledger 中需要在最终 subject 回填的 SHA/evidence 外，其余均作为 Agent 的固定实施约束：
 
-- [ ] Framework / Developer validation boundary 无歧义；
-- [ ] 哪些历史 numeric caps 属于协议、哪些属于实现容量已经逐项确认；
-- [ ] outbound serialization error、local candidate error、protocol-fatal、carrier failure 的分类明确；
-- [ ] RenderManager caller ownership contract 明确；
-- [ ] update-only COW/index 方向认可；
-- [ ] structural Patch 采用“先保守、后 profiling”的策略认可；
-- [ ] 不引入新的 Framework resource-budget 体系；
-- [ ] same-identity compatibility gate 的执行时点明确；
-- [ ] 实现 PR 与 normative activation PR 分离；
-- [ ] Issue #133 的 performance/qualification 指标明确，并分别覆盖正常 update、structural Patch、Snapshot、reconnect 和 failure recovery；
-- [ ] async authoring acceptance 的 Wire representability + ownership 边界明确；
-- [ ] same-generation reconnect 与 fresh-generation identity/baseline 规则明确；
-- [ ] local candidate failure 的 continuity / retire / fresh-baseline 后果明确；
-- [ ] failure containment 不越过 Data / Frame / Main / Render authority 边界；
+- [ ] Framework / Developer validation boundary 无歧义：历史 fixed cap 不因已写入旧 Contract 就自动保留，只保留 Framework correctness 所需 invariant；
+- [ ] pre-release same-identity correction 已授权：不做 migration/version gate，但所有 observable accept/reject/drop 变化必须进入 revision ledger；
+- [ ] generic Runtime cap 与 Developer/Product-owned policy 分离，Map `VIEW_DATA_GUARD` / PR #134 不被通用清理误删；
+- [ ] outbound representation error、peer protocol violation、local candidate mechanics failure、business callback failure、carrier failure 的传播路径明确，并能由现有 protocol-fatal / local-fatal / boundary containment 表达；
+- [ ] fresh generation 重置 generation-scoped retired/consumed/live-tag/revision metadata；same-generation reconnect 保留 wire identity history；
+- [ ] RenderManager update-only COW/index 使用 touched-path index edits，不复制整棵 Tree 或整个 index；
+- [ ] Renderer Store update-only 使用 index；structural Patch 使用 isolated candidate + candidate index + ordered ops + 一次 final structural validation，不每 op 全树扫描；
+- [ ] async authoring acceptance 在一次 traversal 中完成 Wire representability + ownership detach/freeze，coalescing 后才做最终必要 serialization；
+- [ ] DataRuntime / RenderManager / MessagePort queue 均无固定 Framework capacity admission；使用 O(1) queue mechanics、single writer、自然 Promise backpressure 与 terminal reference cleanup；
+- [ ] 不引入 ResourceBudgetPolicy / ResourceBudgetExceeded 或新的 hidden fixed cap；
 - [ ] Framework-owned traversal 不通过递归调用栈引入隐含 depth cap；
-- [ ] Presentation 历史容量数字与保留的语义约束均有专项 regression；
-- [ ] 每个受影响 protocol/profile identity 均完成 compatibility gate。
+- [ ] Presentation 历史容量数字、`zIndex` int32、DataRuntime 1024、Presentation 256 等旧阈值均有 historical-cap regression；
+- [ ] Issue #133 diagnostic closure 与 current full/native Performance Qualification 都是最终 PASS 条件，且有通用大型 Render fixture 证明不是 Map 特例；
+- [ ] Contract / implementation / Conformance / revision ledger 通过 stacked/integration merge train 一致进入 `main`，不留下长期半旧半新状态。
+
+满足上述约束后，Agent 不需要再为这些架构问题请求逐项设计决策；可以按 Phase 0→6 直接实施、测试、修复回归、收集 qualification evidence，并在遇到**新的** Contract 冲突或无法满足 PASS 条件时才停止并上报。
 
 达到这些条件后再开始代码改造。
