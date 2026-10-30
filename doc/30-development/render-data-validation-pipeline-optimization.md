@@ -119,9 +119,9 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 
 **关键区别：** 业务 Schema 检查不是协议 envelope 检查；开发者选择不启用业务严格验证，不等于可以绕过 current wire contract、identity/revision 或资源保护。
 
-## 5. Render Update v1 pre-release resource-budget correction
+## 5. Render Update v1 resource-budget policy correction
 
-[ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md) 已授权在首次正式发布前修订 Render Update v1 的 numeric hard-limit policy，并将修订后的 conformance fixtureSetRevision 升为 2。协议 identity 暂保持 loomrealm.render-update / 1；这不是对已发布 wire 的静默变更。
+[ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md) 将 Render Update v1 的 numeric hard-limit policy 改为 local resource-budget policy；协议 identity 保持 `loomrealm.render-update / 1`，conformance fixtureSetRevision 为 2。数值容量是本地实现策略，不是 wire ABI；仅调整容量不要求协议版本升级。
 
 修订后不再将以下数字定义为跨实现 protocol accept/reject thresholds：message bytes、JSON depth、identifier byte length、Registry/Node/operation counts、tree depth、attrs member/key/value limits、data array/object counts、data payload bytes 与 relative depth。
 
