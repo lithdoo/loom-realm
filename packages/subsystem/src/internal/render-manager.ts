@@ -471,7 +471,6 @@ function applyStringDelta(
   if (delta.set) {
     for (const key of Object.keys(delta.set)) next[key] = delta.set[key] as string;
   }
-  validateAttrs(next);
   return Object.freeze(next);
 }
 
@@ -492,63 +491,95 @@ function applyDataDelta(
   if (delta.set) {
     for (const key of Object.keys(delta.set)) next[key] = delta.set[key] as JsonValue;
   }
-  validateJsonData(next, "RenderNode data");
   return Object.freeze(next) as JsonObject;
 }
 
-function freezeNode(node: {
+interface MutableNode {
   readonly key: string;
   readonly tag: string;
-  readonly attrs: Readonly<Record<string, string>>;
-  readonly data: JsonObject;
-  readonly children: readonly RenderNode[];
-}): RenderNode {
-  return Object.freeze({
-    key: node.key,
-    tag: node.tag,
-    attrs: node.attrs,
-    data: node.data,
-    children: node.children,
-  }) as RenderNode;
+  attrs: Readonly<Record<string, string>>;
+  data: JsonObject;
+  children: RenderNode[];
 }
 
 function applyCow(
   state: RenderDomainState,
   zIndex: number,
   updates: readonly ValidatedNodeUpdate[],
-): RenderDomainState {
-  const pending = new Map(updates.map((item) => [item.key, item]));
-  const seen = new Set<string>();
-  const visit = (node: RenderNode): RenderNode => {
-    const children = node.children.map(visit);
-    const childrenChanged = children.some((child, index) => child !== node.children[index]);
-    const delta = pending.get(node.key);
-    if (delta === undefined) {
-      if (!childrenChanged) return node;
-      return freezeNode({
-        key: node.key,
-        tag: node.tag,
-        attrs: node.attrs,
-        data: node.data,
-        children: Object.freeze(children),
-      });
+  nodes: ReadonlyMap<string, RenderNode>,
+  locations: ReadonlyMap<string, NodeLocation>,
+): {
+  readonly state: RenderDomainState;
+  readonly clones: ReadonlyMap<string, RenderNode>;
+} {
+  const clones = new Map<string, MutableNode>();
+  const clonedChildren = new Set<string>();
+  let roots = state.roots as RenderNode[];
+  let rootsCopied = false;
+
+  const ensurePath = (targetKey: string): MutableNode => {
+    const path: string[] = [];
+    let current: string | null = targetKey;
+    while (current !== null) {
+      path.push(current);
+      const location = locations.get(current);
+      if (location === undefined) throw new TypeError("Updated Render node is missing");
+      current = location.parentKey;
     }
-    seen.add(node.key);
-    return freezeNode({
-      key: node.key,
-      tag: node.tag,
-      attrs: delta.attrs === undefined ? node.attrs : applyStringDelta(node.attrs, delta.attrs),
-      data: delta.data === undefined ? node.data : applyDataDelta(node.data, delta.data),
-      children: childrenChanged ? Object.freeze(children) : node.children,
-    });
+
+    for (let index = path.length - 1; index >= 0; index -= 1) {
+      const key = path[index]!;
+      if (clones.has(key)) continue;
+      const original = nodes.get(key);
+      const location = locations.get(key);
+      if (original === undefined || location === undefined) {
+        throw new TypeError("Updated Render node is missing");
+      }
+      const clone: MutableNode = {
+        key: original.key,
+        tag: original.tag,
+        attrs: original.attrs,
+        data: original.data,
+        children: original.children as RenderNode[],
+      };
+      clones.set(key, clone);
+
+      if (location.parentKey === null) {
+        if (!rootsCopied) {
+          roots = roots.slice();
+          rootsCopied = true;
+        }
+        roots[location.index] = clone as RenderNode;
+      } else {
+        const parent = clones.get(location.parentKey);
+        if (parent === undefined) throw new TypeError("Render parent path is missing");
+        if (!clonedChildren.has(location.parentKey)) {
+          parent.children = parent.children.slice();
+          clonedChildren.add(location.parentKey);
+        }
+        parent.children[location.index] = clone as RenderNode;
+      }
+    }
+    const result = clones.get(targetKey);
+    if (result === undefined) throw new TypeError("Updated Render node is missing");
+    return result;
   };
-  const roots = state.roots.map(visit);
-  if (seen.size !== pending.size) throw new TypeError("Updated Render node is missing");
-  const rootsChanged = roots.some((node, index) => node !== state.roots[index]);
-  return Object.freeze({
-    zIndex,
-    roots: rootsChanged ? Object.freeze(roots) : state.roots,
-  });
+
+  for (const update of updates) {
+    const node = ensurePath(update.key);
+    if (update.attrs !== undefined) node.attrs = applyStringDelta(node.attrs, update.attrs);
+    if (update.data !== undefined) node.data = applyDataDelta(node.data, update.data);
+  }
+
+  for (const [key, node] of clones) {
+    if (clonedChildren.has(key)) Object.freeze(node.children);
+    Object.freeze(node);
+  }
+  const nextRoots = rootsCopied ? Object.freeze(roots) : state.roots;
+  return {
+    state: Object.freeze({ zIndex, roots: nextRoots }),
+    clones: new Map([...clones].map(([key, node]) => [key, node as RenderNode])),
+  };
 }
 
 function toWireOps(nodes: readonly ValidatedNodeUpdate[]): readonly RenderNodeUpdateV1[] {
