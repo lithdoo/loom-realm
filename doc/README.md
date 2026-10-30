@@ -5,7 +5,7 @@
 | 想了解什么 | 唯一入口 |
 | --- | --- |
 | 产品目标、权威与文档治理 | [产品目标](./00-overview/product-vision.md) → [文档治理](./00-overview/document-governance.md) |
-| 系统 authority / topology / data flow | [系统架构](./10-architecture/system-overview.md) |
+| 系统 authority / topology / data flow | [系统架构](./10-architecture/system-overview.md) · [框架与应用验证边界](./10-architecture/framework-validation-boundary.md) |
 | 跨角色协议 / ABI / version | [正式契约](./15-contracts/README.md) |
 | 当前有哪些模块、代码在哪里 | [核心模块](./20-modules/core/README.md) → [模块目录](./20-modules/README.md) |
 | 开发、测试、资格、性能和仓库布局 | [开发与资格](./30-development/README.md) |
