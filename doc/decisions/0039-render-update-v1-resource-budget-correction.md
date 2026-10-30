@@ -4,11 +4,11 @@
 > 日期：2026-10-30
 > 相关原则：[Framework Responsibility and Validation Boundary](../10-architecture/framework-validation-boundary.md)
 > 相关决策：[ADR 0022 — Render Update v1 freeze closure](./0022-render-update-v1-freeze-closure.md)、[ADR 0038 — Developer Authority and Minimal Runtime Enforcement](./0038-developer-authority-minimal-runtime-enforcement.md)
-> 相关契约：[Render Update v1](../15-contracts/render-update-v1.md)、[Render Update v1 Conformance](../15-contracts/render-update-conformance-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Renderer Data Profile /3](../15-contracts/renderer-data-profile-v3.md)
+> 相关契约：[Render Update v1](../15-contracts/render-update-v1.md)、[Render Update v1 Conformance](../15-contracts/render-update-conformance-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Renderer Data Profile /3](../15-contracts/renderer-data-profile-v3.md)、[Frame-targeted Presentation Event v1](../15-contracts/frame-targeted-presentation-event-v1.md)
 
 ## 背景
 
-Issue #133 的真实物理机诊断表明，Render Data 路径不仅承担重复遍历，还把许多固定数值限制当成 accept/reject 规则：message bytes、JSON depth、identifier length、Domain/Node/operation counts、attrs members、data members/elements/bytes/depth 等。
+Issue #133 的真实物理机诊断表明，Render Data 路径不仅承担重复遍历，还把许多固定数值限制当成 accept/reject 规则：message bytes、JSON depth、identifier length、Domain/Node/operation counts、attrs members、data members/elements/bytes/depth，以及 Presentation Interest 的 Frame/channel/pair counts 和 Presentation Event payload depth/member/byte limits 等。
 
 这些数字并非全部来自 Render authority、wire interoperability 或业务语义。它们混合了历史实现容量、预先防御性验证和框架自行设定的资源上限，使不同平台/产品不得不接受同一套与实际平台能力不匹配的限制，也让开发者的数据形状被框架约束。
 
@@ -29,6 +29,8 @@ Render Update v1 不再定义或要求框架实现以下容量上限：
 - attrs key/value byte length 与 attrs member count；
 - Render data array elements、object members、compact bytes、relative depth；
 - generic data object key byte length；
+- Presentation Interest Frame count、per-Frame Channel count、total pair count、Channel byte length；
+- Presentation Event name / identity byte length、data depth、member count、payload bytes；
 - pending message count、queue bytes、retained work、candidate growth 或其他框架自行设定的容量。
 
 这些数字不得通过默认常量、可配置选项、Product composition policy、Host policy 或新的 ResourceBudgetPolicy 重新引入为框架拒绝条件。
@@ -113,6 +115,7 @@ Host、浏览器、JavaScript engine、操作系统和实际 carrier API 自身�
 - Conformance 不要求每个实现配置 local resource budgets，也不测试 ResourceBudgetExceeded。
 - Renderer Data Profile v1 conformance fixtureSetRevision 4 candidate 删除 common message-byte/depth budget obligation；增加超过历史阈值的代表性 profile workload。
 - Renderer Data Profile /3 删除 generic queue / message/depth budget obligation；保留单 reader、单 writer、FIFO、viewport latest-value coalescing 和既有 role semantics。
+- Frame-targeted Presentation Event v1 删除 Interest 的 128 Frames / 64 Channels / 4096 pairs / 256-byte Channel caps，以及 Event identity/name byte、data depth/member/byte caps；保留 exact shape、Unicode scalar、C0/DEL、authority、activation、interest applicability 和 transient semantics。
 - Design / conformance revision 尚未激活；实现和 qualification 完成后才能标记为 Active / Normative。
 
 ### 8. Same-identity pre-release compatibility gate
@@ -121,7 +124,7 @@ Host、浏览器、JavaScript engine、操作系统和实际 carrier API 自身�
 
 保持 Render Update /1 与受影响 Renderer Data Profile identity 的前提是：它们仍处于首次正式发布前，并且 release owner 确认不存在：
 
-- deployed old-cap Render Update /1 or affected Renderer Data Profile /1 or /3 peers；
+- deployed old-cap Render Update /1, affected Renderer Data Profile /1 or /3 peers, or Frame-targeted Presentation Event v1 peers；
 - independent implementations relying on old reject/drop behavior；
 - rolling upgrade / rollback cohorts；
 - persisted messages, recordings, or compatibility obligations requiring old behavior.
