@@ -53,17 +53,17 @@ Catch 不能替代 bounded resource guard。外部输入、消息解析、序列
 
 本 ADR 不静默修改已有 Frozen Contract。
 
-当前 Render Update v1 明确规定：
+当前 Render Update v1 继续规定：
 
 - JSON representation 与 closed message schema；
-- message / data / depth / member / node / tree hard limits；
-- Patch 每个 operation 后的 bounded candidate；
-- protocol-fatal representation/schema/limit failure；
-- isolated candidate 与 atomic commit。
+- authority / identity / generation / revision / lifecycle；
+- Patch operation preconditions、candidate isolation 与 atomic commit；
+- framework-owned tree/identity invariants；
+- Event ordering/drop/barrier 与 failure/recovery semantics。
 
-这些当前可观察语义在实现 PR 中继续有效。PR #135 的首要目标是在不改变 accept/reject、retire、limit 和 state outcome 的前提下，移除重复全量 traversal 和与当前 operation 无关的预检。
+原先统一的 message/data/depth/member/node/tree numeric hard limits 已由 [ADR 0039](./0039-render-update-v1-resource-budget-correction.md) 授权在首次正式发布前修订为显式、有限、实现/产品级 local resource budgets。resource exhaustion 必须与 malformed peer/protocol violation 分开分类。PR #135 必须同步更新 Render Update v1、Renderer Data Profile v1、conformance fixtures 和 qualification requirements。
 
-如果项目后续决定放宽或删除其中任何约束，必须单独提交 contract correction，评估 compatibility / migration，并更新 conformance 与 qualification。不能把“开发者拥有业务正确性”解释为可绕过当前协议。
+本次不是静默变更：它有独立 Accepted direction ADR、明确 pre-release compatibility gate、fixture revision 更新和重新 qualification。首次正式发布后，wire-observable semantics 变更仍须版本化。不能把“开发者拥有业务正确性”解释为可以绕过 protocol invariants 或 bounded resource safety。
 
 ## 后果
 
