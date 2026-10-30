@@ -35,7 +35,7 @@
 - authority、identity、generation、revision、lifecycle 和 state continuity；
 - Patch / Snapshot 的 candidate isolation、commit atomicity 和 framework-owned tree invariants；
 - bounded parse/serialize、队列、内存和其他防止资源耗尽的约束；
-- 当前 Frozen Contract 明确规定的 representation、hard limits 和 failure semantics。
+- 当前正式契约明确规定的 representation、framework invariants 和 failure semantics；numeric resource budgets 由显式 local policy 管理，pre-release correction 按正式 ADR 修订。
 
 默认 Runtime 不应额外执行：
 
@@ -92,19 +92,19 @@ Strict Validation 可以提供 JSON representation、exact Schema、业务 valid
 
 ## 6. Frozen Contract 兼容规则
 
-本原则不自动修改任何已经 Frozen 的正式契约。
+本原则不允许静默修改正式契约，但正式契约本身可以在首次发布前通过明确的 correction 重新评估历史 numeric limits。
 
-当前 [Render Update v1](../15-contracts/render-update-v1.md) 已定义 JSON representation、hard structural limits、Patch 每个 operation 的 bounded candidate、failure classification 和 atomic commit。实现必须继续遵守这些现有可观察语义。
+当前 [Render Update v1](../15-contracts/render-update-v1.md) 保留 JSON representation、closed message schema、authority/identity/revision、Patch atomicity、framework structural invariants、failure/recovery semantics。原统一 hard limits 已由 [ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md) 修订为实现/产品级 local resource budgets。
 
-若希望将其中某项约束改为 opt-in、删除 hard limit 或改变 protocol-fatal / retirement 行为，必须：
+任何 pre-release correction 必须：
 
-1. 明确证明它不再是 framework runtime / resource safety 所必需，或确认原契约过度约束；
+1. 明确区分 framework invariant、protocol interoperability 与 local resource-safety policy；
 2. 提交独立 Accepted ADR / contract correction；
-3. 评估 peer compatibility、accept/reject、failure、recovery 和 migration；
+3. 评估旧 peer、部署 cohort、accept/reject、failure、recovery 和 migration；
 4. 更新 conformance / tests；
 5. 按 qualification governance 重新判断受影响 subject。
 
-不得以实现优化 PR 或默认配置变更的方式静默修改 Frozen Contract。
+首次正式发布后，wire-observable protocol changes 必须版本化；不得以实现优化 PR 或默认配置变更的方式静默修改已发布契约。
 
 ## 7. 设计审查清单
 
