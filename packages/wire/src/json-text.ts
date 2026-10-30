@@ -1,10 +1,9 @@
-import { JsonTextSyntaxError } from "./errors.js";
+import { JsonTextSyntaxError, WireValidationError } from "./errors.js";
 import type { JsonValue } from "./json-value.js";
-import { assertJsonValue, assertString } from "./validation.js";
 
 interface ValueTask {
   readonly kind: "value";
-  readonly value: JsonValue;
+  readonly value: unknown;
 }
 
 interface TextTask {
@@ -12,18 +11,56 @@ interface TextTask {
   readonly text: string;
 }
 
-type SerializationTask = ValueTask | TextTask;
+interface LeaveTask {
+  readonly kind: "leave";
+  readonly value: object;
+}
+
+type SerializationTask = ValueTask | TextTask | LeaveTask;
+
+function invalid(message: string): never {
+  throw new WireValidationError(message);
+}
+
+function arrayIndex(key: string): number | null {
+  if (key === "" || key === "-0") return null;
+  const index = Number(key);
+  if (!Number.isInteger(index) || index < 0 || index >= 0xffff_ffff) return null;
+  return String(index) === key ? index : null;
+}
+
+function assertFiniteParsedNumbers(value: unknown): void {
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (typeof current === "number") {
+      if (!Number.isFinite(current)) invalid("Expected a finite number");
+      continue;
+    }
+    if (current === null || typeof current !== "object") continue;
+    if (Array.isArray(current)) {
+      for (let index = 0; index < current.length; index += 1) stack.push(current[index]);
+    } else {
+      for (const key of Object.keys(current)) {
+        stack.push((current as Record<string, unknown>)[key]);
+      }
+    }
+  }
+}
 
 export function parseJsonText(raw: string): JsonValue {
-  assertString(raw);
+  if (typeof raw !== "string") invalid("Expected a string");
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch {
     throw new JsonTextSyntaxError();
   }
-  assertJsonValue(parsed);
-  return parsed;
+  // JSON.parse already creates dense arrays, ordinary objects and enumerable
+  // data properties. Overflowing numeric literals are its sole Wire-model
+  // exception and therefore require one stack-safe representation pass.
+  assertFiniteParsedNumbers(parsed);
+  return parsed as JsonValue;
 }
 
 function primitiveText(value: null | boolean | number | string): string {
@@ -33,8 +70,8 @@ function primitiveText(value: null | boolean | number | string): string {
 }
 
 export function stringifyJson(value: JsonValue): string {
-  assertJsonValue(value);
   const output: string[] = [];
+  const active = new WeakSet<object>();
   const stack: SerializationTask[] = [{ kind: "value", value }];
 
   while (stack.length > 0) {
@@ -44,38 +81,84 @@ export function stringifyJson(value: JsonValue): string {
       output.push(task.text);
       continue;
     }
-
-    const current = task.value;
-    if (current === null || typeof current !== "object") {
-      output.push(primitiveText(current));
+    if (task.kind === "leave") {
+      active.delete(task.value);
       continue;
     }
 
-    if (Array.isArray(current)) {
-      stack.push({ kind: "text", text: "]" });
-      for (let index = current.length - 1; index >= 0; index -= 1) {
-        const descriptor = Object.getOwnPropertyDescriptor(current, String(index));
-        if (descriptor === undefined || !("value" in descriptor)) {
-          throw new TypeError("Validated JSON array changed during serialization");
+    const current = task.value;
+    if (current === null || typeof current === "string" || typeof current === "boolean") {
+      output.push(primitiveText(current));
+      continue;
+    }
+    if (typeof current === "number") {
+      if (!Number.isFinite(current)) invalid("Expected a finite number");
+      output.push(primitiveText(current));
+      continue;
+    }
+    if (typeof current !== "object") invalid("Expected a JSON value");
+    if (active.has(current)) invalid("Cyclic JSON value");
+
+    let array: boolean;
+    let descriptors: PropertyDescriptorMap;
+    let prototype: object | null;
+    try {
+      array = Array.isArray(current);
+      prototype = Object.getPrototypeOf(current) as object | null;
+      descriptors = Object.getOwnPropertyDescriptors(current);
+    } catch {
+      invalid("Unable to inspect JSON container");
+    }
+    if (!array && prototype !== Object.prototype && prototype !== null) {
+      invalid("Expected a plain JSON object");
+    }
+    const keys = Reflect.ownKeys(descriptors);
+    active.add(current);
+
+    if (array) {
+      const length = (current as unknown[]).length;
+      const elements: Array<{ readonly index: number; readonly value: unknown }> = [];
+      for (const key of keys) {
+        if (typeof key === "symbol") invalid("JSON arrays cannot have symbol properties");
+        if (key === "length") continue;
+        const index = arrayIndex(key);
+        if (index === null || index >= length) invalid("JSON arrays cannot have extra properties");
+        const descriptor = descriptors[key];
+        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+          invalid("JSON array elements must be enumerable data properties");
         }
-        stack.push({ kind: "value", value: descriptor.value as JsonValue });
-        if (index > 0) stack.push({ kind: "text", text: "," });
+        elements.push({ index, value: descriptor.value });
+      }
+      if (elements.length !== length) invalid("Sparse JSON arrays are not supported");
+      elements.sort((left, right) => right.index - left.index);
+
+      stack.push({ kind: "leave", value: current });
+      stack.push({ kind: "text", text: "]" });
+      for (const element of elements) {
+        stack.push({ kind: "value", value: element.value });
+        if (element.index > 0) stack.push({ kind: "text", text: "," });
       }
       stack.push({ kind: "text", text: "[" });
       continue;
     }
 
-    const keys = Object.keys(current);
-    stack.push({ kind: "text", text: "}" });
-    for (let index = keys.length - 1; index >= 0; index -= 1) {
-      const key = keys[index];
-      if (key === undefined) continue;
-      const descriptor = Object.getOwnPropertyDescriptor(current, key);
-      if (descriptor === undefined || !("value" in descriptor)) {
-        throw new TypeError("Validated JSON object changed during serialization");
+    const members: Array<{ readonly key: string; readonly value: unknown }> = [];
+    for (const key of keys) {
+      if (typeof key === "symbol") invalid("JSON objects cannot have symbol properties");
+      const descriptor = descriptors[key];
+      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+        invalid("JSON object members must be enumerable data properties");
       }
-      stack.push({ kind: "value", value: descriptor.value as JsonValue });
-      stack.push({ kind: "text", text: `${JSON.stringify(key)}:` });
+      members.push({ key, value: descriptor.value });
+    }
+
+    stack.push({ kind: "leave", value: current });
+    stack.push({ kind: "text", text: "}" });
+    for (let index = members.length - 1; index >= 0; index -= 1) {
+      const member = members[index];
+      if (member === undefined) continue;
+      stack.push({ kind: "value", value: member.value });
+      stack.push({ kind: "text", text: `${JSON.stringify(member.key)}:` });
       if (index > 0) stack.push({ kind: "text", text: "," });
     }
     stack.push({ kind: "text", text: "{" });
