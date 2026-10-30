@@ -121,7 +121,7 @@ Host、浏览器、JavaScript engine、操作系统和实际 carrier API 自身�
 
 保持 Render Update /1 与受影响 Renderer Data Profile identity 的前提是：它们仍处于首次正式发布前，并且 release owner 确认不存在：
 
-- deployed old-hard-limit /1 peers；
+- deployed old-cap Render Update /1 or affected Renderer Data Profile /1 or /3 peers；
 - independent implementations relying on old reject/drop behavior；
 - rolling upgrade / rollback cohorts；
 - persisted messages, recordings, or compatibility obligations requiring old behavior.
