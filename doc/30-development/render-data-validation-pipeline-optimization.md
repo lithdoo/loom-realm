@@ -229,9 +229,9 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 
 当前有三条彼此独立的队列边界，不能只依赖消息数量上限：
 
-1. **PWA MessagePort inbound queue**（`apps/pwa/src/message-port-carrier.ts`）：当前 `queue: string[]` 在没有 waiter 时持续 push，没有 count / retained-payload budget；`finish()` 也没有释放已积压的字符串引用。必须增加有限的 queued-message count 与 retained-string budget，采用 head-index / ring-buffer，避免 `shift()` 的反复搬移；Carrier terminal 时清空队列。队列满时终止当前 Carrier 并报告 local resource exhaustion，不得静默丢弃中间消息后继续消费后续 authoritative updates。队列计量优先复用已有元数据；若只需估算字符串保留成本，可用确定性的 code-unit weight，不要为了计量对每条消息再做一次 UTF-8 encode。
+1. **PWA MessagePort inbound queue**（`apps/pwa/src/message-port-carrier.ts`）：当前 `queue: string[]` 在没有 waiter 时持续 push，没有 count / retained-payload budget；`finish()` 也没有释放已积压的字符串引用。必须增加有限的 queued-message count 与 retained-string budget，采用 head-index / ring-buffer，避免 `shift()` 的反复搬移；Carrier terminal 时清空队列。队列满时以带类型的 `ResourceBudgetExceeded` cause 终止当前 Carrier；DataRuntime 必须识别该 cause 并映射为 `local-fatal` / `local-resource-exhaustion`，不能降格为普通 `carrier-lost`，更不能归类为 `protocol-fatal`。不得静默丢弃中间消息后继续消费后续 authoritative updates。队列计量优先复用已有元数据；若只需估算字符串保留成本，可用确定性的 code-unit weight，不要为了计量对每条消息再做一次 UTF-8 encode。
 2. **DataRuntime outbound send queue**（`packages/data/src/runtime.ts`）：当前 `MAX_PENDING_SENDS = 1024` 只限制数量，而且 `send()` 在检查 pending 数量前已调用 `encodeForRole()`。必须同时限制 pending count 与累计 encoded payload bytes；先做 O(1) count admission，之后由单次 bounded serializer 产出文本和精确 byte count，再做 byte admission。成功入队后维护累计值，在 send settle / terminal 时扣减或清零。1024 只能作为某个实现的默认配置，不能成为 Profile / wire cap。
-3. **RenderManager pending work queue**（`packages/subsystem/src/internal/render-manager.ts`）：当前 `MAX_PENDING_WORK = 1024` 只有 work item count，不能约束大型 Snapshot / Patch object graph 的 retained cost。必须增加 retained-work budget，使用状态构建时维护的精确/保守 accounting metadata；不能为了队列 admission 再调用 `probeLimit()` 或 stringify 完整 Snapshot。保留现有 Registry / Domain coalescing 和 Event barrier；只可合并尚未 emitted 且语义允许重建的 desired state。不得丢弃 Patch 中间操作后继续发送基于旧 revision 的后续 Patch。
+3. **RenderManager pending work queue**（`packages/subsystem/src/internal/render-manager.ts`）：当前 `MAX_PENDING_WORK = 1024` 只有 work item count，不能约束大型 Snapshot / Patch object graph 的 retained cost。必须增加 retained-work budget，使用状态构建时维护的精确/保守 accounting metadata；不能为了队列 admission 再调用 `probeLimit()` 或 stringify 完整 Snapshot。保留现有 Registry / Domain coalescing 和 Event barrier；只可合并尚未 emitted 且语义允许重建的 desired state。不得丢弃 Patch 中间操作后继续发送基于旧 revision 的后续 Patch。若仍无法 admission，RenderManager 必须记录本地 resource-exhaustion 诊断并 retire 当前 publication peer；不能仅通过普通 close 让故障看起来像 peer protocol violation，也不能继续发送不连续的 Patch。
 
 所有队列计数与预算应在 admission、coalesce、settle、terminal 时增量更新，避免每次 enqueue 都重新扫描队列或完整 Render Tree。Count 与 retained payload / work weight 是互补维度；两者都必须有界。
 
@@ -244,7 +244,8 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 | malformed JSON、unknown type、wrong direction、closed-schema violation | protocol-fatal |
 | authority / identity / revision / Patch precondition / final-tree invariant violation | authoritative continuity failure，retire 当前 Data carrier |
 | inbound queue、parse、candidate 或 retained-state local budget exhaustion | local-resource-exhaustion；discard candidate、no partial commit、retire 当前 Carrier |
-| outbound queue / serialization local budget exhaustion | local-resource-exhaustion；no partial application unit；仅可 coalesce 尚未 emitted 且语义允许的 desired state |
+| DataRuntime outbound queue / serialization local budget exhaustion | 现有 DataRuntime `local-fatal`；no partial application unit；仅可 coalesce 尚未 emitted 且语义允许的 desired state |
+| RenderManager pending-work budget exhaustion | local producer failure + local diagnostic；retire 当前 publication peer；不归咎于 remote peer，也不发送不连续 Patch |
 | well-formed but inapplicable transient Event | 按既有 Event contract drop |
 
 Inbound carrier 退休后，使用现有 lifecycle 建立 fresh carrier，并由 RenderManager 重新发布 Registry + 完整 Domain Snapshots；不得沿旧 revision 继续消费。若同一个 Baseline 仍超过接收端 local budget，应报告持续性容量不足，不得自动重连并无限重发同一个超限 Baseline。资源耗尽诊断应包含预算类别、发生阶段和配置值，便于区分容量不足与 peer 协议错误。
@@ -417,7 +418,7 @@ Map 专项 PR #134 负责：
 - [ ] PWA MessagePort inbound queue 同时受 count 与 retained-string budget 约束，terminal 时释放队列引用。
 - [ ] DataRuntime outbound queue 同时受 pending count 与 encoded bytes budget 约束；count admission 在昂贵编码之前完成。
 - [ ] RenderManager pending work 同时受 item count 与 retained-work budget 约束，计量不触发完整 Snapshot stringify。
-- [ ] local resource exhaustion 与 protocol-fatal / continuity failure 分开；inbound no-partial-commit + carrier retirement，outbound no-partial-send。
+- [ ] local resource exhaustion 与 protocol-fatal / continuity failure 分开；PWA typed carrier cause 由 DataRuntime 映射为 local-fatal；inbound no-partial-commit + carrier retirement，outbound no-partial-send；RenderManager queue exhaustion 有独立 local diagnostic。
 - [ ] caller 在 RenderManager API 返回后修改原输入对象，不影响 retained state / pending publication；必要 clone + freeze 已与校验和计量融合。
 - [ ] 普通小 Patch 不再完整 stringify 与本次操作无关的 Snapshot。
 - [ ] Data Codec 不再对同一 subtree 重复完整 traversal。
