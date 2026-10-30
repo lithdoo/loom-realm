@@ -84,8 +84,8 @@ ADR0038
     Opt-in Strict Validation
 
 ADR0039
-    Render Update v1 pre-release numeric hard-limit correction /
-    Local resource budgets / Conformance revision 2
+    Render Update v1 numeric capacity → local resource-budget policy /
+    No wire ABI version bump / Conformance revision 2
 ```
 
 ADR0033 只在 RuntimeHosting composition process 本身是 Electron 的条件下成立；ADR0034 定义 canonical Desktop outer host ownership。ADR0035 只修正 existing-node Render author surface，不重开 Render Update wire semantics。ADR0037 取消 `/2` current 路线，采用 governed corrected `/1`。
