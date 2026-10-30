@@ -46,6 +46,7 @@ ADR 记录“为什么”；Current 可实现事实以 Architecture / Formal Con
 35. [ADR 0035：RenderDomain existing-node authoritative update](./0035-render-domain-existing-node-update.md)
 36. [ADR 0036：Viewport child 独立于 Input（Profile-v2 方案由 ADR0037 修订）](./0036-viewport-state-and-renderer-data-profile-v2.md)
 37. [ADR 0037：首次发布前直接修正 Profile v1，取消 v2 current 路线](./0037-direct-profile-v1-preimplementation-viewport-correction.md)
+38. [ADR 0038：Developer Authority and Minimal Runtime Enforcement](./0038-developer-authority-minimal-runtime-enforcement.md)
 
 ## Current supersession relationships
 
@@ -76,6 +77,10 @@ ADR0032
 ADR0033 (conditional Electron composition)
     coexistence with
 ADR0034 (canonical Desktop outer Hostra ownership)
+
+ADR0038
+    Developer Authority / Minimal Runtime Enforcement /
+    Opt-in Strict Validation
 ```
 
 ADR0033 只在 RuntimeHosting composition process 本身是 Electron 的条件下成立；ADR0034 定义 canonical Desktop outer host ownership。ADR0035 只修正 existing-node Render author surface，不重开 Render Update wire semantics。ADR0037 取消 `/2` current 路线，采用 governed corrected `/1`。
@@ -117,6 +122,17 @@ Viewport correction 追加 ADR0036→0037，并由 [Renderer Data Profile v1](..
 ADR0003 → ADR0030
 → Content API + FSDB core / adapter ownership
 ```
+
+### Framework / application validation boundary
+
+```text
+ADR0038
+→ Framework Responsibility and Validation Boundary
+→ Minimal Runtime Guard + Developer-owned business validation
+→ Opt-in Strict Validation
+```
+
+ADR0038 不静默修改现有 Frozen Contract；当前协议限制继续有效，放宽必须单独 correction / migration / qualification。
 
 ### Game libraries / products
 
