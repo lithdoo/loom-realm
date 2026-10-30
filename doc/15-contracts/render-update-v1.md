@@ -1057,6 +1057,8 @@ raw carrier string
 
 Wire representation 和协议字段的必要语义检查仍然有效，例如 plain JSON values、Unicode scalar identity strings、精确字段类型。不得为 message bytes、JSON depth、member count 或 string byte length 增加容量门槛，也不得对同一对象图重复执行全量 traversal。
 
+Outbound 必须使用单次 Wire JSON encoding：在生成 application-unit string 的同一遍历中执行必要的 representability checks。不能直接依赖 JSON.stringify 对 undefined / function / symbol 的静默省略或对 NaN / Infinity 的强制转换，也不能先单独完整扫描对象再 stringify。该检查保护 wire representation，不是业务 Schema validation。
+
 因此 source-level duplicate JSON object member 不由 Render 额外检测；parse 后 resulting object 仍必须满足 exact closed schema。
 
 ## 18. Validation Order
