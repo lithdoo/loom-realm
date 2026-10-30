@@ -5,7 +5,7 @@
 > 稳定程度：Stable  
 > 主要定义：logical roles、authority/currentness、bootstrap、state/events/render/content placement 与 platform composition  
 > 依赖：[产品总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
-> 细化：[平台组合](./platform-composition-system.md)、[运行承载](./runtime-hosting-system.md)、[Shared State](./shared-state-system.md)、[Session Events](./session-events-system.md)、[渲染](./rendering-system.md)、[Subsystem](./subsystem-model.md)、[存储](./storage-system.md)  
+> 细化：[框架与应用验证边界](./framework-validation-boundary.md)、[平台组合](./platform-composition-system.md)、[运行承载](./runtime-hosting-system.md)、[Shared State](./shared-state-system.md)、[Session Events](./session-events-system.md)、[渲染](./rendering-system.md)、[Subsystem](./subsystem-model.md)、[存储](./storage-system.md)  
 > 最近复核：2026-10-13
 
 本文描述 Current system-level responsibility / authority / topology。精确 wire、ABI、error、limit 与 conformance semantics 由 [正式契约](../15-contracts/README.md) 拥有；实现位置由 [模块文档](../20-modules/README.md) 拥有；qualification 规则由 [30-development](../30-development/qualification.md) 拥有。
@@ -247,4 +247,8 @@ Products               Desktop/Hostra + PWA
 16. Desktop/PWA physical topology 可以不同，但 logical contract 与 observable outcome 必须一致；
 17. current architecture 不从历史 qualification ledger 推导；
 18. 行为或 qualification-input 改变后，PASS 只对重新确定的 subject 有效；
-19. `Frozen != Implemented != Qualified`。
+19. `Frozen != Implemented != Qualified`；
+20. 框架默认只强制执行自身运行、协议兼容和资源安全所必需的 Runtime Guard；应用业务正确性归开发者，额外 Strict Validation 必须 opt-in；
+21. 对可信应用数据优先 operation-first / error-first，失败 candidate 不得部分提交；
+22. 不得静默修改 Frozen Contract；任何 hard limit / accept-reject / failure semantics 放宽都必须走正式 contract correction 与 qualification；
+23. 不得仅为严格验证而默认深复制、深冻结或全量扫描与当前操作无关的应用数据。
