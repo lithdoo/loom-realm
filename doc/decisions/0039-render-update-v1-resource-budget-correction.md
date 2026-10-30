@@ -1,6 +1,6 @@
 # ADR 0039 — Render Update v1 Pre-release Resource-Budget Correction
 
-> 状态：Accepted direction / Pre-release correction; implementation and qualification pending
+> 状态：Accepted direction / Local resource-policy correction; implementation and qualification pending
 > 日期：2026-10-30
 > 相关原则：[Framework Responsibility and Validation Boundary](../10-architecture/framework-validation-boundary.md)
 > 相关决策：[ADR 0022 — Render Update v1 freeze closure](./0022-render-update-v1-freeze-closure.md)、[ADR 0038 — Developer Authority and Minimal Runtime Enforcement](./0038-developer-authority-minimal-runtime-enforcement.md)
@@ -18,11 +18,11 @@ Issue #133 的真实物理机诊断表明，Render Data 路径不仅承担重复
 
 ### 1. 首次发布前修订同一 v1，不创建 v2
 
-本 ADR 授权在首次正式发布前重新打开 Render Update v1 的 numeric hard-limit policy，并将修订后的 contract/conformance 仍标识为 loomrealm.render-update / 1，fixtureSetRevision 升为 2。
+本 ADR 将 Render Update v1 的 numeric hard-limit policy 修订为 local resource-budget policy；Render Update identity 仍为 `loomrealm.render-update / 1`，conformance fixtureSetRevision 为 2。该修改不改变 wire representation、message kind、closed schema、direction、authority、identity、revision、Patch algebra、atomicity 或 Event semantics，因此**不需要创建 v2，也不需要仅因旧实现存在较小容量而执行 protocol migration**。
 
-该决定只适用于 pre-release correction。首次正式发布之后，改变已发布的 wire-observable schema、authority、ordering、revision、atomicity、failure 或 recovery semantics，必须走新协议版本和迁移。
+数值 threshold 原本是实现容量被误写成统一 accept/reject 规则；修订后它们是 Host / Product / Runtime 的本地容量选择。旧接收端可能仍保留较小的硬编码容量，发送端若给它发送超过该容量的负载，该 workload 可能失败；这属于 receiver capacity mismatch，而不是 wire ABI incompatibility。需要更大负载的产品应先确保接收端本地预算足够，再启用更大的发送负载。不得把“放宽限制”误解为可以向未知容量的 peer 无条件发送任意大消息。
 
-兼容性门槛：合并/冻结 revised-v1 之前，必须确认没有需要与旧 hard-limit /1 实现混合互操作的已部署 peer、外部对接者、rolling/rollback cohort 或持久化协议承诺。现有 ADR0022 的首次冻结前证据与 ADR0037 的首次发布前 direct-correction 先例可作为 provenance；本 ADR 同时 supersedes ADR0037 中“common 1MiB/depth64 与 Render limits 不修改”的范围声明，但必须由当前 release owner 在 qualification ledger 中复核。若发现真实混版/旧 peer 互操作义务，STOP same-identity correction，改为显式 protocol version / migration ADR；不得声称旧 peer 可识别新 limits。
+本 ADR 不取消真正的版本治理：如果后续改变 wire schema、message direction、authority、identity、ordering、revision、atomicity、Event 或 recovery semantics，仍按正式版本治理处理。Renderer Data Profile v1 的三-child → 四-child composition correction 是 ADR0037 的独立事项，其 cohort 约束继续有效，不由本 ADR 改写。
 
 ### 2. 删除协议级固定 numeric hard limits
 
@@ -64,13 +64,18 @@ revision/baseRevision 仍为 positive safe integer。zIndex 从 signed 32-bit �
 - parser work/depth 与 candidate construction；
 - retained Render state / nodes / strings / JSON members；
 - Patch operation work / indexes / tombstones；
-- outbound serialization、queues、pending messages 与 in-flight work。
+- outbound serialization、queues、pending messages 与 in-flight work；
+- PWA MessagePort inbound retained-string queue；
+- DataRuntime outbound pending count + encoded payload bytes；
+- RenderManager pending-work count + retained-work weight。
 
 规则：
 
 - local budgets 可以因平台/产品 capacity 和 threat model 不同而不同；
 - budget 不是 wire schema、业务 Schema 或跨实现统一 accept/reject threshold；
 - bounded checks 必须融合到实际 parse/serialize/mutation/admission，避免先完整预检再重复处理；
+- queue budget 至少同时约束 item count 与 retained payload/work；count-only cap 不足以证明内存有界；
+- queue accounting 应在 admission/coalesce/settle/terminal 时增量更新，不得为每次 admission 重新扫描完整 Snapshot；
 - resource budget exhaustion 不得报告为 peer malformed/protocol-invalid；
 - inbound exhaustion 必须 no-partial-commit，并 retire current carrier，因为不能安全地继续消费后续 authoritative updates；
 - outbound exhaustion 不得发出 partial application unit；尚未 emitted 的 desired state 可 coalesce，或在本地边界报告失败；
@@ -89,7 +94,9 @@ revision/baseRevision 仍为 positive safe integer。zIndex 从 signed 32-bit �
 - Render Update conformance fixtureSetRevision 1 被 revision 2 supersede；移除固定数值边界 exactly-at / one-over fixtures。
 - Revision 2 覆盖协议不变量、atomicity、identity、revision、Event 与 transport semantics，并测试 local budget exhaustion 的无 partial commit / no partial send / local diagnostic。
 - Local numeric budgets 属 implementation/product qualification input，不属于跨实现 Render wire conformance corpus。
-- Renderer Data Profile v1 的 common fixed message/depth gate 必须同步改为 local resource policy；Profile conformance fixtureSetRevision 3 升为 4。
+- Renderer Data Profile v1 的 common fixed message/depth gate 改为 local resource policy；其 conformance fixtureSetRevision 为 4。
+- 当前 active Renderer Data Profile `/3` 的 common message/depth gate 与 generic pending queue 也必须使用 local resource policy；`/3` identity 不变，不创建 profile v4。
+- Profile v1 三-child → 四-child 的 cohort/compatibility correction 继续由 ADR0037 单独治理；numeric budget correction 不增加该 gate。
 
 ## 后果
 
@@ -105,7 +112,7 @@ revision/baseRevision 仍为 positive safe integer。zIndex 从 signed 32-bit �
 
 - Product composition 必须明确选择 sender/receiver 兼容的预算；
 - local exhaustion 的诊断与可观测性必须实现；
-- independent peers 没有 budget negotiation，超出 receiver capacity 时可能 Data-local retire；
+- independent peers 没有 budget negotiation；仅当某条消息超过 receiver 实际 local capacity 时，接收端才可能发生 Data-local resource exhaustion；这不是协议格式不兼容；
 - 旧实现中的 hard-coded limits 必须改为可配置 resource budgets 或移除；
 - revised-v1 必须重新 materialize conformance tests，并执行受影响 Desktop/Hostra/PWA qualification。
 
