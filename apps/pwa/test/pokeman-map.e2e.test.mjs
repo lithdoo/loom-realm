@@ -93,7 +93,7 @@ function traceTaskSummary(events) {
       names.set(`${event.pid}:${event.tid}`, event.args?.name ?? "unknown");
     }
   }
-  const tasks = events.filter((event) => event.name === "RunTask" && typeof event.dur === "number");
+  const tasks = events.filter((event) => /RunTask$/u.test(event.name) && typeof event.dur === "number");
   const summarize = (matching) => {
     const selected = tasks.filter((event) => matching(names.get(`${event.pid}:${event.tid}`) ?? ""));
     const durations = selected.map((event) => event.dur / 1_000);
@@ -662,6 +662,8 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
       assert.equal(report.movements >= 20, true);
       assert.equal(report.projectionShifts >= 2, true);
       assert.equal(report.browser.longTasks.filter((entry) => entry.duration >= 100).length, 0, JSON.stringify(report.browser));
+      assert.equal(report.tasks.main.count > 0, true, JSON.stringify(report.tasks));
+      assert.equal(report.tasks.worker.count > 0, true, JSON.stringify(report.tasks));
       assert.equal(report.tasks.main.maxMs < 100, true, JSON.stringify(report.tasks.main));
       assert.equal(report.tasks.worker.maxMs < 100, true, JSON.stringify(report.tasks.worker));
       const artifacts = join(import.meta.dirname, "..", "..", "..", "artifacts");
