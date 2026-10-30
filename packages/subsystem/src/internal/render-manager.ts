@@ -439,9 +439,17 @@ function applyCow(
   updates: readonly ValidatedNodeUpdate[],
   nodes: ReadonlyMap<string, RenderNode>,
   locations: ReadonlyMap<string, NodeLocation>,
-): { readonly state: RenderDomainState; readonly clones: ReadonlyMap<string, RenderNode> } {
+  collectMetrics: boolean,
+): {
+  readonly state: RenderDomainState;
+  readonly clones: ReadonlyMap<string, RenderNode>;
+  readonly metrics: Omit<RenderUpdateQualificationMetrics, "totalNodes" | "changedNodes" | "unchangedNodes" | "changedDataContainers" | "unchangedDataContainers"> | null;
+} {
   const clones = new Map<string, MutableNode>();
   const copiedChildren = new Set<string>();
+  let pathVisits = 0;
+  let changedDataMembers = 0;
+  let reusedDataMembers = 0;
   let roots = state.roots as RenderNode[];
   let rootsCopied = false;
 
@@ -449,6 +457,7 @@ function applyCow(
     const path: string[] = [];
     let current: string | null = targetKey;
     while (current !== null) {
+      if (collectMetrics) pathVisits += 1;
       path.push(current);
       const location = locations.get(current);
       if (location === undefined) throw new TypeError("Updated Render node is missing");
@@ -492,7 +501,16 @@ function applyCow(
   for (const update of updates) {
     const node = ensurePath(update.key);
     if (update.attrs !== undefined) node.attrs = applyStringDelta(node.attrs, update.attrs);
-    if (update.data !== undefined) node.data = applyDataDelta(node.data, update.data);
+    if (update.data !== undefined) {
+      const previous = node.data;
+      node.data = applyDataDelta(previous, update.data);
+      if (collectMetrics) {
+        changedDataMembers += Object.keys(update.data.set ?? {}).length + (update.data.remove?.length ?? 0);
+        for (const key of Object.keys(previous)) {
+          if (hasOwn(node.data, key) && node.data[key] === previous[key]) reusedDataMembers += 1;
+        }
+      }
+    }
   }
   for (const [key, node] of clones) {
     if (copiedChildren.has(key)) Object.freeze(node.children);
@@ -502,6 +520,23 @@ function applyCow(
   return {
     state: Object.freeze({ zIndex, roots: nextRoots }),
     clones: new Map([...clones].map(([key, node]) => [key, node as RenderNode])),
+    metrics: collectMetrics ? Object.freeze({
+      operations: updates.length,
+      pathVisits,
+      nodeIndexLookups: pathVisits + clones.size,
+      structuralNodeClones: clones.size,
+      childArrayClones: copiedChildren.size,
+      rootArrayClones: rootsCopied ? 1 : 0,
+      cowContainersCreatedAndFrozen: clones.size + copiedChildren.size + (rootsCopied ? 1 : 0)
+        + updates.filter((update) => update.attrs !== undefined).length
+        + updates.filter((update) => update.data !== undefined).length
+        + 1,
+      fullSnapshotTraversals: 0,
+      parseCalls: 0,
+      stringifyCalls: 0,
+      changedDataMembers,
+      reusedDataMembers,
+    }) : null,
   };
 }
 
@@ -529,6 +564,27 @@ export interface RenderManagerSnapshot {
     readonly state: RenderDomainState;
   }[];
   readonly pendingWork: number;
+  readonly lastUpdate: RenderUpdateQualificationMetrics | null;
+}
+
+export interface RenderUpdateQualificationMetrics {
+  readonly operations: number;
+  readonly totalNodes: number;
+  readonly changedNodes: number;
+  readonly unchangedNodes: number;
+  readonly changedDataContainers: number;
+  readonly unchangedDataContainers: number;
+  readonly pathVisits: number;
+  readonly nodeIndexLookups: number;
+  readonly structuralNodeClones: number;
+  readonly childArrayClones: number;
+  readonly rootArrayClones: number;
+  readonly cowContainersCreatedAndFrozen: number;
+  readonly fullSnapshotTraversals: number;
+  readonly parseCalls: number;
+  readonly stringifyCalls: number;
+  readonly changedDataMembers: number;
+  readonly reusedDataMembers: number;
 }
 
 export class RenderManager {
@@ -545,6 +601,8 @@ export class RenderManager {
   private readonly coalescibleSnapshots = new Map<DomainRecord, Extract<StateWork, { readonly kind: "snapshot" }>>();
   private inFlight: InFlightPublication | null = null;
   private closed = false;
+  private lastUpdate: RenderUpdateQualificationMetrics | null = null;
+  private collectUpdateMetrics = false;
 
   createDomain(initialState: RenderDomainState): RenderDomain {
     if (this.closed) throw new TypeError("RenderManager is closed");
@@ -614,6 +672,7 @@ export class RenderManager {
         state: domain.state,
       })),
       pendingWork: this.queuedCount,
+      lastUpdate: this.lastUpdate,
     });
   }
 
@@ -697,8 +756,20 @@ export class RenderManager {
       nodes,
       domain.nodes,
       domain.locations,
+      this.collectUpdateMetrics,
     );
     const ops = toWireOps(nodes);
+    if (next.metrics !== null) {
+      const changedDataContainers = nodes.filter((node) => node.data !== undefined).length;
+      this.lastUpdate = Object.freeze({
+        ...next.metrics,
+        totalNodes: domain.nodes.size,
+        changedNodes: nodes.length,
+        unchangedNodes: domain.nodes.size - nodes.length,
+        changedDataContainers,
+        unchangedDataContainers: domain.nodes.size - changedDataContainers,
+      });
+    }
     domain.state = next.state;
     for (const [key, node] of next.clones) domain.nodes.set(key, node);
     this.enqueueState(domain, "update", ops, zIndex);
@@ -776,6 +847,10 @@ export class RenderManager {
     if (work.kind === "snapshot") this.coalescibleSnapshots.set(domain, work);
     this.enqueue(work);
     this.pump();
+  }
+
+  enableUpdateMetricsForQualification(): void {
+    this.collectUpdateMetrics = true;
   }
 
   private enqueue(work: Work): void {

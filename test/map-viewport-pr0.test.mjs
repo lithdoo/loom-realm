@@ -587,7 +587,7 @@ test("dense accepted canvas ≤128MiB and live+decode ≤256MiB", () => {
   assert.equal(overLive.length, 0, `live+decode ${maxLive} over 256MiB; ${JSON.stringify(overLive)}`);
 });
 
-test("RenderDomain.update full-state validation and snapshot residual", () => {
+test("RenderDomain.update indexed COW cost stays below current gates", () => {
   const loaded = denseMap();
   const gates = [
     { width: 640, height: 480, refreshMs: 50 },
@@ -623,7 +623,7 @@ test("RenderDomain.update full-state validation and snapshot residual", () => {
   }
   report.renderDomain = {
     perSize,
-    residualNote: "Core RenderDomain.update still validates merged node data and probes a full snapshot. Compared to each size's accepted nonresize refresh P95 gate; camera-only compared to 50ms ordinary gate.",
+    residualNote: "Core RenderDomain.update validates only the authored delta, uses indexed target-to-root COW, and does not stringify/probe a Snapshot. Compared to each size's accepted nonresize refresh P95 gate; camera-only compared to the 50ms ordinary gate.",
     independentBottleneck,
   };
   assert.equal(report.renderDomain.independentBottleneck, false, JSON.stringify(report.renderDomain));

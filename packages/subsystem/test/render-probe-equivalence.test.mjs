@@ -412,7 +412,10 @@ test("same dense fixture: probe before/after and motion-only RenderDomain.update
   optimizedTimes.sort((a, b) => a - b);
 
   const manager = new RenderManager();
+  manager.enableUpdateMetricsForQualification();
+  const snapshotStart = performance.now();
   const domain = manager.createDomain(state);
+  const snapshotAcceptanceMs = performance.now() - snapshotStart;
   const motionOnly = {
     nodes: [
       { key: "viewport", data: { set: { motionId: 1, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 1024, fromCameraY: 448 } } } },
@@ -420,36 +423,72 @@ test("same dense fixture: probe before/after and motion-only RenderDomain.update
     ],
   };
   const updateTimes = [];
+  globalThis.gc?.();
+  const heapBeforeUpdates = process.memoryUsage().heapUsed;
   for (let index = 0; index < 200; index += 1) {
     const start = performance.now();
     domain.update(motionOnly);
     updateTimes.push(performance.now() - start);
   }
+  globalThis.gc?.();
+  const heapAfterUpdates = process.memoryUsage().heapUsed;
   updateTimes.sort((a, b) => a - b);
-  const snapshot = manager.snapshotForQualification().domains[0].state;
+  const qualification = manager.snapshotForQualification();
+  const snapshot = qualification.domains[0].state;
   assert.equal(snapshot.roots[0].data.motionId, 1);
   assert.equal(snapshot.roots[0].data.cameraMotion.durationMs, 250);
   assert.equal(snapshot.roots[0].children[0].data.motionId, 1);
   assert.equal(snapshot.chunks, undefined);
+  assert.deepEqual({
+    totalNodes: qualification.lastUpdate.totalNodes,
+    changedNodes: qualification.lastUpdate.changedNodes,
+    pathVisits: qualification.lastUpdate.pathVisits,
+    structuralNodeClones: qualification.lastUpdate.structuralNodeClones,
+    changedDataContainers: qualification.lastUpdate.changedDataContainers,
+    fullSnapshotTraversals: qualification.lastUpdate.fullSnapshotTraversals,
+    parseCalls: qualification.lastUpdate.parseCalls,
+    stringifyCalls: qualification.lastUpdate.stringifyCalls,
+  }, {
+    totalNodes: 2,
+    changedNodes: 2,
+    pathVisits: 3,
+    structuralNodeClones: 2,
+    changedDataContainers: 2,
+    fullSnapshotTraversals: 0,
+    parseCalls: 0,
+    stringifyCalls: 0,
+  });
+  assert.ok(qualification.lastUpdate.reusedDataMembers > qualification.lastUpdate.changedDataMembers);
 
   const report = {
     fixture: "dense 1080 (80 chunks)",
     encodedChars: encoded.length,
     encodedUtf8Bytes: utf8ByteLength(encoded),
     jsonDepth: jsonDepth(state),
+    snapshotAcceptanceMs,
+    updateOnlyCounters: qualification.lastUpdate,
+    heap: {
+      explicitGc: typeof globalThis.gc === "function",
+      beforeUpdates: heapBeforeUpdates,
+      afterUpdates: heapAfterUpdates,
+      retainedDelta: heapAfterUpdates - heapBeforeUpdates,
+    },
     probeLegacyMs: {
       p50: percentile(legacyTimes, 0.5),
       p95: percentile(legacyTimes, 0.95),
+      p99: percentile(legacyTimes, 0.99),
       max: legacyTimes[legacyTimes.length - 1],
     },
     probeOptimizedMs: {
       p50: percentile(optimizedTimes, 0.5),
       p95: percentile(optimizedTimes, 0.95),
+      p99: percentile(optimizedTimes, 0.99),
       max: optimizedTimes[optimizedTimes.length - 1],
     },
     motionOnlyUpdateMs: {
       p50: percentile(updateTimes, 0.5),
       p95: percentile(updateTimes, 0.95),
+      p99: percentile(updateTimes, 0.99),
       max: updateTimes[updateTimes.length - 1],
     },
   };
