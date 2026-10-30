@@ -16,7 +16,7 @@ Issue #133 的真实物理机诊断表明，Render Data 路径不仅承担重复
 
 ## 决定
 
-### 1. 首次发布前修订同一 v1，不创建 v2
+### 1. 保持同一 v1，不创建 v2
 
 本 ADR 将 Render Update v1 的 numeric hard-limit policy 修订为 local resource-budget policy；Render Update identity 仍为 `loomrealm.render-update / 1`，conformance fixtureSetRevision 为 2。该修改不改变 wire representation、message kind、closed schema、direction、authority、identity、revision、Patch algebra、atomicity 或 Event semantics，因此**不需要创建 v2，也不需要仅因旧实现存在较小容量而执行 protocol migration**。
 
