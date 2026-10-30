@@ -131,10 +131,10 @@ Schema Form 仍不是独立 Subsystem，也不通过 `frame.call("schema-form")`
       readonly onSubmit?: (
         value: SchemaFormDataV1,
         control: SchemaFormSubmitControlV1,
-      ) => void | Promise<void>;
+      ) => void | `Promise<void>`;
     }
 
-Promise<void> 只描述 callback 的异步 lifetime 和异常传播；**Promise resolve 不表示 submit success**。成功只能由 control.close() 表达。
+`Promise<void>` 只描述 callback 的异步 lifetime 和异常传播；**Promise resolve 不表示 submit success**。成功只能由 control.close() 表达。
 
 - onSubmit 缺省时，保持现有 V1 自动提交行为。
 - 配置 onSubmit 后，Runtime 不因 callback 返回或 Promise resolve 自动关闭。
@@ -335,20 +335,20 @@ setLoading()：
     current submit control
     → RenderDomain.update(root attrs set loading="true")
     → Web Projector
-    → <lr-schema-form loading="true">
+    → `<lr-schema-form loading="true">`
 
 cancelLoading()：
 
     current submit control
     → RenderDomain.update(root attrs remove loading)
     → Web Projector
-    → <lr-schema-form>
+    → `<lr-schema-form>`
 
 Loading 是 Schema Form Runtime 持有的 retained presentation fact，不由 Browser 自行猜测。
 
 ### 7.2 Browser behavior and propagation
 
-<lr-schema-form loading="true"> 时必须：
+`<lr-schema-form loading="true">` 时必须：
 
 - 禁用 Submit、Cancel、Close 等 root action buttons；
 - Submit button 展示 loading progress；
