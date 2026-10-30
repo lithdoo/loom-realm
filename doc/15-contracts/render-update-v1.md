@@ -184,8 +184,7 @@ array order has no presentation meaning
 `domainId`：
 
 ```text
-1..128 UTF-8 bytes
-valid Unicode scalar sequence
+non-empty Unicode scalar string
 opaque
 case-sensitive exact identity
 no normalization
@@ -1114,7 +1113,7 @@ actual UTF-8 byte gate
 ↓
 Wire parseJsonText
 ↓
-Wire representation + JSON container depth
+Wire representation + local parser resource budget
 ↓
 top-level Render type discrimination
 ↓
