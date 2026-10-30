@@ -10,7 +10,7 @@
 >
 > 配套 Map 专项：[PR #134 — Incremental Projection Payload Optimization](https://github.com/lithdoo/loom-realm/pull/134)
 >
-> 适用范围：packages/wire、packages/data、packages/subsystem、packages/renderer。
+> 适用范围：packages/wire、packages/data、packages/subsystem、packages/renderer，以及 PWA carrier adapter（apps/pwa）。当前运行时绑定的 active Renderer Data Profile 是 `/3`；本提案同时修正其 common resource/failure policy 文档，不改变 `/3` wire identity。
 >
 > 本文不引入 Map、Tile、depth、bridge 或 Canvas 语义。Map 是暴露共享热路径成本的高负载使用者，不是通用数据协议的特殊例外。
 
@@ -135,7 +135,7 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 
 固定数字改为 Host / Product / Runtime 明确、有限、可审计的 local resource budgets。Inbound budget exhaustion 不得 partial commit，必须 retire 当前 carrier，但诊断为 local-resource-exhaustion 而非 peer protocol violation；outbound budget exhaustion 不得发送部分 message。v1 不做 budget negotiation，产品部署必须记录 peer budget compatibility。
 
-本次同一 /1 pre-release correction 的合并门槛是确认不存在必须与旧 hard-limit /1 peer 混合互操作的已部署/外部/rolling/rollback 义务。若存在，STOP same-identity correction，改走显式 protocol version / migration ADR。
+**数值容量调整本身不构成 wire ABI 变更，也不要求创建 Render Update v2 或 Renderer Data Profile 新版本。** 旧实现可能仍保留较小的本地硬编码容量；若新发送端发出超过旧接收端容量的消息，该接收端可能拒绝该条消息，这是接收端容量不匹配，不是消息格式、identity 或协议语义不兼容。需要使用更大数据的产品，应先让接收端具备相应本地容量，再启用较大的发送负载；无需仅为放宽容量升级协议 identity。另需注意，Renderer Data Profile v1 的三-child 到四-child 组合修订属于 ADR0037 的独立兼容事项，其 cohort 要求不由本次 numeric budget correction 产生，也不在此处取消。
 
 ---
 ## 6. 当前热路径与改造方向
@@ -159,7 +159,9 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 - 仅执行 Patch operation、协议和 local resource budget 所要求的检查；
 - 避免在同一个输入值上重复执行结构 walk、copy、freeze；
 - 不要求所有业务 data 都先转换为强制 ValidatedJson wrapper；
-- 如果现有 API 必须隔离 caller mutation，应明确选择 ownership transfer、必要复制或开发者约定，不能把“深冻结”当成免费验证；
+- 当前 RenderManager authoring API 在异步 publication 前必须隔离 caller-owned input：调用返回后，caller 修改原对象不得改变 retained Domain state、pending work 或最终 emitted message。
+- 因此 `detachedFrozen()` 的 ownership-isolation 效果不能仅为性能而删除；应把必要的 shape/type 检查、detached clone、freeze 与 retained-state accounting 融合为一次遍历。
+- 只有另一个 API 明确声明 ownership transfer / immutable handoff，并测试证明调用方在 transfer 后不得继续 mutate 时，才允许省略复制；不能把隐式约定当成现有 API 的语义。
 - 对每个 Patch operation 保留顺序语义、前置条件和原子提交；固定 numeric intermediate caps 移除，资源峰值由 local budget 在实际增长过程中保护。
 
 ### 6.2 RenderManager：完整 Snapshot probe
@@ -194,8 +196,9 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 
 改造方向：
 
-- Decode：先按 local inbound budget 对原始 carrier string 做 bounded gate，再 parse；随后一次性执行 discriminator、direction、exact message schema 与 framework-owned field/identity checks。Parser work/depth 也受 local budget 约束。
-- 不要把 JSON.parse 生成的 parser-owned JSON 当成任意可执行 JavaScript 对象，再重复做 getter/proxy/accessor 审查。
+- Decode：在 `JSON.parse` 前对原始 carrier string 执行有限的 local inbound byte/work admission；该 raw-message budget 是解析前的主要硬边界。`JSON.parse` 后，尽量用一次 iterative traversal 合并 JSON representation、finite number / Unicode、depth/member 计量和 role-specific schema 检查。
+- 不要仅为提前拒绝深层 JSON，再对原始字符串增加一轮完整 depth pre-scan；这会在 JSON.parse 前额外增加 O(n) 工作。若某个 Host 的 threat model 确实要求 parse 前 depth rejection，应采用有实测收益的 bounded/streaming parser，而不是叠加第二次完整扫描。
+- `JSON.parse` 生成的 parser-owned JSON 不应被当成任意可执行 JavaScript 对象，再重复做 getter/proxy/accessor 审查；仍须保留必要的 JSON representation 与具体协议 Schema 检查。
 - Encode：对框架 envelope / 协议字段执行必要检查；在实际 bounded serializer 中完成可表示性检查和精确 byte accounting，不先完整 assert/depth walk 再 stringify。
 - stringifyJson 的 public contract 和 frozen compact JSON semantics 必须保持；不能通过 unchecked public serializer 逃避协议约束。
 - 业务 payload 的额外 Schema 检查由 opt-in Strict Validation 提供，不嵌入默认 codec。
@@ -214,12 +217,37 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 
 ### 6.5 packages/wire：保持必要能力，不强制全量预检
 
-- 保留安全的 public JSON serializer/parser 语义和错误处理。
-- 避免在同一调用链中重复完整 assertJsonValue、depth walk 和 stringify。
-- 对需要硬字节限制的实际编码，优先使用 bounded serialization，在生成输出时达到上限立即失败。
+- 保留 public JSON serializer/parser 的可观察语义和错误处理。
+- 将 plain-JSON 可表示性检查与实际 serialization 融合：在生成输出时累计 UTF-8 bytes，达到 local outbound budget 即停止；不要先完整 `assertJsonValue` / depth walk，再对同一对象图 stringify。
+- 对输入端保留 parse 前 raw-message local byte budget；解析后在实际 decode/validation 路径完成一次必要的 bounded traversal。
 - 对外部 carrier input，在 parse 前执行 raw message byte gate。
 - 不引入一个必须由所有业务调用者创建的公开可信 JSON wrapper。
 - 不要求用深复制/深冻结证明每份业务数据正确；ownership 与 mutation contract 应由相应 API 明确。
+
+
+### 6.6 Bounded queues 与 retained work
+
+当前有三条彼此独立的队列边界，不能只依赖消息数量上限：
+
+1. **PWA MessagePort inbound queue**（`apps/pwa/src/message-port-carrier.ts`）：当前 `queue: string[]` 在没有 waiter 时持续 push，没有 count / retained-payload budget；`finish()` 也没有释放已积压的字符串引用。必须增加有限的 queued-message count 与 retained-string budget，采用 head-index / ring-buffer，避免 `shift()` 的反复搬移；Carrier terminal 时清空队列。队列满时终止当前 Carrier 并报告 local resource exhaustion，不得静默丢弃中间消息后继续消费后续 authoritative updates。队列计量优先复用已有元数据；若只需估算字符串保留成本，可用确定性的 code-unit weight，不要为了计量对每条消息再做一次 UTF-8 encode。
+2. **DataRuntime outbound send queue**（`packages/data/src/runtime.ts`）：当前 `MAX_PENDING_SENDS = 1024` 只限制数量，而且 `send()` 在检查 pending 数量前已调用 `encodeForRole()`。必须同时限制 pending count 与累计 encoded payload bytes；先做 O(1) count admission，之后由单次 bounded serializer 产出文本和精确 byte count，再做 byte admission。成功入队后维护累计值，在 send settle / terminal 时扣减或清零。1024 只能作为某个实现的默认配置，不能成为 Profile / wire cap。
+3. **RenderManager pending work queue**（`packages/subsystem/src/internal/render-manager.ts`）：当前 `MAX_PENDING_WORK = 1024` 只有 work item count，不能约束大型 Snapshot / Patch object graph 的 retained cost。必须增加 retained-work budget，使用状态构建时维护的精确/保守 accounting metadata；不能为了队列 admission 再调用 `probeLimit()` 或 stringify 完整 Snapshot。保留现有 Registry / Domain coalescing 和 Event barrier；只可合并尚未 emitted 且语义允许重建的 desired state。不得丢弃 Patch 中间操作后继续发送基于旧 revision 的后续 Patch。
+
+所有队列计数与预算应在 admission、coalesce、settle、terminal 时增量更新，避免每次 enqueue 都重新扫描队列或完整 Render Tree。Count 与 retained payload / work weight 是互补维度；两者都必须有界。
+
+### 6.7 Resource exhaustion 与协议错误分类
+
+使用内部明确的资源耗尽错误（例如 `ResourceBudgetExceeded` / `RESOURCE_BUDGET_EXCEEDED`），并映射到现有 DataRuntime `local-fatal` terminal family；不要把它包装成 `DataProtocolError`，也不新增 wire message 或 Profile identity。
+
+| 情况 | 结果 |
+|---|---|
+| malformed JSON、unknown type、wrong direction、closed-schema violation | protocol-fatal |
+| authority / identity / revision / Patch precondition / final-tree invariant violation | authoritative continuity failure，retire 当前 Data carrier |
+| inbound queue、parse、candidate 或 retained-state local budget exhaustion | local-resource-exhaustion；discard candidate、no partial commit、retire 当前 Carrier |
+| outbound queue / serialization local budget exhaustion | local-resource-exhaustion；no partial application unit；仅可 coalesce 尚未 emitted 且语义允许的 desired state |
+| well-formed but inapplicable transient Event | 按既有 Event contract drop |
+
+Inbound carrier 退休后，使用现有 lifecycle 建立 fresh carrier，并由 RenderManager 重新发布 Registry + 完整 Domain Snapshots；不得沿旧 revision 继续消费。若同一个 Baseline 仍超过接收端 local budget，应报告持续性容量不足，不得自动重连并无限重发同一个超限 Baseline。资源耗尽诊断应包含预算类别、发生阶段和配置值，便于区分容量不足与 peer 协议错误。
 
 ## 7. 可选 Strict Validation 模块
 
@@ -290,12 +318,12 @@ current committed state
 
 ### 9.3 错误与资源边界
 
-- malformed carrier / oversized raw message 在进入业务处理前被拒绝；
+- malformed carrier / invalid JSON / closed-schema message 按协议规则拒绝；超过本地 raw-message budget 则以 local-resource-exhaustion 在进入业务处理前终止，不得报告为 peer protocol violation；
 - bounded serializer 在 local outbound budget 耗尽时停止继续生成输出；
 - getter / Proxy trap 等异常在 authoring boundary 明确失败，不产生 partial commit；
 - cyclic / unsupported value 在实际编码时产生确定错误；
 - Patch 中间超限不能靠后续 op 缩回；
-- queue / node / depth / message caps 继续有效。
+- 所有可能随输入增长的 local resource budgets 继续有限且显式；分别验证 count、retained payload/work、candidate growth 和 outbound bytes。具体数字属于 Host/Product qualification input，不属于跨实现 wire conformance；本地预算耗尽不得伪装为 protocol-fatal。
 
 ### 9.4 性能对比
 
@@ -335,6 +363,10 @@ current committed state
 - duplicate / implementation-only preflight。
 
 没有明确 owner 和必要性证明的默认热路径验证，不应自动保留。
+
+### Phase 0.5 — Close queue and failure-boundary gaps
+
+先补齐 PWA inbound queue、DataRuntime outbound queue、RenderManager pending-work queue 的 count + retained payload/work budgets；终止时释放引用；资源耗尽映射到 local-fatal / local-resource-exhaustion，并验证 no partial commit / no partial send。此阶段不改变 wire message shape。
 
 ### Phase 1 — Remove redundant work without changing the contract
 
@@ -379,8 +411,14 @@ Map 专项 PR #134 负责：
 - [ ] Framework Responsibility and Validation Boundary 已进入 Current Architecture 文档。
 - [ ] Developer Authority、Minimal Runtime Enforcement、Opt-in Strictness 三项原则有明确规范定义。
 - [ ] 未将应用业务 Schema / 业务正确性检查强制放入默认 Runtime。
-- [ ] Render Update v1 numeric hard limits 已按 ADR0039 正式改为 local resource-budget policy；protocol invariants 与 failure/atomicity semantics 保持。
-- [ ] 原始消息大小在 parse 前受限；实际序列化执行 bounded byte guard。
+- [ ] Render Update v1 numeric hard limits 已按 ADR0039 改为 local resource-budget policy；active Renderer Data Profile `/3` 的 common gate / failure 文档同步一致；不因数值容量变化升级 wire identity。
+- [ ] Profile v1 的三-child → 四-child pre-release composition gate（ADR0037）与本次 numeric budget policy 分开处理，不混为同一个兼容性问题。
+- [ ] 原始消息在 parse 前受 local inbound budget 约束；不额外增加无实测收益的 pre-parse depth full scan；实际序列化在单次 bounded serializer 中完成精确 byte accounting。
+- [ ] PWA MessagePort inbound queue 同时受 count 与 retained-string budget 约束，terminal 时释放队列引用。
+- [ ] DataRuntime outbound queue 同时受 pending count 与 encoded bytes budget 约束；count admission 在昂贵编码之前完成。
+- [ ] RenderManager pending work 同时受 item count 与 retained-work budget 约束，计量不触发完整 Snapshot stringify。
+- [ ] local resource exhaustion 与 protocol-fatal / continuity failure 分开；inbound no-partial-commit + carrier retirement，outbound no-partial-send。
+- [ ] caller 在 RenderManager API 返回后修改原输入对象，不影响 retained state / pending publication；必要 clone + freeze 已与校验和计量融合。
 - [ ] 普通小 Patch 不再完整 stringify 与本次操作无关的 Snapshot。
 - [ ] Data Codec 不再对同一 subtree 重复完整 traversal。
 - [ ] Renderer Store data-only Patch 不再无条件重新扫描全部未变化 data。
