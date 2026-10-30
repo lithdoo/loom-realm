@@ -754,39 +754,37 @@ Patch `zIndex` 若存在，与 `ops[]` 属于同一个原子 Domain commit。
 
 ---
 
-## 12. Patch Atomicity / Structural Limits
+## 12. Patch Atomicity / Structural Invariants
 
-Renderer：
-
-```text
+~~~text
 current committed Domain Store
 → verify baseRevision/revision
 → isolated candidate
-→ apply ordered ops with operation preconditions and incremental local resource accounting
+→ apply ordered ops with operation preconditions
 → validate final candidate framework invariants
 → atomic commit once
-```
+~~~
 
 任何失败：
 
-```text
+~~~text
 revision unchanged
 zIndex unchanged
 tree unchanged
 no partial authoritative/presentation exposure
-```
+~~~
 
 ### 12.1 Structural invariants
 
-Render Update v1 不定义 node count、tree depth、attrs member count、data element/member count 或 data nesting depth 的固定协议级数字上限。
+Render Update v1 不定义 node count、tree depth、attrs member count、data element/member count 或 data nesting depth 的数字上限。
 
-Patch operations 按序作用于 isolated candidate。每个 op 的目标、identity、parent/sibling 关系及后续 op 所依赖的前置条件必须按当前 candidate 解释；协议不要求每个中间 candidate 满足已删除的固定数字上限，也不要求每个 op 后重新扫描整棵树。实现 MUST 在实际分配/增长过程中执行 local resource budget，防止通过“先增长再删除”造成无界峰值资源消耗。
+Patch operations 按序作用于 isolated candidate。每个 op 的目标、identity、parent/sibling 关系及后续 op 所依赖的前置条件必须按当前 candidate 解释。协议不要求每个 op 后重新扫描整棵树；实现应避免对未受影响的 subtree 重复验证。
 
-### 12.2 Render data measurement
+最终 candidate 必须满足 framework-owned structural invariants：identity uniqueness、parent/sibling consistency、reachability、acyclicity、one-shot key/tag history。不得将这些结构正确性检查替换成 node-count 或 depth cap。
 
-data / Event data 不设协议级 compact byte limit。发送端实际编码必须使用受 local outbound budget 约束的 bounded serializer；不得为了预检而先完整 stringify 后再计量。
+### 12.2 Render data representation
 
----
+data / Event data 保持 plain JSON object；协议不定义 compact byte、member、element 或 relative-depth 上限。实际编码只执行一次必要的 JSON serialization / representation handling，不为计算框架容量而先扫描、计量或重复 stringify。
 
 ## 13. Event
 
@@ -870,44 +868,44 @@ Sender MAY在 Event 尚未 emitted 时按 backpressure policy 丢弃该 Event；
 
 ---
 
-## 14. Backpressure / Coalescing
+## 14. Ordering / Coalescing
 
-所有队列 MUST bounded。
+Render Update 使用单 reader、单 serialized writer 和既定 FIFO 顺序。该约束保证消息顺序，不定义 pending queue 的容量。
 
 ### Registry
 
 尚未 emitted 的 full Registry MAY latest-state coalesce，但：
 
-```text
+~~~text
 cannot resurrect emitted one-shot domainId
 cannot cross retained Event/lifecycle barrier illegally
-```
+~~~
 
 ### Authoritative state
 
 已 emitted Snapshot/Patch：
 
-```text
+~~~text
 MUST NOT retract
 MUST NOT reorder
 MUST NOT silently skip within current carrier continuity
-```
+~~~
 
-尚未 emitted desired-state 变化 MAY相对 `lastEmittedRevision` 重新 diff 为一个下一 revision Patch，或 materialize：
+尚未 emitted desired-state 变化 MAY 相对 lastEmittedRevision 重新 diff 为一个下一 revision Patch，或 materialize：
 
-```text
+~~~text
 Snapshot revision = lastEmittedRevision + 1
-```
+~~~
 
 具体 Patch-vs-Snapshot heuristic 不属于协议。
 
 ### Event
 
-Event 使用 bounded ordered queue；压力下 MAY丢弃。surviving Events 保持相对顺序，永不 replay。
+已接受 Event 保持 FIFO，不 coalesce、不 replay，也不得因为框架自设队列容量而丢弃。stale / inapplicable Event 按 §13.1 drop；current carrier 在发送或交付前终止时不 replay。
 
-如果 Event backlog妨碍 authoritative convergence，实现 MUST优先 authoritative state progress。
+### Actual transport failure
 
----
+如果底层 carrier / Host API 的 send 实际失败，传播该 transport failure 并按 carrier lifecycle 处理。不得把框架人为 queue cap 触发的拒绝伪装成 transport failure。
 
 ## 15. Carrier Loss / Stale Presentation Cache
 
