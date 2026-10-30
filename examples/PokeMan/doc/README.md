@@ -31,7 +31,7 @@
 
 当前 physical data canonical sources：
 
-```
+```text
 Shared State
 → 67-shared-state-records.md
 
