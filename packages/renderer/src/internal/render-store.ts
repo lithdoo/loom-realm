@@ -414,7 +414,7 @@ export class RendererRenderStore {
       const identity = this.identities.get(message.domainId);
       if (identity === undefined) throw new Error("Missing Domain identity state");
       const nextTags = new Map<string, string>();
-      for (const [key, node] of index) {
+      for (const [key, node] of index.nodes) {
         if (identity.consumedKeys.has(key)) throw new Error("Consumed Render node key reintroduced");
         const priorTag = identity.liveTags.get(key);
         if (priorTag !== undefined && priorTag !== node.tag) throw new Error("Live Render node tag changed");
