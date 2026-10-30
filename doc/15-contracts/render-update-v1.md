@@ -838,7 +838,7 @@ no Data retirement solely for this applicability miss
 
 因此 stale Domain Event、pre-baseline Event、stale/missing target Event 都是 transient-inapplicable，不是 authoritative continuity failure。
 
-注意：malformed/oversize/closed-schema-invalid Event 仍是 protocol-fatal，见 §16。
+注意：malformed / closed-schema-invalid Event 仍是 protocol-fatal；若仅超过 local resource budget，则按 §16.2 作为 local-resource-exhaustion 处理。
 
 ### 13.2 Event / authoritative barrier
 
