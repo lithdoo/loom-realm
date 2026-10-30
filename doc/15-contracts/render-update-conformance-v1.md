@@ -27,7 +27,7 @@ LoomRealm Render Update v1 Transport Mapping Conformant
 ```text
 protocol = loomrealm.render-update
 protocolVersion = 1
-fixtureSetRevision = 1
+fixtureSetRevision = 2
 role = subsystem-sender | renderer-receiver | transport
 result = pass
 ```
@@ -53,7 +53,7 @@ interface RenderUpdateFixtureManifestV1 {
   readonly fixtureFormatVersion: 1;
   readonly protocol: "loomrealm.render-update";
   readonly protocolVersion: 1;
-  readonly fixtureSetRevision: 1;
+  readonly fixtureSetRevision: 2;
   readonly fixtures: readonly RenderUpdateFixtureDescriptorV1[];
 }
 
