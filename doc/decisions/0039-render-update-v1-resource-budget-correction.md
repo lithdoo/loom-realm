@@ -1,49 +1,50 @@
-# ADR 0039 — Render Update v1 Local Resource-Budget Policy Correction
+# ADR 0039 — Render Update v1 Pre-release Removal of Framework-Imposed Capacity Caps
 
-> 状态：Accepted direction / Local resource-policy correction; implementation and qualification pending
+> 状态：Accepted direction / pre-release correction; implementation and qualification pending
 > 日期：2026-10-30
 > 相关原则：[Framework Responsibility and Validation Boundary](../10-architecture/framework-validation-boundary.md)
 > 相关决策：[ADR 0022 — Render Update v1 freeze closure](./0022-render-update-v1-freeze-closure.md)、[ADR 0038 — Developer Authority and Minimal Runtime Enforcement](./0038-developer-authority-minimal-runtime-enforcement.md)
-> 相关契约：[Render Update v1](../15-contracts/render-update-v1.md)、[Render Update v1 Conformance](../15-contracts/render-update-conformance-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)
+> 相关契约：[Render Update v1](../15-contracts/render-update-v1.md)、[Render Update v1 Conformance](../15-contracts/render-update-conformance-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Renderer Data Profile /3](../15-contracts/renderer-data-profile-v3.md)
 
 ## 背景
 
-Issue #133 的真实物理机诊断表明，Render Data 路径不仅承担重复遍历，还把许多固定数值限制当成协议级 accept/reject 规则：message bytes、JSON depth、identifier length、Domain/Node/operation counts、attrs members、data members/elements/bytes/depth 等。
+Issue #133 的真实物理机诊断表明，Render Data 路径不仅承担重复遍历，还把许多固定数值限制当成 accept/reject 规则：message bytes、JSON depth、identifier length、Domain/Node/operation counts、attrs members、data members/elements/bytes/depth 等。
 
-这些数字并非全部来自 Render authority、wire interoperability 或业务语义。它们混合了历史实现容量、预先防御性验证和资源保护目标，使不同平台/产品不得不接受同一套与实际 capacity 不匹配的硬编码限制，也让开发者的数据形状被框架约束。
+这些数字并非全部来自 Render authority、wire interoperability 或业务语义。它们混合了历史实现容量、预先防御性验证和框架自行设定的资源上限，使不同平台/产品不得不接受同一套与实际平台能力不匹配的限制，也让开发者的数据形状被框架约束。
 
-项目已确立 Developer Authority / Minimal Runtime Enforcement：框架拥有自己的协议和状态正确性；开发者拥有应用数据业务语义。框架仍必须防止无界资源消耗，但“必须有 bounded resource policy”不等于“所有平台必须采用同一组协议级数字”。
+PR #135 的目标不是把固定数字改成可配置数字。**框架不应以 ResourceBudgetPolicy、local budget、bounded queue 或其他可配置机制重新建立同一类人为容量门槛。** 平台有能力处理更大的数据时，LoomRealm 不得因为自己的容量估计而拒绝它。
 
 ## 决定
 
-### 1. 保持同一 v1，不创建 v2
+### 1. 删除框架自行设定的 numeric capacity caps
 
-本 ADR 将 Render Update v1 的 numeric hard-limit policy 修订为 local resource-budget policy；Render Update identity 仍为 `loomrealm.render-update / 1`，conformance fixtureSetRevision 为 2。该修改不改变 wire representation、message kind、closed schema、direction、authority、identity、revision、Patch algebra、atomicity 或 Event semantics，因此**不需要创建 v2，也不需要仅因旧实现存在较小容量而执行 protocol migration**。
+Render Update v1 不再定义或要求框架实现以下容量上限：
 
-数值 threshold 原本是实现容量被误写成统一 accept/reject 规则；修订后它们是 Host / Product / Runtime 的本地容量选择。旧接收端可能仍保留较小的硬编码容量，发送端若给它发送超过该容量的负载，该 workload 可能失败；这属于 receiver capacity mismatch，而不是 wire ABI incompatibility。需要更大负载的产品应先确保接收端本地预算足够，再启用更大的发送负载。不得把“放宽限制”误解为可以向未知容量的 peer 无条件发送任意大消息。
-
-本 ADR 不取消真正的版本治理：如果后续改变 wire schema、message direction、authority、identity、ordering、revision、atomicity、Event 或 recovery semantics，仍按正式版本治理处理。Renderer Data Profile v1 的三-child → 四-child composition correction 是 ADR0037 的独立事项，其 cohort 约束继续有效，不由本 ADR 改写。
-
-### 2. 删除协议级固定 numeric hard limits
-
-修订后 Render Update v1 不再规定统一数值上限：
-
-- application message UTF-8 bytes 与 JSON container depth；
+- application message UTF-8 bytes；
+- JSON container / application data nesting depth；
 - Domain Registry entries；
 - domainId、Node key、tag、Event name 的 UTF-8 byte length；
 - RenderNode count、tree depth；
 - Patch operation count；
 - attrs key/value byte length 与 attrs member count；
 - Render data array elements、object members、compact bytes、relative depth；
-- generic data object key byte length。
+- generic data object key byte length；
+- pending message count、queue bytes、retained work、candidate growth 或其他框架自行设定的容量。
 
-revision/baseRevision 仍为 positive safe integer。zIndex 从 signed 32-bit 改为 signed safe integer，确保 JavaScript number 的精确性。身份字符串仍必须非空、Unicode scalar、opaque、case-sensitive、no normalization；不设协议级 byte cap。
+这些数字不得通过默认常量、可配置选项、Product composition policy、Host policy 或新的 ResourceBudgetPolicy 重新引入为框架拒绝条件。
 
-### 3. 保留协议不变量与 wire representation
+以下数值约束仍保留，因为它们不是容量估计，而是协议语义或数值表示正确性：
 
-以下不是应用业务正确性限制，继续属于协议：
+- revision/baseRevision 为 positive safe integer，避免 JavaScript Number 精度丢失和 revision wrap；
+- zIndex 为 signed safe integer，保证跨实现的精确整数排序；
+- identity strings 必须非空且为 Unicode scalar strings；不定义 byte-length 上限；
+- Viewport width/height 等字段继续遵循其自身 contract 的正数和 safe-integer 语义。
 
-- one UTF-8 JSON text string = one exact Render message object；不增加 binary、Batch 或第五种 message kind；
+### 2. 保留协议不变量与 wire representation
+
+以下不是应用资源容量限制，继续属于协议：
+
+- one UTF-8 JSON text string = one exact Render message object；
 - exact closed message / operation schema，未知字段拒绝；
 - Wire JSON representation；Render attrs 是 string→string map，data 是 plain JSON object；
 - Domain / Node identity uniqueness、one-shot history、stable live tag；
@@ -51,78 +52,110 @@ revision/baseRevision 仍为 positive safe integer。zIndex 从 signed 32-bit �
 - strict per-carrier revision continuity；
 - Patch operation preconditions、ordered application、isolated candidate、atomic commit；
 - final candidate 的 parent/sibling/reachability/cycle/identity/tree invariants；
-- Event transient/drop/barrier semantics；
+- Event transient/applicability/order semantics；
 - Data authority、Frame/Input/Content separation。
 
-不因取消 numeric caps 而取消框架实际依赖的类型前提、状态一致性或失败原子性。
+不因取消 numeric caps 而取消框架实际依赖的类型前提、状态一致性或失败原子性。结构合法性不等于结构规模限制：Tree 可以很大、很深，但仍必须满足 identity、parent、sibling、reachability 和 cycle invariants。
 
-### 4. 以 local resource budget 取代协议级数字
+### 3. 不以 local resource budget 替代旧限制
 
-每个 Host / Product composition / Runtime implementation MUST 对可能随输入增长的工作配置有限、显式、可审计的 local resource budgets，至少覆盖：
+本次明确不引入：
 
-- inbound/outbound carrier bytes；
-- parser work/depth 与 candidate construction；
-- retained Render state / nodes / strings / JSON members；
-- Patch operation work / indexes / tombstones；
-- outbound serialization、queues、pending messages 与 in-flight work；
-- PWA MessagePort inbound retained-string queue；
-- DataRuntime outbound pending count + encoded payload bytes；
-- RenderManager pending-work count + retained-work weight。
+- Host / Product / Runtime ResourceBudgetPolicy；
+- raw inbound byte gate；
+- parser depth/work budget；
+- bounded serializer 或 outbound byte accounting gate；
+- candidate growth / retained-state budget；
+- queue count / retained payload / in-flight capacity budget；
+- ResourceBudgetExceeded / local-resource-exhaustion 作为人为容量限制的错误类别；
+- sender/receiver budget negotiation 或预算兼容登记。
 
-规则：
+Host、浏览器、JavaScript engine、操作系统和实际 carrier API 自身的能力边界仍然存在。这些边界由平台决定，不由 LoomRealm 重新估算或缩窄。实际操作若因平台能力失败，框架应传播可观察到的真实异常；不可捕获的进程级 OOM 不承诺能够被 JavaScript catch。
 
-- local budgets 可以因平台/产品 capacity 和 threat model 不同而不同；
-- budget 不是 wire schema、业务 Schema 或跨实现统一 accept/reject threshold；
-- bounded checks 必须融合到实际 parse/serialize/mutation/admission，避免先完整预检再重复处理；
-- queue budget 至少同时约束 item count 与 retained payload/work；count-only cap 不足以证明内存有界；
-- queue accounting 应在 admission/coalesce/settle/terminal 时增量更新，不得为每次 admission 重新扫描完整 Snapshot；
-- resource budget exhaustion 不得报告为 peer malformed/protocol-invalid；
-- inbound exhaustion 必须 no-partial-commit，并 retire current carrier，因为不能安全地继续消费后续 authoritative updates；
-- outbound exhaustion 不得发出 partial application unit；尚未 emitted 的 desired state 可 coalesce，或在本地边界报告失败；
-- v1 不增加 budget negotiation。Product cohort 必须记录 sender/receiver budget compatibility；独立 peers 超过接收端 local budget 时不保证交付。
+### 4. Operation-first、single-pass 与 atomicity
+
+- Parse 直接使用既定 Wire / ECMAScript JSON.parse 语义，不先执行 raw-byte gate 或 JSON depth preflight。
+- Encode 在实际序列化过程中完成必要的 JSON representation 处理，不先完整扫描对象再重复 stringify；不得为 byte accounting 再遍历对象图。
+- RenderManager 只执行 API ownership contract 和当前操作需要的检查；删除与当前 Patch 无关的完整 Snapshot probe。
+- RenderStore 按 Patch operation 顺序处理实际目标和前置条件；不因每个 operation 或每次小更新重新扫描无关 subtree。
+- Snapshot / structural Patch 仍须维护框架拥有的 Tree identity、parent/sibling、reachability 和 cycle invariants；不执行 node-count 或 tree-depth cap。
+- 必要的 detached ownership isolation、COW、isolated candidate 和 atomic commit 保留；失败时丢弃 candidate，不污染 current state。
+- 对未 emitted 的 authoritative desired state，只按既有语义允许的方式 coalesce；不得通过容量压力丢弃已接受的 Event 或跳过 authoritative operation。
 
 ### 5. Failure classification
 
 - malformed JSON / invalid Wire representation / unknown message kind / exact closed-schema violation：protocol-fatal，retire current Data Connection；
 - Domain lifecycle / revision / Patch precondition / candidate invariant violation：authoritative continuity failure，retire current Data Connection；
-- local bounded-resource exhaustion：local-resource-exhaustion，不归咎于 peer protocol violation；inbound retire carrier、outbound 不发送部分消息；PWA Carrier、Codec parser 和 Renderer Store candidate 的 typed resource cause 必须穿过 DataRuntime terminal mapping，不能被 `carrier-lost` 或 `protocol-fatal` 覆盖；RenderManager pending-work exhaustion 必须产生 Subsystem-local diagnostic；
+- developer-owned input、getter/Proxy、JSON serialization 或本地操作异常：在对应 API / authoring boundary 报告实际异常，不得自动伪装成 peer protocol-fatal，也不得仅因此终止整个 Data Connection；
+- inbound candidate 的意外本地执行异常：丢弃 candidate，报告本地异常；若无法继续证明 authoritative continuity，可以退休当前 Data Connection，但必须标记为 local implementation failure，而不是 peer protocol violation；
+- carrier / Host API 的实际 send/receive failure：按实际 transport failure 处理；
 - well-formed Event applicability miss：drop only；
-- presentation-local failure：不改变 authoritative Render validity。
+- 不定义 ResourceBudgetExceeded 或 local-resource-exhaustion，因为本 ADR 不建立人为资源预算。
 
-### 6. Conformance reset
+序列化失败不得产生 partial application unit；Patch 失败不得 partial commit。错误分类必须说明实际失败位置和责任边界，不得为容量数字创造一套新错误体系。
 
-- Render Update conformance fixtureSetRevision 1 被 revision 2 supersede；移除固定数值边界 exactly-at / one-over fixtures。
-- Revision 2 覆盖协议不变量、atomicity、identity、revision、Event 与 transport semantics，并测试 local budget exhaustion 的无 partial commit / no partial send / local diagnostic。
-- Local numeric budgets 属 implementation/product qualification input，不属于跨实现 Render wire conformance corpus。
-- Renderer Data Profile v1 的 common fixed message/depth gate 改为 local resource policy；其 conformance fixtureSetRevision 为 4。
-- 当前 active Renderer Data Profile `/3` 的 common message/depth gate 与 generic pending queue 也必须使用 local resource policy；`/3` identity 不变，不创建 profile v4。
-- Profile v1 三-child → 四-child 的 cohort/compatibility correction 继续由 ADR0037 单独治理；numeric budget correction 不增加该 gate。
+### 6. Queue、backpressure 与 transient Event
+
+- Data reader / writer 继续保持单 reader、单 serialized writer 和既有 FIFO/order semantics；这些是并发与协议顺序约束，不是队列容量上限。
+- Render Update、Renderer Data Profile 和 DataRuntime 不定义通用 queue item count、retained bytes 或 pending-work cap。
+- 不得因为 queue 达到框架设定的数字而拒绝 send、关闭 Data peer 或静默丢弃消息。
+- Registry 和尚未 emitted 的 authoritative desired state 仍可按既有规则 coalesce；已 emitted 的 authoritative message 不得撤回、重排或跳过。
+- Render Event 不因框架队列容量压力而丢弃；保留 Event ordering barrier。Event 仍是 transient、non-authoritative、no replay；carrier 在发送/交付前终止时不 replay，stale/inapplicable Event 仍按协议 drop。
+- Presentation Event 不设置 256 等框架容量；保留 FIFO 和 single-writer ordering。
+- Viewport latest-value coalescing 是该 state child 的语义，不是通用资源预算；仅未发送的旧 size 可由更新的 size 替代。
+- PWA MessagePort queue terminal 时清空引用；可用 head-index/ring-buffer 改善队列操作成本，但不得增加容量 cap。
+- 真实 carrier.send / host API failure 按 transport error 传播；不以 ResourceBudgetExceeded 替代。
+
+### 7. Conformance correction
+
+- Render Update conformance fixtureSetRevision 1 被 revision 2 candidate supersede；revision 2 删除 local-resource-budget fixtures。
+- Revision 2 保留协议不变量、atomicity、identity、revision、Event 与 transport semantics，并增加超过历史 1 MiB / depth 64 / Node 16384 / tree depth 30 / Patch 4096 / data 256 KiB 等旧阈值的代表性有效 fixture，证明旧数字不再作为 protocol rejection rule。Fixture 只证明样本有效，不建立新的最大值。
+- Conformance 不要求每个实现配置 local resource budgets，也不测试 ResourceBudgetExceeded。
+- Renderer Data Profile v1 conformance fixtureSetRevision 4 candidate 删除 common message-byte/depth budget obligation；增加超过历史阈值的代表性 profile workload。
+- Renderer Data Profile /3 删除 generic queue / message/depth budget obligation；保留单 reader、单 writer、FIFO、viewport latest-value coalescing 和既有 role semantics。
+- Design / conformance revision 尚未激活；实现和 qualification 完成后才能标记为 Active / Normative。
+
+### 8. Same-identity pre-release compatibility gate
+
+移除旧限制会改变旧实现的 accept/reject 行为；移除容量触发的 Event drop 也会改变可观察 delivery 行为。因此本 ADR 不声称这些修改“没有 wire-observable effect”。
+
+保持 Render Update /1 与受影响 Renderer Data Profile identity 的前提是：它们仍处于首次正式发布前，并且 release owner 确认不存在：
+
+- deployed old-hard-limit /1 peers；
+- independent implementations relying on old reject/drop behavior；
+- rolling upgrade / rollback cohorts；
+- persisted messages, recordings, or compatibility obligations requiring old behavior.
+
+若任何一项存在，必须 STOP same-identity correction，另行提交 protocol version / migration ADR。不能只靠“新实现接受更多数据”推断旧新实现一定互操作。
+
+如果兼容核查通过，可以在首次发布前用明确的 correction 更新同一 identity；PR 描述、ADR、contract 和 conformance 必须一致记录该 gate。
 
 ## 后果
 
 正面：
 
-- Render wire contract 不再把历史实现容量伪装成业务/协议正确性；
-- Desktop / PWA / future hosts 可按各自 capacity 选择 bounded budgets；
-- 开发者可表达更大的业务数据结构，不受 arbitrary fixed caps 限制；
-- Framework 仍然有界，且 resource failures 与 malformed peer errors 可区分；
-- 通过 operation-first bounded work 避免全树预检的重复 CPU 成本。
+- 开发者可使用平台本身能够处理的数据规模，不再受框架自行估计的容量数字限制；
+- Framework 不会用可配置 budget 重新建立相同的强制门槛；
+- 默认热路径减少 raw-byte scan、depth/member traversal、重复 stringify 和无关 Snapshot preflight；
+- Queue 不会因人为容量数字丢弃应用消息或关闭 peer；
+- Protocol invariants、ownership isolation 和 atomicity 仍然受到保护。
 
-代价：
+代价与边界：
 
-- Product composition 必须明确选择 sender/receiver 兼容的预算；
-- local exhaustion 的诊断与可观测性必须实现；
-- independent peers 没有 budget negotiation；仅当某条消息超过 receiver 实际 local capacity 时，接收端才可能发生 Data-local resource exhaustion；这不是协议格式不兼容；
-- 旧实现中的 hard-coded limits 必须改为可配置 resource budgets 或移除；
-- revised-v1 必须重新 materialize conformance tests，并执行受影响 Desktop/Hostra/PWA qualification。
+- 平台实际失败可能发生在较晚的操作阶段；框架必须准确传播可观察异常；
+- 不可恢复的 OOM / process termination 不能承诺被 catch；
+- 应用若需要业务数据大小或深度限制，应自行启用 Strict Validation；
+- 移除旧数字和容量触发的 drop 行为必须通过兼容性 gate 与 conformance correction；
+- 性能收益必须由 Issue #133 同等工作负载证明，不能只凭删除代码推断。
 
 ## 不在本 ADR 范围
 
 - 改变 Render message kinds、exact envelope schema、authority direction；
-- 改变 Domain/Node one-shot identity、revision semantics、Patch algebra、Event semantics；
-- 引入 ACK/NACK、resync、history replay、budget negotiation；
+- 改变 Domain/Node one-shot identity、revision semantics、Patch algebra 和 structural invariants；
+- 引入 ACK/NACK、resync、history replay 或 budget negotiation；
 - 放宽 JSON wire representation 为任意 JavaScript object；
 - 将业务 Schema 强制塞进 Runtime；
-- 实现 Map-specific Tile/Projection/Canvas policy。
+- 实现 Map-specific Tile/Projection/Canvas policy；
+- 为替代旧限制而创建新的 ResourceBudgetPolicy、ResourceBudgetExceeded 或通用容量治理系统。
 
 本 ADR 不表示实现或 qualification 已完成。
