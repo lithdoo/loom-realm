@@ -176,7 +176,7 @@ interface RenderDomainsV1 {
 `domains` 是 current generation 的 full replacement set：
 
 ```text
-0..256 entries
+0..N entries
 no duplicates
 array order has no presentation meaning
 ```
@@ -184,7 +184,7 @@ array order has no presentation meaning
 `domainId`：
 
 ```text
-1..128 UTF-8 bytes
+non-empty Unicode scalar string
 valid Unicode scalar sequence
 opaque
 case-sensitive exact identity
@@ -323,7 +323,7 @@ roots/children order 是 authoritative logical sibling order。Domain Host 不�
 `key` 是 Domain-wide wire Node identity：
 
 ```text
-1..128 UTF-8 bytes
+non-empty Unicode scalar string
 valid Unicode scalar sequence
 opaque / case-sensitive / no normalization
 ```
@@ -365,7 +365,7 @@ fresh same-generation carrier baseline MAY包含此前仍 live 的 keys；这不
 `tag`：
 
 ```text
-1..256 UTF-8 bytes
+non-empty Unicode scalar string
 valid Unicode scalar sequence
 opaque
 same live key keeps same tag
@@ -392,9 +392,11 @@ data  = plain JSON object
 
 Core不解释业务语义。
 
-`attrs` key：1..128 UTF-8 bytes；value：0..4096 UTF-8 bytes；每 Node 最多 256 members。
+`attrs` key 是 non-empty Unicode scalar string；value 是允许空字符串的 Unicode scalar string。Framework 不限制 attrs member 数量或字符串 UTF-8 byte 长度。
 
-Generic Render `data` object key：0..256 UTF-8 bytes；允许空字符串 key，因为 Core不增加业务 grammar。
+Generic Render `data` object key 是允许空字符串的 Unicode scalar string，因为 Core 不增加业务 grammar。Framework 不限制 generic data 的 byte、member、array-element 或 nesting depth；应用 schema 与规模策略由 Developer/Product 拥有。
+
+Generic Render `data` 中的 nested string value 同样 MUST 是 valid Unicode scalar sequence。Codec 在最终 Wire parse/serialization traversal 内执行该语义检查，不另行扫描 generic subtree；Wire serializer 仍负责完整 representation reject-set。
 
 ---
 
@@ -403,8 +405,8 @@ Generic Render `data` object key：0..256 UTF-8 bytes；允许空字符串 key�
 `zIndex`：
 
 ```text
-safe integer
--2,147,483,648 .. 2,147,483,647
+signed safe integer
+-9,007,199,254,740,991 .. 9,007,199,254,740,991
 ```
 
 它定义跨 current Domains 的 logical stacking input：
@@ -531,7 +533,7 @@ Renderer：
 ```text
 validate whole Snapshot
 → build isolated candidate
-→ validate one-shot/tag/limits
+→ validate one-shot/tag/Framework invariants
 → atomic replace
 → baselined(snapshot.revision)
 ```
@@ -582,7 +584,7 @@ patch.baseRevision == currentRevision
 patch.revision == patch.baseRevision + 1
 ```
 
-`ops`：0..4096 entries，但：
+`ops`：0..N entries，但：
 
 ```text
 ops.length > 0 OR zIndex member is present
@@ -758,7 +760,7 @@ Patch `zIndex` 若存在，与 `ops[]` 属于同一个原子 Domain commit。
 
 ---
 
-## 12. Patch Atomicity / Structural Limits
+## 12. Patch Atomicity / Structural Invariants
 
 Renderer：
 
@@ -767,8 +769,8 @@ current committed Domain Store
 → verify baseRevision/revision
 → isolated candidate
 → apply ordered ops
-→ validate after each op for bounded structure
-→ validate final candidate
+→ validate each op's local preconditions
+→ validate final structural candidate once
 → atomic commit once
 ```
 
@@ -781,32 +783,11 @@ tree unchanged
 no partial authoritative/presentation exposure
 ```
 
-### 12.1 Hard structural limits
+### 12.1 Framework structural invariants
 
-```text
-max RenderNode count / Domain State       16,384
-max Render tree depth                     30
-max attrs members / Node                  256
-max Render data array elements            16,384
-max Render data object members            16,384
-max Render data/event-data compact bytes  262,144
-max Render data relative container depth  32
-```
+Render v1 不规定 Domain/Node/tree/Patch/attrs/generic-data 的固定容量上限，也不允许默认 Runtime 用 configurable resource budget 重建同类 gate。实现仍消耗真实平台资源；真实 allocation、transport 或 host failure 必须传播其真实失败，不得伪装为 peer protocol violation。
 
-定义：
-
-```text
-Render tree root Node depth = 1
-children level +1
-
-JSON container depth:
-    root object/array = 1
-
-Render data relative depth:
-    data root object = 1
-```
-
-Patch 中每个 op 完成后的 candidate MUST处于 node-count/tree-depth/attrs/data hard bounds 内。实现不得允许“中间超限、后续 op 再缩回”来绕过 bounded-processing contract。
+Structural Patch 可以构造 isolated full candidate 并在 ordered operations 后执行一次完整最终结构校验；每个 op 仍必须按当时 candidate 验证其局部 precondition。Update-only Patch 应使用 current index 与 touched-path COW，不应扫描无关树或 generic data subtree。
 
 最终 candidate 至少满足：
 
@@ -819,13 +800,9 @@ all live Nodes reachable from roots
 no cycles
 one-shot key history valid
 same live key tag stable
-attrs/data representation + limits valid
+attrs/data Wire representation valid
 zIndex valid
 ```
-
-### 12.2 Render data byte measurement
-
-`data` / Event `data` 的 262,144-byte limit 按 frozen Wire compact JSON serialization semantics计算其 UTF-8 bytes；不计无意义外部 whitespace。实现 MAY用等价的 bounded-size walker，不能要求先构造无界 serialized string。
 
 ---
 
@@ -841,7 +818,7 @@ interface RenderEventV1 {
 }
 ```
 
-`name`：1..128 UTF-8 bytes，opaque / case-sensitive / no normalization。
+`name`：non-empty Unicode scalar string，opaque / case-sensitive / no normalization。
 
 Event：
 
@@ -857,7 +834,7 @@ MUST NOT change Domain revision/store
 
 ### 13.1 Receiver applicability
 
-一个 schema/limits 合法的 Event 只有在：
+一个 schema/representation 合法的 Event 只有在：
 
 ```text
 Domain current
@@ -905,7 +882,7 @@ Event 必须先 logical-deliver，再处理 removal。
 
 **未 emitted 但决定保留的 Event 是 authoritative coalescing barrier。** Sender不得把 Event 之前建立其 target/lifetime 的 authoritative commit 重写到 Event 之后，也不得在 Event 前把 target lifetime coalesce away。
 
-Sender MAY在 Event 尚未 emitted 时按 backpressure policy 丢弃该 Event；一旦 Event 被丢弃，对应 barrier 消失，尚未 emitted desired authoritative state可继续正常 coalesce。
+Sender 不得仅因 queue/backlog 容量丢弃已经接受的 Event。Event 只有在 authority/applicability 失效、carrier 被替换/终止或真实 send failure 时才按相应规则停止；对应 barrier 随该 Event 一并消失。
 
 不要求等待 physical paint/vsync，也不增加 `afterRevision`。
 
@@ -913,7 +890,7 @@ Sender MAY在 Event 尚未 emitted 时按 backpressure policy 丢弃该 Event；
 
 ## 14. Backpressure / Coalescing
 
-所有队列 MUST bounded。
+Framework 不用固定 queue count/byte budget 拒绝合法 application unit。队列实现 MUST 使用 amortized O(1) enqueue/dequeue、单 writer 和 transport Promise 自然 backpressure；terminal 必须 exactly-once settle 未开始 work 并释放 retained references。
 
 ### Registry
 
@@ -944,7 +921,7 @@ Snapshot revision = lastEmittedRevision + 1
 
 ### Event
 
-Event 使用 bounded ordered queue；压力下 MAY丢弃。surviving Events 保持相对顺序，永不 replay。
+Event 使用 ordered queue；已经接受且仍 applicable 的 Events 保持相对顺序，永不 replay。queue pressure 本身不是 drop 或 Data retirement 理由。
 
 如果 Event backlog妨碍 authoritative convergence，实现 MUST优先 authoritative state progress。
 
@@ -985,7 +962,7 @@ same-generation reconnect 不创建新 wire Domain lifetime；fresh generation �
 
 Frozen v1 明确三类结果。
 
-### 16.1 Protocol-fatal representation/schema/limit failure
+### 16.1 Protocol-fatal representation/schema failure
 
 任何 Render message 的以下错误：
 
@@ -994,8 +971,7 @@ malformed JSON / invalid Wire representation
 top-level unknown type
 wrong exact schema / extra or missing field
 invalid Unicode scalar sequence
-message / depth / identifier / collection hard limit violation
-invalid primitive type / integer range
+invalid primitive type / required integer range
 ```
 
 → MUST retire current Data Connection；不得交给 Render business/presentation handler。
@@ -1081,7 +1057,6 @@ Render v1 使用 frozen Wire JSON representation semantics；Render 不增加第
 
 ```text
 raw carrier string
-→ actual UTF-8 byte gate
 → Wire parseJsonText / ECMAScript JSON.parse observable semantics
 → Wire JsonValue representation validation
 → Render exact-schema/domain validation
@@ -1147,17 +1122,15 @@ Inbound 固定：
 ```text
 carrier string
 ↓
-actual UTF-8 byte gate
-↓
 Wire parseJsonText
 ↓
-Wire representation + JSON container depth
+Wire representation
 ↓
 top-level Render type discrimination
 ↓
 exact closed schema
 ↓
-field identifier/count/size/numeric limits
+field scalar/numeric constraints
 ↓
 Registry/current-Domain/baseline gate
 ↓
@@ -1167,7 +1140,7 @@ message-specific semantic/precondition validation
 ↓
 isolated candidate mutation when authoritative
 ↓
-intermediate/final structural + one-shot/tag validation
+final structural + one-shot/tag validation
 ↓
 atomic commit OR Event applicability/delivery
 ```
@@ -1178,51 +1151,18 @@ Representation/schema-invalid input不得进入 authority/presentation logic；�
 
 ---
 
-## 19. Hard Limits
+## 19. Representation and Numeric Constraints
 
-Connection-wide Render application limits：
-
-```text
-max application message UTF-8 bytes       1,048,576
-max JSON container nesting depth          64
-```
-
-Identifiers / labels：
-
-```text
-domainId              1..128 UTF-8 bytes
-Node key              1..128 UTF-8 bytes
-tag                   1..256 UTF-8 bytes
-Event name            1..128 UTF-8 bytes
-attrs member key      1..128 UTF-8 bytes
-attrs member value    0..4096 UTF-8 bytes
-Generic data object key 0..256 UTF-8 bytes
-```
-
-Structural：
-
-```text
-render.domains entries                    <= 256
-RenderNode count / Domain State           <= 16,384
-Render tree depth                         <= 30
-Patch operations                          <= 4,096
-attrs members / Node                      <= 256
-Render data array elements                <= 16,384
-Render data object members                <= 16,384
-Render data/event-data compact UTF-8 size <= 262,144 bytes
-Render data relative container depth      <= 32
-```
+Render strings MUST be valid Unicode scalar sequences。Identity/tag/Event-name/attrs-key 非空；attrs value 和 generic data key 可以为空。Framework 不规定这些字符串的 UTF-8 byte 长度，也不规定 message、JSON depth/member/array、Domain/Node/tree/Patch/data 或 queue 容量。
 
 Numeric：
 
 ```text
 revision/baseRevision  positive safe integer
-zIndex                 signed 32-bit integer range
+zIndex                 signed safe integer
 ```
 
-所有 UTF-8 限制按 encoded bytes，不按 JavaScript UTF-16 `.length`。
-
-实现不得以更低的 platform-specific protocol limit 拒绝合法 v1 message；内部 capacity 可以更高。
+revision/baseRevision 仍必须为 positive safe integer，且 continuity 不得 wrap。Product/Developer MAY 为自己的业务 schema、projection window 或 payload policy 设定规模策略；该策略不属于 generic Render protocol validity。
 
 ---
 
@@ -1275,7 +1215,7 @@ Patch algebra
 Event barrier/drop semantics
 logical stacking order
 failure/recovery
-hard limits
+Wire representation and numeric constraints
 ```
 
 允许不同：
@@ -1315,7 +1255,7 @@ DOM/CSS protocol
 Frame binding
 Input authority
 business state mutation
-Event FIFO concrete capacity/drop preference
+Event queue container choice
 Patch-vs-Snapshot cost threshold
 presentation scheduler policy
 ```
@@ -1337,15 +1277,15 @@ presentation scheduler policy
 11. sender用 carrier-local `lastEmittedRevision`，emitted = ordered-send boundary accepted；
 12. Patch仅 insert/remove/move/update，whole candidate atomic；
 13. empty Patch只有携 zIndex 才合法；Update/Delta不得结构性空操作；
-14. structural limits对每个 Patch op后的 candidate 与最终 candidate都成立；
+14. ordered Patch 对每个 op 验证局部 precondition，并在 atomic commit 前验证最终结构 invariant；
 15. Event transient/no replay，不修改 revision/store；retained Event 是 authoritative coalescing barrier；
-16. well-formed stale/inapplicable Event drop-only；schema/limit invalid message与 authoritative continuity error retire Data；
+16. well-formed stale/inapplicable Event drop-only；schema/representation invalid message与 authoritative continuity error retire Data；queue pressure 不是 drop 理由；
 17. Data loss后旧 Store最多是 stale presentation cache，不是 current authority/Patch base；
 18. recovery固定 fresh carrier + Registry + current Domain Snapshots；
 19. no ACK/NACK/replay/resync RPC；
 20. tag/presentation/component implementation不属于 Render protocol authority；
 21. Frame/Input/Data transport/Content capability 与 Render authority保持分离；
-22. hard limits、closed schema、validation order均已冻结。
+22. exact closed schema、Wire representation、signed-safe zIndex 与 validation/failure order均已冻结；Framework 不拥有 application capacity policy。
 
 ---
 
@@ -1362,10 +1302,18 @@ revision continuity scope
 Snapshot semantics
 Patch algebra/preconditions/atomicity
 Node one-shot/tag rules
-Event ordering/barrier/drop semantics
+Event ordering/barrier/applicability semantics
 zIndex logical ordering
-hard limits
+Wire representation and Framework invariants
 validation/failure/recovery semantics
 ```
 
 新增 Component Profile、tag semantic grammar、Render ACK、resync RPC 或第五种 Render message 同样不属于 v1 兼容扩展。
+
+---
+
+## 25. Revision History
+
+### 2026-10-30 — pre-release same-identity correction
+
+在首次实质公开发布前直接修订 `loomrealm.render-update/1`，不增加 protocol identity、migration 或 compatibility mode：删除历史 message/depth/count/byte/string/queue hard caps 与 capacity-triggered Event drop；`zIndex` 改为 signed safe integer；保留 exact Wire/closed schema、authority、identity/generation/revision、ordered Patch preconditions、tree invariants、atomicity、Event applicability/FIFO/no-replay 与 fresh-baseline recovery。对应 fixtureSetRevision 为 2，完整 observable delta 记录于 Render Data Runtime correction ledger。

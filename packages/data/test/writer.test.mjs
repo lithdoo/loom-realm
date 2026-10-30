@@ -150,6 +150,42 @@ test("writer pending operations settle exactly once on terminal", async () => {
   assert.equal(results.filter((result) => result.kind === "terminal").length, 2);
 });
 
+test("controlled backlog exceeds the historical 1024 threshold without admission failure", async () => {
+  const carrier = createWriterCarrier();
+  carrier.holdSend();
+  const subsystem = createSubsystemDataPeer({ binding: binding(carrier), handlers });
+  globalThis.gc?.();
+  const heapBefore = process.memoryUsage().heapUsed;
+  const enqueueStart = performance.now();
+  const operations = Array.from({ length: 1_100 }, (_, index) =>
+    subsystem.render.sendDomains({ type: "render.domains", domains: [`d${index}`] }));
+  const enqueueMs = performance.now() - enqueueStart;
+  const heapQueued = process.memoryUsage().heapUsed;
+  await waitFor(() => carrier.maxActive === 1);
+  assert.equal(subsystem.peekTerminal?.(), undefined);
+  const settleStart = performance.now();
+  carrier.closeNow();
+  carrier.releaseSend();
+  const results = await Promise.all(operations);
+  const settleMs = performance.now() - settleStart;
+  assert.equal(results[0].kind, "sent");
+  assert.equal(results.slice(1).every((result) => result.kind === "terminal"), true);
+  assert.equal((await subsystem.terminal).kind, "carrier-closed");
+  process.stdout.write(`DATA_WRITER_BACKLOG ${JSON.stringify({
+    count: operations.length,
+    enqueueMs,
+    enqueueMicrosPerItem: enqueueMs * 1_000 / operations.length,
+    settleMs,
+    maxConcurrentPhysicalSends: carrier.maxActive,
+    physicalSends: carrier.sent.length,
+    terminalSettled: results.filter((result) => result.kind === "terminal").length,
+    heapBefore,
+    heapQueued,
+    queuedHeapDelta: heapQueued - heapBefore,
+    explicitGc: typeof globalThis.gc === "function",
+  })}\n`);
+});
+
 test("carrier.send reject with a kind object is carrier-lost and matches peer.terminal", async () => {
   let resolveClosed;
   const closed = new Promise((resolve) => {

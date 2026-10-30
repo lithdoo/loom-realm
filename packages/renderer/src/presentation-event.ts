@@ -1,10 +1,8 @@
 import {
   assertExactKeys,
   assertJsonObject,
-  jsonDepth,
   parseJsonText,
   stringifyJson,
-  utf8ByteLength,
   type JsonObject,
   type JsonValue,
 } from "@loomrealm/wire";
@@ -53,26 +51,18 @@ export interface PresentationEventPublishResultV1 {
   readonly ok: boolean;
 }
 
-const MAX_APPLICATION_BYTES = 1_048_576;
-const MAX_DATA_BYTES = 262_144;
-
-function text(value: JsonValue | undefined, maximum: number, label: string): string {
+function text(value: JsonValue | undefined, label: string): string {
   if (typeof value !== "string") throw new TypeError(`Invalid ${label}`);
-  let bytes = 0;
   for (let index = 0; index < value.length; index += 1) {
     const unit = value.charCodeAt(index);
     if (unit <= 0x1f || unit === 0x7f) throw new TypeError(`Invalid ${label}`);
-    if (unit <= 0x7f) bytes += 1;
-    else if (unit <= 0x7ff) bytes += 2;
-    else if (unit >= 0xd800 && unit <= 0xdbff) {
+    if (unit >= 0xd800 && unit <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
       if (next < 0xdc00 || next > 0xdfff) throw new TypeError(`Invalid ${label}`);
-      bytes += 4;
       index += 1;
     } else if (unit >= 0xdc00 && unit <= 0xdfff) throw new TypeError(`Invalid ${label}`);
-    else bytes += 3;
   }
-  if (bytes < 1 || bytes > maximum) throw new TypeError(`Invalid ${label}`);
+  if (value.length === 0) throw new TypeError(`Invalid ${label}`);
   return value;
 }
 
@@ -99,30 +89,27 @@ function parseEvent(value: JsonValue | undefined): PresentationEventPublication 
   const payload = object(event.payload, ["domainId", "targetKey", "data"], "Presentation Event payload");
   // Data is open-schema even though the containing envelopes are closed.
   try { assertJsonObject(payload.data); } catch { throw new TypeError("Invalid Presentation Event data"); }
-  if (jsonDepth(payload.data) > 64 || utf8ByteLength(stringifyJson(payload.data)) > MAX_DATA_BYTES) {
-    throw new TypeError("Invalid Presentation Event data");
-  }
-  const domainId = text(event.domainId, 256, "Presentation Event domainId");
-  const targetKey = text(event.targetKey, 256, "Presentation Event targetKey");
+  const domainId = text(event.domainId, "Presentation Event domainId");
+  const targetKey = text(event.targetKey, "Presentation Event targetKey");
   if (payload.domainId !== domainId || payload.targetKey !== targetKey) {
     throw new TypeError("Invalid Presentation Event provenance envelope");
   }
   if (typeof event.broadcast !== "boolean") throw new TypeError("Invalid Presentation Event broadcast");
   return Object.freeze({
-    sessionId: text(event.sessionId, 128, "Presentation Event sessionId"),
-    ownerSubsystemKey: text(event.ownerSubsystemKey, 256, "Presentation Event owner"),
+    sessionId: text(event.sessionId, "Presentation Event sessionId"),
+    ownerSubsystemKey: text(event.ownerSubsystemKey, "Presentation Event owner"),
     generation: positiveSafeInteger(event.generation, "Presentation Event generation"),
     domainId,
     targetKey,
-    channel: text(event.channel, 256, "Presentation Event channel"),
-    type: text(event.type, 128, "Presentation Event type"),
+    channel: text(event.channel, "Presentation Event channel"),
+    type: text(event.type, "Presentation Event type"),
     broadcast: event.broadcast,
     payload: Object.freeze({ domainId, targetKey, data: payload.data as JsonObject }),
   });
 }
 
 function parseApplicationText(raw: string): JsonObject {
-  if (typeof raw !== "string" || utf8ByteLength(raw) > MAX_APPLICATION_BYTES) {
+  if (typeof raw !== "string") {
     throw new TypeError("Invalid Presentation Event application unit");
   }
   try {
@@ -145,9 +132,7 @@ export function encodePresentationEventPublishRequestV1(
     requestId: positiveSafeInteger(requestId, "Presentation Event requestId"),
     event: parsed,
   });
-  const text = stringifyJson(request as unknown as JsonValue);
-  if (utf8ByteLength(text) > MAX_APPLICATION_BYTES) throw new TypeError("Presentation Event application unit is too large");
-  return text;
+  return stringifyJson(request as unknown as JsonValue);
 }
 
 export function decodePresentationEventPublishRequestV1(raw: string): PresentationEventPublishRequestV1 {

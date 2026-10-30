@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { MAP_ONLY_NPC_PLACEMENTS } from "../../../examples/PokeMan/subsystems/map.mjs";
@@ -18,6 +19,8 @@ const movements = Object.freeze([
   Object.freeze({ direction: 6, code: "ArrowRight", dx: 1, dy: 0 }),
   Object.freeze({ direction: 8, code: "ArrowUp", dx: 0, dy: -1 }),
 ]);
+
+const renderDataDiagnostic = process.env.LOOMREALM_RENDER_DATA_DIAGNOSTIC === "1";
 
 async function mapSnapshot(page) {
   return page.evaluate(() => {
@@ -53,13 +56,161 @@ async function waitForState(page, expected) {
   }, expected, { timeout: 20_000 });
 }
 
-async function runActions(page, actions, history) {
+async function runActions(page, actions, history, samples = null) {
   for (const action of actions) {
     history.push(Object.freeze({ code: action.code, expected: action.expected }));
+    const before = samples === null ? null : await page.evaluate(() => ({
+      at: performance.now(),
+      visualEpoch: document.querySelector("lr-map-view")?._latestData?.visualEpoch ?? null,
+    }));
     await page.keyboard.press(action.code);
     await waitForState(page, action.expected);
+    if (before !== null) {
+      const after = await page.evaluate(() => ({
+        at: performance.now(),
+        visualEpoch: document.querySelector("lr-map-view")?._latestData?.visualEpoch ?? null,
+      }));
+      samples.push(Object.freeze({
+        code: action.code,
+        durationMs: after.at - before.at,
+        refresh: after.visualEpoch !== before.visualEpoch,
+      }));
+    }
   }
   return actions.at(-1)?.expected ?? null;
+}
+
+function percentile(values, fraction) {
+  if (values.length === 0) return null;
+  const ordered = [...values].sort((left, right) => left - right);
+  return ordered[Math.max(0, Math.ceil(ordered.length * fraction) - 1)];
+}
+
+function traceTaskSummary(events) {
+  const names = new Map();
+  for (const event of events) {
+    if (event.ph === "M" && event.name === "thread_name") {
+      names.set(`${event.pid}:${event.tid}`, event.args?.name ?? "unknown");
+    }
+  }
+  const tasks = events.filter((event) => /RunTask$/u.test(event.name) && typeof event.dur === "number");
+  const summarize = (matching) => {
+    const selected = tasks.filter((event) => matching(names.get(`${event.pid}:${event.tid}`) ?? ""));
+    const durations = selected.map((event) => event.dur / 1_000);
+    return {
+      count: durations.length,
+      longTasks: durations.filter((duration) => duration >= 50).length,
+      maxMs: durations.length === 0 ? 0 : Math.max(...durations),
+      p95Ms: percentile(durations, 0.95) ?? 0,
+    };
+  };
+  return {
+    main: summarize((name) => /CrRendererMain/u.test(name)),
+    worker: summarize((name) => /Worker/u.test(name)),
+    threads: [...new Set(names.values())].sort(),
+  };
+}
+
+function traceCpuSummary(events) {
+  const profiles = new Map();
+  for (const event of events) {
+    if (event.name !== "ProfileChunk") continue;
+    const data = event.args?.data;
+    const cpu = data?.cpuProfile;
+    if (cpu === undefined) continue;
+    const key = `${event.pid}:${event.tid}:${event.id ?? "profile"}`;
+    let profile = profiles.get(key);
+    if (profile === undefined) {
+      profile = { nodes: new Map(), weighted: new Map(), total: 0 };
+      profiles.set(key, profile);
+    }
+    for (const node of cpu.nodes ?? []) profile.nodes.set(node.id, node.callFrame ?? {});
+    for (let index = 0; index < (cpu.samples?.length ?? 0); index += 1) {
+      const nodeId = cpu.samples[index];
+      const weight = data.timeDeltas?.[index] ?? 1;
+      profile.total += weight;
+      profile.weighted.set(nodeId, (profile.weighted.get(nodeId) ?? 0) + weight);
+    }
+  }
+  let total = 0;
+  let validation = 0;
+  let stringify = 0;
+  const functions = new Map();
+  for (const profile of profiles.values()) {
+    total += profile.total;
+    for (const [nodeId, weight] of profile.weighted) {
+      const frame = profile.nodes.get(nodeId) ?? {};
+      const label = `${frame.functionName ?? "(anonymous)"} ${frame.url ?? ""}`;
+      functions.set(label, (functions.get(label) ?? 0) + weight);
+      if (/validat|assertJson|renderJsonValue|clonePresentationJson|cloneJsonValue/u.test(label)) validation += weight;
+      if (/stringify|stringifyJsonValue/u.test(label)) stringify += weight;
+    }
+  }
+  const top = [...functions].sort((left, right) => right[1] - left[1]).slice(0, 15)
+    .map(([name, weight]) => ({ name, percent: total === 0 ? 0 : weight * 100 / total }));
+  return {
+    sampledMicros: total,
+    validationPercent: total === 0 ? 0 : validation * 100 / total,
+    stringifyPercent: total === 0 ? 0 : stringify * 100 / total,
+    top,
+  };
+}
+
+async function beginRenderDataDiagnostic(page, context) {
+  await page.evaluate(() => {
+    const state = { frameGaps: [], longTasks: [], running: true };
+    let previous = performance.now();
+    const frame = (at) => {
+      if (!state.running) return;
+      state.frameGaps.push(at - previous);
+      previous = at;
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) state.longTasks.push({ startTime: entry.startTime, duration: entry.duration });
+    });
+    observer.observe({ type: "longtask", buffered: true });
+    globalThis.__renderDataDiagnostic = { state, observer };
+  });
+  const session = await context.newCDPSession(page);
+  await session.send("Tracing.start", {
+    categories: "toplevel,devtools.timeline,v8,blink.user_timing,disabled-by-default-v8.cpu_profiler",
+    options: "sampling-frequency=10000",
+    transferMode: "ReturnAsStream",
+  });
+  return async () => {
+    const complete = new Promise((resolve) => session.once("Tracing.tracingComplete", resolve));
+    await session.send("Tracing.end");
+    const { stream } = await complete;
+    let text = "";
+    for (;;) {
+      const part = await session.send("IO.read", { handle: stream });
+      text += part.data;
+      if (part.eof) break;
+    }
+    await session.send("IO.close", { handle: stream });
+    await session.detach();
+    const browser = await page.evaluate(() => {
+      const diagnostic = globalThis.__renderDataDiagnostic;
+      diagnostic.state.running = false;
+      diagnostic.observer.disconnect();
+      const view = document.querySelector("lr-map-view");
+      const frameGaps = diagnostic.state.frameGaps.slice(1);
+      return {
+        longTasks: diagnostic.state.longTasks,
+        frameGaps: {
+          count: frameGaps.length,
+          over50: frameGaps.filter((gap) => gap >= 50).length,
+          maxMs: frameGaps.length === 0 ? 0 : Math.max(...frameGaps),
+          p95Ms: frameGaps.length === 0 ? 0 : [...frameGaps].sort((left, right) => left - right)[Math.max(0, Math.ceil(frameGaps.length * 0.95) - 1)],
+        },
+        tiles: view?._latestData?.tiles?.length ?? 0,
+      };
+    });
+    const events = JSON.parse(text).traceEvents;
+    return { browser, tasks: traceTaskSummary(events), cpu: traceCpuSummary(events) };
+  };
 }
 
 function responsiveFacingPlan(planner, state) {
@@ -302,7 +453,9 @@ async function completeProfessorDialogue(page) {
 test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real Chromium", { timeout: 180_000 }, async () => {
   const fixture = await createPokeManPwaFixture({ executablePaths });
   const planner = createPokeManRoutePlanner(fixture);
-  const product = await openProduct({ viewport: { width: 960, height: 720 } });
+  const product = await openProduct({ viewport: renderDataDiagnostic
+    ? { width: 1920, height: 1080 }
+    : { width: 960, height: 720 } });
   const history = [];
   try {
     const { page, context, diagnostics } = product;
@@ -450,9 +603,13 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
       if ([4, 5, 7, 8].includes(targetMapId)) await assertNpcProjection(page, targetMapId);
     }
 
-    const longTraversal = planner.planDistance(state, 20);
+    const longTraversal = planner.planDistance(state, renderDataDiagnostic ? 70 : 20);
     assert.ok(longTraversal.length >= 20, "Map 7 qualification must cross multiple projection boundaries");
-    state = await runActions(page, longTraversal, history);
+    const projectionShiftsBefore = await page.evaluate(() => document.querySelector("lr-map-view")?._projectionShifts ?? 0);
+    const diagnosticSamples = [];
+    const finishDiagnostic = renderDataDiagnostic ? await beginRenderDataDiagnostic(page, context) : null;
+    state = await runActions(page, longTraversal, history, renderDataDiagnostic ? diagnosticSamples : null);
+    const diagnostic = finishDiagnostic === null ? null : await finishDiagnostic();
     const continuity = await page.evaluate(() => {
       const view = document.querySelector("lr-map-view");
       return {
@@ -484,6 +641,36 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     assert.equal(continuity.surfaces.live, continuity.surfaces.liveSet);
     assert.ok(continuity.surfaces.pool <= 4, "surface reuse pool must remain fixed-budget");
     assert.ok(continuity.surfaces.live <= continuity.surfaces.active + 4, "live surfaces must be bounded by active depths plus the pool budget");
+    if (diagnostic !== null) {
+      const refresh = diagnosticSamples.filter((sample) => sample.refresh);
+      const report = {
+        subject: process.env.GITHUB_SHA ?? "local-worktree",
+        route: "PokeMan Map 7 real PWA Worker → Data → Renderer → browser",
+        viewport: "1920x1080",
+        movements: diagnosticSamples.length,
+        projectionShifts: continuity.surfaces.shifts - projectionShiftsBefore,
+        action: {
+          p50Ms: percentile(diagnosticSamples.map((sample) => sample.durationMs), 0.5),
+          p95Ms: percentile(diagnosticSamples.map((sample) => sample.durationMs), 0.95),
+          p99Ms: percentile(diagnosticSamples.map((sample) => sample.durationMs), 0.99),
+          maxMs: Math.max(...diagnosticSamples.map((sample) => sample.durationMs)),
+          refreshCount: refresh.length,
+          refreshMaxMs: refresh.length === 0 ? 0 : Math.max(...refresh.map((sample) => sample.durationMs)),
+        },
+        ...diagnostic,
+      };
+      assert.equal(report.movements >= 20, true);
+      assert.equal(report.projectionShifts >= 2, true);
+      assert.equal(report.browser.longTasks.filter((entry) => entry.duration >= 100).length, 0, JSON.stringify(report.browser));
+      assert.equal(report.tasks.main.count > 0, true, JSON.stringify(report.tasks));
+      assert.equal(report.tasks.worker.count > 0, true, JSON.stringify(report.tasks));
+      assert.equal(report.tasks.main.maxMs < 100, true, JSON.stringify(report.tasks.main));
+      assert.equal(report.tasks.worker.maxMs < 100, true, JSON.stringify(report.tasks.worker));
+      const artifacts = join(import.meta.dirname, "..", "..", "..", "artifacts");
+      await mkdir(artifacts, { recursive: true });
+      await writeFile(join(artifacts, "render-data-runtime-pwa-diagnostic.json"), `${JSON.stringify(report, null, 2)}\n`);
+      process.stdout.write(`RENDER_DATA_PWA_DIAGNOSTIC ${JSON.stringify(report)}\n`);
+    }
 
     const routes = await page.evaluate(async (id) => {
       const requests = {

@@ -187,16 +187,15 @@ test("extra viewport fields fail closed as viewport without mutation", async () 
   assert.equal(calls, 0);
 });
 
-test("fractional viewport dimensions are local-fatal and emit zero bytes", async () => {
+test("fractional viewport dimensions fail the call without retiring Data", async () => {
   const carrier = createWriterCarrier();
   const renderer = createRendererDataPeer({
     binding: binding(carrier),
     handlers: rendererHandlers,
   });
-  const result = await renderer.viewport.sendState(viewport(640.9, 480));
-  assert.equal(result.kind, "terminal");
-  assert.equal(result.terminal.kind, "local-fatal");
+  assert.throws(() => renderer.viewport.sendState(viewport(640.9, 480)), /positive safe integer/);
   assert.equal(carrier.sent.length, 0);
+  assert.deepEqual(await renderer.viewport.sendState(viewport(640, 480)), { kind: "sent" });
   await renderer.close();
 });
 
@@ -208,20 +207,17 @@ test("same-size invalid viewport input is validated before idle deduplication", 
   });
   assert.deepEqual(await renderer.viewport.sendState(viewport(640, 480)), { kind: "sent" });
 
-  const result = await renderer.viewport.sendState({
+  assert.throws(() => renderer.viewport.sendState({
     type: "viewport.state",
     width: 640,
     height: 480,
     extra: true,
-  });
-  assert.equal(result.kind, "terminal");
-  assert.equal(result.terminal.kind, "local-fatal");
-  assert.equal(await renderer.terminal, result.terminal);
+  }), /unknown member/);
   assert.deepEqual(carrier.sent.map((text) => JSON.parse(text)), [viewport(640, 480)]);
   await renderer.close();
 });
 
-test("invalid viewport input terminates instead of being swallowed by pending-latest", async () => {
+test("invalid viewport input fails locally without disturbing pending-latest", async () => {
   const carrier = createWriterCarrier();
   carrier.holdSend();
   const renderer = createRendererDataPeer({
@@ -232,30 +228,24 @@ test("invalid viewport input terminates instead of being swallowed by pending-la
   await waitFor(() => carrier.maxActive === 1);
   const pending = renderer.viewport.sendState(viewport(800, 600));
 
-  let invalid;
-  assert.doesNotThrow(() => {
-    invalid = renderer.viewport.sendState({
+  assert.throws(() => renderer.viewport.sendState({
       type: "viewport.state",
       width: 640,
       height: 480,
       extra: true,
-    });
-  });
-  const [invalidResult, pendingResult] = await Promise.all([invalid, pending]);
-  assert.equal(invalidResult.kind, "terminal");
-  assert.equal(invalidResult.terminal.kind, "local-fatal");
-  assert.equal(pendingResult.kind, "terminal");
-  assert.equal(pendingResult.terminal, invalidResult.terminal);
+    }), /unknown member/);
   assert.deepEqual(carrier.sent, []);
 
   carrier.releaseSend();
   const firstResult = await first;
-  assert.ok(firstResult.kind === "sent" || firstResult.kind === "terminal");
-  assert.deepEqual(carrier.sent.map((text) => JSON.parse(text)), [viewport(640, 480)]);
+  const pendingResult = await pending;
+  assert.equal(firstResult.kind, "sent");
+  assert.equal(pendingResult.kind, "sent");
+  assert.deepEqual(carrier.sent.map((text) => JSON.parse(text)), [viewport(640, 480), viewport(800, 600)]);
   await renderer.close();
 });
 
-test("sendState contains exotic invalid objects without synchronous escape or wire bytes", async (t) => {
+test("sendState rejects exotic invalid objects synchronously without retiring Data", async (t) => {
   const cases = [
     {
       name: "throwing getter",
@@ -309,20 +299,15 @@ test("sendState contains exotic invalid objects without synchronous escape or wi
         handlers: rendererHandlers,
       });
       const { message, verify } = entry.create();
-      let outcome;
-      assert.doesNotThrow(() => {
-        outcome = renderer.viewport.sendState(message);
-      });
-      const result = await outcome;
-      assert.equal(result.kind, "terminal");
-      assert.equal(result.terminal.kind, "local-fatal");
+      assert.throws(() => renderer.viewport.sendState(message));
       assert.equal(carrier.sent.length, 0);
       verify();
+      assert.deepEqual(await renderer.viewport.sendState(viewport(640, 480)), { kind: "sent" });
       await renderer.close();
     });
   }
 
-  await t.test("throwing Proxy get trap becomes local-fatal without synchronous escape", async () => {
+  await t.test("throwing Proxy get trap propagates from the authoring call", async () => {
     let getHits = 0;
     const message = new Proxy(viewport(640, 480), {
       get(target, property, receiver) {
@@ -338,15 +323,10 @@ test("sendState contains exotic invalid objects without synchronous escape or wi
       binding: binding(carrier),
       handlers: rendererHandlers,
     });
-    let outcome;
-    assert.doesNotThrow(() => {
-      outcome = renderer.viewport.sendState(message);
-    });
-    const result = await outcome;
-    assert.equal(result.kind, "terminal");
-    assert.equal(result.terminal.kind, "local-fatal");
+    assert.throws(() => renderer.viewport.sendState(message), /get boom/);
     assert.ok(getHits >= 1);
     assert.deepEqual(carrier.sent, []);
+    assert.deepEqual(await renderer.viewport.sendState(viewport(640, 480)), { kind: "sent" });
     await renderer.close();
   });
 });

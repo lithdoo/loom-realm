@@ -78,13 +78,16 @@ export const eventEvidence = new Map([
   ["wellformed-event-after-domain-removal-dropped", () => { const store = baseline(); const delivered = []; assertAccepted(store.onDomains(domains())); assertAccepted(store.onEvent(event(), (value) => delivered.push(value))); assert.equal(delivered.length, 0); }],
   ["wellformed-event-stale-target-dropped", () => { const store = baseline(); const delivered = []; assertAccepted(store.onEvent(event("missing"), (value) => delivered.push(value))); assert.equal(delivered.length, 0); }],
   ["malformed-event-retires-data", async () => assert.equal((await invalidCarrier(JSON.stringify({ ...event(), extra: true }))).kind, "protocol-fatal")],
-  ["oversize-event-retires-data", async () => assert.equal((await invalidCarrier("x".repeat(1_048_577))).kind, "protocol-fatal")],
+  ["event-over-historical-size-depth-member-thresholds-valid", () => {
+    const store = baseline();
+    assertAccepted(store.onEvent(event("root", { data: { value: "x".repeat(300_000) } })));
+  }],
   ["patch-insert-then-event-targets-new-lifetime", () => { const store = baseline(); const delivered = []; assertAccepted(store.onPatch(patch([{ op: "insert", parentKey: null, beforeKey: null, node: node("new") }]))); assertAccepted(store.onEvent(event("new"), (value) => delivered.push(value))); assert.equal(delivered.length, 1); }],
   ["event-before-remove-targets-old-lifetime", () => { const store = baseline(); const delivered = []; assertAccepted(store.onEvent(event(), (value) => delivered.push(value))); assertAccepted(store.onPatch(patch([{ op: "remove", key: "root" }]))); assert.equal(delivered.length, 1); }],
   ["event-order-preserved", () => { const store = baseline(); const delivered = []; store.onEvent(event("root", { name: "a" }), (value) => delivered.push(value)); store.onEvent(event("root", { name: "b" }), (value) => delivered.push(value)); assert.deepEqual(delivered.map(({ name }) => name), ["a", "b"]); }],
   ["event-not-coalesced", () => { const store = baseline(); const delivered = []; store.onEvent(event("root", { data: { n: 1 } }), (value) => delivered.push(value)); store.onEvent(event("root", { data: { n: 2 } }), (value) => delivered.push(value)); assert.deepEqual(delivered.map(({ data }) => data.n), [1, 2]); }],
   ["event-loss-not-replayed", async () => { const trace = await reconnectTrace(); assert.equal(trace.second.some(({ type }) => type === "render.event"), false); }],
-  ["event-overflow-does-not-block-authoritative-progress", async () => { const gate = deferred(); let block = false; const connected = await connectedSender({ hook: async (message) => { if (block && message.type === "render.snapshot") { block = false; await gate.promise; } } }); block = true; connected.domain.replace(replaceState("blocked")); await turn(); for (let i = 0; i < 1_500; i += 1) connected.domain.emit({ targetKey: "root", name: "pulse", data: { i } }); connected.domain.replace(replaceState("latest")); assert.ok(connected.manager.snapshotForQualification().pendingWork <= 1_024); gate.resolve(); await settle(); assert.equal(connected.messages.at(-1).type, "render.snapshot"); assert.equal(connected.messages.at(-1).roots[0].attrs.phase, "latest"); }],
+  ["event-backlog-over-historical-threshold-retained-fifo", async () => { const gate = deferred(); let block = false; const connected = await connectedSender({ hook: async (message) => { if (block && message.type === "render.snapshot") { block = false; await gate.promise; } } }); block = true; connected.domain.replace(replaceState("blocked")); await turn(); for (let i = 0; i < 1_500; i += 1) connected.domain.emit({ targetKey: "root", name: "pulse", data: { i } }); connected.domain.replace(replaceState("latest")); assert.ok(connected.manager.snapshotForQualification().pendingWork > 1_024); gate.resolve(); await settle(); const events = connected.messages.filter(({ type }) => type === "render.event"); assert.equal(events.length, 1_500); assert.deepEqual(events.map(({ data }) => data.i), Array.from({ length: 1_500 }, (_, i) => i)); assert.equal(connected.messages.at(-1).type, "render.snapshot"); assert.equal(connected.messages.at(-1).roots[0].attrs.phase, "latest"); }],
   ["retained-event-blocks-authoritative-coalesce-across-barrier", sameDomainBarrier],
   ["dropped-unemitted-event-releases-coalescing-barrier", async () => { const manager = new RenderManager(); const domain = manager.createDomain(state()); domain.emit({ targetKey: "root", name: "offline", data: {} }); const wire = senderHarness(); manager.setDataPeer(wire.peer); domain.replace(replaceState("a")); domain.replace(replaceState("b")); await settle(); assert.equal(wire.messages.some(({ type }) => type === "render.event"), false); assert.equal(wire.messages.filter(({ type }) => type === "render.snapshot").length, 1); }],
 ]);
@@ -113,7 +116,26 @@ export const continuityEvidence = new Map([
   ["protocol-invalid-json-retires-data", async () => assert.equal((await invalidCarrier("{")).kind, "protocol-fatal")],
   ["protocol-unknown-type-retires-data", async () => assert.equal((await invalidCarrier('{"type":"render.unknown"}')).kind, "protocol-fatal")],
   ["protocol-closed-schema-violation-retires-data", async () => assert.equal((await invalidCarrier(JSON.stringify({ ...domains(), extra: true }))).kind, "protocol-fatal")],
-  ["protocol-hard-limit-violation-retires-data", async () => assert.equal((await invalidCarrier("x".repeat(1_048_577))).kind, "protocol-fatal")],
+  ["protocol-wire-representation-violation-retires-data", async () => assert.equal((await invalidCarrier("x".repeat(1_048_577))).kind, "protocol-fatal")],
+  ["local-candidate-mechanics-failure-propagates-local-cause", () => {
+    const store = baseline();
+    const hostile = new Proxy({}, { ownKeys() { throw new Error("local candidate mechanics failed"); } });
+    assert.throws(() => store.onPatch(patch([{ op: "update", key: "root", data: { set: { hostile } } }])), /local candidate mechanics failed/);
+  }],
+  ["local-candidate-mechanics-failure-no-partial-commit", () => {
+    const store = baseline();
+    const before = JSON.stringify(committedDomain(store));
+    const hostile = new Proxy({}, { ownKeys() { throw new Error("local candidate mechanics failed"); } });
+    assert.throws(() => store.onPatch(patch([{ op: "update", key: "root", data: { set: { hostile } } }])), /local candidate mechanics failed/);
+    assert.equal(JSON.stringify(committedDomain(store)), before);
+  }],
+  ["local-candidate-mechanics-failure-retires-current-data-as-local-fatal", async () => {
+    const outcome = await terminalForRaw(JSON.stringify(patch([], { zIndex: 1 })), {
+      onRenderPatch() { throw new Error("local candidate mechanics failed"); },
+    });
+    assert.equal(outcome.kind, "local-fatal");
+    assert.match(String(outcome.cause), /local candidate mechanics failed/);
+  }],
   ["continuity-domain-lifecycle-violation-retires-data", async () => { const store = baseline(); store.onDomains(domains()); assert.equal((await invalidCarrier(JSON.stringify(domains("d1")), store)).kind, "protocol-fatal"); }],
   ["continuity-patch-before-baseline-retires-data", async () => assert.equal((await invalidCarrier(JSON.stringify(patch([], { zIndex: 1 })))).kind, "protocol-fatal")],
   ["continuity-patch-base-mismatch-retires-data", async () => assert.equal((await invalidCarrier(JSON.stringify(patch([], { baseRevision: 0, revision: 1, zIndex: 1 })), baseline())).kind, "protocol-fatal")],
@@ -134,5 +156,6 @@ export const continuityEvidence = new Map([
   ["retained-event-is-coalescing-barrier", sameDomainBarrier],
   ["no-ack-wait", async () => { const sent = []; const carrier = inboundCarrier([]); carrier.send = async (raw) => { sent.push(JSON.parse(raw)); }; const peer = await realSenderPeer(carrier); const manager = new RenderManager(); const domain = manager.createDomain(state()); manager.setDataPeer(peer); await settle(); domain.replace(replaceState("next")); await settle(); assert.deepEqual(sent.slice(0, 3).map(({ type }) => type), ["render.domains", "render.snapshot", "render.snapshot"]); await peer.close(); }],
   ["no-event-replay", async () => { const trace = await reconnectTrace(); assert.equal(trace.second.some(({ type }) => type === "render.event"), false); }],
-  ["outbound-preflight-before-send", async () => { const connected = await connectedSender(); const count = connected.messages.length; assert.throws(() => connected.domain.replace(state([node("dup"), node("dup")]))); await settle(); assert.equal(connected.messages.length, count); }],
+  ["outbound-representation-acceptance-before-send", async () => { const connected = await connectedSender(); const count = connected.messages.length; assert.throws(() => connected.domain.replace(state([node("dup"), node("dup")]))); await settle(); assert.equal(connected.messages.length, count); }],
+  ["outbound-authoring-error-fails-current-call-without-retiring-peer", async () => { const connected = await connectedSender(); const count = connected.messages.length; assert.throws(() => connected.domain.emit({ targetKey: "root", name: "bad", data: { value: undefined } })); connected.domain.emit({ targetKey: "root", name: "healthy", data: {} }); await settle(); assert.equal(connected.messages.length, count + 1); assert.equal(connected.messages.at(-1).name, "healthy"); }],
 ]);

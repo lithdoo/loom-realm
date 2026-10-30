@@ -80,9 +80,9 @@ validate closed author shape and lifetime
 → return void
 ```
 
-失败分类固定为：shape、semantic、missing/retired target、closed handle 使用 `TypeError`；hard-limit overflow 使用 `RangeError`。失败不修改 authoritative state、pending publication work 或 cursor。
+失败分类固定为：shape、semantic、missing/retired target、closed handle 使用 `TypeError`；真实 local mechanics/host failure 传播原 cause。失败不修改 authoritative state、pending publication work 或 cursor。
 
-Optional member 以 own-property presence 判定；显式 `undefined` 非法。空 update 非法；zIndex-only update 合法；同一调用中 node key 不得重复。完整接受/拒绝集合、4096 node-op 上限、message probe、detach 和 atomicity 以实施规范第 5 节为准。
+Optional member 以 own-property presence 判定；显式 `undefined` 非法。空 update 非法；zIndex-only update 合法；同一调用中 node key 不得重复。Framework 不规定 node-op count 或 message size；author acceptance 在一次必要 traversal 中完成 Wire representability、detach/freeze 与 atomicity。
 
 作者仍不观察或管理：
 
@@ -100,10 +100,10 @@ carrier / cursor / send outcome
 - current Domain 未 baseline：收敛进 latest queued Snapshot；
 - baseline Snapshot in-flight：其后保留 latest Snapshot，不生成未知 baseRevision Patch；
 - current Domain 已 baseline：ordinary update materialize 为现有 `RenderPatchV1`；
-- queue pressure：Event 可按 Frozen policy 丢弃，authoritative work 最终收敛为 latest Snapshot；
+- stale/inapplicable/retired carrier：Event 按协议丢弃；queue pressure 本身不丢弃已接受 Event；authoritative work 仍可按既有规则收敛为 latest Snapshot；
 - carrier replacement、send failure、revision exhaustion和 close：沿用 ADR 0022 / M11 publication recovery。
 
-一次 ordinary author update 保持一次 pending state work；不做 Patch algebra、自动 tree diff 或 history/replay。完整 transition、Event overflow 和 bounded coalescing 算法以实施规范第 6 节为准。
+一次 ordinary author update 保持一次 pending state work；不做 Patch algebra、自动 tree diff 或 history/replay。Publication 使用 O(1) queue drain、Event barrier 与既有 desired-state coalescing，不设固定 capacity admission。
 
 Render Update v1 仍只有：
 
@@ -114,7 +114,7 @@ render.patch
 render.event
 ```
 
-本 ADR 不修改 Data/Wire schema、direction、hard limits、ACK/replay 或 protocol version。
+本 ADR 不修改 Data/Wire schema、direction、ACK/replay 或 protocol version。其历史 hard-limit/queue 表述由 ADR 0038 的首次发布前 same-identity correction 覆盖。
 
 ### 4. Renderer 和 Map 变化保持 private/downstream
 

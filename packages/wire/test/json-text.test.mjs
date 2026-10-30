@@ -66,3 +66,22 @@ test("stringify handles very deep inputs without recursive serialization", () =>
   const text = stringifyJson(value);
   assert.equal(text.length, 20_004);
 });
+
+test("protocol string checks can share the necessary parse and serialization traversals", () => {
+  const value = { key: ["value"] };
+  const serializedStrings = [];
+  assert.equal(
+    stringifyJson(value, (text) => serializedStrings.push(text)),
+    '{"key":["value"]}',
+  );
+  assert.deepEqual(serializedStrings, ["key", "value"]);
+
+  const parsedStrings = [];
+  const parsed = parseJsonText('{"key":["value"]}', (text) => parsedStrings.push(text));
+  assert.deepEqual(parsed, value);
+  assert.deepEqual(parsedStrings, ["key", "value"]);
+
+  const semanticFailure = new TypeError("protocol string rejected");
+  assert.throws(() => stringifyJson(value, () => { throw semanticFailure; }), (cause) => cause === semanticFailure);
+  assert.throws(() => parseJsonText('{"key":"value"}', () => { throw semanticFailure; }), (cause) => cause === semanticFailure);
+});

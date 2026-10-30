@@ -1,5 +1,5 @@
 import type { JsonValue } from "@loomrealm/wire";
-import { assertJsonValue, jsonDepth, parseJsonText, stringifyJson, utf8ByteLength } from "@loomrealm/wire";
+import { parseJsonText, stringifyJson } from "@loomrealm/wire";
 import type { DataProtocolFamily, RendererDataMessageV3 } from "./model.js";
 import {
   validateRenderDomains,
@@ -8,17 +8,12 @@ import {
   validateRenderSnapshot,
 } from "./render-codec.js";
 import { validateViewportState } from "./viewport-codec.js";
+import { validatePresentationEvent, validatePresentationInterest } from "./presentation-codec.js";
 import {
-  MAX_PRESENTATION_MESSAGE_DEPTH,
-  validatePresentationEvent,
-  validatePresentationInterest,
-} from "./presentation-codec.js";
-import {
-  assertBoundedJson,
+  DataProtocolError,
   fail,
-  MAX_JSON_DEPTH,
-  MAX_MESSAGE_BYTES,
   object,
+  scalarString,
   stringValue,
 } from "./validation-common.js";
 
@@ -33,11 +28,16 @@ export function protocolFamilyOfType(type: string): DataProtocolFamily {
 
 function typeOfObject(raw: unknown): string {
   const o = object(raw, "profile", "message");
-  return stringValue(o.type, "profile", "type");
-}
-
-function messageDepthLimit(type: unknown): number {
-  return type === "presentation.event" ? MAX_PRESENTATION_MESSAGE_DEPTH : MAX_JSON_DEPTH;
+  let descriptor: PropertyDescriptor | undefined;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(o, "type");
+  } catch (cause) {
+    fail("profile", `invalid message type member: ${String(cause)}`);
+  }
+  if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+    fail("profile", "type must be an enumerable data property");
+  }
+  return stringValue(descriptor.value, "profile", "type");
 }
 
 function validateByType(raw: unknown): RendererDataMessageV3 {
@@ -50,6 +50,18 @@ function validateByType(raw: unknown): RendererDataMessageV3 {
   if (type === "presentation.interest") return validatePresentationInterest(raw);
   if (type === "presentation.event") return validatePresentationEvent(raw);
   fail(protocolFamilyOfType(type), "unknown data message type");
+}
+
+function familyOfParsedRoot(root: JsonValue): DataProtocolFamily {
+  if (root === null || typeof root !== "object" || Array.isArray(root)) return "profile";
+  const type = (root as Readonly<Record<string, JsonValue>>).type;
+  return typeof type === "string" ? protocolFamilyOfType(type) : "profile";
+}
+
+function scalarVisitor(protocol: DataProtocolFamily) {
+  return (value: string): void => {
+    scalarString(value, protocol, "string", true);
+  };
 }
 
 function inboundAllowed(role: DataRole, type: string): boolean {
@@ -66,19 +78,22 @@ function outboundAllowed(role: DataRole, type: string): boolean {
 
 export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV3 {
   if (typeof raw !== "string") fail("profile", "carrier application unit must be string");
-  if (utf8ByteLength(raw) > MAX_MESSAGE_BYTES) fail("profile", "message byte limit exceeded");
   let parsed: JsonValue;
+  let invalidScalar = false;
   try {
-    parsed = parseJsonText(raw);
+    parsed = parseJsonText(raw, (value) => {
+      if (invalidScalar) return;
+      try {
+        scalarString(value, "profile", "string", true);
+      } catch (cause) {
+        if (!(cause instanceof DataProtocolError)) throw cause;
+        invalidScalar = true;
+      }
+    });
   } catch (cause) {
     fail("profile", `invalid JSON: ${String(cause)}`);
   }
-  const parsedTypeHint = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, JsonValue>).type
-    : undefined;
-  const maxDepth = messageDepthLimit(parsedTypeHint);
-  if (jsonDepth(parsed) > maxDepth) fail("profile", "JSON depth limit exceeded");
-  assertBoundedJson(parsed, "profile", maxDepth);
+  if (invalidScalar) fail(familyOfParsedRoot(parsed), "string has invalid Unicode scalar sequence");
   const message = validateByType(parsed);
   const t = (message as { type: string }).type;
   if (!inboundAllowed(role, t)) {
@@ -93,11 +108,5 @@ export function encodeForRole(message: RendererDataMessageV3, role: DataRole): s
   if (!outboundAllowed(role, t)) {
     fail(protocolFamilyOfType(t), "outbound direction invalid for role");
   }
-  assertJsonValue(validated as unknown);
-  if (jsonDepth(validated as unknown as JsonValue) > messageDepthLimit(t)) {
-    fail("profile", "JSON depth limit exceeded");
-  }
-  const text = stringifyJson(validated as unknown as JsonValue);
-  if (utf8ByteLength(text) > MAX_MESSAGE_BYTES) fail("profile", "message byte limit exceeded");
-  return text;
+  return stringifyJson(validated as unknown as JsonValue, scalarVisitor(protocolFamilyOfType(t)));
 }

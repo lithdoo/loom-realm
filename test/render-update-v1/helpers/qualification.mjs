@@ -47,7 +47,7 @@ export function qualify(group, title, behavior) {
 }
 
 export function registerCoverageAudit() {
-  test("fixtureSetRevision 1 catalog and executable fixture evidence have exact coverage", () => {
+  test(`fixtureSetRevision ${fixtureSetRevision} catalog and executable fixture evidence have exact coverage`, () => {
     assert.ok(fixtureCatalog.length > 0);
     assert.deepEqual([...registeredGroups].sort(), Object.keys(fixturesByGroup).sort());
     const expected = fixtureCatalog.flatMap(({ fixture, roles }) => roles.map((role) => evidenceKey(role, fixture))).sort();

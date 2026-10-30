@@ -194,8 +194,14 @@ export function assertExactKeys(
   optionalKeys?: readonly string[],
 ): void;
 
-export function parseJsonText(raw: string): JsonValue;
-export function stringifyJson(value: JsonValue): string;
+export function parseJsonText(
+  raw: string,
+  visitString?: (value: string) => void,
+): JsonValue;
+export function stringifyJson(
+  value: JsonValue,
+  visitString?: (value: string) => void,
+): string;
 export function utf8ByteLength(text: string): number;
 export function jsonDepth(value: JsonValue): number;
 
@@ -588,7 +594,10 @@ engine-specific cause object
 ### 10.1 `parseJsonText`
 
 ```ts
-parseJsonText(raw: string): JsonValue
+parseJsonText(
+  raw: string,
+  visitString?: (value: string) => void,
+): JsonValue
 ```
 
 流程语义：
@@ -624,18 +633,23 @@ reviver
 
 首批不实现独立 duplicate-object-member detector。Duplicate member name 的 observable result遵循当前 ECMAScript `JSON.parse` 行为；producer MUST NOT依赖 duplicate-name semantics。若未来出现真实 third-party parser interoperability requirement，再单独评估 strict duplicate detection，而不是把 custom parser 预建进 M1。
 
+可选的 `visitString` 会在上述必要的 stack-safe result traversal 中接收每个 string value 与 object member name。它只用于上层协议的 string semantic validation；抛错会中止 parse，但不能跳过或放宽 Wire value-model validation。
+
 ### 10.2 `stringifyJson`
 
 ```ts
-stringifyJson(value: JsonValue): string
+stringifyJson(
+  value: JsonValue,
+  visitString?: (value: string) => void,
+): string
 ```
 
 MUST：
 
 ```text
-runtime-validate actual value first
-reject unsupported/cyclic/sparse/accessor/exotic value
-then serialize using ECMAScript JSON serialization semantics
+iteratively inspect each actual value/container
+validate strict representation and emit its JSON tokens in the same traversal
+reject unsupported/cyclic/sparse/accessor/exotic value without returning partial text
 return exactly one JSON text string
 ```
 
@@ -648,7 +662,9 @@ unsupported object member → omitted
 custom toJSON/getter → application-defined conversion
 ```
 
-因为这些输入会在 serialization 前被 Wire validation 拒绝。
+因为这些输入会在同一次 serialization traversal 中被 Wire validation 拒绝，且不会返回 partial text。
+
+可选的 `visitString` 与实际 iterative serialization traversal 融合，接收每个 string value 与 object member name。它允许上层协议在不增加第二次 generic subtree walk 的情况下执行 string semantic validation；serializer 仍完整承担并强制全部 Wire representation reject-set。
 
 `stringifyJson` 明确不是：
 
@@ -1603,7 +1619,7 @@ conformance tests
 6. closed schema只提供 `assertExactKeys` 小 primitive，不建立 schema DSL；
 7. JSON text syntax failure与 parsed-value validation failure使用稳定不同 error class；
 8. human-readable Error.message 不是稳定 API；
-9. `stringifyJson` 先验证再序列化，不利用 native silent conversion；
+9. `stringifyJson` 在一次 iterative traversal 中融合 representation validation 与 serialization，不利用 native silent conversion；
 10. canonical JSON/key order/signature bytes不属于首批 contract；
 11. UTF-8/depth由 Wire measurement，hard limit由具体 Profile拥有；
 12. 首批没有 member/node counting；

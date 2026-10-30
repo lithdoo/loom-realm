@@ -27,12 +27,11 @@ export interface AcceptedTopFramePresentationEvent {
 interface Slot {
   readonly peer: RendererDataPeer;
   interest: Map<string, Set<string>>;
-  readonly queue: AcceptedTopFramePresentationEvent[];
+  queue: Array<AcceptedTopFramePresentationEvent | undefined>;
+  queueHead: number;
   sending: boolean;
   retired: boolean;
 }
-
-const MAX_PENDING_EVENTS = 256;
 
 export class PresentationFrameGate {
   private snapshot: RendererAuthoritySnapshotV2 | null = null;
@@ -78,6 +77,7 @@ export class PresentationFrameGate {
       peer,
       interest: new Map(),
       queue: [],
+      queueHead: 0,
       sending: false,
       retired: false,
     });
@@ -103,8 +103,6 @@ export class PresentationFrameGate {
     const slot = this.slots.get(event.targetSubsystemKey);
     if (slot === undefined || slot.peer !== event.targetPeer || slot.retired) return;
     if (!this.effective(event.targetSubsystemKey, slot, event)) return;
-    this.pruneIneffective(event.targetSubsystemKey, slot);
-    if (slot.queue.length >= MAX_PENDING_EVENTS) return;
     slot.queue.push(event);
     this.pump(event.targetSubsystemKey, slot);
   }
@@ -112,7 +110,7 @@ export class PresentationFrameGate {
   private pump(subsystemKey: string, slot: Slot): void {
     if (slot.retired || slot.sending) return;
     for (;;) {
-      const event = slot.queue.shift();
+      const event = this.dequeue(slot);
       if (event === undefined) return;
       if (!this.effective(subsystemKey, slot, event)) continue;
       const message: PresentationEventV1 = Object.freeze({
@@ -159,22 +157,50 @@ export class PresentationFrameGate {
 
   private retireSlot(slot: Slot): void {
     slot.retired = true;
-    slot.queue.length = 0;
+    for (let index = slot.queueHead; index < slot.queue.length; index += 1) slot.queue[index] = undefined;
+    slot.queue = [];
+    slot.queueHead = 0;
     slot.interest.clear();
   }
 
   private pruneIneffective(subsystemKey: string, slot: Slot): void {
-    for (let index = slot.queue.length - 1; index >= 0; index -= 1) {
-      const event = slot.queue[index]!;
-      if (!this.effective(subsystemKey, slot, event)) slot.queue.splice(index, 1);
-    }
+    this.retain(slot, (event) => this.effective(subsystemKey, slot, event));
   }
 
   private pruneSource(peer: RendererDataPeer): void {
     for (const slot of this.slots.values()) {
-      for (let index = slot.queue.length - 1; index >= 0; index -= 1) {
-        if (slot.queue[index]?.sourcePeer === peer) slot.queue.splice(index, 1);
-      }
+      this.retain(slot, (event) => event.sourcePeer !== peer);
     }
+  }
+
+  private dequeue(slot: Slot): AcceptedTopFramePresentationEvent | undefined {
+    while (slot.queueHead < slot.queue.length) {
+      const index = slot.queueHead++;
+      const event = slot.queue[index];
+      slot.queue[index] = undefined;
+      if (event === undefined) continue;
+      if (slot.queueHead === slot.queue.length) {
+        slot.queue = [];
+        slot.queueHead = 0;
+      } else if (slot.queueHead * 2 >= slot.queue.length) {
+        slot.queue = slot.queue.slice(slot.queueHead);
+        slot.queueHead = 0;
+      }
+      return event;
+    }
+    slot.queue = [];
+    slot.queueHead = 0;
+    return undefined;
+  }
+
+  private retain(slot: Slot, keep: (event: AcceptedTopFramePresentationEvent) => boolean): void {
+    const retained: AcceptedTopFramePresentationEvent[] = [];
+    for (let index = slot.queueHead; index < slot.queue.length; index += 1) {
+      const event = slot.queue[index];
+      slot.queue[index] = undefined;
+      if (event !== undefined && keep(event)) retained.push(event);
+    }
+    slot.queue = retained;
+    slot.queueHead = 0;
   }
 }

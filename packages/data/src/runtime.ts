@@ -10,8 +10,12 @@ import type {
 import { DataProtocolError } from "./validation-common.js";
 import { decodeForRole, encodeForRole, protocolFamilyOfType, type DataRole } from "./profile-codec.js";
 
-const MAX_PENDING_SENDS = 1024;
 type Handler = (message: RendererDataMessageV3) => DataInboundDisposition | Promise<DataInboundDisposition>;
+
+interface SendRecord {
+  text: string | null;
+  resolve: (outcome: DataSendOutcome) => void;
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -40,8 +44,9 @@ export class DataRuntime {
   readonly terminal: Promise<DataTerminal>;
   private readonly terminalDeferred = deferred<DataTerminal>();
   private terminalValue?: DataTerminal;
-  private writer: Promise<void> = Promise.resolve();
-  private pendingSends = 0;
+  private sendQueue: Array<SendRecord | undefined> = [];
+  private sendHead = 0;
+  private sending = false;
 
   constructor(
     private readonly carrier: MessageCarrier,
@@ -68,36 +73,15 @@ export class DataRuntime {
     return this.terminalValue;
   }
 
-  async send(message: RendererDataMessageV3): Promise<DataSendOutcome> {
-    if (this.terminalValue) return freeze({ kind: "terminal", terminal: this.terminalValue });
-    let text: string;
-    try { text = encodeForRole(message, this.role); }
-    catch (cause) {
-      const terminal = this.commit({ kind: "local-fatal", cause });
-      return freeze({ kind: "terminal", terminal });
-    }
-    if (this.pendingSends >= MAX_PENDING_SENDS) {
-      const terminal = this.commit({ kind: "local-fatal", cause: new Error("Data writer queue capacity exceeded") });
-      return freeze({ kind: "terminal", terminal });
-    }
-    this.pendingSends += 1;
-    const operation = this.writer.then(async () => {
-      if (this.terminalValue) throw this.terminalValue;
-      await this.carrier.send(text);
+  send(message: RendererDataMessageV3): Promise<DataSendOutcome> {
+    if (this.terminalValue) return Promise.resolve(freeze({ kind: "terminal", terminal: this.terminalValue }));
+    // Encoding belongs to this caller operation. Representation/getter/Proxy
+    // failure rejects only this call and does not retire a healthy Data peer.
+    const text = encodeForRole(message, this.role);
+    return new Promise<DataSendOutcome>((resolve) => {
+      this.sendQueue.push({ text, resolve });
+      this.drainSends();
     });
-    this.writer = operation.catch(() => undefined);
-    try {
-      await operation;
-      this.pendingSends -= 1;
-      return freeze({ kind: "sent" });
-    } catch (cause) {
-      this.pendingSends -= 1;
-      const terminal =
-        cause === this.terminalValue && this.terminalValue !== undefined
-          ? this.terminalValue
-          : this.commit({ kind: "carrier-lost", cause });
-      return freeze({ kind: "terminal", terminal });
-    }
   }
 
   async close(): Promise<void> {
@@ -140,11 +124,66 @@ export class DataRuntime {
     }
   }
 
+  private dequeueSend(): SendRecord | undefined {
+    while (this.sendHead < this.sendQueue.length) {
+      const index = this.sendHead;
+      this.sendHead += 1;
+      const record = this.sendQueue[index];
+      this.sendQueue[index] = undefined;
+      if (record === undefined) continue;
+      if (this.sendHead === this.sendQueue.length) {
+        this.sendQueue = [];
+        this.sendHead = 0;
+      } else if (this.sendHead * 2 >= this.sendQueue.length) {
+        this.sendQueue = this.sendQueue.slice(this.sendHead);
+        this.sendHead = 0;
+      }
+      return record;
+    }
+    this.sendQueue = [];
+    this.sendHead = 0;
+    return undefined;
+  }
+
+  private drainSends(): void {
+    if (this.sending || this.terminalValue !== undefined) return;
+    const record = this.dequeueSend();
+    if (record === undefined) return;
+    const text = record.text;
+    record.text = null;
+    if (text === null) throw new Error("Data writer record lost its application unit");
+    this.sending = true;
+    void this.carrier.send(text).then(
+      () => {
+        this.sending = false;
+        // A physical send that was already admitted keeps the existing race
+        // result: carrier success settles sent even if terminal won meanwhile.
+        record.resolve(freeze({ kind: "sent" }));
+        this.drainSends();
+      },
+      (cause) => {
+        this.sending = false;
+        const terminal = this.terminalValue ?? this.commit({ kind: "carrier-lost", cause });
+        record.resolve(freeze({ kind: "terminal", terminal }));
+      },
+    );
+  }
+
+  private settleQueued(terminal: DataTerminal): void {
+    for (;;) {
+      const record = this.dequeueSend();
+      if (record === undefined) return;
+      record.text = null;
+      record.resolve(freeze({ kind: "terminal", terminal }));
+    }
+  }
+
   private commit(value: DataTerminal, closeCarrier = true): DataTerminal {
     if (this.terminalValue) return this.terminalValue;
     const terminal = freeze(value);
     this.terminalValue = terminal;
     this.terminalDeferred.resolve(terminal);
+    this.settleQueued(terminal);
     if (closeCarrier) void this.carrier.close().catch(() => undefined);
     return terminal;
   }
