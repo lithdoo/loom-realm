@@ -54,7 +54,7 @@ test("RenderDomain commits detached local authority and enforces lifetime identi
   assert.throws(() => domain.emit({ targetKey: "root", name: "hit", data: {} }), /closed/);
 });
 
-test("Render author validation is atomic and classifies shape versus hard limits", () => {
+test("Render author validation is atomic and zIndex is a signed safe integer", () => {
   const manager = new RenderManager();
   assert.throws(() => manager.createDomain({ zIndex: 0, roots: [], extra: true }), TypeError);
   assert.throws(() => manager.createDomain(state([node("same"), node("same")])), TypeError);
@@ -64,7 +64,9 @@ test("Render author validation is atomic and classifies shape versus hard limits
   const sparse = [];
   sparse.length = 1;
   assert.throws(() => manager.createDomain(state(sparse)), TypeError);
-  assert.throws(() => manager.createDomain(state([], 2_147_483_648)), RangeError);
+  const wide = manager.createDomain(state([], 2_147_483_648));
+  wide.close();
+  assert.throws(() => manager.createDomain(state([], Number.MAX_SAFE_INTEGER + 1)), TypeError);
   assert.equal(manager.snapshotForQualification().domains.length, 0);
   const domain = manager.createDomain(state([node("a")]));
   assert.throws(() => domain.emit({ targetKey: "a", name: "", data: {} }), TypeError);
@@ -197,10 +199,10 @@ test("Runtime cleanup closes every still-live RenderDomain", () => {
   assert.throws(() => manager.createDomain(state([])), /closed/);
 });
 
-test("Domain count and publication pressure remain bounded without rejecting valid author commits", async () => {
-  const bounded = new RenderManager();
-  for (let index = 0; index < 256; index += 1) bounded.createDomain(state([]));
-  assert.throws(() => bounded.createDomain(state([])), RangeError);
+test("Domain count and publication backlog exceed historical caps without dropping Events", async () => {
+  const unbounded = new RenderManager();
+  for (let index = 0; index < 257; index += 1) unbounded.createDomain(state([]));
+  assert.equal(unbounded.snapshotForQualification().domains.length, 257);
 
   let releaseSnapshot;
   const gate = new Promise((resolve) => { releaseSnapshot = resolve; });
@@ -219,10 +221,11 @@ test("Domain count and publication pressure remain bounded without rejecting val
     assert.doesNotThrow(() => domain.emit({ targetKey: "root", name: "pulse", data: { index } }));
   }
   assert.doesNotThrow(() => domain.replace(state([node("root", [], "sprite", { final: "yes" })])));
-  assert.ok(manager.snapshotForQualification().pendingWork <= 1_024);
+  assert.ok(manager.snapshotForQualification().pendingWork > 1_024);
   blocked = false;
   releaseSnapshot();
   await settle();
+  assert.equal(current.messages.filter(({ type }) => type === "render.event").length, 1_500);
   assert.equal(current.messages.at(-1).type, "render.snapshot");
   assert.equal(current.messages.at(-1).roots[0].attrs.final, "yes");
 });
@@ -405,10 +408,11 @@ test("RenderDomain.update is local-atomic and distinguishes missing from explici
   const accessor = { nodes: [{ key: "root", data: { set: { n: 2 } } }] };
   Object.defineProperty(accessor, "zIndex", { get() { return 1; }, enumerable: true });
   assert.throws(() => domain.update(accessor), TypeError);
-  assert.throws(() => domain.update({ zIndex: 2_147_483_648 }), RangeError);
+  domain.update({ zIndex: 2_147_483_648 });
+  assert.throws(() => domain.update({ zIndex: Number.MAX_SAFE_INTEGER + 1 }), TypeError);
   assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].attrs.x, "1");
   assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.n, 1);
-  assert.equal(manager.snapshotForQualification().domains[0].state.zIndex, 4);
+  assert.equal(manager.snapshotForQualification().domains[0].state.zIndex, 2_147_483_648);
   domain.update({ zIndex: 4 });
   assert.equal(manager.snapshotForQualification().domains[0].state.zIndex, 4);
 });
@@ -462,7 +466,7 @@ test("Event barrier keeps later updates from coalescing into an earlier Snapshot
   assert.equal(tail[2].ops[0].attrs.set.phase, "after");
 });
 
-test("full queue coalesces same-Domain updates to the latest Snapshot", async () => {
+test("backlog beyond 1024 retains the latest same-Domain authority", async () => {
   let release;
   let blockSnapshots = false;
   const gate = new Promise((resolve) => { release = resolve; });
@@ -482,9 +486,9 @@ test("full queue coalesces same-Domain updates to the latest Snapshot", async ()
   for (let index = 0; index < 1_024; index += 1) {
     domain.update({ nodes: [{ key: "root", data: { set: { n: index } } }] });
   }
-  assert.ok(manager.snapshotForQualification().pendingWork <= 1_024);
+  assert.ok(manager.snapshotForQualification().pendingWork >= 1_024);
   domain.update({ nodes: [{ key: "root", data: { set: { n: 2048 } } }] });
-  assert.ok(manager.snapshotForQualification().pendingWork <= 1_024);
+  assert.ok(manager.snapshotForQualification().pendingWork > 1_024);
   release();
   await settle();
   assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.n, 2048);
@@ -523,7 +527,7 @@ test("send failure invalidates the old peer instead of retrying a Patch", async 
   assert.equal(manager.snapshotForQualification().pendingWork, 0);
 });
 
-test("update op count accepts 4096 and rejects 4097 atomically", () => {
+test("update op count exceeds the historical 4096 cap atomically", () => {
   const roots = Array.from({ length: 4096 }, (_, index) => node(`n${index}`));
   const manager = new RenderManager();
   const domain = manager.createDomain(state(roots));
@@ -533,13 +537,75 @@ test("update op count accepts 4096 and rejects 4097 atomically", () => {
   assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.n, 1);
   const overflow = Array.from({ length: 4097 }, (_, index) => node(`k${index}`));
   const other = manager.createDomain(state(overflow));
-  assert.throws(() => other.update({
+  assert.doesNotThrow(() => other.update({
     nodes: overflow.map((item) => ({ key: item.key, data: { set: { n: 1 } } })),
-  }), RangeError);
-  assert.equal(manager.snapshotForQualification().domains[1].state.roots[0].data.n, undefined);
+  }));
+  assert.equal(manager.snapshotForQualification().domains[1].state.roots[0].data.n, 1);
 });
 
-test("full queue drops the oldest Event before coalescing authoritative work", async () => {
+test("fresh generation resets wire identity history while same-generation replacement preserves it", async () => {
+  const manager = new RenderManager();
+  const retired = manager.createDomain(state([node("retired")]));
+  const first = peer(1);
+  manager.setDataPeer(first);
+  await settle();
+  assert.equal(first.messages[1].domainId, "d1");
+  retired.close();
+  const domain = manager.createDomain(state([node("same")]));
+  await settle();
+  assert.equal(first.messages.at(-1).domainId, "d2");
+
+  domain.replace(state([]));
+  const sameGeneration = peer(1);
+  manager.setDataPeer(sameGeneration);
+  assert.throws(() => domain.replace(state([node("same")])), /reused/);
+
+  const freshGeneration = peer(2);
+  manager.setDataPeer(freshGeneration);
+  domain.replace(state([node("same")]));
+  await settle();
+  assert.equal(freshGeneration.messages[0].type, "render.domains");
+  assert.equal(freshGeneration.messages[0].domains[0], "d1");
+  assert.equal(freshGeneration.messages[1].type, "render.snapshot");
+  assert.equal(freshGeneration.messages[1].domainId, "d1");
+  assert.equal(freshGeneration.messages[1].revision, 1);
+});
+
+test("queued Event from an old carrier is never replayed to its replacement", async () => {
+  let releaseSnapshot;
+  const gate = new Promise((resolve) => { releaseSnapshot = resolve; });
+  const manager = new RenderManager();
+  const domain = manager.createDomain(state([node("root")]));
+  const oldCarrier = peer(1, {
+    async send(message) {
+      if (message.type === "render.snapshot") await gate;
+    },
+  });
+  manager.setDataPeer(oldCarrier);
+  await turn();
+  await turn();
+  domain.emit({ targetKey: "root", name: "old", data: {} });
+
+  const replacement = peer(1);
+  manager.setDataPeer(replacement);
+  releaseSnapshot();
+  await settle();
+  assert.deepEqual(replacement.messages.map(({ type }) => type), ["render.domains", "render.snapshot"]);
+});
+
+test("Render authoring exceeds historical node, tree-depth, and attrs caps", () => {
+  const manager = new RenderManager();
+  const wideAttrs = Object.fromEntries(Array.from({ length: 257 }, (_, index) => [`attr-${index}`, "v"]));
+  const manyRoots = Array.from({ length: 16_385 }, (_, index) => node(`n${index}`));
+  manyRoots[0].attrs = wideAttrs;
+  assert.doesNotThrow(() => manager.createDomain(state(manyRoots)));
+  let deep = node("deep-40");
+  for (let depth = 39; depth >= 1; depth -= 1) deep = node(`deep-${depth}`, [deep]);
+  assert.doesNotThrow(() => manager.createDomain(state([deep])));
+  assert.equal(manager.snapshotForQualification().domains.length, 2);
+});
+
+test("backlog retains every accepted Event before later authoritative work", async () => {
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
   const manager = new RenderManager();
@@ -556,11 +622,12 @@ test("full queue drops the oldest Event before coalescing authoritative work", a
   for (let index = 0; index < 1_024; index += 1) {
     domain.emit({ targetKey: "root", name: "pulse", data: { index } });
   }
-  assert.ok(manager.snapshotForQualification().pendingWork <= 1_024);
+  assert.ok(manager.snapshotForQualification().pendingWork >= 1_024);
   domain.update({ nodes: [{ key: "root", data: { set: { hold: 2 } } }] });
-  assert.ok(manager.snapshotForQualification().pendingWork <= 1_024);
+  assert.ok(manager.snapshotForQualification().pendingWork > 1_024);
   release();
   await settle();
+  assert.equal(current.messages.filter(({ type }) => type === "render.event").length, 1_024);
   assert.equal(current.messages.at(-1).type, "render.patch");
   assert.equal(current.messages.at(-1).ops[0].data.set.hold, 2);
 });

@@ -159,14 +159,14 @@ test("reject-set parity: every invalid value still throws TypeError through the 
     const domain = manager.createDomain({ zIndex: 0, roots: [node()] });
     assert.throws(
       () => domain.replace({ zIndex: 0, roots: [node({ bad: value })] }),
-      (error) => error instanceof TypeError && /must be plain JSON/.test(error.message),
+      (error) => error instanceof TypeError,
       `expected domain reject: ${String(value)}`,
     );
     assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.bad, undefined);
   }
 });
 
-test("depth and byte limits still reject at exactly the same boundaries", () => {
+test("valid data exceeds historical depth and byte boundaries", () => {
   const manager = new RenderManager();
   const domain = manager.createDomain({ zIndex: 0, roots: [node()] });
   const deep = (count) => {
@@ -178,8 +178,8 @@ test("depth and byte limits still reject at exactly the same boundaries", () => 
   domain.replace({ zIndex: 0, roots: [node({ d: deep(31) })] });
   assert.equal(jsonDepth({ d: deep(31) }), 32);
   assert.equal(jsonDepth({ d: deep(32) }), 33);
-  assert.throws(() => domain.replace({ zIndex: 0, roots: [node({ d: deep(32) })] }), RangeError);
-  assert.throws(() => domain.replace({ zIndex: 0, roots: [node({ d: deep(33) })] }), RangeError);
+  domain.replace({ zIndex: 0, roots: [node({ d: deep(32) })] });
+  domain.replace({ zIndex: 0, roots: [node({ d: deep(80) })] });
   assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.d.length, 1);
 
   const dataBytes = (count) => utf8ByteLength(stringifyJson({ s: "x".repeat(count) }));
@@ -187,8 +187,8 @@ test("depth and byte limits still reject at exactly the same boundaries", () => 
   assert.equal(dataBytes(exact), MAX_DATA_BYTES);
   assert.ok(dataBytes(exact + 1) > MAX_DATA_BYTES);
   domain.replace({ zIndex: 0, roots: [node({ s: "x".repeat(exact) })] });
-  assert.throws(() => domain.replace({ zIndex: 0, roots: [node({ s: "x".repeat(exact + 1) })] }), RangeError);
-  assert.throws(() => domain.replace({ zIndex: 0, roots: [node({ s: "x".repeat(300_000) })] }), RangeError);
+  domain.replace({ zIndex: 0, roots: [node({ s: "x".repeat(exact + 1) })] });
+  domain.replace({ zIndex: 0, roots: [node({ s: "x".repeat(300_000) })] });
   assert.equal(JSON.stringify({ z: -0 }), stringifyJson({ z: -0 }));
   assert.equal(JSON.stringify({ z: -0 }), '{"z":0}');
   domain.replace({ zIndex: 0, roots: [node({ z: -0 })] });
@@ -247,7 +247,7 @@ function messageBoundaryState() {
   return stateWithRoots(lengths.map((length, index) => keyedNode(`n${index}`, { s: "x".repeat(length) })));
 }
 
-test("whole-message byte limit accepts exactly 1048576 bytes and rejects the next byte atomically", () => {
+test("whole message exceeds the historical 1048576 byte cap", () => {
   const exact = messageBoundaryState();
   const probe = {
     type: "render.snapshot",
@@ -262,10 +262,10 @@ test("whole-message byte limit accepts exactly 1048576 bytes and rejects the nex
   domain.replace(exact);
   const overflow = structuredClone(exact);
   overflow.roots[3].data.s += "x";
-  assert.throws(() => domain.replace(overflow), RangeError);
+  domain.replace(overflow);
   assert.equal(
     manager.snapshotForQualification().domains[0].state.roots[3].data.s.length,
-    exact.roots[3].data.s.length,
+    exact.roots[3].data.s.length + 1,
   );
 });
 
@@ -298,7 +298,7 @@ test("Object.prototype toJSON is ignored by Wire and RenderManager", { concurren
 
     const overflow = messageBoundaryState();
     overflow.roots[3].data.s += "x";
-    assert.throws(() => domain.replace(overflow), RangeError);
+    assert.doesNotThrow(() => domain.replace(overflow));
     assert.equal(calls, 0);
   } finally {
     if (original === undefined) delete Object.prototype.toJSON;

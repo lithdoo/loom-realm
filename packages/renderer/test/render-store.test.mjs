@@ -115,6 +115,27 @@ test("failed Patch leaves the committed replica unchanged", () => {
   assert.equal(JSON.stringify(store.snapshotForQualification().domains[0]), before);
 });
 
+test("unexpected local candidate mechanics failure propagates without committing", () => {
+  const store = new RendererRenderStore(1);
+  store.beginCarrier();
+  store.onDomains(domains("d1"));
+  store.onSnapshot(snapshot("d1", 1, [node("root", [], "sprite", {}, { n: 1 })]));
+  const before = JSON.stringify(store.snapshotForQualification().domains[0]);
+  const hostile = new Proxy({}, {
+    ownKeys() {
+      throw new Error("local candidate mechanics failed");
+    },
+  });
+  assert.throws(() => store.onPatch({
+    type: "render.patch",
+    domainId: "d1",
+    baseRevision: 1,
+    revision: 2,
+    ops: [{ op: "update", key: "root", data: { set: { hostile } } }],
+  }), /local candidate mechanics failed/);
+  assert.equal(JSON.stringify(store.snapshotForQualification().domains[0]), before);
+});
+
 test("node and Domain one-shot identity survives same-generation carrier replacement", () => {
   const store = new RendererRenderStore(1);
   store.beginCarrier();
@@ -229,12 +250,11 @@ test("zIndex-only Patch reuses roots identity", () => {
   assert.equal(view.roots, before);
 });
 
-test("update-only Patch is protocol-fatal on intermediate over-limit even if a later op would shrink", () => {
+test("update-only Patch exceeds historical data size and preserves ordered operations", () => {
   const store = new RendererRenderStore(1);
   store.beginCarrier();
   store.onDomains(domains("d1"));
   store.onSnapshot(snapshot("d1", 1, [node("root", [], "sprite", {}, { n: 1 })]));
-  const before = JSON.stringify(store.snapshotForQualification().domains[0]);
   const tooBig = { value: "x".repeat(262_144) };
   const disposition = store.onPatch({
     type: "render.patch",
@@ -246,6 +266,8 @@ test("update-only Patch is protocol-fatal on intermediate over-limit even if a l
       { op: "update", key: "root", data: { remove: ["value"] } },
     ],
   });
-  assert.equal(disposition.kind, "protocol-fatal");
-  assert.equal(JSON.stringify(store.snapshotForQualification().domains[0]), before);
+  assert.equal(disposition.kind, "accepted");
+  const current = store.snapshotForQualification().domains[0];
+  assert.equal(current.revision, 2);
+  assert.equal(current.roots[0].data.value, undefined);
 });

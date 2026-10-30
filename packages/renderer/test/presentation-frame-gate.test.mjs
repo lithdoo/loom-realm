@@ -231,7 +231,7 @@ test("a retired source RenderNode cannot occupy pending capacity for a current s
   assert.deepEqual(sent, [0, 999]);
 });
 
-test("Presentation queue is FIFO, capped at 256 pending, and uses one in-flight send", async () => {
+test("Presentation queue exceeds historical 256 pending, stays FIFO, and uses one in-flight send", async () => {
   const first = deferred();
   const sent = [];
   let active = 0;
@@ -251,8 +251,8 @@ test("Presentation queue is FIFO, capped at 256 pending, and uses one in-flight 
   for (let sequence = 0; sequence < 300; sequence += 1) gate.offer(event(target, { sequence }));
   assert.deepEqual(sent, [0]);
   first.resolve();
-  for (let attempt = 0; attempt < 20 && sent.length < 257; attempt += 1) await turn();
-  assert.equal(sent.length, 257);
-  assert.deepEqual(sent, Array.from({ length: 257 }, (_, index) => index));
+  for (let attempt = 0; attempt < 20 && sent.length < 300; attempt += 1) await turn();
+  assert.equal(sent.length, 300);
+  assert.deepEqual(sent, Array.from({ length: 300 }, (_, index) => index));
   assert.equal(maxActive, 1);
 });

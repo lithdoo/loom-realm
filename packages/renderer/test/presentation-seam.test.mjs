@@ -69,12 +69,20 @@ test("Web Presentation events preserve channel, type, payload, owner, and broadc
   };
   emitNodeEvent({ ...base, name: "confirm", data: { value: 1 } });
   emitNodeEvent({ ...base, name: "input.event", data: { code: "Enter" }, options: { broadcast: true, channel: "keyboard.event" } });
-  await waitFor(() => publications.length === 2, "publications");
+  const deep = {};
+  let cursor = deep;
+  for (let index = 0; index < 65; index += 1) cursor = cursor.next = {};
+  const wide = Object.fromEntries(Array.from({ length: 16_385 }, (_, index) => [`member${index}`, index]));
+  emitNodeEvent({ ...base, name: "historical-cap.event", data: { deep, wide } });
+  await waitFor(() => publications.length === 3, "publications");
   assert.deepEqual(publications.map(({ channel, type, broadcast }) => [channel, type, broadcast]), [
     ["x.loomrealm.web-presentation.event", "confirm", false],
     ["keyboard.event", "input.event", true],
+    ["x.loomrealm.web-presentation.event", "historical-cap.event", false],
   ]);
   assert.deepEqual(publications[1].payload, { domainId: "domain", targetKey: "node", data: { code: "Enter" } });
+  assert.equal(Object.keys(publications[2].payload.data.wide).length, 16_385);
+  assert.equal(publications[2].payload.data.deep.next.next.next !== undefined, true);
   assert.equal(publications[1].ownerSubsystemKey, "owner");
   publisher.retire();
 });
