@@ -279,67 +279,6 @@ function applyDelta<T extends string | JsonValue>(
   }
 }
 
-function findContainer(
-  roots: MutableNode[],
-  key: string,
-): { readonly container: MutableNode[]; readonly index: number } | null {
-  const stack: MutableNode[][] = [roots];
-  while (stack.length > 0) {
-    const container = stack.pop();
-    if (container === undefined) continue;
-    for (let index = 0; index < container.length; index += 1) {
-      const node = container[index];
-      if (node === undefined) continue;
-      if (node.key === key) return { container, index };
-      stack.push(node.children);
-    }
-  }
-  return null;
-}
-
-function collectKeys(node: MutableNode): string[] {
-  const result: string[] = [];
-  const stack = [node];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (current === undefined) continue;
-    result.push(current.key);
-    stack.push(...current.children);
-  }
-  return result;
-}
-
-function destination(
-  roots: MutableNode[],
-  parentKey: string | null,
-  beforeKey: string | null,
-): { readonly container: MutableNode[]; readonly index: number } {
-  const tree = validateTree(roots);
-  const container = parentKey === null ? roots : tree.get(parentKey)?.children;
-  if (container === undefined) throw new Error("Missing Patch destination parent");
-  if (beforeKey === null) return { container, index: container.length };
-  const index = container.findIndex((node) => node.key === beforeKey);
-  if (index < 0) throw new Error("beforeKey is not a destination sibling");
-  return { container, index };
-}
-
-function applyDelta<T extends string | JsonValue>(
-  target: Record<string, T>,
-  delta: { readonly set?: Readonly<Record<string, T>>; readonly remove?: readonly string[] },
-): void {
-  if (delta.set !== undefined) {
-    for (const key of Object.keys(delta.set)) {
-      target[key] = freezeJson(cloneJson(delta.set[key] as JsonValue)) as T;
-    }
-  }
-  if (delta.remove !== undefined) {
-    for (const key of delta.remove) {
-      if (!Object.prototype.hasOwnProperty.call(target, key)) throw new Error("Delta removes missing member");
-      delete target[key];
-    }
-  }
-}
-
 export interface RenderStoreSnapshot {
   readonly generation: number;
   readonly currentCarrier: boolean;
