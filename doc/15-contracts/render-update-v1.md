@@ -1104,7 +1104,7 @@ Render Update v1 不定义、也不要求 Runtime 实现通用容量上限。以
 - JSON object/array members、string/key bytes；
 - Domain Registry entries、RenderNode count、tree depth；
 - Patch operation count、candidate growth、retained state；
-- pending messages、queue count、queue bytes、in-flight work；
+- pending messages、queue count、queue bytes 或 retained in-flight payload capacity（不改变 single serialized writer 的顺序语义）；
 - Render data / Event data payload bytes。
 
 框架不得通过固定常量、默认配置、可配置 local budget、Product/Host policy 或 ResourceBudgetPolicy 重新引入这些门槛。平台本身可能因内存、调用栈、传输实现或其他实际能力限制而失败；框架应传播可观察到的实际异常，不应提前以自己的数字拒绝。不可捕获的进程级 OOM 不承诺可恢复。
