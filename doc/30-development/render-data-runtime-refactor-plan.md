@@ -438,19 +438,44 @@ RenderManager authoring API 当前若承诺 caller/framework ownership isolation
 
 ## 7. 实施顺序
 
-### Phase 0 — Validation inventory
+### Phase 0 — Protocol correction inventory / revision record
 
-建立一张检查清单，把现有每个 validation / cap / preflight 标记为：
+先建立一张完整矩阵，把现有每个 validation / cap / preflight 标记为：
 
-- protocol invariant；
-- authority/lifecycle invariant；
-- framework structural invariant；
-- developer-owned business validation；
-- arbitrary capacity cap；
+- Framework protocol/authority/lifecycle/structural invariant；
+- Developer/Product-owned business policy；
+- arbitrary historical capacity cap；
 - duplicate implementation preflight；
 - ownership isolation。
 
-没有明确 owner 的检查不得直接保留，也不得直接删除；先通过 contract/tests 确认责任。
+当前 release state 已确认没有需要维护的实质公开兼容边界，因此 Phase 0 **不做 migration/version gate**。即使某个 fixed cap 已经写入当前 Active/Frozen Contract，只要它不属于 Framework correctness，也按 pre-release protocol correction 删除。
+
+Phase 0 必须产出 revision ledger，至少逐项记录：
+
+- affected identity / document；
+- old observable accept/reject/drop behavior；
+- corrected behavior；
+- 为什么旧限制属于 Framework 越界而不是 invariant；
+- implementation/test owner；
+- 最终 implementation SHA / Conformance revision（完成时回填）。
+
+当前预计受影响 identity 至少包括：
+
+- `loomrealm.render-update / 1`；
+- Renderer Data Profile `/1`；
+- Renderer Data Profile `/3`；
+- Frame-targeted Presentation Event v1。
+
+本次保持这些 identity，不新建版本，不设计 migration。删除 hard caps、容量触发 Event drop、扩大 `zIndex` 到 signed safe integer 等 observable correction 必须在 revision note 中如实写明，不能声称“wire behavior 完全未变化”。
+
+#### Main consistency rule
+
+虽然不需要兼容迁移，但不能让 `main` 长期处于“Contract 已改、代码没改”或“代码已改、Contract 仍规定旧 reject-set”的半状态。Agent 可以选择：
+
+- 单一 implementation PR 按 phase 分 commit；或
+- stacked PR / integration branch 分模块实现。
+
+无论采用哪种方式，最终进入 `main` 的 merge train 必须同时具备对应 Contract/ADR revision record、implementation、regression/Conformance 和 qualification evidence。中间工作分支可以暂时不一致，`main` 的最终 subject 必须一致。
 
 ### Phase 1 — Wire / Data codec
 
@@ -515,11 +540,20 @@ RenderManager authoring API 当前若承诺 caller/framework ownership isolation
 
 目标：
 
-- 删除非协议 pending-count capacity gate；
-- 保留 FIFO / single writer / once-settle；
-- terminal 清理 retained references；
-- MessagePort queue 改 head-index/ring-buffer；
+- 删除非协议 pending-count capacity gate 与容量触发 Event drop；
+- 使用显式 serialized writer drain loop，保留 FIFO / single writer / per-send once-settle；
+- `send()` Promise 作为自然 transport backpressure，不按 backlog 长度主动 reject 合法 application unit；
+- terminal settle 未开始 work 并清理 retained message/payload/closure references；
+- MessagePort queue 改 head-index/deque/ring-buffer；
+- RenderManager publication queue 保留 Event barrier 与 state coalescing，但不做固定容量 admission；
 - transport failure 保留真实 cause。
+
+门槛：
+
+- controlled stalled carrier 下排队超过旧 1024 send 阈值，不出现 Framework capacity local-fatal；
+- Presentation Event 超过旧 256 pending 阈值，不因容量被静默 drop，仍保持 FIFO/applicability semantics；
+- terminal 后所有未开始 send Promise/waiter exactly-once settle，并可通过引用/heap probe 证明 queue payload 可释放；
+- backlog 操作不使用每次 O(N) `Array.shift()`/全队列搬移。
 
 ### Phase 5 — Optional Strict Validation
 
@@ -527,27 +561,31 @@ RenderManager authoring API 当前若承诺 caller/framework ownership isolation
 
 本阶段只定义是否需要 public package/API；不允许为了“以后可能需要”把 strict validation 重新塞进默认 Runtime。
 
-### Phase 6 — Contract / Conformance activation
+### Phase 6 — Normative synchronization / revision closure
 
-只有实现和 qualification 完成后，才单独修改 normative Contract / ADR / Conformance。
+实现与 qualification 全部通过后，完成同一 identity 的 pre-release normative correction closure，不做 compatibility migration。
 
-#### Affected identity inventory
+必须同步修订：
 
-本次历史容量限制移除及容量触发 drop 行为修正，至少影响以下 identity；activation 前必须逐项核查，不得只检查 Render Update：
-
-- Render Update protocol：`loomrealm.render-update / 1`；
-- Renderer Data Profile `/1`；
+- Render Update v1；
+- Renderer Data Profile `/1` 中仍引用旧 common/hard limits 的历史/目标文本；
 - Renderer Data Profile `/3`；
-- Frame-targeted Presentation Event v1。
+- Frame-targeted Presentation Event v1；
+- 对应 ADR / architecture decision record；
+- 对应 Conformance fixture catalog / revision；
+- revision ledger。
 
-对每个 identity 单独记录：旧实现的 observable accept/reject/drop 行为、是否已有 deployed peers、independent implementations、rolling upgrade / rollback cohorts，以及 persisted messages / recordings / compatibility obligations。Presentation Interest/Event 的旧容量数字与 Render/Data payload 限制都必须纳入该清单。
+修订规则：
 
-#### Same-identity gate
+- 删除已经判定为 Developer/Product-owned 或 arbitrary capacity 的 Framework hard caps；
+- 保留 exact schema、direction、Wire representation、authority、identity、generation、revision、ordered Patch preconditions、tree structural invariants、atomicity、Event applicability/FIFO/no-replay 等 Framework semantics；
+- `zIndex` 的目标语义统一为 signed safe integer，不再保留旧 int32 人工范围；
+- queue/backlog 长度不再成为 protocol-invalid、Event capacity drop 或 Data local-fatal 的理由；
+- 所有 observable accept/reject/drop correction 在 revision history 中明确列出；
+- revision note 记录“首次实质公开发布前直接修订，同 identity 保留，无 migration/version bump”；
+- final Contract、implementation 与 Conformance 对同一输入必须给出一致结果。
 
-- 如果 release owner 确认所有受影响 identity 均处于首次正式发布前，且不存在 deployed old-cap peers、independent implementations、rolling upgrade / rollback cohorts 或 persisted compatibility obligations，可以提出明确的 same-identity pre-release correction；
-- 如果任一 identity 存在上述任一兼容义务，必须停止该 identity 的 same-identity correction，另行设计 protocol/profile version 或 migration ADR；不能假定“新实现接受更多数据”就自动兼容旧实现；
-- 删除容量限制和容量触发的 Event drop 会改变 observable accept/reject/drop behavior，PR、Contract、ADR、Conformance 必须如实记录，不得声称完全没有 wire-observable change；
-- 只有实现、qualification 和逐 identity compatibility gate 全部通过后，才允许激活相应 Contract / ADR / Conformance revision。
+Phase 6 是同步/记录闭环，不是兼容性审批 gate。
 
 ## 8. 测试与 Qualification
 
