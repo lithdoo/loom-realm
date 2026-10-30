@@ -1,16 +1,16 @@
 # Renderer ⇄ Subsystem Data Application Profile v1
 
 > 层级：正式契约 / Application Profile  
-> 状态：**Pre-release correction reopened / Not Implemented / Not Qualified**（四-child `/1` baseline 由 ADR0037 建立；common resource gate 由 ADR0039 再修订）  
+> 状态：**Pre-release correction reopened / Not Implemented / Not Qualified**（四-child `/1` baseline 由 ADR0037 建立；人为容量限制由 ADR0039 再修订）  
 > 唯一目标 Profile identity：`loomrealm.renderer-data/1`；版本：1  
 > Composition：Data Connection v1 + User Input v1 + Render Update v1 + Viewport State v1  
 > 依赖：[Connection v1](./renderer-subsystem-data-connection-v1.md) · [Input v1](./user-input-v1.md) · [Render v1](./render-update-v1.md) · [Viewport v1](./viewport-state-v1.md) · [ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md)  
 > Authority：[Control v1](./main-renderer-control-v1.md)；Conformance：[Profile v1 revision4](./renderer-data-profile-conformance-v1.md)；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)（部分更新ADR0025/0036）  
 > 受保护完整原文：[原三-child Profile v1 baseline](./renderer-data-profile-v1-previewport-baseline.md)；[范围修复/逐项继承](../30-implementation/viewport-scope-repair-2026-09-16.md)。最近复核：2026-10-30
 
-**本文件是一项显式治理的首次发布前 `/1` 设计修订，绝不声称已发布系统可静默接受新的相同 identity。** 若兼容核查发现任何真实外部使用/共存义务，STOP direct reset并另行 version/migrate。当前旧三-child `/1`代码仍存在；四-child profile 与 ADR0039 resource-budget correction 均尚未实现/资格验证；不生产`/2`。authority、lifecycle、direction、ordering、atomicity 等 MUST 仍是规范语义；统一 numeric resource caps 已由 ADR0039 改为 local policy。
+**本文件是一项显式治理的首次发布前 `/1` 设计修订，绝不声称已发布系统可静默接受新的相同 identity。** 若兼容核查发现任何真实外部使用/共存义务，STOP direct reset并另行 version/migrate。当前旧三-child `/1`代码仍存在；四-child profile 与 ADR0039 capacity-cap correction 均尚未实现/资格验证；不生产`/2`。authority、lifecycle、direction、ordering、atomicity 等 MUST 仍是规范语义；框架不定义通用消息、解析、队列或 retained-state 容量上限。
 
-**原文保全规则：** 原三-child 完整基线是本修订的受保护语义来源，而非另一个 current profile。它的 §2 identity/authority、§3 UTF-8 JSON encoding/Wire/parser/limits、§5 one-reader ordered demux（除新增 viewport branch）、§6 serialized writer、§7 原 Input/Render handler outcome、§8 independent ordering、§9 原 Input/Render fresh baseline、§10 first-wins Data-local terminal、§11 bounded backpressure中所有未明确改变的逐项约束继续适用；原 §13 revision-2 obligations 不因 revision-3 而撤销。**唯一覆盖旧文的范围**是：§1/§4/§14 原「只含三 child」的 closed set改为四 child；§5/§6 增加 viewport demux和有界 producer；§7/§9/§10 增加独立 Viewport 语义与 diagnostic；§12/§13 接受 ADR0037 授权的发布前直接修正及 fixture revision-3。原文关于未来真实不同 profile identity 的 fresh-generation规则不变。任何未列入此 delta 的冲突必须 STOP 并由设计者处理，执行者不得擅自删掉旧规则。旧基线标题的 Frozen 只证明旧实现历史状态，不宣称本候选已冻结。
+**原文保全规则：** 原三-child 完整基线是本修订的受保护语义来源，而非另一个 current profile。它的 §2 identity/authority、§3 UTF-8 JSON encoding/Wire/parser semantics（固定 byte/depth/collection caps 由 ADR0039 supersede）、§5 one-reader ordered demux（除新增 viewport branch）、§6 serialized writer、§7 原 Input/Render handler outcome、§8 independent ordering、§9 原 Input/Render fresh baseline、§10 first-wins Data-local terminal、§11 backpressure ordering/coalescing semantics（框架队列容量和容量触发的 drop 由 ADR0039 supersede）中未明确改变的逐项约束继续适用；原 §13 revision-2 obligations 不因 revision-3 而撤销。**唯一覆盖旧文的范围**是：§1/§4/§14 原「只含三 child」的 closed set改为四 child；§5/§6 增加 viewport demux和有界 producer；§7/§9/§10 增加独立 Viewport 语义与 diagnostic；§12/§13 接受 ADR0037 授权的发布前直接修正及 fixture revision-3。原文关于未来真实不同 profile identity 的 fresh-generation规则不变。任何未列入此 delta 的冲突必须 STOP 并由设计者处理，执行者不得擅自删掉旧规则。旧基线标题的 Frozen 只证明旧实现历史状态，不宣称本候选已冻结。
 
 ## 1. Exact complete profile
 
@@ -40,7 +40,7 @@ Hostra WebSocket: one complete text message, binary forbidden
 PWA MessagePort: postMessage(string), structured clone/transfer仅Platform bootstrap
 ```
 
-Receiver MUST 在任何 child mutation 之前：unit 为 string→Wire JSON representation/parser→exact top-level type/role direction→child exact validation。Profile 不定义统一的 message byte 或 JSON depth 数值上限。每个 platform adapter/runtime MUST 在无界 buffering/parsing 之前实施有限的 local inbound resource budget；该预算属于实现/产品资源策略，不是跨实现 wire accept/reject threshold。budget exhaustion 属 local-resource-exhaustion，不得报告为 malformed peer；不得发生 child partial mutation，当前 carrier 必须终止以避免后续 state continuity 不明。Unknown extra/malformed family/shape 仍 fail closed。非法 application 值包括 undefined/BigInt/NaN/Infinity/ArrayBuffer/Blob/Port/host object/Function/Symbol/JSON-RPC Batch/一个 unit 多条；duplicate JSON keys 沿现有 Wire/ECMAScript JSON.parse observable，不另造 parser。Viewport 不能绕过通用 gate。
+Receiver MUST 在任何 child mutation 之前：unit 为 string→Wire JSON representation/parser→exact top-level type/role direction→child exact validation。Profile 不定义统一的 message byte、JSON depth、collection count 或 payload size 上限，也不要求 local resource budget。平台或 carrier 实际无法接收/解析/处理时，传播可观察到的真实异常；不得以框架自行设定的数字提前拒绝。Unknown extra/malformed family/shape 仍 fail closed。非法 application 值包括 undefined/BigInt/NaN/Infinity/ArrayBuffer/Blob/Port/host object/Function/Symbol/JSON-RPC Batch/一个 unit 多条；duplicate JSON keys 沿现有 Wire/ECMAScript JSON.parse observable，不另造 parser。Viewport 不能绕过通用 gate。
 
 ## 4. Exact namespace/direction
 
@@ -60,11 +60,11 @@ Renderer → Subsystem:
 
 每 current carrier 有一个 logical inbound reader 调用 `carrier.messages()`，common preflight 后 exact type/direction 分流 Input role、Render role 或 Subsystem Viewport role；child 不得竞争 raw stream/绕过 router。每 unit 只 dispatch 一次，handler N disposition settles 后才暴露 N+1 protocol effect；Profile 不是 JSON-RPC、没有 correlation。Viewport receive 只更新 Subsystem retained author size，不直接写 Renderer Store、Projector、InputManager 或 Main。Well-formed stale Input 依其 Frozen rule drop；malformed 不能伪装为 reset 或其他 child。
 
-## 6. Single serialized writer / narrow bounded viewport sender
+## 6. Single serialized writer / latest-value Viewport coalescing
 
 每 carrier 每方向只有一个 ordered/serialized writer，max concurrent physical `carrier.send=1`；所有 Input/Render/Viewport 经同 writer，admitted units 不可撤回/重排/bypass/dup/retry或跨 carrier 迁移。Single writer 只保证本方向 unit 顺序及 Data-local terminal，不造 cross-child authority/revision/transaction/ACK/barrier/replay；Input State/Event/Reset、Render publication barriers 仍由各 child 自己维护。
 
-Viewport 在 writer admission 前 per carrier 最多一个 admitted/in-flight unit 加一个 not-yet-admitted latest pending slot；新合法 size 覆盖 pending，前一个 send 结算再提交 latest 直到 converge。普通 geometry burst 本身不得无界积累、填满 shared queue 导致 Data fatal 或永久饿死 Input/Render。`send()` fulfilled 仅 carrier local acceptance，不是 author ACK。Old carrier pending/cursor 失效且不可迁移；fresh carrier 使用当时最新合法 physical observation 作独立 baseline。不改现有 writer capacity/limits、不引入 generic priority scheduler。见[Viewport §3](./viewport-state-v1.md)。
+Viewport 是 latest-value state：每 carrier 保留当前 in-flight send 与最新尚未发送的 size；新合法 size 替换尚未发送的旧 size，前一个 send 结算后提交最新值直至 converge。这是 Viewport state coalescing 语义，不是对应用数据或通用 queue 设置容量上限。`send()` fulfilled 仅 carrier local acceptance，不是 author ACK。Old carrier pending/cursor 失效且不可迁移；fresh carrier 使用当时最新合法 physical observation 作独立 baseline。不得由此推导 generic queue capacity 或 priority scheduler。见[Viewport §3](./viewport-state-v1.md)。
 
 ## 7. Child state/diagnostics
 
@@ -84,10 +84,10 @@ Viewport: current legal physical size fresh baseline, otherwise first legal samp
 
 不要求固定 child-first order、super-snapshot 或 cross-child barrier。Same G carrier reconnect 不重启 Frame/InputListener/RenderDomain/Viewport object；Render wire Domain identity 沿 Frozen 规则；Viewport Runtime object/value retain，equal fresh sample 无 callback、different 先更新再通知。Fresh G/Renderer 同一 Runtime 存活时只 current authority traffic 可修改 size，old carrier/source/queued rAF inert；新 baseline 前 last value 可以暂留，但不是 current Renderer paintability 证明。
 
-## 9. Terminal / failure / bounded work
+## 9. Terminal / failure
 
-Carrier close/loss、protocol/profile violation、child invalid/explicit fatal、writer send failure、local resource exhaustion、local mechanics fatal first-wins terminal 当前 Data peer：停止 ordinary 读写、queued sends settle once、local fatal best-effort close。Resource exhaustion 必须以独立 local diagnostic 表达，不伪装为 peer protocol violation。Data unusable≠Runtime terminal/Frame unwind/Main InputTarget或 DataAuthority mutation/Renderer participant failure；若 authority 仍 current Platform 可另建 fresh paired carrier，Profile 不提供 reconnect API。Writer/child queues bounded，teardown 不永久阻塞；具体 capacity 属于 implementation/product resource policy，不升格为统一协议阈值。
+Carrier close/loss、protocol/profile violation、child invalid/explicit fatal、实际 writer send failure 或不可恢复的 local mechanics failure first-wins terminal 当前 Data peer：停止 ordinary 读写、queued sends settle once、local fatal best-effort close。开发者输入或普通本地操作异常不得伪装为 peer protocol violation，也不得仅因异常自动终止 Data peer。Data unusable≠Runtime terminal/Frame unwind/Main InputTarget 或 DataAuthority mutation/Renderer participant failure；若 authority 仍 current，Platform 可另建 fresh paired carrier，Profile 不提供 reconnect API。Writer/child queues 不设框架容量上限；teardown 应释放队列引用并使 pending operation 按既有 once-settle 语义结束。
 
 ## 10. Conformance and Freeze
 
-[Profile `/1` fixtureSetRevision3](./renderer-data-profile-conformance-v1.md)与[Viewport conformance](./viewport-state-conformance-v1.md)共同定义期望断言，原 Connection/Input/Render 测试继续作为 regression。Docs Freeze 已在 subject `4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9` 签署；之后新 executable SHA 提供**全端一致的 build/deployment cohort 证据**、four-child revised `/1` suite、原三-child regression、Desktop/Hostra 及后续 PWA。唯一资格状态见[revised-v1 ledger](../30-implementation/viewport-profile-v1-qualification.md)；Map PR0 独立。最终不发布 `/2`、不修改 Frozen Input/Render/Connection/Control wire、Main 不存 size、Core 不实现 map 政策。
+[Profile `/1` fixtureSetRevision4](./renderer-data-profile-conformance-v1.md)与[Viewport conformance](./viewport-state-conformance-v1.md)共同定义期望断言，原 Connection/Input/Render 测试继续作为 regression。Docs Freeze 已在 subject `4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9` 签署；之后新 executable SHA 提供**全端一致的 build/deployment cohort 证据**、four-child revised `/1` suite、原三-child regression、Desktop/Hostra 及后续 PWA。唯一资格状态见[revised-v1 ledger](../30-implementation/viewport-profile-v1-qualification.md)；Map PR0 独立。最终不发布 `/2`、不修改 Frozen Input/Render/Connection/Control wire、Main 不存 size、Core 不实现 map 政策。
