@@ -6,12 +6,7 @@ import type {
   RenderSnapshotV1,
   SubsystemDataPeer,
 } from "@loomrealm/data";
-import {
-  assertJsonValue,
-  utf8ByteLength,
-  type JsonObject,
-  type JsonValue,
-} from "@loomrealm/wire";
+import type { JsonObject, JsonValue } from "@loomrealm/wire";
 import type {
   RenderDomain,
   RenderDomainState,
@@ -20,23 +15,15 @@ import type {
   RenderNode,
 } from "../render.js";
 
-const MAX_DOMAINS = 256;
-const MAX_NODES = 16_384;
-const MAX_TREE_DEPTH = 30;
-const MAX_ATTRS = 256;
-const MAX_CONTAINER_MEMBERS = 16_384;
-const MAX_DATA_BYTES = 262_144;
-const MAX_DATA_DEPTH = 32;
-const MAX_MESSAGE_BYTES = 1_048_576;
-const MAX_PENDING_WORK = 1_024;
-const MAX_NODE_OPS = 4_096;
-const PROBE_DOMAIN_ID = "d".repeat(128);
-
 interface DomainRecord {
   wireId: string;
   state: RenderDomainState;
   readonly liveKeys: Set<string>;
   readonly consumedKeys: Set<string>;
+  tags: Map<string, string>;
+  nodes: Map<string, RenderNode>;
+  parents: Map<string, string | null>;
+  locations: Map<string, NodeLocation>;
   closed: boolean;
 }
 
@@ -121,192 +108,163 @@ function optionalMember<T>(value: Record<string, unknown>, key: string, label: s
   return member as T;
 }
 
-function scalarString(value: unknown, min: number, max: number, label: string): string {
-  if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
+function scalarString(value: unknown, allowEmpty: boolean, label: string): string {
+  if (typeof value !== "string") throw new TypeError(label + " must be a string");
   for (let index = 0; index < value.length; index += 1) {
     const unit = value.charCodeAt(index);
     if (unit >= 0xd800 && unit <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
-      if (!(next >= 0xdc00 && next <= 0xdfff)) throw new TypeError(`${label} has invalid Unicode`);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) throw new TypeError(label + " has invalid Unicode");
       index += 1;
     } else if (unit >= 0xdc00 && unit <= 0xdfff) {
-      throw new TypeError(`${label} has invalid Unicode`);
+      throw new TypeError(label + " has invalid Unicode");
     }
   }
-  const bytes = utf8ByteLength(value);
-  if (bytes < min) throw new TypeError(`${label} cannot be empty`);
-  if (bytes > max) throw new RangeError(`${label} byte limit exceeded`);
+  if (!allowEmpty && value.length === 0) throw new TypeError(label + " cannot be empty");
   return value;
 }
 
-function validatedChildren(value: JsonObject | readonly JsonValue[]): JsonValue[] {
-  if (Array.isArray(value)) {
-    const children: JsonValue[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-        throw new TypeError("Validated JSON array changed during inspection");
-      }
-      children.push(descriptor.value as JsonValue);
-    }
-    return children;
+interface NodeLocation {
+  readonly parentKey: string | null;
+  readonly index: number;
+}
+
+interface JsonCloneEntry {
+  readonly key: string | number;
+  readonly value: unknown;
+}
+
+interface JsonCloneContainer {
+  readonly target: Record<string, JsonValue> | JsonValue[];
+  readonly entries: readonly JsonCloneEntry[];
+}
+
+function cloneContainer(value: object, label: string): JsonCloneContainer {
+  let isArray: boolean;
+  let descriptors: PropertyDescriptorMap;
+  let prototype: object | null;
+  try {
+    isArray = Array.isArray(value);
+    prototype = Object.getPrototypeOf(value) as object | null;
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch {
+    throw new TypeError(label + " must be plain JSON");
   }
-  const children: JsonValue[] = [];
-  for (const key of Object.keys(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+
+  if (isArray) {
+    const length = (value as unknown[]).length;
+    const entries: JsonCloneEntry[] = [];
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (typeof key === "symbol") throw new TypeError(label + " array cannot contain symbol properties");
+      if (key === "length") continue;
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0 || index >= length || String(index) !== key) {
+        throw new TypeError(label + " array cannot contain extra properties");
+      }
+      const descriptor = descriptors[key];
+      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+        throw new TypeError(label + " array elements must be enumerable data properties");
+      }
+      entries.push({ key: index, value: descriptor.value });
+    }
+    if (entries.length !== length) throw new TypeError(label + " array must be dense");
+    entries.sort((left, right) => (left.key as number) - (right.key as number));
+    return { target: new Array<JsonValue>(length), entries };
+  }
+
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(label + " must be a plain object");
+  }
+  const entries: JsonCloneEntry[] = [];
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key === "symbol") throw new TypeError(label + " object cannot contain symbol properties");
+    scalarString(key, true, label + " key");
+    const descriptor = descriptors[key];
     if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-      throw new TypeError("Validated JSON object changed during inspection");
+      throw new TypeError(label + " object members must be enumerable data properties");
     }
-    children.push(descriptor.value as JsonValue);
+    entries.push({ key, value: descriptor.value });
   }
-  return children;
+  return { target: Object.create(null) as Record<string, JsonValue>, entries };
 }
 
-/** Depth of an already assertJsonValue-validated JSON tree. */
-function depthOfValidatedJson(value: JsonValue): number {
-  let maximum = 0;
-  const stack: Array<{ readonly value: JsonValue; readonly depth: number }> = [
-    { value, depth: 0 },
-  ];
-  while (stack.length > 0) {
-    const entry = stack.pop();
-    if (entry === undefined || entry.value === null || typeof entry.value !== "object") continue;
-    const containerDepth = entry.depth + 1;
-    if (containerDepth > maximum) maximum = containerDepth;
-    for (const child of validatedChildren(entry.value)) {
-      stack.push({ value: child, depth: containerDepth });
+/** Validate and detach a JSON subtree in one iterative pass. */
+function cloneJsonValue(value: unknown, label: string): JsonValue {
+  const primitive = (current: unknown): JsonValue | undefined => {
+    if (current === null || typeof current === "boolean") return current;
+    if (typeof current === "string") return scalarString(current, true, label + " string");
+    if (typeof current === "number") {
+      if (!Number.isFinite(current)) throw new TypeError(label + " number must be finite");
+      return current;
     }
-  }
-  return maximum;
-}
-
-interface ValidatedValueTask {
-  readonly kind: "value";
-  readonly value: JsonValue;
-}
-
-interface ValidatedTextTask {
-  readonly kind: "text";
-  readonly text: string;
-}
-
-/**
- * Wire-compatible serialization for an already validated tree.
- *
- * Native JSON.stringify cannot be used here: assertJsonValue permits normal
- * objects and arrays, so an inherited Object.prototype/Array.prototype
- * `toJSON` would be invoked by the native serializer. Wire stringifyJson does
- * not invoke inherited methods. Keeping the iterative serializer local removes
- * its redundant validation without weakening that behavior or its mutation
- * checks.
- */
-function stringifyValidatedJson(value: JsonValue): string {
-  const output: string[] = [];
-  const stack: Array<ValidatedValueTask | ValidatedTextTask> = [{ kind: "value", value }];
-  while (stack.length > 0) {
-    const task = stack.pop();
-    if (task === undefined) break;
-    if (task.kind === "text") {
-      output.push(task.text);
-      continue;
-    }
-    const current = task.value;
-    if (current === null || typeof current !== "object") {
-      output.push(current === null ? "null" : typeof current === "boolean" ? (current ? "true" : "false") : JSON.stringify(current));
-      continue;
-    }
-    if (Array.isArray(current)) {
-      stack.push({ kind: "text", text: "]" });
-      for (let index = current.length - 1; index >= 0; index -= 1) {
-        const descriptor = Object.getOwnPropertyDescriptor(current, String(index));
-        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-          throw new TypeError("Validated JSON array changed during serialization");
-        }
-        stack.push({ kind: "value", value: descriptor.value as JsonValue });
-        if (index > 0) stack.push({ kind: "text", text: "," });
-      }
-      stack.push({ kind: "text", text: "[" });
-      continue;
-    }
-    const keys = Object.keys(current);
-    stack.push({ kind: "text", text: "}" });
-    for (let index = keys.length - 1; index >= 0; index -= 1) {
-      const key = keys[index];
-      if (key === undefined) continue;
-      const descriptor = Object.getOwnPropertyDescriptor(current, key);
-      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-        throw new TypeError("Validated JSON object changed during serialization");
-      }
-      stack.push({ kind: "value", value: descriptor.value as JsonValue });
-      stack.push({ kind: "text", text: `${JSON.stringify(key)}:` });
-      if (index > 0) stack.push({ kind: "text", text: "," });
-    }
-    stack.push({ kind: "text", text: "{" });
-  }
-  return output.join("");
-}
-
-function validateJsonData(value: unknown, label: string): asserts value is JsonObject {
-  try {
-    assertJsonValue(value);
-  } catch {
-    throw new TypeError(`${label} must be plain JSON`);
-  }
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a JSON object`);
-  }
-  if (depthOfValidatedJson(value) > MAX_DATA_DEPTH) throw new RangeError(`${label} depth limit exceeded`);
-  const stack: JsonValue[] = [value];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (typeof current === "string") {
-      scalarString(current, 0, Number.POSITIVE_INFINITY, `${label} string`);
-      continue;
-    }
-    if (current === undefined || current === null || typeof current !== "object") continue;
-    if (Array.isArray(current)) {
-      if (current.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} array limit exceeded`);
-      for (const child of current) stack.push(child);
-    } else {
-      const keys = Object.keys(current);
-      if (keys.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} member limit exceeded`);
-      for (const key of keys) {
-        scalarString(key, 0, 256, `${label} key`);
-        stack.push((current as JsonObject)[key] as JsonValue);
-      }
-    }
-  }
-  if (utf8ByteLength(stringifyValidatedJson(value)) > MAX_DATA_BYTES) {
-    throw new RangeError(`${label} byte limit exceeded`);
-  }
-}
-
-function validateJsonValue(value: unknown, label: string): JsonValue {
-  try {
-    assertJsonValue(value);
-  } catch {
-    throw new TypeError(`${label} must be plain JSON`);
-  }
-  const walk = (current: JsonValue): void => {
-    if (typeof current === "string") {
-      scalarString(current, 0, Number.POSITIVE_INFINITY, `${label} string`);
-      return;
-    }
-    if (current === null || typeof current !== "object") return;
-    if (Array.isArray(current)) {
-      if (current.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} array limit exceeded`);
-      for (const child of current) walk(child);
-      return;
-    }
-    const keys = Object.keys(current);
-    if (keys.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} member limit exceeded`);
-    for (const key of keys) {
-      scalarString(key, 0, 256, `${label} key`);
-      walk((current as JsonObject)[key] as JsonValue);
-    }
+    return undefined;
   };
-  walk(value as JsonValue);
-  return value as JsonValue;
+
+  const first = primitive(value);
+  if (first !== undefined || value === null) return first as JsonValue;
+  if (typeof value !== "object") throw new TypeError(label + " must be plain JSON");
+
+  const root = cloneContainer(value, label);
+  const active = new WeakSet<object>();
+  const completed = new WeakMap<object, Record<string, JsonValue> | JsonValue[]>();
+  active.add(value);
+  completed.set(value, root.target);
+  const stack: Array<{
+    readonly source: object;
+    readonly target: Record<string, JsonValue> | JsonValue[];
+    readonly entries: readonly JsonCloneEntry[];
+    next: number;
+  }> = [{ source: value, target: root.target, entries: root.entries, next: 0 }];
+
+  const assign = (
+    target: Record<string, JsonValue> | JsonValue[],
+    key: string | number,
+    child: JsonValue,
+  ): void => {
+    if (Array.isArray(target)) target[key as number] = child;
+    else target[key as string] = child;
+  };
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    if (frame.next >= frame.entries.length) {
+      Object.freeze(frame.target);
+      active.delete(frame.source);
+      stack.pop();
+      continue;
+    }
+    const entry = frame.entries[frame.next++]!;
+    const childPrimitive = primitive(entry.value);
+    if (childPrimitive !== undefined || entry.value === null) {
+      assign(frame.target, entry.key, childPrimitive as JsonValue);
+      continue;
+    }
+    if (typeof entry.value !== "object") throw new TypeError(label + " must be plain JSON");
+    if (active.has(entry.value)) throw new TypeError(label + " cannot contain cycles");
+    const prior = completed.get(entry.value);
+    if (prior !== undefined) {
+      assign(frame.target, entry.key, prior as JsonValue);
+      continue;
+    }
+    const nested = cloneContainer(entry.value, label);
+    completed.set(entry.value, nested.target);
+    active.add(entry.value);
+    assign(frame.target, entry.key, nested.target as JsonValue);
+    stack.push({
+      source: entry.value,
+      target: nested.target,
+      entries: nested.entries,
+      next: 0,
+    });
+  }
+  return root.target as JsonValue;
+}
+
+function cloneJsonObject(value: unknown, label: string): JsonObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(label + " must be a JSON object");
+  }
+  return cloneJsonValue(value, label) as JsonObject;
 }
 
 function detachedFrozen<T>(value: T, seen = new WeakMap<object, object>()): T {
@@ -330,98 +288,111 @@ function detachedFrozen<T>(value: T, seen = new WeakMap<object, object>()): T {
   return Object.freeze(output) as T;
 }
 
-function probeLimit(value: unknown, label: string): void {
-  try {
-    assertJsonValue(value);
-  } catch {
-    throw new TypeError(`${label} must be plain JSON`);
+function denseArray(value: unknown, label: string): readonly unknown[] {
+  if (!Array.isArray(value)) throw new TypeError(label + " must be an array");
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1 || !keys.includes("length")) {
+    throw new TypeError(label + " must be a dense array");
   }
-  const json = value as JsonValue;
-  if (depthOfValidatedJson(json) > 64 || utf8ByteLength(stringifyValidatedJson(json)) > MAX_MESSAGE_BYTES) {
-    throw new RangeError(`${label} message limit exceeded`);
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+      throw new TypeError(label + " must be a dense array");
+    }
   }
+  return value;
 }
 
 function validateStateShape(value: unknown): {
   readonly state: RenderDomainState;
   readonly keys: Set<string>;
   readonly tags: Map<string, string>;
+  readonly nodes: Map<string, RenderNode>;
+  readonly parents: Map<string, string | null>;
+  readonly locations: Map<string, NodeLocation>;
 } {
-  try {
-    assertJsonValue(value);
-  } catch {
-    throw new TypeError("RenderDomainState must be plain JSON");
-  }
   ownDataObject(value, "RenderDomainState");
   exactKeys(value, ["zIndex", "roots"], "RenderDomainState");
-  if (!Number.isInteger(value.zIndex)) throw new TypeError("zIndex must be an integer");
-  if ((value.zIndex as number) < -2_147_483_648 || (value.zIndex as number) > 2_147_483_647) {
-    throw new RangeError("zIndex limit exceeded");
-  }
-  if (!Array.isArray(value.roots)) throw new TypeError("roots must be an array");
+  if (!Number.isSafeInteger(value.zIndex)) throw new TypeError("zIndex must be a signed safe integer");
+  const rawRoots = denseArray(value.roots, "Render roots");
+  const roots = new Array<RenderNode>(rawRoots.length);
   const keys = new Set<string>();
   const tags = new Map<string, string>();
-  let count = 0;
-  const visit = (raw: unknown, depth: number): void => {
-    if (depth > MAX_TREE_DEPTH) throw new RangeError("Render tree depth limit exceeded");
-    ownDataObject(raw, "RenderNode");
-    exactKeys(raw, ["key", "tag", "attrs", "data", "children"], "RenderNode");
-    const key = scalarString(raw.key, 1, 128, "RenderNode key");
+  const nodes = new Map<string, RenderNode>();
+  const parents = new Map<string, string | null>();
+  const locations = new Map<string, NodeLocation>();
+  const built: Array<{
+    readonly key: string;
+    readonly tag: string;
+    readonly attrs: Readonly<Record<string, string>>;
+    readonly data: JsonObject;
+    readonly children: RenderNode[];
+  }> = [];
+  const stack: Array<{
+    readonly raw: unknown;
+    readonly parentChildren: RenderNode[];
+    readonly index: number;
+    readonly parentKey: string | null;
+  }> = [];
+  for (let index = rawRoots.length - 1; index >= 0; index -= 1) {
+    stack.push({ raw: rawRoots[index], parentChildren: roots, index, parentKey: null });
+  }
+
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    ownDataObject(frame.raw, "RenderNode");
+    exactKeys(frame.raw, ["key", "tag", "attrs", "data", "children"], "RenderNode");
+    const key = scalarString(frame.raw.key, false, "RenderNode key");
     if (keys.has(key)) throw new TypeError("Duplicate RenderNode key");
     keys.add(key);
-    const tag = scalarString(raw.tag, 1, 256, "RenderNode tag");
+    const tag = scalarString(frame.raw.tag, false, "RenderNode tag");
     tags.set(key, tag);
-    ownDataObject(raw.attrs, "RenderNode attrs");
-    const attrKeys = Object.keys(raw.attrs);
-    if (attrKeys.length > MAX_ATTRS) throw new RangeError("RenderNode attrs limit exceeded");
-    for (const attrKey of attrKeys) {
-      scalarString(attrKey, 1, 128, "RenderNode attr key");
-      scalarString(raw.attrs[attrKey], 0, 4096, "RenderNode attr value");
+
+    ownDataObject(frame.raw.attrs, "RenderNode attrs");
+    const attrs = Object.create(null) as Record<string, string>;
+    for (const attrKey of Object.keys(frame.raw.attrs)) {
+      scalarString(attrKey, false, "RenderNode attr key");
+      attrs[attrKey] = scalarString(frame.raw.attrs[attrKey], true, "RenderNode attr value");
     }
-    validateJsonData(raw.data, "RenderNode data");
-    if (!Array.isArray(raw.children)) throw new TypeError("RenderNode children must be an array");
-    count += 1;
-    if (count > MAX_NODES) throw new RangeError("RenderNode count limit exceeded");
-    for (const child of raw.children) visit(child, depth + 1);
+    Object.freeze(attrs);
+
+    const data = cloneJsonObject(frame.raw.data, "RenderNode data");
+    const rawChildren = denseArray(frame.raw.children, "RenderNode children");
+    const children = new Array<RenderNode>(rawChildren.length);
+    const node = { key, tag, attrs, data, children };
+    frame.parentChildren[frame.index] = node as RenderNode;
+    built.push(node);
+    nodes.set(key, node as RenderNode);
+    parents.set(key, frame.parentKey);
+    locations.set(key, { parentKey: frame.parentKey, index: frame.index });
+
+    for (let index = rawChildren.length - 1; index >= 0; index -= 1) {
+      stack.push({ raw: rawChildren[index], parentChildren: children, index, parentKey: key });
+    }
+  }
+
+  for (const node of built) {
+    Object.freeze(node.children);
+    Object.freeze(node);
+  }
+  Object.freeze(roots);
+  return {
+    state: Object.freeze({ zIndex: value.zIndex as number, roots }),
+    keys,
+    tags,
+    nodes,
+    parents,
+    locations,
   };
-  for (const root of value.roots) visit(root, 1);
-  const detached = detachedFrozen(value as unknown as RenderDomainState);
-  probeLimit({
-    type: "render.snapshot",
-    domainId: PROBE_DOMAIN_ID,
-    revision: Number.MAX_SAFE_INTEGER,
-    zIndex: detached.zIndex,
-    roots: detached.roots,
-  }, "Render Snapshot");
-  return { state: detached, keys, tags };
 }
 
 function validateEventShape(value: unknown): RenderEvent {
   ownDataObject(value, "RenderEvent");
   exactKeys(value, ["targetKey", "name", "data"], "RenderEvent");
-  scalarString(value.targetKey, 1, 128, "RenderEvent targetKey");
-  scalarString(value.name, 1, 128, "RenderEvent name");
-  validateJsonData(value.data, "RenderEvent data");
-  const detached = detachedFrozen(value as unknown as RenderEvent);
-  probeLimit({ type: "render.event", domainId: PROBE_DOMAIN_ID, ...detached }, "Render Event");
-  return detached;
-}
-
-function denseArray(value: unknown, max: number, label: string): readonly unknown[] {
-  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
-  if (value.length > max) throw new RangeError(`${label} length limit exceeded`);
-  const keys = Reflect.ownKeys(value);
-  if (keys.length !== value.length + 1 || !keys.includes("length")) {
-    throw new TypeError(`${label} must be a dense array`);
-  }
-  for (let index = 0; index < value.length; index += 1) {
-    const key = String(index);
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-      throw new TypeError(`${label} must be a dense array`);
-    }
-  }
-  return value;
+  const targetKey = scalarString(value.targetKey, false, "RenderEvent targetKey");
+  const name = scalarString(value.name, false, "RenderEvent name");
+  const data = cloneJsonObject(value.data, "RenderEvent data");
+  return Object.freeze({ targetKey, name, data });
 }
 
 function validateDelta(
@@ -432,40 +403,42 @@ function validateDelta(
   ownDataObject(raw, label);
   const allowed = new Set(["set", "remove"]);
   for (const key of Object.keys(raw)) {
-    if (!allowed.has(key)) throw new TypeError(`${label} has invalid members`);
+    if (!allowed.has(key)) throw new TypeError(label + " has invalid members");
   }
-  const setRaw = optionalMember<unknown>(raw, "set", `${label}.set`);
-  const removeRaw = optionalMember<unknown>(raw, "remove", `${label}.remove`);
-  if (setRaw === undefined && removeRaw === undefined) throw new TypeError(`${label} is empty`);
+  const setRaw = optionalMember<unknown>(raw, "set", label + ".set");
+  const removeRaw = optionalMember<unknown>(raw, "remove", label + ".remove");
+  if (setRaw === undefined && removeRaw === undefined) throw new TypeError(label + " is empty");
+
   let set: Record<string, string> | Record<string, JsonValue> | undefined;
   if (setRaw !== undefined) {
-    ownDataObject(setRaw, `${label}.set`);
+    ownDataObject(setRaw, label + ".set");
     const copied = Object.create(null) as Record<string, string | JsonValue>;
     for (const key of Object.keys(setRaw)) {
       if (kind === "attrs") {
-        scalarString(key, 1, 128, `${label}.set key`);
-        copied[key] = scalarString(setRaw[key], 0, 4096, `${label}.set value`);
+        scalarString(key, false, label + ".set key");
+        copied[key] = scalarString(setRaw[key], true, label + ".set value");
       } else {
-        scalarString(key, 1, 256, `${label}.set key`);
-        copied[key] = detachedFrozen(validateJsonValue(setRaw[key], `${label}.set value`));
+        scalarString(key, true, label + ".set key");
+        copied[key] = cloneJsonValue(setRaw[key], label + ".set value");
       }
     }
-    if (Object.keys(copied).length === 0 && removeRaw === undefined) throw new TypeError(`${label} is empty`);
+    if (Object.keys(copied).length === 0 && removeRaw === undefined) throw new TypeError(label + " is empty");
     set = copied;
   }
+
   let remove: string[] | undefined;
   if (removeRaw !== undefined) {
-    const items = denseArray(removeRaw, MAX_CONTAINER_MEMBERS, `${label}.remove`);
-    if (items.length === 0 && setRaw === undefined) throw new TypeError(`${label} is empty`);
-    remove = items.map((item, index) => scalarString(item, 1, kind === "attrs" ? 128 : 256, `${label}.remove[${index}]`));
+    const items = denseArray(removeRaw, label + ".remove");
+    if (items.length === 0 && setRaw === undefined) throw new TypeError(label + " is empty");
+    remove = items.map((item, index) => scalarString(item, kind === "data", label + ".remove[" + index + "]"));
   }
   if ((set === undefined || Object.keys(set).length === 0) && (remove === undefined || remove.length === 0)) {
-    throw new TypeError(`${label} is empty`);
+    throw new TypeError(label + " is empty");
   }
   const removed = new Set(remove ?? []);
   if (set !== undefined) {
     for (const key of Object.keys(set)) {
-      if (removed.has(key)) throw new TypeError(`${label} set/remove overlap`);
+      if (removed.has(key)) throw new TypeError(label + " set/remove overlap");
     }
   }
   return {
@@ -475,11 +448,9 @@ function validateDelta(
 }
 
 function validateAttrs(attrs: Readonly<Record<string, string>>): void {
-  const keys = Object.keys(attrs);
-  if (keys.length > MAX_ATTRS) throw new RangeError("RenderNode attrs limit exceeded");
-  for (const key of keys) {
-    scalarString(key, 1, 128, "RenderNode attr key");
-    scalarString(attrs[key], 0, 4096, "RenderNode attr value");
+  for (const key of Object.keys(attrs)) {
+    scalarString(key, false, "RenderNode attr key");
+    scalarString(attrs[key], true, "RenderNode attr value");
   }
 }
 
