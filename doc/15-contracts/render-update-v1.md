@@ -1166,7 +1166,6 @@ Patch algebra
 Event barrier/drop semantics
 logical stacking order
 failure/recovery
-Host / carrier actual capabilities
 ```
 
 允许不同：
