@@ -6,7 +6,7 @@
 > Composition：Data Connection v1 + User Input v1 + Render Update v1 + Viewport State v1  
 > 依赖：[Connection v1](./renderer-subsystem-data-connection-v1.md) · [Input v1](./user-input-v1.md) · [Render v1](./render-update-v1.md) · [Viewport v1](./viewport-state-v1.md) · [ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md)  
 > Authority：[Control v1](./main-renderer-control-v1.md)；Conformance：[Profile v1 revision4](./renderer-data-profile-conformance-v1.md)；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)（部分更新ADR0025/0036）  
-> 受保护完整原文：[原三-child Profile v1 baseline](./renderer-data-profile-v1-previewport-baseline.md)；[范围修复/逐项继承](../30-implementation/viewport-scope-repair-2026-09-16.md)。最近复核：2026-09-16
+> 受保护完整原文：[原三-child Profile v1 baseline](./renderer-data-profile-v1-previewport-baseline.md)；[范围修复/逐项继承](../30-implementation/viewport-scope-repair-2026-09-16.md)。最近复核：2026-10-30
 
 **本文件是一项显式治理的首次发布前 `/1` 设计修订，绝不声称已发布系统可静默接受新的相同 identity。** 若兼容核查发现任何真实外部使用/共存义务，STOP direct reset并另行 version/migrate。当前旧三-child `/1`代码仍存在；四-child profile 与 ADR0039 resource-budget correction 均尚未实现/资格验证；不生产`/2`。authority、lifecycle、direction、ordering、atomicity 等 MUST 仍是规范语义；统一 numeric resource caps 已由 ADR0039 改为 local policy。
 
