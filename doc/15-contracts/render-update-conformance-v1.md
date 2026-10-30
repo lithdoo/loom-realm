@@ -125,7 +125,24 @@ Protocol conformance 不定义统一的 message byte、JSON depth、identifier b
 - attrs / JSON members、array elements 超过历史 256 / 16384；
 - Render data 超过历史 256 KiB 和 relative depth 32。
 
-这些 fixture 只证明旧数字不再是 protocol rejection rule，不建立新的最大值。测试运行环境若因实际平台故障无法执行，记录为该环境的 execution failure，不得将其转化为协议级 numeric cap。
+这些 fixture 只证明旧数字不再是 protocol rejection rule，不建立新的最大值。对应的 required fixture ids：
+
+~~~text
+legacy-message-over-1mib-not-protocol-rejected
+legacy-json-depth-over-64-not-protocol-rejected
+legacy-identity-tag-event-string-over-old-byte-cap-not-protocol-rejected
+legacy-registry-over-256-not-protocol-rejected
+legacy-node-count-over-16384-not-protocol-rejected
+legacy-tree-depth-over-30-not-protocol-rejected
+legacy-patch-ops-over-4096-not-protocol-rejected
+legacy-attrs-and-json-members-over-old-counts-not-protocol-rejected
+legacy-render-data-over-256kib-not-protocol-rejected
+event-backlog-not-dropped-by-framework-capacity
+serialization-error-is-local-call-failure-not-peer-protocol-fatal
+local-candidate-exception-discards-candidate-not-peer-protocol-fatal
+~~~
+
+测试运行环境若因实际平台故障无法执行，记录为该环境的 execution failure，不得将其转化为协议级 numeric cap。
 
 Conformance 继续验证：
 
