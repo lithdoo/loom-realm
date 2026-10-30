@@ -4,7 +4,7 @@
 > Identity：`loomrealm.renderer-data/3`
 > 组成：Render Update v1 + Viewport State v1 + Frame-targeted Presentation Event v1
 > 历史 profile：[Renderer Data Profile v2](./renderer-data-profile-v2.md)
-> 最近复核：2026-10-23
+> 最近复核：2026-10-30
 
 ## 1. Closed message set
 
