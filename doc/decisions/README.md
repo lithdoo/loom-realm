@@ -137,7 +137,7 @@ ADR0038
 → Opt-in Strict Validation
 ```
 
-ADR0038 不静默修改现有 Frozen Contract；当前协议限制继续有效，放宽必须单独 correction / migration / qualification。
+ADR0038 不允许静默修改 wire schema 或 protocol semantics。ADR0039 已将 numeric capacity thresholds 明确为 local resource budgets；仅放宽本地容量不要求 protocol migration / version bump。真正改变 message/schema/authority/ordering/revision/atomicity/recovery semantics 时，仍须独立 correction / versioning / qualification。
 
 ### Game libraries / products
 
