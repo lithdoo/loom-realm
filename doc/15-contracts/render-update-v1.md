@@ -1,7 +1,7 @@
 # Renderer ⇐ Subsystem Render Update Protocol v1
 
 > 层级：正式契约  
-> 状态：Active / Normative / Pre-release correction reopened  
+> 状态：Active / Normative / local resource-budget policy correction pending implementation and qualification  
 > 协议版本：1  
 > 协议标识：`loomrealm.render-update / 1`  
 > 稳定程度：Pre-release correction candidate  
@@ -1289,7 +1289,7 @@ presentation scheduler policy
 
 ## 24. Compatibility Boundary
 
-Render Update v1 的首次发布前修订可按 ADR0039 在保持 `/1` identity 的前提下修订 numeric resource-budget policy；必须在首次发布前完成协调升级和重新 qualification。首次正式发布后，任何 wire-observable schema/authority/ordering/atomicity/failure 或 recovery 变化必须发布新 protocol version。
+Render Update v1 的 numeric resource-budget policy 属于 Host / Product / Runtime 本地资源策略，不是 wire ABI。调整或移除这些本地容量阈值，在正式发布前后都不要求创建新 protocol version，也不要求改变 `/1` identity。旧接收端若仍有较小的本地容量，可能无法处理超过该容量的具体负载；这是 receiver capacity mismatch，不是消息格式或协议语义不兼容。v1 不提供 budget negotiation，产品应为实际 workload 配置相互可承受的 sender / receiver budgets。只有 message schema、direction、authority、identity、ordering、revision、atomicity、Event 或 recovery semantics 真正改变时，才需要 protocol versioning。Conformance fixture revision 是测试语料版本，不等同于 wire protocol version。
 
 ```text
 message kind / schema
