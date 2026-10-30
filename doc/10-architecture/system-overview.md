@@ -250,5 +250,5 @@ Products               Desktop/Hostra + PWA
 19. `Frozen != Implemented != Qualified`；
 20. 框架默认只强制执行自身运行、协议兼容和资源安全所必需的 Runtime Guard；应用业务正确性归开发者，额外 Strict Validation 必须 opt-in；
 21. 对可信应用数据优先 operation-first / error-first，失败 candidate 不得部分提交；
-22. 不得静默修改 Frozen Contract；任何 hard limit / accept-reject / failure semantics 放宽都必须走正式 contract correction 与 qualification；
+22. 不得静默修改正式 Contract；首次发布前可按独立 ADR / compatibility gate / conformance revision / qualification 正式修订 numeric resource budgets；首次发布后 wire-observable semantics 变化必须版本化；
 23. 不得仅为严格验证而默认深复制、深冻结或全量扫描与当前操作无关的应用数据。
