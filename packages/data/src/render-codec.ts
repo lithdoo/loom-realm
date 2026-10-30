@@ -1,5 +1,4 @@
 import type { JsonObject } from "@loomrealm/wire";
-import { assertJsonValue, stringifyJson, utf8ByteLength } from "@loomrealm/wire";
 import type {
   RenderDomainsV1,
   RenderEventV1,
@@ -8,120 +7,80 @@ import type {
 } from "./model.js";
 import {
   array,
-  assertBoundedJson,
-  boundedString,
   exact,
   fail,
-  int32,
-  MAX_PAYLOAD_BYTES,
   object,
   positiveSafe,
+  scalarString,
+  signedSafe,
 } from "./validation-common.js";
 
-function renderId(value: unknown, label: string, max = 128): string {
-  return boundedString(value, "render", label, 1, max);
+function renderId(value: unknown, label: string): string {
+  return scalarString(value, "render", label);
 }
 
 function attrs(raw: unknown): void {
-  const a = object(raw, "render", "attrs");
-  const keys = Object.keys(a);
-  if (keys.length > 256) fail("render", "attrs member limit");
-  for (const k of keys) {
-    boundedString(k, "render", "attrs key", 1, 128);
-    const v = a[k];
-    if (typeof v !== "string") fail("render", "attrs value must string");
-    boundedString(v, "render", "attrs value", 0, 4096);
-  }
-}
-
-function renderJsonValue(raw: unknown): void {
-  try {
-    assertJsonValue(raw);
-  } catch {
-    fail("render", "data must be plain JSON");
-  }
-  const stack = [raw];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (typeof current === "string") {
-      boundedString(current, "render", "data string", 0, Number.POSITIVE_INFINITY);
-    } else if (Array.isArray(current)) {
-      for (const child of current) stack.push(child);
-    } else if (current !== null && typeof current === "object") {
-      for (const [key, value] of Object.entries(current)) {
-        boundedString(key, "render", "data key", 0, 256);
-        stack.push(value);
-      }
-    }
+  const value = object(raw, "render", "attrs");
+  for (const key of Object.keys(value)) {
+    scalarString(key, "render", "attrs key");
+    scalarString(value[key], "render", "attrs value", true);
   }
 }
 
 function renderData(raw: unknown): JsonObject {
-  const d = object(raw, "render", "data");
-  renderJsonValue(d);
-  assertBoundedJson(d, "render");
-  if (utf8ByteLength(stringifyJson(d)) > MAX_PAYLOAD_BYTES) fail("render", "render data byte limit");
-  return d;
+  return object(raw, "render", "data");
 }
 
-function renderNode(
-  raw: unknown,
-  seen: Set<string>,
-  depth: number,
-  counter: { n: number },
-): void {
-  if (depth > 30) fail("render", "render tree depth limit");
-  const n = exact(raw, ["key", "tag", "attrs", "data", "children"], [], "render");
-  const key = renderId(n.key, "node key");
-  if (seen.has(key)) fail("render", "duplicate node key");
-  seen.add(key);
-  renderId(n.tag, "tag", 256);
-  attrs(n.attrs);
-  renderData(n.data);
-  const children = array(n.children, "render", "children");
-  counter.n += 1;
-  if (counter.n > 16384) fail("render", "node count limit");
-  for (const c of children) renderNode(c, seen, depth + 1, counter);
+function renderNode(raw: unknown, seen: Set<string>): void {
+  const stack: unknown[] = [raw];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const node = exact(current, ["key", "tag", "attrs", "data", "children"], [], "render");
+    const key = renderId(node.key, "node key");
+    if (seen.has(key)) fail("render", "duplicate node key");
+    seen.add(key);
+    renderId(node.tag, "tag");
+    attrs(node.attrs);
+    renderData(node.data);
+    const children = array(node.children, "render", "children");
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push(children[index]);
+    }
+  }
 }
 
 function renderRoots(raw: unknown): void {
   const roots = array(raw, "render", "roots");
   const seen = new Set<string>();
-  const counter = { n: 0 };
-  for (const r of roots) renderNode(r, seen, 1, counter);
+  for (const root of roots) renderNode(root, seen);
 }
 
-function nullableRenderId(v: unknown, label: string): void {
-  if (v !== null) renderId(v, label);
+function nullableRenderId(value: unknown, label: string): void {
+  if (value !== null) renderId(value, label);
 }
 
 function stringDelta(raw: unknown, json: boolean): void {
-  const d = exact(raw, [], ["set", "remove"], "render");
-  if (d.set === undefined && d.remove === undefined) fail("render", "empty delta");
+  const delta = exact(raw, [], ["set", "remove"], "render");
+  if (delta.set === undefined && delta.remove === undefined) fail("render", "empty delta");
   let nonempty = false;
-  if (d.set !== undefined) {
-    const s = json ? renderData(d.set) : object(d.set, "render", "delta.set");
-    const keys = Object.keys(s);
-    if (keys.length) nonempty = true;
-    for (const k of keys) {
-      if (json) {
-        boundedString(k, "render", "data delta key", 0, 256);
-        renderJsonValue(s[k]);
-      } else {
-        boundedString(k, "render", "attrs delta key", 1, 128);
-        boundedString(s[k], "render", "attrs delta value", 0, 4096);
-      }
+  if (delta.set !== undefined) {
+    const values = json ? renderData(delta.set) : object(delta.set, "render", "delta.set");
+    const keys = Object.keys(values);
+    if (keys.length > 0) nonempty = true;
+    for (const key of keys) {
+      scalarString(key, "render", json ? "data delta key" : "attrs delta key", json);
+      if (!json) scalarString(values[key], "render", "attrs delta value", true);
     }
   }
-  if (d.remove !== undefined) {
-    const r = array(d.remove, "render", "delta.remove");
-    if (r.length) nonempty = true;
+  if (delta.remove !== undefined) {
+    const removed = array(delta.remove, "render", "delta.remove");
+    if (removed.length > 0) nonempty = true;
     const seen = new Set<string>();
-    for (const x of r) {
-      if (typeof x !== "string" || seen.has(x)) fail("render", "invalid delta remove");
-      boundedString(x, "render", json ? "data delta key" : "attrs delta key", json ? 0 : 1, json ? 256 : 128);
-      seen.add(x);
-      if (d.set !== undefined && Object.prototype.hasOwnProperty.call(d.set, x)) {
+    for (const value of removed) {
+      const key = scalarString(value, "render", json ? "data delta key" : "attrs delta key", json);
+      if (seen.has(key)) fail("render", "duplicate delta remove key");
+      seen.add(key);
+      if (delta.set !== undefined && Object.prototype.hasOwnProperty.call(delta.set, key)) {
         fail("render", "delta set/remove overlap");
       }
     }
@@ -133,76 +92,74 @@ function renderOp(raw: unknown): void {
   const base = object(raw, "render", "op");
   const op = base.op;
   if (op === "insert") {
-    const p = exact(base, ["op", "parentKey", "beforeKey", "node"], [], "render");
-    nullableRenderId(p.parentKey, "parentKey");
-    nullableRenderId(p.beforeKey, "beforeKey");
-    renderNode(p.node, new Set<string>(), 1, { n: 0 });
+    const value = exact(base, ["op", "parentKey", "beforeKey", "node"], [], "render");
+    nullableRenderId(value.parentKey, "parentKey");
+    nullableRenderId(value.beforeKey, "beforeKey");
+    renderNode(value.node, new Set<string>());
   } else if (op === "remove") {
-    const p = exact(base, ["op", "key"], [], "render");
-    renderId(p.key, "key");
+    const value = exact(base, ["op", "key"], [], "render");
+    renderId(value.key, "key");
   } else if (op === "move") {
-    const p = exact(base, ["op", "key", "parentKey", "beforeKey"], [], "render");
-    renderId(p.key, "key");
-    nullableRenderId(p.parentKey, "parentKey");
-    nullableRenderId(p.beforeKey, "beforeKey");
+    const value = exact(base, ["op", "key", "parentKey", "beforeKey"], [], "render");
+    renderId(value.key, "key");
+    nullableRenderId(value.parentKey, "parentKey");
+    nullableRenderId(value.beforeKey, "beforeKey");
   } else if (op === "update") {
-    const p = exact(base, ["op", "key"], ["attrs", "data"], "render");
-    renderId(p.key, "key");
-    if (p.attrs === undefined && p.data === undefined) fail("render", "empty update");
-    if (p.attrs !== undefined) stringDelta(p.attrs, false);
-    if (p.data !== undefined) stringDelta(p.data, true);
+    const value = exact(base, ["op", "key"], ["attrs", "data"], "render");
+    renderId(value.key, "key");
+    if (value.attrs === undefined && value.data === undefined) fail("render", "empty update");
+    if (value.attrs !== undefined) stringDelta(value.attrs, false);
+    if (value.data !== undefined) stringDelta(value.data, true);
   } else {
     fail("render", "unknown patch op");
   }
 }
 
 export function validateRenderDomains(raw: unknown): RenderDomainsV1 {
-  const p = exact(raw, ["type", "domains"], [], "render");
-  if (p.type !== "render.domains") fail("render", "wrong type");
-  const domains = array(p.domains, "render", "domains");
-  if (domains.length > 256) fail("render", "domain limit");
+  const message = exact(raw, ["type", "domains"], [], "render");
+  if (message.type !== "render.domains") fail("render", "wrong type");
+  const domains = array(message.domains, "render", "domains");
   const seen = new Set<string>();
-  for (const d of domains) {
-    const id = renderId(d, "domainId");
+  for (const value of domains) {
+    const id = renderId(value, "domainId");
     if (seen.has(id)) fail("render", "duplicate domainId");
     seen.add(id);
   }
-  return p as unknown as RenderDomainsV1;
+  return message as unknown as RenderDomainsV1;
 }
 
 export function validateRenderSnapshot(raw: unknown): RenderSnapshotV1 {
-  const p = exact(raw, ["type", "domainId", "revision", "zIndex", "roots"], [], "render");
-  if (p.type !== "render.snapshot") fail("render", "wrong type");
-  renderId(p.domainId, "domainId");
-  positiveSafe(p.revision, "render", "revision");
-  int32(p.zIndex, "render", "zIndex");
-  renderRoots(p.roots);
-  return p as unknown as RenderSnapshotV1;
+  const message = exact(raw, ["type", "domainId", "revision", "zIndex", "roots"], [], "render");
+  if (message.type !== "render.snapshot") fail("render", "wrong type");
+  renderId(message.domainId, "domainId");
+  positiveSafe(message.revision, "render", "revision");
+  signedSafe(message.zIndex, "render", "zIndex");
+  renderRoots(message.roots);
+  return message as unknown as RenderSnapshotV1;
 }
 
 export function validateRenderPatch(raw: unknown): RenderPatchV1 {
-  const p = exact(raw, ["type", "domainId", "baseRevision", "revision", "ops"], ["zIndex"], "render");
-  if (p.type !== "render.patch") fail("render", "wrong type");
-  renderId(p.domainId, "domainId");
-  const base = positiveSafe(p.baseRevision, "render", "baseRevision");
-  const rev = positiveSafe(p.revision, "render", "revision");
-  if (base === Number.MAX_SAFE_INTEGER || rev !== base + 1) {
+  const message = exact(raw, ["type", "domainId", "baseRevision", "revision", "ops"], ["zIndex"], "render");
+  if (message.type !== "render.patch") fail("render", "wrong type");
+  renderId(message.domainId, "domainId");
+  const base = positiveSafe(message.baseRevision, "render", "baseRevision");
+  const revision = positiveSafe(message.revision, "render", "revision");
+  if (base === Number.MAX_SAFE_INTEGER || revision !== base + 1) {
     fail("render", "invalid patch revision step");
   }
-  if (p.zIndex !== undefined) int32(p.zIndex, "render", "zIndex");
-  const ops = array(p.ops, "render", "ops");
-  if (ops.length > 4096) fail("render", "patch op limit");
-  if (ops.length === 0 && p.zIndex === undefined) fail("render", "empty patch");
+  if (message.zIndex !== undefined) signedSafe(message.zIndex, "render", "zIndex");
+  const ops = array(message.ops, "render", "ops");
+  if (ops.length === 0 && message.zIndex === undefined) fail("render", "empty patch");
   for (const op of ops) renderOp(op);
-  return p as unknown as RenderPatchV1;
+  return message as unknown as RenderPatchV1;
 }
 
 export function validateRenderEvent(raw: unknown): RenderEventV1 {
-  const p = exact(raw, ["type", "domainId", "targetKey", "name", "data"], [], "render");
-  if (p.type !== "render.event") fail("render", "wrong type");
-  renderId(p.domainId, "domainId");
-  renderId(p.targetKey, "targetKey");
-  boundedString(p.name, "render", "event name", 1, 128);
-  renderData(p.data);
-  return p as unknown as RenderEventV1;
+  const message = exact(raw, ["type", "domainId", "targetKey", "name", "data"], [], "render");
+  if (message.type !== "render.event") fail("render", "wrong type");
+  renderId(message.domainId, "domainId");
+  renderId(message.targetKey, "targetKey");
+  scalarString(message.name, "render", "event name");
+  renderData(message.data);
+  return message as unknown as RenderEventV1;
 }
