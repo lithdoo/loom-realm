@@ -344,7 +344,9 @@ export class RendererRenderStore {
         baselined: false,
         revision: null,
         zIndex: old?.zIndex ?? 0,
-        roots: old?.roots.map(cloneNode) ?? [],
+        roots: old?.roots ?? [],
+        nodes: old?.nodes ?? new Map(),
+        locations: old?.locations ?? new Map(),
       });
     }
     this.domains = next;
@@ -377,7 +379,9 @@ export class RendererRenderStore {
             baselined: false,
             revision: null,
             zIndex: current?.zIndex ?? 0,
-            roots: current?.roots.map(cloneNode) ?? [],
+            roots: current?.roots ?? [],
+            nodes: current?.nodes ?? new Map(),
+            locations: current?.locations ?? new Map(),
           });
         }
         if (!this.identities.has(domainId)) {
@@ -404,8 +408,9 @@ export class RendererRenderStore {
       if (current.baselined && message.revision !== (current.revision as number) + 1) {
         throw new Error("Snapshot revision continuity failure");
       }
-      const roots = message.roots.map(cloneNode);
-      const index = validateTree(roots);
+      const cloned = cloneTree(message.roots);
+      const roots = cloned.roots;
+      const index = cloned.index;
       const identity = this.identities.get(message.domainId);
       if (identity === undefined) throw new Error("Missing Domain identity state");
       const nextTags = new Map<string, string>();
@@ -423,8 +428,10 @@ export class RendererRenderStore {
         revision: message.revision,
         zIndex: message.zIndex,
         roots,
+        nodes: index.nodes,
+        locations: index.locations,
       };
-      for (const root of committed.roots) freezeNode(root);
+      freezeTree(roots);
       this.identities.set(message.domainId, { liveTags: nextTags, consumedKeys: consumed });
       this.domains.set(message.domainId, committed);
       return accepted;
@@ -447,21 +454,24 @@ export class RendererRenderStore {
         this.commitUpdateOnlyPatch(current, message);
         return accepted;
       }
-      const roots = current.roots.map(cloneNode);
+      const cloned = cloneTree(current.roots);
+      const roots = cloned.roots;
       const sourceIdentity = this.identities.get(message.domainId);
       if (sourceIdentity === undefined) throw new Error("Missing Domain identity state");
       const liveTags = new Map(sourceIdentity.liveTags);
       const consumedKeys = new Set(sourceIdentity.consumedKeys);
       for (const op of message.ops) this.applyOperation(roots, liveTags, consumedKeys, op);
-      validateTree(roots);
+      const index = indexTree(roots);
       const committed: DomainReplica = {
         domainId: current.domainId,
         baselined: true,
         revision: message.revision,
         zIndex: message.zIndex ?? current.zIndex,
         roots,
+        nodes: index.nodes,
+        locations: index.locations,
       };
-      for (const root of roots) freezeNode(root);
+      freezeTree(roots);
       this.identities.set(message.domainId, { liveTags, consumedKeys });
       this.domains.set(message.domainId, committed);
       return accepted;
