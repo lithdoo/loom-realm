@@ -507,8 +507,6 @@ RenderManager authoring API 当前若承诺 caller/framework ownership isolation
 
 ### 8.2 Historical-cap regression
 
-### 8.2 Historical-cap regression
-
 在测试环境可承受范围内，用代表性 fixture 超过历史数字：
 
 - message > 1 MiB；
