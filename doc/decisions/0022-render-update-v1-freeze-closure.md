@@ -8,7 +8,7 @@
 
 ## 后续修订
 
-[ADR 0039](./0039-render-update-v1-resource-budget-correction.md) supersedes this ADR's Decision 11 numeric hard-limit freeze and the corresponding hard-limit portion of Decision 13 for the first-release pre-release correction only. Render Update v1 remains the same protocol identity under a coordinated revised-v1 cohort; all other authority, lifecycle, revision, Patch, Event, and recovery decisions in this ADR remain unchanged. After first release, wire-observable changes follow normal protocol versioning.
+[ADR 0039](./0039-render-update-v1-resource-budget-correction.md) supersedes this ADR's Decision 11 numeric capacity limits and Decision 6's capacity-triggered Event drop policy for the first-release pre-release correction only; the corresponding historical conformance assertions under Decision 13 are replaced by fixtureSetRevision 2. This is a wire-observable accept/reject/drop correction, not a claim that the old limits were never semantics. Same-identity `/1` correction is permitted only after the ADR0039 compatibility gate passes. All other authority, lifecycle, revision, Patch, Event ordering/applicability, and recovery decisions in this ADR remain unchanged. After first release, wire-observable changes follow normal protocol versioning.
 
 ## 背景
 
