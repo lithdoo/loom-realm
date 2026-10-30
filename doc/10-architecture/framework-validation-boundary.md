@@ -115,7 +115,7 @@ Catch 不能让失败后的 current state 继续被当作有效状态使用。�
 
 本原则不允许静默修改正式契约。Render Update v1 历史固定数字和容量触发的队列行为曾经属于可观察的 accept/reject/drop 语义；本次必须作为明确的首次发布前 correction 处理，而不能声称它们从未影响协议行为。
 
-同一 /1 identity 只允许在兼容性核查确认没有已部署旧实现、独立旧 Peer、rolling/rollback cohort 或 persisted compatibility obligation 时采用。若任何此类义务存在，必须停止 same-identity correction，另行提交明确的 protocol version / migration ADR。
+Render Update /1 与受影响 Renderer Data Profile identity（包括 /3）的 same-identity correction，只允许在兼容性核查确认没有已部署旧实现、独立旧 Peer、rolling/rollback cohort 或 persisted compatibility obligation 时采用。若任何此类义务存在，必须停止 same-identity correction，另行提交明确的 protocol version / migration ADR。
 
 本次 correction 保留 JSON representation、closed message schema、authority/identity/revision、Patch atomicity、framework structural invariants 和必要 Event ordering；删除人为 numeric capacity 和容量触发的丢弃语义。首次正式发布后，任何 wire-observable accept/reject/drop semantics 变化必须按版本治理处理。
 
