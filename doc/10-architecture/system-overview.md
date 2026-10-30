@@ -6,7 +6,7 @@
 > 主要定义：logical roles、authority/currentness、bootstrap、state/events/render/content placement 与 platform composition  
 > 依赖：[产品总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
 > 细化：[框架与应用验证边界](./framework-validation-boundary.md)、[平台组合](./platform-composition-system.md)、[运行承载](./runtime-hosting-system.md)、[Shared State](./shared-state-system.md)、[Session Events](./session-events-system.md)、[渲染](./rendering-system.md)、[Subsystem](./subsystem-model.md)、[存储](./storage-system.md)  
-> 最近复核：2026-10-13
+> 最近复核：2026-10-30
 
 本文描述 Current system-level responsibility / authority / topology。精确 wire、ABI、error、limit 与 conformance semantics 由 [正式契约](../15-contracts/README.md) 拥有；实现位置由 [模块文档](../20-modules/README.md) 拥有；qualification 规则由 [30-development](../30-development/qualification.md) 拥有。
 
