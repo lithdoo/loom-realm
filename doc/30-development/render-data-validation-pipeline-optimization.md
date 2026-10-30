@@ -226,6 +226,18 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 - 不要求用深复制/深冻结证明每份业务数据正确；ownership 与 mutation contract 应由相应 API 明确。
 
 
+### 6.8 Contract-to-runtime conformance corrections
+
+The current contract already defines these semantics; the implementation must be brought into line rather than narrowing the contract:
+
+| Contract | Current implementation mismatch | Required correction |
+|---|---|---|
+| `zIndex` is a signed safe integer (`Number.isSafeInteger`) | `RenderManager` and `render-codec.ts` still enforce signed int32 | Replace int32 checks with `Number.isSafeInteger`; retain rejection of non-integers and values outside the safe-integer range |
+| Generic Render `data` keys may be empty strings | `render-codec.ts` Patch delta accepts empty keys, but `RenderManager.validateDelta()` rejects empty keys for data `set` and `remove` | Use minimum length 0 for data set/remove keys, matching full Snapshot and wire codec; attrs keys remain non-empty |
+| Protocol identity / tag / Event / attrs strings have semantic Unicode and non-empty rules, but no protocol-level byte maximum | `render-codec.ts` and `RenderManager` still contain fixed per-string maxima such as 128 / 256 / 4096 bytes | Remove fixed protocol accept/reject maxima; keep required non-empty / Unicode-scalar semantics and bound aggregate resource use through local message, queue, candidate and serialization budgets |
+| Generic data shape is plain JSON; its key / member / array / nesting / payload limits are local resource policy | Authoring and codec paths still apply several fixed member/depth/byte caps | Enforce local budgets while traversing, cloning, applying or serializing; do not make the old numeric thresholds cross-implementation protocol rules |
+
+These are conformance corrections, not a wire-version change: message shape, identity model, ordering and commit semantics remain unchanged. The zIndex safe-integer range and empty-data-key behavior are already part of Render Update v1; the Runtime must implement them.
 ### 6.6 Bounded queues 与 retained work
 
 当前有三条彼此独立的队列边界，不能只依赖消息数量上限：
@@ -421,6 +433,9 @@ Map 专项 PR #134 负责：
 - [ ] RenderManager pending work 同时受 item count 与 retained-work budget 约束，计量不触发完整 Snapshot stringify。
 - [ ] local resource exhaustion 与 protocol-fatal / continuity failure 分开；PWA typed carrier cause、Codec parse-budget cause、RenderStore candidate-budget cause 均由 DataRuntime 映射为 local-fatal；inbound no-partial-commit + carrier retirement，outbound no-partial-send；RenderManager queue exhaustion 有独立 local diagnostic。
 - [ ] caller 在 RenderManager API 返回后修改原输入对象，不影响 retained state / pending publication；必要 clone + freeze 已与校验和计量融合。
+- [ ] zIndex 在 RenderManager 与 Codec 两端接受完整 signed-safe-integer 范围，拒绝范围外值；不再使用 int32。
+- [ ] generic data Patch set / remove 接受空字符串 key，与 Snapshot 和 wire Codec 一致；attrs key 仍保持非空。
+- [ ] protocol strings 不再因旧 128 / 256 / 4096 byte cap 被拒绝；aggregate local budgets 仍能阻止无界资源增长。
 - [ ] 普通小 Patch 不再完整 stringify 与本次操作无关的 Snapshot。
 - [ ] Data Codec 不再对同一 subtree 重复完整 traversal。
 - [ ] Renderer Store data-only Patch 不再无条件重新扫描全部未变化 data。
