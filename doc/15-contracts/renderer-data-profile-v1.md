@@ -1,10 +1,10 @@
 # Renderer ⇄ Subsystem Data Application Profile v1
 
 > 层级：正式契约 / Application Profile  
-> 状态：**Frozen / Not Implemented / Not Qualified**（原三-child Frozen baseline被ADR0037显式reopen并在 docs-only subject `4cbf620` 重新冻结为四-child `/1`）  
+> 状态：**Pre-release correction reopened / Not Implemented / Not Qualified**（四-child `/1` baseline 由 ADR0037 建立；common resource gate 由 ADR0039 再修订）  
 > 唯一目标 Profile identity：`loomrealm.renderer-data/1`；版本：1  
 > Composition：Data Connection v1 + User Input v1 + Render Update v1 + Viewport State v1  
-> 依赖：[Connection v1](./renderer-subsystem-data-connection-v1.md) · [Input v1](./user-input-v1.md) · [Render v1](./render-update-v1.md) · [Viewport v1](./viewport-state-v1.md)  
+> 依赖：[Connection v1](./renderer-subsystem-data-connection-v1.md) · [Input v1](./user-input-v1.md) · [Render v1](./render-update-v1.md) · [Viewport v1](./viewport-state-v1.md) · [ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md)  
 > Authority：[Control v1](./main-renderer-control-v1.md)；Conformance：[Profile v1 revision3](./renderer-data-profile-conformance-v1.md)；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)（部分更新ADR0025/0036）  
 > 受保护完整原文：[原三-child Profile v1 baseline](./renderer-data-profile-v1-previewport-baseline.md)；[范围修复/逐项继承](../30-implementation/viewport-scope-repair-2026-09-16.md)。最近复核：2026-09-16
 
@@ -40,7 +40,7 @@ Hostra WebSocket: one complete text message, binary forbidden
 PWA MessagePort: postMessage(string), structured clone/transfer仅Platform bootstrap
 ```
 
-Receiver MUST 在任何 child mutation 之前：unit 为 string→actual UTF-8 bytes≤1,048,576→existing Wire parseJsonText/representation→JSON container depth≤64→exact top-level type/role direction→child exact validation。不得先无界 buffer/parse。Unknown extra/malformed family/shape 均 fail closed；原 Input/Render 的 identifier/count/payload/structural limits 不修改，Profile 不建第二套 business limit。非法 application 值包括 undefined/BigInt/NaN/Infinity/ArrayBuffer/Blob/Port/host object/Function/Symbol/JSON-RPC Batch/一个 unit 多条；duplicate JSON keys 沿现有 Wire/ECMAScript JSON.parse observable，不另造 parser。Viewport 不能绕过通用 gate。
+Receiver MUST 在任何 child mutation 之前：unit 为 string→Wire JSON representation/parser→exact top-level type/role direction→child exact validation。Profile 不定义统一的 message byte 或 JSON depth 数值上限。每个 platform adapter/runtime MUST 在无界 buffering/parsing 之前实施有限的 local inbound resource budget；该预算属于实现/产品资源策略，不是跨实现 wire accept/reject threshold。budget exhaustion 属 local-resource-exhaustion，不得报告为 malformed peer；不得发生 child partial mutation，当前 carrier 必须终止以避免后续 state continuity 不明。Unknown extra/malformed family/shape 仍 fail closed。非法 application 值包括 undefined/BigInt/NaN/Infinity/ArrayBuffer/Blob/Port/host object/Function/Symbol/JSON-RPC Batch/一个 unit 多条；duplicate JSON keys 沿现有 Wire/ECMAScript JSON.parse observable，不另造 parser。Viewport 不能绕过通用 gate。
 
 ## 4. Exact namespace/direction
 
@@ -86,7 +86,7 @@ Viewport: current legal physical size fresh baseline, otherwise first legal samp
 
 ## 9. Terminal / failure / bounded work
 
-Carrier close/loss、common/profile violation、child invalid/explicit fatal、writer send failure、local mechanics fatal first-wins terminal 当前 Data peer：停止 ordinary 读写、queued sends settle once、local fatal best-effort close。Data unusable≠Runtime terminal/Frame unwind/Main InputTarget或 DataAuthority mutation/Renderer participant failure；若 authority 仍 current Platform 可另建 fresh paired carrier，Profile 不提供 reconnect API。Writer/child queues bounded，teardown 不永久阻塞；具体 `MAX_PENDING_SENDS` 属于 implementation，不升格为协议阈值。
+Carrier close/loss、protocol/profile violation、child invalid/explicit fatal、writer send failure、local resource exhaustion、local mechanics fatal first-wins terminal 当前 Data peer：停止 ordinary 读写、queued sends settle once、local fatal best-effort close。Resource exhaustion 必须以独立 local diagnostic 表达，不伪装为 peer protocol violation。Data unusable≠Runtime terminal/Frame unwind/Main InputTarget或 DataAuthority mutation/Renderer participant failure；若 authority 仍 current Platform 可另建 fresh paired carrier，Profile 不提供 reconnect API。Writer/child queues bounded，teardown 不永久阻塞；具体 capacity 属于 implementation/product resource policy，不升格为统一协议阈值。
 
 ## 10. Conformance and Freeze
 
