@@ -114,7 +114,7 @@ test("accepted events never retarget across A1 to B1 or A2", async () => {
   assert.deepEqual(sent.map((message) => message.data.sequence), [1], "A1 does not execute in A2");
 });
 
-test("lease replacement immediately frees pending capacity for the new activation", async () => {
+test("lease replacement clears stale pending Events for the new activation", async () => {
   const first = deferred();
   const sent = [];
   const target = peer(async (message) => {
@@ -177,7 +177,7 @@ test("target replacement and interest shrink fence queued work", async () => {
   assert.deepEqual(sent, [1, 4]);
 });
 
-test("source replacement eagerly frees capacity in every cross-Subsystem target queue", async () => {
+test("source replacement eagerly clears stale Events in every cross-Subsystem target queue", async () => {
   const first = deferred();
   const sent = [];
   const target = peer(async (message) => {
@@ -206,7 +206,7 @@ test("source replacement eagerly frees capacity in every cross-Subsystem target 
   assert.deepEqual(sent, [0, 999]);
 });
 
-test("a retired source RenderNode cannot occupy pending capacity for a current sibling", async () => {
+test("a retired source RenderNode is lazily discarded before a current sibling", async () => {
   const first = deferred();
   const sent = [];
   const target = peer(async (message) => {
@@ -231,28 +231,44 @@ test("a retired source RenderNode cannot occupy pending capacity for a current s
   assert.deepEqual(sent, [0, 999]);
 });
 
-test("Presentation queue exceeds historical 256 pending, stays FIFO, and uses one in-flight send", async () => {
+test("Presentation offer stays O(1) across 10k pending Events and drains FIFO with one in-flight send", async () => {
   const first = deferred();
+  const drained = deferred();
   const sent = [];
   let active = 0;
   let maxActive = 0;
+  let applicabilityChecks = 0;
   const target = peer(async (message) => {
     active += 1;
     maxActive = Math.max(maxActive, active);
     sent.push(message.data.sequence);
     if (message.data.sequence === 0) await first.promise;
     active -= 1;
+    if (message.data.sequence === 10_000) drained.resolve();
     return { kind: "sent" };
   });
-  const gate = new PresentationFrameGate(() => true);
+  const gate = new PresentationFrameGate(() => {
+    applicabilityChecks += 1;
+    return true;
+  });
   gate.setControl(snapshot());
   gate.installData("game", target);
   gate.replaceInterest("game", target, interest());
-  for (let sequence = 0; sequence < 300; sequence += 1) gate.offer(event(target, { sequence }));
+  for (let sequence = 0; sequence <= 10_000; sequence += 1) gate.offer(event(target, { sequence }));
   assert.deepEqual(sent, [0]);
+  assert.equal(applicabilityChecks, 10_002, "offer checks only the new Event; the first Event is rechecked for send");
   first.resolve();
-  for (let attempt = 0; attempt < 20 && sent.length < 300; attempt += 1) await turn();
-  assert.equal(sent.length, 300);
-  assert.deepEqual(sent, Array.from({ length: 300 }, (_, index) => index));
+  await drained.promise;
+  assert.equal(sent.length, 10_001);
+  assert.deepEqual(sent, Array.from({ length: 10_001 }, (_, index) => index));
+  assert.equal(applicabilityChecks, 20_002, "dequeue rechecks each retained Event exactly once");
   assert.equal(maxActive, 1);
+  console.log("PRESENTATION_QUEUE_COMPLEXITY", JSON.stringify({
+    enqueueOperations: 10_001,
+    applicabilityChecksBeforeRelease: 10_002,
+    queueWideOfferScans: 0,
+    totalApplicabilityChecks: applicabilityChecks,
+    maxPhysicalSendConcurrency: maxActive,
+    delivered: sent.length,
+  }));
 });

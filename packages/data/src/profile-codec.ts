@@ -10,8 +10,10 @@ import {
 import { validateViewportState } from "./viewport-codec.js";
 import { validatePresentationEvent, validatePresentationInterest } from "./presentation-codec.js";
 import {
+  DataProtocolError,
   fail,
   object,
+  scalarString,
   stringValue,
 } from "./validation-common.js";
 
@@ -50,6 +52,18 @@ function validateByType(raw: unknown): RendererDataMessageV3 {
   fail(protocolFamilyOfType(type), "unknown data message type");
 }
 
+function familyOfParsedRoot(root: JsonValue): DataProtocolFamily {
+  if (root === null || typeof root !== "object" || Array.isArray(root)) return "profile";
+  const type = (root as Readonly<Record<string, JsonValue>>).type;
+  return typeof type === "string" ? protocolFamilyOfType(type) : "profile";
+}
+
+function scalarVisitor(protocol: DataProtocolFamily) {
+  return (value: string): void => {
+    scalarString(value, protocol, "string", true);
+  };
+}
+
 function inboundAllowed(role: DataRole, type: string): boolean {
   return role === "subsystem"
     ? type === "viewport.state" || type === "presentation.event"
@@ -65,11 +79,21 @@ function outboundAllowed(role: DataRole, type: string): boolean {
 export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV3 {
   if (typeof raw !== "string") fail("profile", "carrier application unit must be string");
   let parsed: JsonValue;
+  let invalidScalar = false;
   try {
-    parsed = parseJsonText(raw);
+    parsed = parseJsonText(raw, (value) => {
+      if (invalidScalar) return;
+      try {
+        scalarString(value, "profile", "string", true);
+      } catch (cause) {
+        if (!(cause instanceof DataProtocolError)) throw cause;
+        invalidScalar = true;
+      }
+    });
   } catch (cause) {
     fail("profile", `invalid JSON: ${String(cause)}`);
   }
+  if (invalidScalar) fail(familyOfParsedRoot(parsed), "string has invalid Unicode scalar sequence");
   const message = validateByType(parsed);
   const t = (message as { type: string }).type;
   if (!inboundAllowed(role, t)) {
@@ -84,5 +108,5 @@ export function encodeForRole(message: RendererDataMessageV3, role: DataRole): s
   if (!outboundAllowed(role, t)) {
     fail(protocolFamilyOfType(t), "outbound direction invalid for role");
   }
-  return stringifyJson(validated as unknown as JsonValue);
+  return stringifyJson(validated as unknown as JsonValue, scalarVisitor(protocolFamilyOfType(t)));
 }

@@ -359,6 +359,36 @@ test("RenderDomain.update mutates existing node attrs/data/zIndex without a Snap
   assert.equal(after.children[0].key, "child");
 });
 
+test("large attrs/data remove uses one membership probe per current member", () => {
+  const memberCount = 10_000;
+  const removeCount = 5_000;
+  const attrs = Object.fromEntries(Array.from({ length: memberCount }, (_, index) => [`attr-${index}`, String(index)]));
+  const data = Object.fromEntries(Array.from({ length: memberCount }, (_, index) => [`data-${index}`, index]));
+  const manager = new RenderManager();
+  manager.enableUpdateMetricsForQualification();
+  const domain = manager.createDomain(state([node("root", [], "sprite", attrs, data)]));
+
+  domain.update({
+    nodes: [{
+      key: "root",
+      attrs: { remove: Array.from({ length: removeCount }, (_, index) => `attr-${index}`) },
+      data: { remove: Array.from({ length: removeCount }, (_, index) => `data-${index}`) },
+    }],
+  });
+
+  const qualification = manager.snapshotForQualification();
+  assert.equal(Object.keys(qualification.domains[0].state.roots[0].attrs).length, memberCount - removeCount);
+  assert.equal(Object.keys(qualification.domains[0].state.roots[0].data).length, memberCount - removeCount);
+  assert.equal(qualification.lastUpdate.deltaCurrentMembers, memberCount * 2);
+  assert.equal(qualification.lastUpdate.deltaRemovedMembers, removeCount * 2);
+  assert.equal(qualification.lastUpdate.deltaMembershipProbes, memberCount * 2);
+  console.log("RENDER_DELTA_COMPLEXITY", JSON.stringify({
+    currentMembers: qualification.lastUpdate.deltaCurrentMembers,
+    removedMembers: qualification.lastUpdate.deltaRemovedMembers,
+    membershipProbes: qualification.lastUpdate.deltaMembershipProbes,
+  }));
+});
+
 test("RenderDomain.update is local-atomic and distinguishes missing from explicit undefined", () => {
   const manager = new RenderManager();
   const domain = manager.createDomain(state([node("root", [], "sprite", { x: "1" }, { n: 1 })], 4));

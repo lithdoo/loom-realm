@@ -131,7 +131,10 @@ export class DataRuntime {
       const record = this.sendQueue[index];
       this.sendQueue[index] = undefined;
       if (record === undefined) continue;
-      if (this.sendHead > 1024 && this.sendHead * 2 > this.sendQueue.length) {
+      if (this.sendHead === this.sendQueue.length) {
+        this.sendQueue = [];
+        this.sendHead = 0;
+      } else if (this.sendHead * 2 >= this.sendQueue.length) {
         this.sendQueue = this.sendQueue.slice(this.sendHead);
         this.sendHead = 0;
       }

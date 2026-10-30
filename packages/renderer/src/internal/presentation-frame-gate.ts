@@ -103,7 +103,6 @@ export class PresentationFrameGate {
     const slot = this.slots.get(event.targetSubsystemKey);
     if (slot === undefined || slot.peer !== event.targetPeer || slot.retired) return;
     if (!this.effective(event.targetSubsystemKey, slot, event)) return;
-    this.pruneIneffective(event.targetSubsystemKey, slot);
     slot.queue.push(event);
     this.pump(event.targetSubsystemKey, slot);
   }
@@ -180,7 +179,10 @@ export class PresentationFrameGate {
       const event = slot.queue[index];
       slot.queue[index] = undefined;
       if (event === undefined) continue;
-      if (slot.queueHead > 1024 && slot.queueHead * 2 > slot.queue.length) {
+      if (slot.queueHead === slot.queue.length) {
+        slot.queue = [];
+        slot.queueHead = 0;
+      } else if (slot.queueHead * 2 >= slot.queue.length) {
         slot.queue = slot.queue.slice(slot.queueHead);
         slot.queueHead = 0;
       }

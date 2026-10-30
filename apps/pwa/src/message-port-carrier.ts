@@ -1,56 +1,26 @@
 import type { CarrierClosed, MessageCarrier } from "@loomrealm/foundation";
+import { FifoQueue } from "./fifo-queue.js";
 
 const CLOSE = "\u001eloomrealm.pwa.port.close/1";
 
 export function createMessagePortCarrier(port: MessagePort): MessageCarrier {
   if (port === null || typeof port !== "object" || typeof port.postMessage !== "function") throw new TypeError("Invalid MessagePort");
-  let queue: Array<string | undefined> = [];
-  let queueHead = 0;
-  let waiters: Array<((value: IteratorResult<string>) => void) | undefined> = [];
-  let waiterHead = 0;
+  const queue = new FifoQueue<string>();
+  const waiters = new FifoQueue<(value: IteratorResult<string>) => void>();
   let terminal: CarrierClosed | null = null;
   let settle!: (value: CarrierClosed) => void;
   const closed = new Promise<CarrierClosed>((resolve) => { settle = resolve; });
-  const dequeue = (): string | undefined => {
-    while (queueHead < queue.length) {
-      const index = queueHead++;
-      const value = queue[index];
-      queue[index] = undefined;
-      if (value === undefined) continue;
-      if (queueHead > 1024 && queueHead * 2 > queue.length) {
-        queue = queue.slice(queueHead);
-        queueHead = 0;
-      }
-      return value;
-    }
-    queue = [];
-    queueHead = 0;
-    return undefined;
-  };
-  const dequeueWaiter = (): ((value: IteratorResult<string>) => void) | undefined => {
-    while (waiterHead < waiters.length) {
-      const index = waiterHead++;
-      const waiter = waiters[index];
-      waiters[index] = undefined;
-      if (waiter !== undefined) return waiter;
-    }
-    waiters = [];
-    waiterHead = 0;
-    return undefined;
-  };
   const finish = (fact: CarrierClosed) => {
     if (terminal !== null) return;
     terminal = Object.freeze(fact);
     port.removeEventListener("message", onMessage);
     port.removeEventListener("messageerror", onError);
     for (;;) {
-      const waiter = dequeueWaiter();
+      const waiter = waiters.dequeue();
       if (waiter === undefined) break;
       waiter({ done: true, value: undefined });
     }
-    for (let index = queueHead; index < queue.length; index += 1) queue[index] = undefined;
-    queue = [];
-    queueHead = 0;
+    queue.clear();
     try { port.close(); }
     catch (cause) {
       terminal = Object.freeze({ kind: "lost", cause: new AggregateError([fact.kind === "lost" ? fact.cause : undefined, cause].filter((value) => value !== undefined), "MessagePort carrier close failed") });
@@ -60,8 +30,8 @@ export function createMessagePortCarrier(port: MessagePort): MessageCarrier {
   const onMessage = (event: MessageEvent<unknown>) => {
     if (event.data === CLOSE) { finish({ kind: "closed" }); return; }
     if (typeof event.data !== "string") { finish({ kind: "lost", cause: new TypeError("Non-string MessagePort unit") }); return; }
-    const waiter = dequeueWaiter();
-    if (waiter) waiter({ done: false, value: event.data }); else queue.push(event.data);
+    const waiter = waiters.dequeue();
+    if (waiter) waiter({ done: false, value: event.data }); else queue.enqueue(event.data);
   };
   const onError = (event: MessageEvent<unknown>) => finish({ kind: "lost", cause: event });
   port.addEventListener("message", onMessage);
@@ -87,10 +57,10 @@ export function createMessagePortCarrier(port: MessagePort): MessageCarrier {
           acquired = true;
           return Object.freeze({
             next(): Promise<IteratorResult<string>> {
-              const value = dequeue();
+              const value = queue.dequeue();
               if (value !== undefined) return Promise.resolve({ done: false, value });
               if (terminal !== null) return Promise.resolve({ done: true, value: undefined });
-              return new Promise((resolve) => waiters.push(resolve));
+              return new Promise((resolve) => waiters.enqueue(resolve));
             },
           });
         },

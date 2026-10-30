@@ -374,6 +374,7 @@ function validateDelta(
     throw new TypeError(`${label} is empty`);
   }
   const removed = new Set(remove ?? []);
+  if (remove !== undefined && removed.size !== remove.length) throw new TypeError(`${label} remove contains duplicates`);
   if (set !== undefined) {
     for (const key of Object.keys(set)) {
       if (removed.has(key)) throw new TypeError(`${label} set/remove overlap`);
@@ -385,44 +386,35 @@ function validateDelta(
   } as StringDelta | DataDelta;
 }
 
-function applyStringDelta(
-  current: Readonly<Record<string, string>>,
-  delta: StringDelta,
-): Readonly<Record<string, string>> {
-  const next = Object.create(null) as Record<string, string>;
-  for (const key of Object.keys(current)) {
-    if (delta.remove?.includes(key)) continue;
-    next[key] = current[key] as string;
-  }
-  if (delta.remove) {
-    for (const key of delta.remove) {
-      if (!hasOwn(current, key)) throw new TypeError("Delta removes missing member");
-    }
-  }
-  if (delta.set) {
-    for (const key of Object.keys(delta.set)) next[key] = delta.set[key] as string;
-  }
-  return Object.freeze(next);
+interface DeltaApplyMetrics {
+  currentMembers: number;
+  removedMembers: number;
+  membershipProbes: number;
 }
 
-function applyDataDelta(
-  current: JsonObject,
-  delta: DataDelta,
-): JsonObject {
-  const next = Object.create(null) as Record<string, JsonValue>;
+function applyRecordDelta<T extends string | JsonValue>(
+  current: Readonly<Record<string, T>>,
+  delta: { readonly set?: Readonly<Record<string, T>>; readonly remove?: readonly string[] },
+  metrics: DeltaApplyMetrics | null,
+): Readonly<Record<string, T>> {
+  const removed = new Set(delta.remove ?? []);
+  if (metrics !== null) metrics.removedMembers += removed.size;
+  const next = Object.create(null) as Record<string, T>;
   for (const key of Object.keys(current)) {
-    if (delta.remove?.includes(key)) continue;
-    next[key] = current[key] as JsonValue;
-  }
-  if (delta.remove) {
-    for (const key of delta.remove) {
-      if (!hasOwn(current, key)) throw new TypeError("Delta removes missing member");
+    if (metrics !== null) {
+      metrics.currentMembers += 1;
+      metrics.membershipProbes += 1;
     }
+    if (removed.has(key)) continue;
+    next[key] = current[key] as T;
   }
-  if (delta.set) {
-    for (const key of Object.keys(delta.set)) next[key] = delta.set[key] as JsonValue;
+  for (const key of removed) {
+    if (!hasOwn(current, key)) throw new TypeError("Delta removes missing member");
   }
-  return Object.freeze(next) as JsonObject;
+  if (delta.set !== undefined) {
+    for (const key of Object.keys(delta.set)) next[key] = delta.set[key] as T;
+  }
+  return Object.freeze(next);
 }
 
 interface MutableNode {
@@ -450,6 +442,9 @@ function applyCow(
   let pathVisits = 0;
   let changedDataMembers = 0;
   let reusedDataMembers = 0;
+  const deltaMetrics: DeltaApplyMetrics | null = collectMetrics
+    ? { currentMembers: 0, removedMembers: 0, membershipProbes: 0 }
+    : null;
   let roots = state.roots as RenderNode[];
   let rootsCopied = false;
 
@@ -500,10 +495,10 @@ function applyCow(
 
   for (const update of updates) {
     const node = ensurePath(update.key);
-    if (update.attrs !== undefined) node.attrs = applyStringDelta(node.attrs, update.attrs);
+    if (update.attrs !== undefined) node.attrs = applyRecordDelta(node.attrs, update.attrs, deltaMetrics);
     if (update.data !== undefined) {
       const previous = node.data;
-      node.data = applyDataDelta(previous, update.data);
+      node.data = applyRecordDelta(previous, update.data, deltaMetrics) as JsonObject;
       if (collectMetrics) {
         changedDataMembers += Object.keys(update.data.set ?? {}).length + (update.data.remove?.length ?? 0);
         for (const key of Object.keys(previous)) {
@@ -536,6 +531,9 @@ function applyCow(
       stringifyCalls: 0,
       changedDataMembers,
       reusedDataMembers,
+      deltaCurrentMembers: deltaMetrics?.currentMembers ?? 0,
+      deltaRemovedMembers: deltaMetrics?.removedMembers ?? 0,
+      deltaMembershipProbes: deltaMetrics?.membershipProbes ?? 0,
     }) : null,
   };
 }
@@ -585,6 +583,9 @@ export interface RenderUpdateQualificationMetrics {
   readonly stringifyCalls: number;
   readonly changedDataMembers: number;
   readonly reusedDataMembers: number;
+  readonly deltaCurrentMembers: number;
+  readonly deltaRemovedMembers: number;
+  readonly deltaMembershipProbes: number;
 }
 
 export class RenderManager {
@@ -870,7 +871,10 @@ export class RenderManager {
       if (work.kind === "snapshot" && this.coalescibleSnapshots.get(work.domain) === work) {
         this.coalescibleSnapshots.delete(work.domain);
       }
-      if (this.workHead > 1024 && this.workHead * 2 > this.work.length) {
+      if (this.workHead === this.work.length) {
+        this.work = [];
+        this.workHead = 0;
+      } else if (this.workHead * 2 >= this.work.length) {
         this.work = this.work.slice(this.workHead);
         this.workHead = 0;
       }

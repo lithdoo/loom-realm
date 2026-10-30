@@ -396,6 +396,8 @@ Core不解释业务语义。
 
 Generic Render `data` object key 是允许空字符串的 Unicode scalar string，因为 Core 不增加业务 grammar。Framework 不限制 generic data 的 byte、member、array-element 或 nesting depth；应用 schema 与规模策略由 Developer/Product 拥有。
 
+Generic Render `data` 中的 nested string value 同样 MUST 是 valid Unicode scalar sequence。Codec 在最终 Wire parse/serialization traversal 内执行该语义检查，不另行扫描 generic subtree；Wire serializer 仍负责完整 representation reject-set。
+
 ---
 
 ## 7. Domain Stacking / zIndex

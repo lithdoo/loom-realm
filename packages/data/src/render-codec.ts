@@ -40,80 +40,8 @@ function attrs(raw: unknown): void {
   }
 }
 
-function renderJsonValue(raw: unknown): void {
-  const active = new WeakSet<object>();
-  const stack: Array<{ readonly value: unknown; readonly leave?: false } | { readonly value: object; readonly leave: true }> = [
-    { value: raw },
-  ];
-  while (stack.length > 0) {
-    const task = stack.pop();
-    if (task === undefined) break;
-    if (task.leave) {
-      active.delete(task.value);
-      continue;
-    }
-    const current = task.value;
-    if (typeof current === "string") {
-      scalarString(current, "render", "data string", true);
-    } else if (Array.isArray(current)) {
-      if (active.has(current)) fail("render", "cyclic data is not supported");
-      active.add(current);
-      stack.push({ value: current, leave: true });
-      let descriptors: PropertyDescriptorMap;
-      try {
-        descriptors = Object.getOwnPropertyDescriptors(current) as unknown as PropertyDescriptorMap;
-      } catch (cause) {
-        fail("render", `invalid data array: ${String(cause)}`);
-      }
-      const length = current.length;
-      let elements = 0;
-      for (const key of Reflect.ownKeys(descriptors)) {
-        if (key === "length") continue;
-        if (typeof key !== "string" || !/^(0|[1-9][0-9]*)$/.test(key)) {
-          fail("render", "data arrays cannot contain augmented members");
-        }
-        const index = Number(key);
-        const descriptor = descriptors[key];
-        if (!Number.isSafeInteger(index) || index < 0 || index >= length
-          || descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-          fail("render", "data arrays must be dense enumerable data properties");
-        }
-        elements += 1;
-        stack.push({ value: descriptor.value });
-      }
-      if (elements !== length) fail("render", "data arrays cannot be sparse");
-    } else if (current !== null && typeof current === "object") {
-      if (active.has(current)) fail("render", "cyclic data is not supported");
-      active.add(current);
-      stack.push({ value: current, leave: true });
-      let prototype: object | null;
-      let descriptors: PropertyDescriptorMap;
-      try {
-        prototype = Object.getPrototypeOf(current) as object | null;
-        descriptors = Object.getOwnPropertyDescriptors(current);
-      } catch (cause) {
-        fail("render", `invalid data object: ${String(cause)}`);
-      }
-      if (prototype !== Object.prototype && prototype !== null) {
-        fail("render", "data must contain only plain JSON objects");
-      }
-      for (const key of Reflect.ownKeys(descriptors)) {
-        if (typeof key !== "string") fail("render", "data cannot contain symbol members");
-        scalarString(key, "render", "data key", true);
-        const descriptor = descriptors[key];
-        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-          fail("render", "data members must be enumerable data properties");
-        }
-        stack.push({ value: descriptor.value });
-      }
-    }
-  }
-}
-
 function renderData(raw: unknown): JsonObject {
-  const value = object(raw, "render", "data");
-  renderJsonValue(value);
-  return value;
+  return object(raw, "render", "data");
 }
 
 function renderNode(raw: unknown, seen: Set<string>): void {
@@ -155,7 +83,6 @@ function stringDelta(raw: unknown, json: boolean): void {
     for (const k of keys) {
       if (json) {
         scalarString(k, "render", "data delta key", true);
-        renderJsonValue(s[k]);
       } else {
         scalarString(k, "render", "attrs delta key");
         scalarString(s[k], "render", "attrs delta value", true);

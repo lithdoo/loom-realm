@@ -60,6 +60,75 @@ test("Render strings keep scalar semantics without historical byte limits", asyn
   await harness.peer.close();
 });
 
+test("outbound Render generic data is inspected only by the final serialization traversal", async () => {
+  const harness = outboundHarness();
+  let ownKeyVisits = 0;
+  let prototypeVisits = 0;
+  const payload = new Proxy({
+    rows: Array.from({ length: 2_000 }, (_, index) => ({ index, label: `row-${index}` })),
+  }, {
+    ownKeys(target) {
+      ownKeyVisits += 1;
+      return Reflect.ownKeys(target);
+    },
+    getPrototypeOf(target) {
+      prototypeVisits += 1;
+      return Reflect.getPrototypeOf(target);
+    },
+  });
+
+  assert.deepEqual(await harness.peer.render.sendEvent({
+    type: "render.event",
+    domainId: "d",
+    targetKey: "root",
+    name: "tick",
+    data: { payload },
+  }), { kind: "sent" });
+  assert.equal(ownKeyVisits, 1);
+  assert.equal(prototypeVisits, 1);
+  assert.equal(harness.sent.length, 1);
+  console.log("RENDER_CODEC_TRAVERSAL", JSON.stringify({
+    genericRows: 2_000,
+    codecFullGenericTraversals: 0,
+    finalSerializationTraversals: 1,
+    instrumentedPayloadOwnKeyVisits: ownKeyVisits,
+    instrumentedPayloadPrototypeVisits: prototypeVisits,
+  }));
+  await harness.peer.close();
+});
+
+test("serialization still rejects invalid nested Render representation synchronously", async () => {
+  const harness = outboundHarness();
+  const sparse = [];
+  sparse.length = 1;
+  const cyclic = {};
+  cyclic.self = cyclic;
+  let getterCalls = 0;
+  const accessor = {};
+  Object.defineProperty(accessor, "value", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return 1;
+    },
+  });
+  const symbolic = {};
+  symbolic[Symbol("hidden")] = 1;
+
+  for (const value of [sparse, cyclic, accessor, symbolic, new Date(), NaN, undefined]) {
+    assert.throws(() => harness.peer.render.sendEvent({
+      type: "render.event",
+      domainId: "d",
+      targetKey: "root",
+      name: "tick",
+      data: { value },
+    }));
+  }
+  assert.equal(getterCalls, 0);
+  assert.deepEqual(await harness.peer.render.sendDomains({ type: "render.domains", domains: ["healthy"] }), { kind: "sent" });
+  await harness.peer.close();
+});
+
 test("Patch attrs and data Deltas exceed historical string and op limits", async () => {
   const harness = outboundHarness();
   const ops = Array.from({ length: 4_097 }, (_, index) => ({
@@ -102,7 +171,9 @@ test("invalid Render representation retires inbound Data before handler delivery
       onRenderEvent: () => { delivered += 1; return { kind: "accepted" }; },
     },
   });
-  assert.equal((await peer.terminal).kind, "protocol-fatal");
+  const terminal = await peer.terminal;
+  assert.equal(terminal.kind, "protocol-fatal");
+  assert.equal(terminal.protocol, "render");
   assert.equal(delivered, 0);
 });
 

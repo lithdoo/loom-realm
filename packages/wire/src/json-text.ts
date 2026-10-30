@@ -17,6 +17,7 @@ interface LeaveTask {
 }
 
 type SerializationTask = ValueTask | TextTask | LeaveTask;
+type JsonStringVisitor = (value: string) => void;
 
 function invalid(message: string): never {
   throw new WireValidationError(message);
@@ -29,7 +30,7 @@ function arrayIndex(key: string): number | null {
   return String(index) === key ? index : null;
 }
 
-function assertFiniteParsedNumbers(value: unknown): void {
+function assertParsedWireValues(value: JsonValue, visitString?: JsonStringVisitor): void {
   const stack: unknown[] = [value];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -37,18 +38,23 @@ function assertFiniteParsedNumbers(value: unknown): void {
       if (!Number.isFinite(current)) invalid("Expected a finite number");
       continue;
     }
+    if (typeof current === "string") {
+      visitString?.(current);
+      continue;
+    }
     if (current === null || typeof current !== "object") continue;
     if (Array.isArray(current)) {
       for (let index = 0; index < current.length; index += 1) stack.push(current[index]);
     } else {
       for (const key of Object.keys(current)) {
+        visitString?.(key);
         stack.push((current as Record<string, unknown>)[key]);
       }
     }
   }
 }
 
-export function parseJsonText(raw: string): JsonValue {
+export function parseJsonText(raw: string, visitString?: JsonStringVisitor): JsonValue {
   if (typeof raw !== "string") invalid("Expected a string");
   let parsed: unknown;
   try {
@@ -59,8 +65,9 @@ export function parseJsonText(raw: string): JsonValue {
   // JSON.parse already creates dense arrays, ordinary objects and enumerable
   // data properties. Overflowing numeric literals are its sole Wire-model
   // exception and therefore require one stack-safe representation pass.
-  assertFiniteParsedNumbers(parsed);
-  return parsed as JsonValue;
+  const value = parsed as JsonValue;
+  assertParsedWireValues(value, visitString);
+  return value;
 }
 
 function primitiveText(value: null | boolean | number | string): string {
@@ -69,7 +76,7 @@ function primitiveText(value: null | boolean | number | string): string {
   return JSON.stringify(value) as string;
 }
 
-export function stringifyJson(value: JsonValue): string {
+export function stringifyJson(value: JsonValue, visitString?: JsonStringVisitor): string {
   const output: string[] = [];
   const active = new WeakSet<object>();
   const stack: SerializationTask[] = [{ kind: "value", value }];
@@ -87,7 +94,12 @@ export function stringifyJson(value: JsonValue): string {
     }
 
     const current = task.value;
-    if (current === null || typeof current === "string" || typeof current === "boolean") {
+    if (typeof current === "string") {
+      visitString?.(current);
+      output.push(primitiveText(current));
+      continue;
+    }
+    if (current === null || typeof current === "boolean") {
       output.push(primitiveText(current));
       continue;
     }
@@ -149,6 +161,7 @@ export function stringifyJson(value: JsonValue): string {
       if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
         invalid("JSON object members must be enumerable data properties");
       }
+      visitString?.(key);
       members.push({ key, value: descriptor.value });
     }
 
