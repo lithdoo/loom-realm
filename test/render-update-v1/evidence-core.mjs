@@ -4,7 +4,7 @@ import {
   assertAccepted, assertFatal, baseline, chain, committedDomain, connectedSender,
   domains, event, expectAtomicFatal, expectInboundAccepted, expectInboundRejected,
   expectOutboundAccepted, expectOutboundRejected, flatNodes, newStore, node, patch,
-  settle, snapshot, state, terminalForRaw,
+  nestedData, settle, snapshot, state, terminalForRaw,
 } from "./helpers/render-fixtures.mjs";
 
 let verticalPromise;
@@ -26,30 +26,18 @@ export const wireEvidence = new Map([
   ["wire-invalid-json", () => expectInboundRejected("{", /invalid JSON/)],
   ["wire-unpaired-surrogate", () => expectInboundRejected('{"type":"render.domains","domains":["\\ud800"]}', /Unicode/)],
   ["wire-unknown-type", () => expectInboundRejected('{"type":"render.unknown"}', /unknown/)],
-  ["wire-extra-top-level-member", () => expectInboundRejected(JSON.stringify({ ...domains(), extra: true }), /closed schema/)],
-  ["wire-missing-required-member", () => expectInboundRejected(JSON.stringify({ type: "render.domains" }), /Missing required/)],
+  ["wire-extra-top-level-member", () => expectInboundRejected(JSON.stringify({ ...domains(), extra: true }), /closed schema|unknown member/)],
+  ["wire-missing-required-member", () => expectInboundRejected(JSON.stringify({ type: "render.domains" }), /missing required/i)],
   ["wire-wrong-member-type", () => expectInboundRejected(JSON.stringify({ type: "render.domains", domains: {} }), /array/)],
-  ["wire-message-exact-byte-limit", () => {
-    const base = JSON.stringify(domains());
-    const raw = `${base}${" ".repeat(1_048_576 - Buffer.byteLength(base))}`;
-    assert.equal(Buffer.byteLength(raw), 1_048_576);
-    assert.deepEqual(expectInboundAccepted(raw), domains());
+  ["wire-message-over-historical-byte-threshold-valid", () => {
+    const message = snapshot("d1", 1, [node("root", [], {}, { value: "x".repeat(1_048_576) })]);
+    const raw = JSON.stringify(message);
+    assert.ok(Buffer.byteLength(raw) > 1_048_576);
+    assert.equal(expectInboundAccepted(raw).roots[0].data.value.length, 1_048_576);
   }],
-  ["wire-message-one-byte-over", () => {
-    const base = JSON.stringify(domains());
-    const raw = `${base}${" ".repeat(1_048_577 - Buffer.byteLength(base))}`;
-    assert.equal(Buffer.byteLength(raw), 1_048_577);
-    expectInboundRejected(raw, /byte limit/);
-  }],
-  ["wire-json-depth-exact-limit", () => {
-    let raw = "null";
-    for (let index = 0; index < 64; index += 1) raw = `{"child":${raw}}`;
-    assert.throws(() => expectInboundAccepted(raw), (error) => !/depth limit/i.test(String(error)));
-  }],
-  ["wire-json-depth-one-over", () => {
-    let raw = "null";
-    for (let index = 0; index < 65; index += 1) raw = `{"child":${raw}}`;
-    expectInboundRejected(raw, /depth limit/);
+  ["wire-json-depth-over-historical-threshold-valid", () => {
+    const message = snapshot("d1", 1, [node("root", [], {}, { deep: nestedData(70) })]);
+    assert.equal(expectInboundAccepted(JSON.stringify(message)).roots[0].key, "root");
   }],
   ["wire-duplicate-source-member-follows-wire-jsonparse", () => assert.deepEqual(
     expectInboundAccepted('{"type":"render.unknown","type":"render.domains","domains":[]}'),
@@ -72,8 +60,7 @@ export const registryEvidence = new Map([
     assert.deepEqual(store.snapshotForQualification().domains.map(({ domainId }) => domainId), ["b", "c"]);
   }],
   ["registry-duplicate-domain-rejected", () => expectOutboundRejected(domains("d1", "d1"), /duplicate|canonical/)],
-  ["registry-exact-count-limit", () => expectOutboundAccepted(domains(...Array.from({ length: 256 }, (_, i) => `d${i}`)))],
-  ["registry-one-over-count-limit", () => expectOutboundRejected(domains(...Array.from({ length: 257 }, (_, i) => `d${i}`)), /limit/)],
+  ["registry-over-historical-count-threshold-valid", () => expectOutboundAccepted(domains(...Array.from({ length: 257 }, (_, i) => `d${i}`)))],
   ["domain-absent-present-absent", () => {
     const store = newStore(1, []);
     assertAccepted(store.onDomains(domains("d1")));
@@ -202,14 +189,13 @@ export const snapshotEvidence = new Map([
   ["snapshot-removal-consumes-key", () => { const store = baseline([node("once")]); assertAccepted(store.onSnapshot(snapshot("d1", 2, []))); assertFatal(store.onSnapshot(snapshot("d1", 3, [node("once")])), /Consumed/); }],
   ["same-generation-fresh-baseline-can-contain-still-live-key", () => { const store = baseline([node("live")]); store.retireCarrier(); store.beginCarrier(); assertAccepted(store.onDomains(domains("d1"))); assertAccepted(store.onSnapshot(snapshot("d1", 9, [node("live")]))); }],
   ["snapshot-invalid-tree-no-partial-commit", () => { const store = baseline(); expectAtomicFatal(store, () => store.onSnapshot(snapshot("d1", 2, [node("dup"), node("dup")])), /Duplicate/); }],
-  ["snapshot-exact-node-count-limit", () => assertAccepted(newStore().onSnapshot(snapshot("d1", 1, minimalNodes(16_384))))],
-  ["snapshot-one-over-node-count-limit", () => assertFatal(newStore().onSnapshot(snapshot("d1", 1, minimalNodes(16_385))), /count limit/)],
-  ["snapshot-exact-tree-depth-limit", () => assertAccepted(newStore().onSnapshot(snapshot("d1", 1, [chain(30)])))],
-  ["snapshot-one-over-tree-depth-limit", () => assertFatal(newStore().onSnapshot(snapshot("d1", 1, [chain(31)])), /depth limit/)],
-  ["zindex-min", () => assert.equal(expectInboundAccepted(JSON.stringify(snapshot("d1", 1, [], -2_147_483_648))).zIndex, -2_147_483_648)],
-  ["zindex-max", () => assert.equal(expectInboundAccepted(JSON.stringify(snapshot("d1", 1, [], 2_147_483_647))).zIndex, 2_147_483_647)],
-  ["zindex-below-min", () => expectInboundRejected(JSON.stringify(snapshot("d1", 1, [], -2_147_483_649)), /zIndex/)],
-  ["zindex-above-max", () => expectInboundRejected(JSON.stringify(snapshot("d1", 1, [], 2_147_483_648)), /zIndex/)],
+  ["snapshot-over-historical-node-count-valid", () => assertAccepted(newStore().onSnapshot(snapshot("d1", 1, minimalNodes(16_385))))],
+  ["snapshot-over-historical-tree-depth-valid", () => assertAccepted(newStore().onSnapshot(snapshot("d1", 1, [chain(31)])))],
+  ["zindex-signed-safe-min", () => assert.equal(expectInboundAccepted(JSON.stringify(snapshot("d1", 1, [], Number.MIN_SAFE_INTEGER))).zIndex, Number.MIN_SAFE_INTEGER)],
+  ["zindex-signed-safe-max", () => assert.equal(expectInboundAccepted(JSON.stringify(snapshot("d1", 1, [], Number.MAX_SAFE_INTEGER))).zIndex, Number.MAX_SAFE_INTEGER)],
+  ["zindex-unsafe-low-rejected", () => expectInboundRejected(JSON.stringify(snapshot("d1", 1, [], Number.MIN_SAFE_INTEGER - 1)), /zIndex/)],
+  ["zindex-unsafe-high-rejected", () => expectInboundRejected(JSON.stringify(snapshot("d1", 1, [], Number.MAX_SAFE_INTEGER + 1)), /zIndex/)],
+  ["zindex-outside-int32-inside-safe-valid", () => assert.equal(expectInboundAccepted(JSON.stringify(snapshot("d1", 1, [], 2_147_483_648))).zIndex, 2_147_483_648)],
   ["higher-zindex-above-lower", () => { const store = newStore(1, ["high", "low"]); assertAccepted(store.onSnapshot(snapshot("high", 1, [], 2))); assertAccepted(store.onSnapshot(snapshot("low", 1, [], 1))); assert.deepEqual(store.snapshotForQualification().logicalOrder, ["low", "high"]); }],
   ["same-zindex-domainid-utf8-lexical-tiebreak", () => { const store = newStore(1, ["é", "z"]); assertAccepted(store.onSnapshot(snapshot("é", 1, []))); assertAccepted(store.onSnapshot(snapshot("z", 1, []))); assert.deepEqual(store.snapshotForQualification().logicalOrder, ["z", "é"]); }],
   ["registry-order-not-stacking-order", () => { const store = newStore(1, ["high", "low"]); assertAccepted(store.onSnapshot(snapshot("high", 1, [], 2))); assertAccepted(store.onSnapshot(snapshot("low", 1, [], 1))); assert.deepEqual(store.snapshotForQualification().logicalOrder, ["low", "high"]); }],

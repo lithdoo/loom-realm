@@ -18,8 +18,19 @@ async function outbound(message, accepted, label = message.type) {
     binding: { carrier, subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/3" },
     handlers: { onViewportState: () => ({ kind: "accepted" }) },
   });
-  const outcome = await peer.render[methodFor(message)](message);
-  assert.equal(outcome.kind, accepted ? "sent" : "terminal", label);
+  let outcome = null;
+  let failure = null;
+  try {
+    outcome = await peer.render[methodFor(message)](message);
+  } catch (cause) {
+    failure = cause;
+  }
+  if (accepted) {
+    assert.equal(failure, null, label);
+    assert.equal(outcome?.kind, "sent", label);
+  } else {
+    assert.ok(failure instanceof Error, `${label}: invalid outbound must fail the current call`);
+  }
   assert.equal(sent.length, accepted ? 1 : 0);
   await peer.close();
 }
@@ -87,7 +98,7 @@ function applicationMessageBytes(target) {
 }
 
 export function registerHardLimitAudit() {
-  test("M11 Render hard-limit matrix proves exact, one-over, UTF-8, and inbound retirement", async () => {
+  test("M11 Render historical-cap matrix proves former thresholds no longer reject valid values", async () => {
     const utf8 = (bytes) => "é".repeat(bytes / 2);
     const update = (delta) => patch([{ op: "update", key: "root", ...delta }]);
     const cases = [
@@ -107,36 +118,39 @@ export function registerHardLimitAudit() {
       ["attrs key UTF-8 bytes", update({ attrs: { set: { [utf8(128)]: "" } } }), update({ attrs: { set: { [`${utf8(128)}a`]: "" } } })],
       ["attrs value UTF-8 bytes", update({ attrs: { set: { x: utf8(4096) } } }), update({ attrs: { set: { x: `${utf8(4096)}a` } } })],
       ["generic data key UTF-8 bytes", update({ data: { set: { [utf8(256)]: null } } }), update({ data: { set: { [`${utf8(256)}a`]: null } } })],
-      ["revision positive-safe", snapshot("d", Number.MAX_SAFE_INTEGER, []), snapshot("d", 0, [])],
     ];
     for (const [label, exact, over] of cases) {
-      await outbound(exact, true, `${label} exact outbound`);
+      await outbound(exact, true, `${label} historical boundary outbound`);
       await inbound(exact, true);
-      await outbound(over, false, `${label} one-over outbound`);
-      await inbound(over, false);
+      await outbound(over, true, `${label} over historical boundary outbound`);
+      await inbound(over, true);
       assert.ok(label.length > 0);
     }
-    for (const value of [-2_147_483_648, 2_147_483_647]) {
-      await outbound(snapshot("d", 1, [], value), true, `zIndex ${value} exact outbound`);
+    for (const value of [Number.MIN_SAFE_INTEGER, -2_147_483_649, 2_147_483_648, Number.MAX_SAFE_INTEGER]) {
+      await outbound(snapshot("d", 1, [], value), true, `zIndex ${value} signed-safe outbound`);
       await inbound(snapshot("d", 1, [], value), true);
     }
-    for (const value of [-2_147_483_649, 2_147_483_648]) {
-      await outbound(snapshot("d", 1, [], value), false, `zIndex ${value} outside outbound`);
+    for (const value of [Number.MIN_SAFE_INTEGER - 1, Number.MAX_SAFE_INTEGER + 1]) {
+      await outbound(snapshot("d", 1, [], value), false, `zIndex ${value} unsafe outbound`);
       await inbound(snapshot("d", 1, [], value), false);
     }
+    await outbound(snapshot("d", Number.MAX_SAFE_INTEGER, []), true, "revision positive-safe max outbound");
+    await inbound(snapshot("d", Number.MAX_SAFE_INTEGER, []), true);
+    await outbound(snapshot("d", 0, []), false, "revision zero outbound");
+    await inbound(snapshot("d", 0, []), false);
 
     const exactDepth = depthMessage(64);
     const overDepth = depthMessage(65);
     await outbound(exactDepth, true, "global JSON depth exact outbound");
     await inbound(exactDepth, true);
-    await outbound(overDepth, false, "global JSON depth one-over outbound");
-    await inbound(overDepth, false);
+    await outbound(overDepth, true, "global JSON depth over historical boundary outbound");
+    await inbound(overDepth, true);
 
     const exactApplicationMessage = applicationMessageBytes(1_048_576);
     const overApplicationMessage = applicationMessageBytes(1_048_577);
     await outbound(exactApplicationMessage, true, "application message bytes exact outbound");
     await inbound(exactApplicationMessage, true);
-    await outbound(overApplicationMessage, false, "application message bytes one-over outbound");
-    await inbound(overApplicationMessage, false);
+    await outbound(overApplicationMessage, true, "application message bytes over historical boundary outbound");
+    await inbound(overApplicationMessage, true);
   });
 }

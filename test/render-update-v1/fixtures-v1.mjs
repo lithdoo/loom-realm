@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 export const protocol = "loomrealm.render-update";
 export const protocolVersion = 1;
-export const fixtureSetRevision = 1;
+export const fixtureSetRevision = 2;
 
 const source = readFileSync(new URL("../../doc/15-contracts/render-update-conformance-v1.md", import.meta.url), "utf8");
 const sections = [...source.matchAll(/^## (\d+)\. .+$/gm)];

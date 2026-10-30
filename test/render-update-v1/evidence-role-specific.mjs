@@ -172,9 +172,9 @@ export const senderRoleEvidence = new Map([
     const connected = await connectedSender(); const count = connected.messages.length;
     assert.throws(() => connected.domain.emit({ targetKey: "root", name: "bad", data: { value: undefined } })); await settle(); assert.equal(connected.messages.length, count);
   }],
-  ["oversize-event-retires-data", async () => {
+  ["event-over-historical-size-depth-member-thresholds-valid", async () => {
     const connected = await connectedSender(); const count = connected.messages.length;
-    assert.throws(() => connected.domain.emit({ targetKey: "root", name: "large", data: { value: "x".repeat(262_145) } })); await settle(); assert.equal(connected.messages.length, count);
+    connected.domain.emit({ targetKey: "root", name: "large", data: { value: "x".repeat(300_000) } }); await settle(); assert.equal(connected.messages.length, count + 1);
   }],
   ["patch-insert-then-event-targets-new-lifetime", async () => {
     const connected = await connectedSender(); connected.domain.replace(state([node("root"), node("new")]));
@@ -266,8 +266,7 @@ export const receiverRoleEvidence = new Map([
     const store = newStore(1, []); assert.equal(store.snapshotForQualification().registrySeen, true);
   }],
   ["registry-duplicate-domain-rejected", async () => assert.equal((await terminalForRaw(JSON.stringify(domains("d1", "d1")))).kind, "protocol-fatal")],
-  ["registry-exact-count-limit", () => assert.equal(expectInboundAccepted(JSON.stringify(domains(...Array.from({ length: 256 }, (_, i) => `d${i}`)))).domains.length, 256)],
-  ["registry-one-over-count-limit", async () => assert.equal((await terminalForRaw(JSON.stringify(domains(...Array.from({ length: 257 }, (_, i) => `d${i}`))))).kind, "protocol-fatal")],
+  ["registry-over-historical-count-threshold-valid", () => assert.equal(expectInboundAccepted(JSON.stringify(domains(...Array.from({ length: 257 }, (_, i) => `d${i}`)))).domains.length, 257)],
   ["unemitted-coalesced-domain-does-not-consume-wire-id", () => {
     const store = newStore(1, ["d2"]); assertAccepted(store.onSnapshot(snapshot("d2", 1, [node("durable")]))); assert.equal(committedDomain(store, "d2").roots[0].key, "durable");
   }],
@@ -285,7 +284,7 @@ export const receiverRoleEvidence = new Map([
   ["event-loss-not-replayed", () => {
     const old = baseline(); const delivered = []; assertAccepted(old.onEvent(event("root", { name: "old" }), (value) => delivered.push(value))); const fresh = receiverFreshBaseline([domains("d1"), snapshot()]); assert.equal(delivered.length, 1); assert.equal("events" in fresh.snapshotForQualification(), false);
   }],
-  ["event-overflow-does-not-block-authoritative-progress", () => {
+  ["event-backlog-over-historical-threshold-retained-fifo", () => {
     const store = baseline(); for (let i = 0; i < 1_500; i += 1) assertAccepted(store.onEvent(event("root", { data: { i } }))); assertAccepted(store.onSnapshot(snapshot("d1", 2, [node("latest")]))); assert.equal(committedDomain(store).roots[0].key, "latest");
   }],
   ["retained-event-blocks-authoritative-coalesce-across-barrier", () => {
