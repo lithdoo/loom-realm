@@ -40,47 +40,38 @@ function globalDepthMessage(target) {
   throw new Error(`Cannot construct Render message at JSON depth ${target}`);
 }
 
-test("Render JSON keys use UTF-8 limits and every string is a Unicode scalar sequence", async () => {
-  const exact = outboundHarness();
-  assert.deepEqual(await exact.peer.render.sendSnapshot({
+test("Render strings keep scalar semantics without historical byte limits", async () => {
+  const harness = outboundHarness();
+  assert.deepEqual(await harness.peer.render.sendSnapshot({
     type: "render.snapshot", domainId: "d", revision: 1, zIndex: 0,
-    roots: [renderNode({ ["é".repeat(128)]: "😀" })],
+    roots: [renderNode({ ["é".repeat(1024)]: "😀", payload: "x".repeat(300_000) })],
   }), { kind: "sent" });
-  assert.equal(exact.sent.length, 1);
-  await exact.peer.close();
+  assert.equal(harness.sent.length, 1);
 
   for (const data of [
-    { ["é".repeat(129)]: true },
     { value: "\ud800" },
     { nested: ["\udc00"] },
   ]) {
-    const invalid = outboundHarness();
-    const outcome = await invalid.peer.render.sendEvent({
+    assert.throws(() => harness.peer.render.sendEvent({
       type: "render.event", domainId: "d", targetKey: "root", name: "tick", data,
-    });
-    assert.equal(outcome.kind, "terminal");
-    assert.equal(outcome.terminal.kind, "local-fatal");
-    assert.equal(invalid.sent.length, 0);
+    }), /Unicode/);
   }
+  assert.deepEqual(await harness.peer.render.sendDomains({ type: "render.domains", domains: ["healthy"] }), { kind: "sent" });
+  await harness.peer.close();
 });
 
-test("Patch attrs and data Delta boundaries fail before carrier emission", async () => {
-  const messages = [
-    { attrs: { set: { ["é".repeat(65)]: "x" } } },
-    { attrs: { set: { x: "\ud800" } } },
-    { data: { set: { ["é".repeat(129)]: 1 } } },
-    { data: { set: { x: "\ud800" } } },
-    { data: { remove: ["é".repeat(129)] } },
-  ];
-  for (const delta of messages) {
-    const invalid = outboundHarness();
-    const outcome = await invalid.peer.render.sendPatch({
-      type: "render.patch", domainId: "d", baseRevision: 1, revision: 2,
-      ops: [{ op: "update", key: "root", ...delta }],
-    });
-    assert.equal(outcome.kind, "terminal");
-    assert.equal(invalid.sent.length, 0);
-  }
+test("Patch attrs and data Deltas exceed historical string and op limits", async () => {
+  const harness = outboundHarness();
+  const ops = Array.from({ length: 4_097 }, (_, index) => ({
+    op: "update", key: `node-${index}-${"k".repeat(160)}`,
+    attrs: { set: { ["a".repeat(160)]: "v".repeat(5_000) } },
+    data: { set: { ["é".repeat(300)]: index } },
+  }));
+  assert.deepEqual(await harness.peer.render.sendPatch({
+    type: "render.patch", domainId: "d", baseRevision: 1, revision: 2, ops,
+  }), { kind: "sent" });
+  assert.equal(harness.sent.length, 1);
+  await harness.peer.close();
 });
 
 test("invalid Render representation retires inbound Data before handler delivery", async () => {
@@ -115,10 +106,9 @@ test("invalid Render representation retires inbound Data before handler delivery
   assert.equal(delivered, 0);
 });
 
-test("outbound preflight rejects a global JSON depth over 64 before carrier emission", async () => {
-  const invalid = outboundHarness();
-  const outcome = await invalid.peer.render.sendSnapshot(globalDepthMessage(65));
-  assert.equal(outcome.kind, "terminal");
-  assert.equal(outcome.terminal.kind, "local-fatal");
-  assert.equal(invalid.sent.length, 0);
+test("outbound accepts valid global JSON depth over the historical 64 cap", async () => {
+  const harness = outboundHarness();
+  assert.deepEqual(await harness.peer.render.sendSnapshot(globalDepthMessage(65)), { kind: "sent" });
+  assert.equal(harness.sent.length, 1);
+  await harness.peer.close();
 });

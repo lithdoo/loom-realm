@@ -150,6 +150,22 @@ test("writer pending operations settle exactly once on terminal", async () => {
   assert.equal(results.filter((result) => result.kind === "terminal").length, 2);
 });
 
+test("controlled backlog exceeds the historical 1024 threshold without admission failure", async () => {
+  const carrier = createWriterCarrier();
+  carrier.holdSend();
+  const subsystem = createSubsystemDataPeer({ binding: binding(carrier), handlers });
+  const operations = Array.from({ length: 1_100 }, (_, index) =>
+    subsystem.render.sendDomains({ type: "render.domains", domains: [`d${index}`] }));
+  await waitFor(() => carrier.maxActive === 1);
+  assert.equal(subsystem.peekTerminal?.(), undefined);
+  carrier.closeNow();
+  carrier.releaseSend();
+  const results = await Promise.all(operations);
+  assert.equal(results[0].kind, "sent");
+  assert.equal(results.slice(1).every((result) => result.kind === "terminal"), true);
+  assert.equal((await subsystem.terminal).kind, "carrier-closed");
+});
+
 test("carrier.send reject with a kind object is carrier-lost and matches peer.terminal", async () => {
   let resolveClosed;
   const closed = new Promise((resolve) => {

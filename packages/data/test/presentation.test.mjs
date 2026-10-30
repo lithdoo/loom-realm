@@ -69,22 +69,23 @@ test("presentation interest and events share the v3 DataRuntime writer in opposi
   await right.terminal;
 });
 
-test("presentation.event accepts the public Web Presentation depth above the generic payload default", async () => {
+test("presentation.event exceeds historical depth, byte, and identity thresholds", async () => {
   const pair = createMemoryCarrierPair();
   const events = [];
   const left = subsystem(pair, events);
   const right = renderer(pair, []);
   let data = {};
-  for (let depth = 0; depth < 64; depth += 1) data = { child: data };
+  for (let depth = 0; depth < 80; depth += 1) data = { child: data };
+  data.payload = "x".repeat(300_000);
   const event = {
     type: "presentation.event",
-    sourceSubsystemKey: "world",
-    domainId: "hud",
-    targetKey: "controls",
-    frameId: "f1",
-    activationId: "a1",
-    channel: "controls.event",
-    name: "input.event",
+    sourceSubsystemKey: "world".repeat(100),
+    domainId: "hud".repeat(100),
+    targetKey: "controls".repeat(100),
+    frameId: "f1".repeat(100),
+    activationId: "a1".repeat(100),
+    channel: "controls.event".repeat(30),
+    name: "input.event".repeat(30),
     data,
   };
   assert.deepEqual(await right.presentation.sendEvent(event), { kind: "sent" });
@@ -94,7 +95,25 @@ test("presentation.event accepts the public Web Presentation depth above the gen
   await right.terminal;
 });
 
-test("presentation schemas are closed, canonical, bounded, and direction checked", async (t) => {
+test("presentation interest exceeds historical frame/channel/pair caps", async () => {
+  const pair = createMemoryCarrierPair();
+  const interests = [];
+  const left = subsystem(pair, []);
+  const right = renderer(pair, interests);
+  const frames = Array.from({ length: 129 }, (_, frameIndex) => ({
+    frameId: `frame-${String(frameIndex).padStart(3, "0")}`,
+    channels: Array.from({ length: 65 }, (_, channelIndex) =>
+      `channel-${String(channelIndex).padStart(3, "0")}-${"x".repeat(260)}`),
+  }));
+  assert.deepEqual(await left.presentation.sendInterest({ type: "presentation.interest", frames }), { kind: "sent" });
+  await turn();
+  assert.equal(interests[0].frames.length, 129);
+  assert.equal(interests[0].frames.reduce((count, frame) => count + frame.channels.length, 0), 8_385);
+  await left.close();
+  await right.terminal;
+});
+
+test("presentation schemas are closed, canonical, and direction checked", async (t) => {
   for (const [name, raw, protocol] of [
     ["unsorted frames", { type: "presentation.interest", frames: [
       { frameId: "z", channels: ["controls.event"] },
