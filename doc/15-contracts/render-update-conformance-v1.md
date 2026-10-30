@@ -529,7 +529,7 @@ Snapshot one-shot semantics
 Patch algebra/atomicity/no-op rules
 Event barrier/drop behavior
 zIndex order
-hard limits
+local resource-budget behavior
 application-unit encoding
 failure/recovery
 ```
