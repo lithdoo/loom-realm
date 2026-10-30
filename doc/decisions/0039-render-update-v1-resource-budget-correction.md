@@ -1,4 +1,4 @@
-# ADR 0039 — Render Update v1 Pre-release Resource-Budget Correction
+# ADR 0039 — Render Update v1 Local Resource-Budget Policy Correction
 
 > 状态：Accepted direction / Local resource-policy correction; implementation and qualification pending
 > 日期：2026-10-30
