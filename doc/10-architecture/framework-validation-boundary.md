@@ -3,7 +3,8 @@
 > 层级：系统架构 / Framework design principle
 > 状态：Proposed in PR #135；合并后成为 Current Architecture 准则
 > 决策：[ADR 0038 — Developer Authority and Minimal Runtime Enforcement](../decisions/0038-developer-authority-minimal-runtime-enforcement.md)
-> 关联：[系统架构总览](./system-overview.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[性能资格](../30-development/performance.md)
+> 关联：[系统架构总览](./system-overview.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[Renderer Data Profile `/3`](../15-contracts/renderer-data-profile-v3.md)、[性能资格](../30-development/performance.md)
+> 最近复核：2026-10-30
 
 ## 1. 核心原则
 
