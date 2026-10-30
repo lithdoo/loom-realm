@@ -1,6 +1,6 @@
 # Renderer Data Application Profile v3
 
-> 状态：Active / Normative / Frozen
+> 状态：Active / Normative / local resource-policy correction proposed in PR #135; implementation and qualification pending
 > Identity：`loomrealm.renderer-data/3`
 > 组成：Render Update v1 + Viewport State v1 + Frame-targeted Presentation Event v1
 > 历史 profile：[Renderer Data Profile v2](./renderer-data-profile-v2.md)
@@ -54,4 +54,4 @@ fresh carrier 不继承 Interest、队列或 in-flight publication。Subsystem �
 
 ## 4. Failure family
 
-Data protocol family 增加 `presentation`。well-formed 但 stale/ineligible 的 Frame Event 只丢弃；malformed JSON / unknown type / wrong direction / closed-schema violation 才使 current peer protocol-fatal。local inbound / candidate / retained-state / queue / outbound serialization budget exhaustion 属 `local-resource-exhaustion`，映射到现有 Data `local-fatal` terminal family：入站 no-partial-commit 并 retire 当前 carrier；出站不得发送部分 application unit。它不是 peer protocol violation，也不新增 wire message 或 `/4` identity。业务 handler throw/reject 仍在本地 role boundary 隔离，不得变成 Data local-fatal。
+Data protocol family 增加 `presentation`。well-formed 但 stale/ineligible 的 Frame Event 只丢弃；malformed JSON / unknown type / wrong direction / closed-schema violation 才使 current peer protocol-fatal。local inbound / candidate / retained-state / queue / outbound serialization budget exhaustion 属 `local-resource-exhaustion`，映射到现有 Data `local-fatal` terminal family：PWA Carrier / Codec 传递带类型的 resource-budget cause，DataRuntime 必须识别并映射为 local-fatal（不能误报为 carrier-lost 或 protocol-fatal）；入站 no-partial-commit 并 retire 当前 carrier；出站不得发送部分 application unit。RenderManager pending-work admission failure 由 Subsystem 本地诊断并 retire 当前 publication peer，不得归咎于远端 peer。它不是 peer protocol violation，也不新增 wire message 或 `/4` identity。业务 handler throw/reject 仍在本地 role boundary 隔离，不得变成 Data local-fatal。
