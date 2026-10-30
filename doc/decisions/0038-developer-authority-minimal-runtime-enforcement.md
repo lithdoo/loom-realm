@@ -31,7 +31,7 @@ LoomRealm 的框架职责应由 authority partition 决定：框架维护自己�
 - authority / identity / generation / revision / lifecycle；
 - candidate isolation、atomic commit 和 framework-owned consistency；
 - 明确的 resource-safety guards；
-- 当前 Frozen Contract 明确规定的 representation、hard limits 和 failure semantics。
+- 当前 Contract 明确规定的 representation、protocol invariants 和 failure semantics；numeric capacity thresholds 由显式 local resource budgets 管理。
 
 没有 framework owner / protocol obligation / resource-safety justification 的完整应用数据审查，不应进入默认热路径。
 
@@ -61,9 +61,11 @@ Catch 不能替代 bounded resource guard。外部输入、消息解析、序列
 - framework-owned tree/identity invariants；
 - Event ordering/drop/barrier 与 failure/recovery semantics。
 
-原先统一的 message/data/depth/member/node/tree numeric hard limits 已由 [ADR 0039](./0039-render-update-v1-resource-budget-correction.md) 授权在首次正式发布前修订为显式、有限、实现/产品级 local resource budgets。resource exhaustion 必须与 malformed peer/protocol violation 分开分类。PR #135 必须同步更新 Render Update v1、Renderer Data Profile v1、conformance fixtures 和 qualification requirements。
+原先统一的 message/data/depth/member/node/tree numeric thresholds 已由 [ADR 0039](./0039-render-update-v1-resource-budget-correction.md) 改为显式、有限的实现/产品级 local resource budgets；active [Renderer Data Profile `/3`](../15-contracts/renderer-data-profile-v3.md) 的 common gate 也须与此一致。resource exhaustion 必须与 malformed peer/protocol violation 分开分类。
 
-本次不是静默变更：它有独立 Accepted direction ADR、明确 pre-release compatibility gate、fixture revision 更新和重新 qualification。首次正式发布后，wire-observable semantics 变更仍须版本化。不能把“开发者拥有业务正确性”解释为可以绕过 protocol invariants 或 bounded resource safety。
+数值容量调整不改变 JSON representation、closed message schema、message direction、authority、identity、revision、Patch atomicity 或 Event semantics，因此不要求 Render Update v2 / Renderer Data Profile 新版本。旧实现可能仍有较小的本地容量，超出该容量的特定 workload 可能失败；这是 receiver capacity mismatch，不是 wire ABI incompatibility。Profile v1 的三-child → 四-child composition correction 仍按 ADR0037 独立处理，不能与 numeric budget change 混为一谈。
+
+首次正式发布后，真正的 wire-observable semantics 变更仍须版本化。不能把“开发者拥有业务正确性”解释为可以绕过 protocol invariants 或 bounded resource safety。
 
 ## 后果
 
