@@ -1,39 +1,39 @@
 {
-  "subject": "99fec490f6c5b3f2ffc9032c9dd6c5d17db9c6e6",
+  "subject": "0bec1c548f904b29ca5d6a2a4f839ce29847c43b",
   "route": "PokeMan Map 7 real PWA Worker → Data → Renderer → browser",
   "viewport": "1920x1080",
   "movements": 70,
   "projectionShifts": 2,
   "action": {
-    "p50Ms": 265.59999990463257,
-    "p95Ms": 270.7000000476837,
-    "p99Ms": 295.2000000476837,
-    "maxMs": 295.2000000476837,
+    "p50Ms": 265.09999990463257,
+    "p95Ms": 274.2000000476837,
+    "p99Ms": 298,
+    "maxMs": 298,
     "refreshCount": 2,
-    "refreshMaxMs": 295.2000000476837
+    "refreshMaxMs": 279.7000000476837
   },
   "browser": {
     "longTasks": [],
     "frameGaps": {
-      "count": 1228,
-      "over50": 0,
-      "maxMs": 33.400000000001455,
-      "p95Ms": 16.799999999995634
+      "count": 1222,
+      "over50": 1,
+      "maxMs": 66.79999999999927,
+      "p95Ms": 16.799999999999272
     },
     "tiles": 3049
   },
   "tasks": {
     "main": {
-      "count": 8409,
-      "longTasks": 0,
-      "maxMs": 48.346,
-      "p95Ms": 1.665
+      "count": 8132,
+      "longTasks": 1,
+      "maxMs": 78.946,
+      "p95Ms": 2.04
     },
     "worker": {
-      "count": 15657,
+      "count": 14988,
       "longTasks": 0,
-      "maxMs": 26.74,
-      "p95Ms": 0.38
+      "maxMs": 27.377,
+      "p95Ms": 0.443
     },
     "threads": [
       "Chrome_ChildIOThread",
@@ -54,69 +54,69 @@
     ]
   },
   "cpu": {
-    "sampledMicros": 37399755,
-    "validationPercent": 0.10143649336740307,
-    "stringifyPercent": 0.03696815660958207,
+    "sampledMicros": 37578541,
+    "validationPercent": 0.016160819016363622,
+    "stringifyPercent": 0.04857825640436653,
     "top": [
       {
         "name": "(idle) ",
-        "percent": 94.29304817638511
+        "percent": 92.44332822820343
       },
       {
         "name": "(program) ",
-        "percent": 4.8642243779404435
+        "percent": 6.226825038257871
       },
       {
         "name": "(garbage collector) ",
-        "percent": 0.09200060267774482
+        "percent": 0.1368467179180799
       },
       {
-        "name": "_drawDirtyAutotiles blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
-        "percent": 0.07567161870445407
+        "name": "_drawDirtyAutotiles blob:http://127.0.0.1:53530/1dae33bb-bc5d-4fe5-881b-41e5e174ff4b",
+        "percent": 0.10889991710960785
       },
       {
-        "name": "renderJsonValue http://127.0.0.1:64399/worker-runner.js",
-        "percent": 0.04979444384060805
+        "name": "assertMapViewData blob:http://127.0.0.1:53530/1dae33bb-bc5d-4fe5-881b-41e5e174ff4b",
+        "percent": 0.09855624783303854
       },
       {
-        "name": "_tickAccepted blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
-        "percent": 0.04911796882091875
+        "name": "_tickAccepted blob:http://127.0.0.1:53530/1dae33bb-bc5d-4fe5-881b-41e5e174ff4b",
+        "percent": 0.08055927450722475
       },
       {
-        "name": "renderJsonValue http://127.0.0.1:64399/window.js",
-        "percent": 0.04187995349167394
+        "name": "validTileTuple blob:http://127.0.0.1:53530/1dae33bb-bc5d-4fe5-881b-41e5e174ff4b",
+        "percent": 0.06821180204947286
       },
       {
-        "name": "assertMapViewData blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
-        "percent": 0.039518975458529074
+        "name": "receiveRenderData blob:http://127.0.0.1:53530/1dae33bb-bc5d-4fe5-881b-41e5e174ff4b",
+        "percent": 0.06696108824448506
       },
       {
-        "name": "_applyLayout blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
-        "percent": 0.037457464627776306
+        "name": "_paintSprite blob:http://127.0.0.1:53530/1dae33bb-bc5d-4fe5-881b-41e5e174ff4b",
+        "percent": 0.06414032945025726
       },
       {
-        "name": "receiveRenderData blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
-        "percent": 0.037187409382762
+        "name": "onMessage http://127.0.0.1:53530/worker-runner.js",
+        "percent": 0.061106683199861324
       },
       {
-        "name": "onMessage http://127.0.0.1:64399/worker-runner.js",
-        "percent": 0.03645211044831711
+        "name": "drawImage ",
+        "percent": 0.04783847249418225
       },
       {
-        "name": "stringifyJson http://127.0.0.1:64399/worker-runner.js",
-        "percent": 0.034813062278081765
-      },
-      {
-        "name": "_paintSprite blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
-        "percent": 0.024256843393760198
-      },
-      {
-        "name": "_autotileFrameDirty blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
-        "percent": 0.022711378724272393
+        "name": "stringifyJson http://127.0.0.1:53530/worker-runner.js",
+        "percent": 0.045733547771319806
       },
       {
         "name": " ",
-        "percent": 0.02121939034092603
+        "percent": 0.04035281731667017
+      },
+      {
+        "name": "_autotileFrameDirty blob:http://127.0.0.1:53530/1dae33bb-bc5d-4fe5-881b-41e5e174ff4b",
+        "percent": 0.038889216055514236
+      },
+      {
+        "name": "getImageData ",
+        "percent": 0.032648952496585754
       }
     ]
   }
