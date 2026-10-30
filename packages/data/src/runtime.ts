@@ -10,7 +10,6 @@ import type {
 import { DataProtocolError } from "./validation-common.js";
 import { decodeForRole, encodeForRole, protocolFamilyOfType, type DataRole } from "./profile-codec.js";
 
-const MAX_PENDING_SENDS = 1024;
 type Handler = (message: RendererDataMessageV3) => DataInboundDisposition | Promise<DataInboundDisposition>;
 
 function deferred<T>() {
@@ -41,7 +40,6 @@ export class DataRuntime {
   private readonly terminalDeferred = deferred<DataTerminal>();
   private terminalValue?: DataTerminal;
   private writer: Promise<void> = Promise.resolve();
-  private pendingSends = 0;
 
   constructor(
     private readonly carrier: MessageCarrier,
@@ -70,17 +68,10 @@ export class DataRuntime {
 
   async send(message: RendererDataMessageV3): Promise<DataSendOutcome> {
     if (this.terminalValue) return freeze({ kind: "terminal", terminal: this.terminalValue });
-    let text: string;
-    try { text = encodeForRole(message, this.role); }
-    catch (cause) {
-      const terminal = this.commit({ kind: "local-fatal", cause });
-      return freeze({ kind: "terminal", terminal });
-    }
-    if (this.pendingSends >= MAX_PENDING_SENDS) {
-      const terminal = this.commit({ kind: "local-fatal", cause: new Error("Data writer queue capacity exceeded") });
-      return freeze({ kind: "terminal", terminal });
-    }
-    this.pendingSends += 1;
+    // Encoding is a caller operation. A malformed value, getter/Proxy
+    // failure or JSON representation error rejects this call without retiring
+    // an otherwise healthy Data peer.
+    const text = encodeForRole(message, this.role);
     const operation = this.writer.then(async () => {
       if (this.terminalValue) throw this.terminalValue;
       await this.carrier.send(text);
@@ -88,10 +79,8 @@ export class DataRuntime {
     this.writer = operation.catch(() => undefined);
     try {
       await operation;
-      this.pendingSends -= 1;
       return freeze({ kind: "sent" });
     } catch (cause) {
-      this.pendingSends -= 1;
       const terminal =
         cause === this.terminalValue && this.terminalValue !== undefined
           ? this.terminalValue
