@@ -196,8 +196,8 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 
 改造方向：
 
-- Decode：在 `JSON.parse` 前对原始 carrier string 执行有限的 local inbound byte/work admission；该 raw-message budget 是解析前的主要硬边界。`JSON.parse` 后，尽量用一次 iterative traversal 合并 JSON representation、finite number / Unicode、depth/member 计量和 role-specific schema 检查。
-- 不要仅为提前拒绝深层 JSON，再对原始字符串增加一轮完整 depth pre-scan；这会在 JSON.parse 前额外增加 O(n) 工作。若某个 Host 的 threat model 确实要求 parse 前 depth rejection，应采用有实测收益的 bounded/streaming parser，而不是叠加第二次完整扫描。
+- Decode：在 `JSON.parse` 前执行有限的 local inbound raw-byte admission。若目标 Host 的 parser threat model 要求 parse 前限制 nesting/work，使用一个 lexical admission pass 同时计算 UTF-8 bytes 与 JSON structural depth，或采用 bounded/streaming parser；不得先计算 bytes 再单独增加第二轮 depth full scan。
+- `JSON.parse` 后，尽量用一次 iterative traversal 合并 JSON representation、finite number / Unicode、depth/member 计量和 role-specific schema 检查。若某个 Host 已证明其 native parser 在 raw-byte budget 下具有足够的有界行为，可以将 depth limit 留在该 post-parse traversal 中；parser work/depth 仍须有明确的 local budget。
 - `JSON.parse` 生成的 parser-owned JSON 不应被当成任意可执行 JavaScript 对象，再重复做 getter/proxy/accessor 审查；仍须保留必要的 JSON representation 与具体协议 Schema 检查。
 - Encode：对框架 envelope / 协议字段执行必要检查；在实际 bounded serializer 中完成可表示性检查和精确 byte accounting，不先完整 assert/depth walk 再 stringify。
 - stringifyJson 的 public contract 和 frozen compact JSON semantics 必须保持；不能通过 unchecked public serializer 逃避协议约束。
