@@ -658,15 +658,17 @@ export class RendererRenderStore {
     op: RenderPatchOpV1,
   ): void {
     if (op.op === "insert") {
-      const node = cloneNode(op.node);
-      const inserted = validateTree([node]);
-      for (const [key] of inserted) {
-        if (liveTags.has(key) || consumedKeys.has(key)) throw new Error("Inserted Render node key was already used");
+      const insertedTree = cloneTree([op.node]);
+      const node = insertedTree.roots[0];
+      if (node === undefined) throw new Error("Inserted Render node is missing");
+      for (const [key] of insertedTree.index.nodes) {
+        if (liveTags.has(key) || consumedKeys.has(key)) {
+          throw new Error("Inserted Render node key was already used");
+        }
       }
       const target = destination(roots, op.parentKey, op.beforeKey);
       target.container.splice(target.index, 0, node);
-      validateTree(roots);
-      for (const [key, insertedNode] of inserted) liveTags.set(key, insertedNode.tag);
+      for (const [key, insertedNode] of insertedTree.index.nodes) liveTags.set(key, insertedNode.tag);
       return;
     }
     if (op.op === "remove") {
@@ -679,29 +681,33 @@ export class RendererRenderStore {
         liveTags.delete(key);
         consumedKeys.add(key);
       }
-      validateTree(roots);
       return;
     }
     if (op.op === "move") {
-      if (op.beforeKey === op.key || op.parentKey === op.key) throw new Error("Render node cannot move relative to itself");
+      if (op.beforeKey === op.key || op.parentKey === op.key) {
+        throw new Error("Render node cannot move relative to itself");
+      }
       const found = findContainer(roots, op.key);
       if (found === null) throw new Error("Moved Render node is missing");
       const node = found.container[found.index];
       if (node === undefined) throw new Error("Moved Render node is missing");
       const subtree = new Set(collectKeys(node));
-      if (op.parentKey !== null && subtree.has(op.parentKey)) throw new Error("Render node cannot move under descendant");
-      if (op.beforeKey !== null && subtree.has(op.beforeKey)) throw new Error("Render node cannot move before its own subtree");
+      if (op.parentKey !== null && subtree.has(op.parentKey)) {
+        throw new Error("Render node cannot move under descendant");
+      }
+      if (op.beforeKey !== null && subtree.has(op.beforeKey)) {
+        throw new Error("Render node cannot move before its own subtree");
+      }
       found.container.splice(found.index, 1);
       const target = destination(roots, op.parentKey, op.beforeKey);
       target.container.splice(target.index, 0, node);
-      validateTree(roots);
       return;
     }
-    const tree = validateTree(roots);
-    const node = tree.get(op.key);
+    const found = findContainer(roots, op.key);
+    if (found === null) throw new Error("Updated Render node is missing");
+    const node = found.container[found.index];
     if (node === undefined) throw new Error("Updated Render node is missing");
     if (op.attrs !== undefined) applyDelta(node.attrs, op.attrs);
     if (op.data !== undefined) applyDelta(node.data, op.data);
-    validateTree(roots);
   }
 }
