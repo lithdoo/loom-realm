@@ -47,7 +47,7 @@ ADR 记录“为什么”；Current 可实现事实以 Architecture / Formal Con
 36. [ADR 0036：Viewport child 独立于 Input（Profile-v2 方案由 ADR0037 修订）](./0036-viewport-state-and-renderer-data-profile-v2.md)
 37. [ADR 0037：首次发布前直接修正 Profile v1，取消 v2 current 路线](./0037-direct-profile-v1-preimplementation-viewport-correction.md)
 38. [ADR 0038：Developer Authority and Minimal Runtime Enforcement](./0038-developer-authority-minimal-runtime-enforcement.md)
-39. [ADR 0039：Render Update v1 Local Resource-Budget Policy Correction](./0039-render-update-v1-resource-budget-correction.md)
+39. [ADR 0039：Render Update v1 首次发布前移除框架容量限制](./0039-render-update-v1-resource-budget-correction.md)
 
 ## Current supersession relationships
 
@@ -84,8 +84,8 @@ ADR0038
     Opt-in Strict Validation
 
 ADR0039
-    Render Update v1 numeric capacity → local resource-budget policy /
-    No wire ABI version bump / Conformance revision 2
+    Render Update v1 framework-owned numeric / queue caps removed /
+    same-identity correction only after compatibility gate / Conformance revision 2
 ```
 
 ADR0033 只在 RuntimeHosting composition process 本身是 Electron 的条件下成立；ADR0034 定义 canonical Desktop outer host ownership。ADR0035 只修正 existing-node Render author surface，不重开 Render Update wire semantics。ADR0037 取消 `/2` current 路线，采用 governed corrected `/1`。
@@ -137,7 +137,7 @@ ADR0038
 → Opt-in Strict Validation
 ```
 
-ADR0038 不允许静默修改 wire schema 或 protocol semantics。ADR0039 已将 numeric capacity thresholds 明确为 local resource budgets；仅放宽本地容量不要求 protocol migration / version bump。真正改变 message/schema/authority/ordering/revision/atomicity/recovery semantics 时，仍须独立 correction / versioning / qualification。
+ADR0038 不允许静默修改 wire schema 或 protocol semantics。ADR0039 明确删除 Render Update 与 Data Profile 中框架自行设定的容量阈值及容量触发的 drop；不以 local budget 替代。该修改会改变旧实现的 accept/reject/drop 行为，只有首次发布前兼容性核查通过才可保持同一 identity；否则必须 version/migrate。
 
 ### Game libraries / products
 
