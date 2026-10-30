@@ -829,7 +829,7 @@ export class RenderManager {
       this.pump();
       return;
     }
-    if (this.makeRoomForAuthoritative()) this.work.push({ kind: "registry", message });
+    this.work.push({ kind: "registry", message });
     this.pump();
   }
 
@@ -859,7 +859,7 @@ export class RenderManager {
     const work: Work = !baselined || kind === "snapshot" || ops === undefined
       ? { kind: "snapshot", domain, state }
       : { kind: "update", domain, state, ops, ...(zIndex === undefined ? {} : { zIndex }) };
-    if (this.makeRoomForAuthoritative()) this.work.push(work);
+    this.work.push(work);
     this.pump();
   }
 
@@ -869,51 +869,6 @@ export class RenderManager {
       if (item?.kind === "event" && item.domain === domain) return index;
     }
     return -1;
-  }
-
-  private makeRoomForAuthoritative(): boolean {
-    while (this.work.length >= MAX_PENDING_WORK) {
-      if (this.dropOldestEvent()) continue;
-      let candidate = -1;
-      for (let index = 0; index < this.work.length; index += 1) {
-        const item = this.work[index];
-        if (item === undefined || !isStateWork(item)) continue;
-        const later = this.work.slice(index + 1).some((entry) => isStateWork(entry) && entry.domain === item.domain);
-        if (later) {
-          candidate = index;
-          break;
-        }
-      }
-      if (candidate < 0) {
-        this.invalidateOldPeer(true);
-        return false;
-      }
-      const domain = (this.work[candidate] as StateWork).domain;
-      const indices: number[] = [];
-      for (let index = 0; index < this.work.length; index += 1) {
-        const item = this.work[index];
-        if (item !== undefined && isStateWork(item) && item.domain === domain) indices.push(index);
-      }
-      const lastIndex = indices[indices.length - 1];
-      if (lastIndex === undefined) {
-        this.invalidateOldPeer(true);
-        return false;
-      }
-      const last = this.work[lastIndex] as StateWork;
-      this.work[lastIndex] = { kind: "snapshot", domain, state: last.state };
-      for (let index = indices.length - 2; index >= 0; index -= 1) {
-        const removeAt = indices[index];
-        if (removeAt !== undefined) this.work.splice(removeAt, 1);
-      }
-    }
-    return this.peer !== null;
-  }
-
-  private dropOldestEvent(): boolean {
-    const index = this.work.findIndex((item) => item.kind === "event");
-    if (index < 0) return false;
-    this.work.splice(index, 1);
-    return true;
   }
 
   private invalidateOldPeer(closePeer: boolean): void {
