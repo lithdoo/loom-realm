@@ -3,7 +3,7 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策背景、取舍、current-v1 provenance 与 reopen 条件  
-> 最近复核：2026-10-09
+> 最近复核：2026-10-30
 
 ADR 记录“为什么”；Current 可实现事实以 Architecture / Formal Contract / Module / Development 为准。历史 ADR 不得覆盖后续 Accepted correction。
 
