@@ -1,0 +1,123 @@
+{
+  "subject": "99fec490f6c5b3f2ffc9032c9dd6c5d17db9c6e6",
+  "route": "PokeMan Map 7 real PWA Worker → Data → Renderer → browser",
+  "viewport": "1920x1080",
+  "movements": 70,
+  "projectionShifts": 2,
+  "action": {
+    "p50Ms": 265.59999990463257,
+    "p95Ms": 270.7000000476837,
+    "p99Ms": 295.2000000476837,
+    "maxMs": 295.2000000476837,
+    "refreshCount": 2,
+    "refreshMaxMs": 295.2000000476837
+  },
+  "browser": {
+    "longTasks": [],
+    "frameGaps": {
+      "count": 1228,
+      "over50": 0,
+      "maxMs": 33.400000000001455,
+      "p95Ms": 16.799999999995634
+    },
+    "tiles": 3049
+  },
+  "tasks": {
+    "main": {
+      "count": 8409,
+      "longTasks": 0,
+      "maxMs": 48.346,
+      "p95Ms": 1.665
+    },
+    "worker": {
+      "count": 15657,
+      "longTasks": 0,
+      "maxMs": 26.74,
+      "p95Ms": 0.38
+    },
+    "threads": [
+      "Chrome_ChildIOThread",
+      "Chrome_IOThread",
+      "Compositor",
+      "CrBrowserMain",
+      "CrGpuMain",
+      "CrRendererMain",
+      "DedicatedWorker thread",
+      "DevToolsPipeHandlerWriteThread",
+      "Gamepad polling thread",
+      "PerfettoTrace",
+      "ServiceWorker thread",
+      "ThreadPoolForegroundWorker",
+      "ThreadPoolServiceThread",
+      "VizCompositorThread",
+      "swapper"
+    ]
+  },
+  "cpu": {
+    "sampledMicros": 37399755,
+    "validationPercent": 0.10143649336740307,
+    "stringifyPercent": 0.03696815660958207,
+    "top": [
+      {
+        "name": "(idle) ",
+        "percent": 94.29304817638511
+      },
+      {
+        "name": "(program) ",
+        "percent": 4.8642243779404435
+      },
+      {
+        "name": "(garbage collector) ",
+        "percent": 0.09200060267774482
+      },
+      {
+        "name": "_drawDirtyAutotiles blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
+        "percent": 0.07567161870445407
+      },
+      {
+        "name": "renderJsonValue http://127.0.0.1:64399/worker-runner.js",
+        "percent": 0.04979444384060805
+      },
+      {
+        "name": "_tickAccepted blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
+        "percent": 0.04911796882091875
+      },
+      {
+        "name": "renderJsonValue http://127.0.0.1:64399/window.js",
+        "percent": 0.04187995349167394
+      },
+      {
+        "name": "assertMapViewData blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
+        "percent": 0.039518975458529074
+      },
+      {
+        "name": "_applyLayout blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
+        "percent": 0.037457464627776306
+      },
+      {
+        "name": "receiveRenderData blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
+        "percent": 0.037187409382762
+      },
+      {
+        "name": "onMessage http://127.0.0.1:64399/worker-runner.js",
+        "percent": 0.03645211044831711
+      },
+      {
+        "name": "stringifyJson http://127.0.0.1:64399/worker-runner.js",
+        "percent": 0.034813062278081765
+      },
+      {
+        "name": "_paintSprite blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
+        "percent": 0.024256843393760198
+      },
+      {
+        "name": "_autotileFrameDirty blob:http://127.0.0.1:64399/2748ec74-7c0f-456e-b704-20e2c62ef87d",
+        "percent": 0.022711378724272393
+      },
+      {
+        "name": " ",
+        "percent": 0.02121939034092603
+      }
+    ]
+  }
+}
