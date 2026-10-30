@@ -70,10 +70,11 @@ Strict Validation 可以提供 JSON representation、exact Schema、业务 valid
 
 ## 4. Ownership 与不可变性
 
-- 不得仅为了运行严格验证而默认深复制、深冻结所有应用数据。
-- Framework API 必须明确 caller 与 framework 的 ownership、mutation 和 snapshot semantics。
-- 如果 authority isolation 要求隔离输入，必须由 API 明确选择 ownership transfer、必要复制或约定的 immutable handoff。
-- Strict Validation 可以在 opt-in 模式检测违反约定的 mutation / shape 问题。
+- 不得把深复制 / 深冻结当作默认业务严格验证，但也不得为了性能删除必要的 authority / ownership isolation。
+- 当前 RenderManager authoring API 在异步 publication 前必须与 caller-owned input 脱离；API 返回后 caller mutation 不得改变 retained state、pending work 或 emitted message。
+- 将必要的 shape/type validation、detached clone、freeze 和 retained-state accounting 融合为一次遍历；ownership transfer 仅能由显式的新 API contract 定义，不能推定为现有 API 行为。
+- Renderer 收到的 JSON.parse object 已由 parser 创建；RenderStore 可在证明无外部别名后利用其 ownership，但仍必须通过 isolated candidate + atomic commit 保证 current state 不被失败 Patch 污染。
+- Strict Validation 可以在 opt-in 模式检测业务 mutation / shape 问题。
 - 缓存 metadata 只能用于它实际证明的内部计算或资源计量；metadata 不是业务正确性证明，也不是跨进程信任凭证。
 
 ## 5. 安全与资源边界
@@ -83,7 +84,7 @@ Strict Validation 可以提供 JSON representation、exact Schema、业务 valid
 - raw message byte gate before parse；
 - bounded serialization / byte accounting；
 - bounded queues and retained work；
-- protocol-defined collection / depth / identifier limits；
+- finite local resource budgets：raw inbound bytes / parser work、candidate growth、retained state、queue count + retained payload/work、outbound serialization bytes；这些是 Host / Product / Runtime policy，不是跨实现统一 wire limits；
 - operation-level candidate isolation and atomic commit。
 
 优先将检查融合到实际 parse、serialize、Patch operation 或 commit 中，而不是在实际工作前增加一轮完整扫描。
@@ -94,17 +95,16 @@ Strict Validation 可以提供 JSON representation、exact Schema、业务 valid
 
 本原则不允许静默修改正式契约，但正式契约本身可以在首次发布前通过明确的 correction 重新评估历史 numeric limits。
 
-当前 [Render Update v1](../15-contracts/render-update-v1.md) 保留 JSON representation、closed message schema、authority/identity/revision、Patch atomicity、framework structural invariants、failure/recovery semantics。原统一 hard limits 已由 [ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md) 修订为实现/产品级 local resource budgets。
+当前 [Render Update v1](../15-contracts/render-update-v1.md) 保留 JSON representation、closed message schema、authority/identity/revision、Patch atomicity、framework structural invariants、failure/recovery semantics；active [Renderer Data Profile `/3`](../15-contracts/renderer-data-profile-v3.md) 的 message set 与 direction 也保持不变。Numeric capacity 是本地资源策略，不是 wire ABI：移除或放宽固定 numeric threshold 不要求创建新 protocol/profile version，也不要求仅因旧实现存在较小容量就停止 same-identity correction。旧接收端仍可能拒绝超过其自身容量的负载；这是 workload capacity mismatch，应通过部署预算与目标负载管理，而不是伪装成 schema incompatibility。
 
-任何 pre-release correction 必须：
+任何正式契约修订仍须：
 
-1. 明确区分 framework invariant、protocol interoperability 与 local resource-safety policy；
-2. 提交独立 Accepted ADR / contract correction；
-3. 评估旧 peer、部署 cohort、accept/reject、failure、recovery 和 migration；
-4. 更新 conformance / tests；
-5. 按 qualification governance 重新判断受影响 subject。
+1. 明确区分 framework invariant、wire semantics 与 local resource-safety policy；
+2. 对真正改变 message schema、direction、authority、ordering、revision、atomicity 或 recovery semantics 的修改，提交独立 ADR / versioning plan；
+3. 对 local budget 修改更新实现配置、诊断和相关测试，不要求协议版本升级；
+4. 更新 conformance / qualification inputs，并按目标 Host/Product 重新验证容量与性能。
 
-首次正式发布后，wire-observable protocol changes 必须版本化；不得以实现优化 PR 或默认配置变更的方式静默修改已发布契约。
+首次正式发布后，wire-observable protocol semantics 变化必须版本化；本地资源预算调整不属于此类变化。
 
 ## 7. 设计审查清单
 
