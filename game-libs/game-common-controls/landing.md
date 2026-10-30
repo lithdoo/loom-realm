@@ -76,3 +76,5 @@ context.emitCustomEvent(
 ## 6. 后续能力提案（不属于输入迁移顺序）
 
 [game-controls-input 全屏控制遮罩层提案](./game-controls-input-fullscreen-overlay.md) 描述在现有统一 Select 长按后显示全屏控制遮罩层，并由用户通过真实按钮交互进入或退出浏览器全屏。该提案不修改冻结的 Controls ABI，也不属于上文三份输入迁移分册的实施顺序；文档状态为 Proposed / Design / Not Implemented。
+
+[game-controls-input CustomEvent 输入源提案](./game-controls-input-custom-source.md) 描述一个仅由 `game-controls-input` 组件自身监听的调试输入入口：CDP / Playwright 将完整按键状态作为 DOM CustomEvent 注入，组件内部把它并入现有 Keyboard / Gamepad Controls Machine，并继续只发布现有 `controls.state` / `controls.event`。该提案不向 Subsystem 暴露 CustomEvent，不增加频道或 ABI，也不包含代码实现；状态为 Proposed / Design / Not Implemented。
