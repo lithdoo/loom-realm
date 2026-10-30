@@ -1,14 +1,14 @@
 # Render Update Protocol v1 Conformance Profile
 
 > 层级：正式契约 / Conformance Profile  
-> 状态：Active / Normative / Frozen  
+> 状态：Active / Normative / Pre-release correction reopened  
 > Profile 版本：1  
-> fixtureSetRevision：1  
+> fixtureSetRevision：2  
 > 适用协议：`loomrealm.render-update / 1`  
-> 依赖：[Render Update Protocol v1](./render-update-v1.md)、[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)  
+> 依赖：[Render Update Protocol v1](./render-update-v1.md)、[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)、[ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md)  
 > 最近复核：2026-08-21
 
-本文定义 Frozen Render Update v1 如何被独立实现验证；与主协议冲突时以主协议为准。
+本文定义修订后 Render Update v1 的可观察语义与 conformance obligations；与主协议冲突时以主协议为准。
 
 ---
 
@@ -65,7 +65,7 @@ interface RenderUpdateFixtureDescriptorV1 {
     | "transport";
   readonly group:
     | "wire-schema"
-    | "limits"
+    | "resource-budget-policy"
     | "registry-lifecycle"
     | "baseline-revision"
     | "snapshot"
@@ -110,48 +110,19 @@ success → one atomic authoritative commit
 
 ---
 
-## 4. Frozen Hard Limits
+## 4. Protocol Invariants and Local Resource Budgets
 
-```text
-application message UTF-8 bytes        <= 1,048,576
-JSON container nesting depth           <= 64
-render.domains entries                 <= 256
-RenderNode count / Domain State        <= 16,384
-Render tree depth                      <= 30
-Patch operations                       <= 4,096
-attrs members / Node                   <= 256
-Render data array elements             <= 16,384
-Render data object members             <= 16,384
-Render data/event-data compact size    <= 262,144 UTF-8 bytes
-Render data relative container depth   <= 32
-```
+Protocol conformance 不再定义统一的 message byte、JSON depth、identifier length、collection count、tree depth、Patch op count、payload size 或 data nesting numeric caps。身份字符串必须非空且为 Unicode scalar strings；revision/baseRevision 为 positive safe integer；zIndex 为 signed safe integer。
 
-Strings：
+每个实现必须配置有限的 inbound/outbound message、parse work/depth、candidate memory、retained-state、operation、queue 等 local resource budgets，并在资源增长过程中 bounded enforcement。Conformance 验证：
 
-```text
-domainId            1..128 UTF-8 bytes
-Node key            1..128
-tag                 1..256
-Event name          1..128
-attrs member key    1..128
-attrs member value  0..4096
-generic data key    0..256
-```
+- budget exhaustion 不产生 partial commit；
+- inbound exhaustion 作为 local-resource-exhaustion 终止当前 carrier，不伪装成 peer protocol violation；
+- outbound exhaustion 不发送部分 application unit；
+- 同一操作路径不重复扫描无关 subtree；
+- 产品部署记录 sender/receiver 预算兼容性。
 
-`zIndex`：
-
-```text
--2,147,483,648 .. 2,147,483,647
-```
-
-每个 hard boundary至少验证：
-
-```text
-exactly-at → ACCEPT
-one-over   → REJECT + retire when inbound protocol message
-```
-
-UTF-8 fixtures必须覆盖多字节字符，防止 UTF-16 `.length` 实现错误。
+具体数字属于实现/产品 qualification input，不属于跨实现 wire conformance fixture。
 
 ---
 
@@ -171,10 +142,6 @@ wire-unknown-type
 wire-extra-top-level-member
 wire-missing-required-member
 wire-wrong-member-type
-wire-message-exact-byte-limit
-wire-message-one-byte-over
-wire-json-depth-exact-limit
-wire-json-depth-one-over
 wire-duplicate-source-member-follows-wire-jsonparse
 ```
 
@@ -223,8 +190,6 @@ fresh-carrier-first-render-message-domains
 registry-empty-valid
 registry-full-replacement-atomic
 registry-duplicate-domain-rejected
-registry-exact-count-limit
-registry-one-over-count-limit
 domain-absent-present-absent
 domain-present-present-same-lifetime
 emitted-domain-id-one-shot-within-generation
@@ -281,10 +246,6 @@ snapshot-previously-removed-key-reintroduced-rejected
 snapshot-removal-consumes-key
 same-generation-fresh-baseline-can-contain-still-live-key
 snapshot-invalid-tree-no-partial-commit
-snapshot-exact-node-count-limit
-snapshot-one-over-node-count-limit
-snapshot-exact-tree-depth-limit
-snapshot-one-over-tree-depth-limit
 ```
 
 ---
@@ -313,8 +274,6 @@ Required：
 
 ```text
 patch-no-partial-apply
-patch-exact-op-count-limit
-patch-one-over-op-count-limit
 patch-empty-ops-without-zindex-rejected
 patch-empty-ops-with-zindex-valid
 patch-zindex-only-commit
@@ -330,7 +289,7 @@ zIndex unchanged
 tree unchanged
 ```
 
-每个 op 后的 intermediate candidate也必须满足 hard structural limits。
+每个 op 按序应用并满足其自身前置条件；不得为固定 numeric cap 重扫全树。local resource budget 必须在实际 candidate growth 时受控；最终 candidate 满足 framework structural invariants。
 
 ---
 
@@ -348,8 +307,6 @@ insert-duplicate-key-rejected
 insert-key-seen-earlier-in-domain-lifetime-rejected
 insert-subtree-internal-duplicate-key-rejected
 insert-before-key-not-destination-sibling-rejected
-insert-over-intermediate-node-count-rejected
-insert-over-intermediate-tree-depth-rejected
 insert-then-later-op-targets-new-key
 ```
 
@@ -413,18 +370,7 @@ update-remove-missing-member-rejected
 update-key-not-allowed
 update-tag-not-allowed
 update-children-not-allowed
-attrs-exact-member-count-limit
-attrs-one-over-member-count-limit
-data-exact-size-limit
-data-one-byte-over-size-limit
-data-exact-relative-depth-limit
-data-one-over-relative-depth-limit
-data-array-exact-count-limit
-data-array-one-over-count-limit
-data-object-exact-member-count-limit
-data-object-one-over-member-count-limit
 generic-data-empty-key-valid
-generic-data-key-one-over-limit
 ```
 
 ---
@@ -440,7 +386,6 @@ wellformed-event-unknown-domain-dropped
 wellformed-event-after-domain-removal-dropped
 wellformed-event-stale-target-dropped
 malformed-event-retires-data
-oversize-event-retires-data
 patch-insert-then-event-targets-new-lifetime
 event-before-remove-targets-old-lifetime
 event-order-preserved
@@ -500,7 +445,6 @@ Required：
 protocol-invalid-json-retires-data
 protocol-unknown-type-retires-data
 protocol-closed-schema-violation-retires-data
-protocol-hard-limit-violation-retires-data
 continuity-domain-lifecycle-violation-retires-data
 continuity-patch-before-baseline-retires-data
 continuity-patch-base-mismatch-retires-data
@@ -590,4 +534,4 @@ application-unit encoding
 failure/recovery
 ```
 
-fixtureSetRevision 后续 MAY只增加“证明既有 Frozen v1 事实”的 coverage；不得借 fixture revision 改变 v1 semantics。
+fixtureSetRevision 2 是 ADR0039 授权的首次发布前 v1 correction：它移除固定 numeric hard-limit semantics，并增加 local resource-budget obligations。首次发布后不得借 fixture revision 改变已发布 wire semantics。
