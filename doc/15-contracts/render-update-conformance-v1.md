@@ -1,7 +1,7 @@
 # Render Update Protocol v1 Conformance Profile
 
 > 层级：正式契约 / Conformance Profile  
-> 状态：Active / Normative / local resource-budget correction pending implementation and qualification  
+> 状态：Proposed pre-release correction / implementation and qualification pending  
 > Profile 版本：1  
 > fixtureSetRevision：2  
 > 适用协议：`loomrealm.render-update / 1`  
@@ -65,7 +65,7 @@ interface RenderUpdateFixtureDescriptorV1 {
     | "transport";
   readonly group:
     | "wire-schema"
-    | "resource-budget-policy"
+    | "capacity-neutrality"
     | "registry-lifecycle"
     | "baseline-revision"
     | "snapshot"
@@ -110,32 +110,33 @@ success → one atomic authoritative commit
 
 ---
 
-## 4. Protocol Invariants and Local Resource Budgets
+## 4. Protocol Invariants and Capacity Neutrality
 
-Protocol conformance 不再定义统一的 message byte、JSON depth、identifier length、collection count、tree depth、Patch op count、payload size 或 data nesting numeric caps。身份字符串必须非空且为 Unicode scalar strings；revision/baseRevision 为 positive safe integer；zIndex 为 signed safe integer。
+Protocol conformance 不定义统一的 message byte、JSON depth、identifier byte length、collection count、tree depth、Patch operation count、payload size、queue count 或 retained-byte cap。身份字符串必须非空且为 Unicode scalar strings；revision/baseRevision 为 positive safe integer；zIndex 为 signed safe integer。
 
-每个实现必须配置有限的 inbound/outbound message、parse work/depth、candidate memory、retained-state、operation、queue 等 local resource budgets，并在资源增长过程中 bounded enforcement。Conformance 验证：
+框架不得仅因为输入超过历史实现数字或自行添加的容量阈值而拒绝有效消息。Revision 2 使用在 conformance harness 平台能够正常处理的代表性 fixture，覆盖超过旧阈值的有效输入：
 
-- budget exhaustion 不产生 partial commit；
-- inbound exhaustion 作为 local-resource-exhaustion 终止当前 carrier，不伪装成 peer protocol violation；
-- outbound exhaustion 不发送部分 application unit；
-- 同一操作路径不重复扫描无关 subtree；
-- 产品部署记录 sender/receiver 预算兼容性。
+- message UTF-8 bytes 超过历史 1 MiB；
+- JSON nesting depth 超过历史 64；
+- identity/tag/Event strings 超过历史 128 / 256 / 4096-byte thresholds；
+- Registry / Node count 超过历史 256 / 16384；
+- tree depth 超过历史 30；
+- Patch operations 超过历史 4096；
+- attrs / JSON members、array elements 超过历史 256 / 16384；
+- Render data 超过历史 256 KiB 和 relative depth 32。
 
-具体数字属于实现/产品 qualification input，不属于跨实现 wire conformance fixture。
+这些 fixture 只证明旧数字不再是 protocol rejection rule，不建立新的最大值。测试运行环境若因实际平台故障无法执行，记录为该环境的 execution failure，不得将其转化为协议级 numeric cap。
 
-Revision 2 必须包含以下 resource-budget fixtures：
+Conformance 继续验证：
 
-- inbound-resource-budget-exhaustion-no-partial-commit-and-retire;
-- inbound-resource-exhaustion-is-not-peer-protocol-violation;
-- outbound-resource-budget-exhaustion-no-partial-application-unit;
-- candidate-growth-budget-enforced-without-full-tree-preflight;
-- legacy-data-262144-byte-threshold-not-wire-reject-when-local-budget-allows;
-- legacy-node-16384-threshold-not-wire-reject-when-local-budget-allows;
-- legacy-tree-depth-30-threshold-not-wire-reject-when-local-budget-allows;
-- legacy-patch-4096-ops-threshold-not-wire-reject-when-local-budget-allows.
+- exact wire representation / closed schema；
+- authority、identity、lifecycle、revision continuity；
+- Patch operation preconditions、final structural invariants 与 atomic commit；
+- Event ordering、applicability、no replay；
+- 真实 serialization / local operation exception 不得伪装成 peer protocol violation；
+- queue capacity 不得成为框架拒绝或静默丢弃消息的理由。
 
----
+ResourceBudgetPolicy、ResourceBudgetExceeded、local-resource-exhaustion 和 sender/receiver budget compatibility 不属于本协议或 Conformance。
 
 ## 5. Wire / Closed Schema
 
@@ -302,7 +303,7 @@ zIndex unchanged
 tree unchanged
 ```
 
-每个 op 按序应用并满足其自身前置条件；不得为固定 numeric cap 重扫全树。local resource budget 必须在实际 candidate growth 时受控；最终 candidate 满足 framework structural invariants。
+每个 op 按序应用并满足其自身前置条件；不得为固定 numeric cap 重扫全树；最终 candidate 满足 framework structural invariants。
 
 ---
 
@@ -407,7 +408,7 @@ event-before-remove-targets-old-lifetime
 event-order-preserved
 event-not-coalesced
 event-loss-not-replayed
-event-overflow-does-not-block-authoritative-progress
+event-backlog-is-not-dropped-by-framework-capacity
 retained-event-blocks-authoritative-coalesce-across-barrier
 dropped-unemitted-event-releases-coalescing-barrier
 ```
@@ -494,7 +495,7 @@ domain-removal-discards-pending-unsent-domain-messages
 retained-event-is-coalescing-barrier
 no-ack-wait
 no-event-replay
-outbound-bounded-serialization-before-send
+outbound-single-pass-json-serialization-before-send
 ```
 
 Sender 本地产生非法 v1 message 是 implementation/programming failure；不得依赖 Renderer 宽容解析。
@@ -549,4 +550,4 @@ application-unit encoding
 failure/recovery
 ```
 
-fixtureSetRevision 2 记录 ADR0039 的 local resource-budget obligations：它移除跨实现固定 numeric hard-limit semantics，并增加 bounded local-budget、no-partial-commit / no-partial-send 与错误分类测试。Fixture revision 只版本化 conformance corpus，不是 wire protocol version；后续可随本地预算策略与实现资格要求演进，但不得借 fixture revision 改变 message schema、direction、authority、ordering、revision、atomicity 或其他 wire-observable semantics。
+fixtureSetRevision 2 记录 ADR0039 的首次发布前 capacity-cap correction。它移除框架人为的 numeric hard limits 与容量触发的 queue drop，并增加超过历史阈值的代表性有效 fixture、无容量触发丢弃、single-pass serialization、实际本地异常分类和 atomicity 测试。Fixture revision 只版本化 conformance corpus，不是 wire protocol version；不得借 fixture revision 改变 message schema、direction、authority、ordering、revision、atomicity 或其他 wire-observable semantics。
