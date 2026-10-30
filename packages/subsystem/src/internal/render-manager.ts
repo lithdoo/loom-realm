@@ -621,7 +621,6 @@ export class RenderManager {
 
   createDomain(initialState: RenderDomainState): RenderDomain {
     if (this.closed) throw new TypeError("RenderManager is closed");
-    if (this.domains.size >= MAX_DOMAINS) throw new RangeError("Render Domain limit exceeded");
     const validated = validateStateShape(initialState);
     const serial = this.nextSerial;
     this.nextSerial += 1n;
@@ -630,6 +629,10 @@ export class RenderManager {
       state: validated.state,
       liveKeys: validated.keys,
       consumedKeys: new Set(),
+      tags: validated.tags,
+      nodes: validated.nodes,
+      parents: validated.parents,
+      locations: validated.locations,
       closed: false,
     };
     this.domains.add(record);
@@ -691,16 +694,8 @@ export class RenderManager {
   private replace(domain: DomainRecord, state: RenderDomainState): void {
     this.requireLive(domain);
     const validated = validateStateShape(state);
-    const oldTags = new Map<string, string>();
-    const stack = [...domain.state.roots];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (node === undefined) continue;
-      oldTags.set(node.key, node.tag);
-      stack.push(...node.children);
-    }
     for (const key of validated.keys) {
-      const oldTag = oldTags.get(key) ?? null;
+      const oldTag = domain.tags.get(key) ?? null;
       const nextTag = validated.tags.get(key);
       if (oldTag !== null && oldTag !== nextTag) throw new TypeError("Live RenderNode tag cannot change");
       if (!domain.liveKeys.has(key) && domain.consumedKeys.has(key)) {
@@ -713,6 +708,10 @@ export class RenderManager {
     domain.liveKeys.clear();
     for (const key of validated.keys) domain.liveKeys.add(key);
     domain.state = validated.state;
+    domain.tags = validated.tags;
+    domain.nodes = validated.nodes;
+    domain.parents = validated.parents;
+    domain.locations = validated.locations;
     this.enqueueState(domain, "snapshot");
   }
 
@@ -729,15 +728,12 @@ export class RenderManager {
     }
     let zIndex: number | undefined;
     if (zIndexRaw !== undefined) {
-      if (!Number.isInteger(zIndexRaw)) throw new TypeError("zIndex must be an integer");
-      if ((zIndexRaw as number) < -2_147_483_648 || (zIndexRaw as number) > 2_147_483_647) {
-        throw new RangeError("zIndex limit exceeded");
-      }
+      if (!Number.isSafeInteger(zIndexRaw)) throw new TypeError("zIndex must be a signed safe integer");
       zIndex = zIndexRaw as number;
     }
     const nodes: ValidatedNodeUpdate[] = [];
     if (nodesRaw !== undefined) {
-      const list = denseArray(nodesRaw, MAX_NODE_OPS, "nodes");
+      const list = denseArray(nodesRaw, "nodes");
       const seen = new Set<string>();
       for (const item of list) {
         ownDataObject(item, "RenderNodeUpdate");
@@ -746,7 +742,7 @@ export class RenderManager {
             throw new TypeError("RenderNodeUpdate has invalid members");
           }
         }
-        const key = scalarString(optionalMember(item, "key", "RenderNodeUpdate.key"), 1, 128, "RenderNodeUpdate key");
+        const key = scalarString(optionalMember(item, "key", "RenderNodeUpdate.key"), false, "RenderNodeUpdate key");
         if (seen.has(key)) throw new TypeError("Duplicate RenderNodeUpdate key");
         seen.add(key);
         if (!domain.liveKeys.has(key)) throw new TypeError("Updated Render node is missing");
@@ -762,25 +758,16 @@ export class RenderManager {
         });
       }
     }
-    const nextState = applyCow(domain.state, zIndex ?? domain.state.zIndex, nodes);
-    probeLimit({
-      type: "render.snapshot",
-      domainId: PROBE_DOMAIN_ID,
-      revision: Number.MAX_SAFE_INTEGER,
-      zIndex: nextState.zIndex,
-      roots: nextState.roots,
-    }, "Render Snapshot");
+    const next = applyCow(
+      domain.state,
+      zIndex ?? domain.state.zIndex,
+      nodes,
+      domain.nodes,
+      domain.locations,
+    );
+    domain.state = next.state;
+    for (const [key, node] of next.clones) domain.nodes.set(key, node);
     const ops = toWireOps(nodes);
-    const patch: Record<string, unknown> = {
-      type: "render.patch",
-      domainId: PROBE_DOMAIN_ID,
-      baseRevision: Number.MAX_SAFE_INTEGER - 1,
-      revision: Number.MAX_SAFE_INTEGER,
-      ops,
-    };
-    if (zIndex !== undefined) patch.zIndex = zIndex;
-    probeLimit(patch, "Render Patch");
-    domain.state = nextState;
     this.enqueueState(domain, "update", ops, zIndex);
   }
 
@@ -789,9 +776,6 @@ export class RenderManager {
     const event = validateEventShape(raw);
     if (!domain.liveKeys.has(event.targetKey)) throw new TypeError("Stale Render Event target");
     if (this.peer === null) return;
-    if (this.work.length >= MAX_PENDING_WORK) {
-      if (!this.dropOldestEvent()) return;
-    }
     const cursor = this.cursors.get(domain);
     const baselined = cursor?.baselined === true;
     if (!baselined) {
