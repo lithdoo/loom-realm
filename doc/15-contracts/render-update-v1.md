@@ -11,7 +11,7 @@
 > 组合：[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)  
 > Conformance：[Render Update v1 Conformance Profile](./render-update-conformance-v1.md)  
 > 决策：[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md) · [ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md)  
-> 最近复核：2026-08-21
+> 最近复核：2026-10-30
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
