@@ -113,7 +113,8 @@ developer input
 
 - 不先执行完整 assertJsonValue/depth/byte scan，再重复 stringify。
 - 不计算一个框架 byte cap。
-- 序列化只执行一次；如果实际 serialization 遇到循环引用、不支持值或 getter/Proxy 异常，将真实异常返回给本次调用。
+- 使用单次 Wire JSON encoder：在生成输出的同一遍历中拒绝 Wire representation 不支持的值；不能依赖 JSON.stringify 静默省略 undefined/function/symbol，或把 NaN/Infinity 改写为 null。
+- 如果实际 serialization 遇到循环引用、getter/Proxy 或其他编码异常，将真实异常返回给本次调用；不得先完整 preflight，再重复 stringify。
 - 只有完整 application unit 生成后才能交给 carrier；不得发送部分 JSON。
 - carrier.send 实际失败按 transport failure 处理，不伪装成资源预算错误。
 
@@ -155,7 +156,7 @@ report the actual failure class
 - 保留既定 JSON wire representation 与错误语义。
 - 删除 raw-message byte cap、JSON depth cap 和为这些 cap 服务的 preflight。
 - 不在 stringify 前先完整 assertJsonValue/depth traversal，再执行第二次 stringify。
-- 使用单次实际 serialization 完成 JSON representation 处理与输出。
+- 使用单次 Wire JSON encoding，在输出过程中完成必要的 representation 检查；不得另做完整 preflight traversal。
 - Parse 使用既定 JSON.parse semantics；只保留 contract 真正要求的 representation 检查。
 - 不计算 UTF-8 byte length 作为框架拒绝条件。
 - 对同一对象图不得重复执行完整 traversal。
