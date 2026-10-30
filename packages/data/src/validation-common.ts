@@ -1,19 +1,5 @@
 import type { JsonObject, JsonValue } from "@loomrealm/wire";
-import {
-  assertExactKeys,
-  assertJsonArray,
-  assertJsonObject,
-  jsonDepth,
-  stringifyJson,
-  utf8ByteLength,
-} from "@loomrealm/wire";
 import type { DataProtocolFamily } from "./model.js";
-
-export const MAX_MESSAGE_BYTES = 1_048_576;
-export const MAX_JSON_DEPTH = 64;
-export const MAX_PAYLOAD_BYTES = 262_144;
-export const MAX_PAYLOAD_DEPTH = 32;
-export const MAX_CONTAINER_MEMBERS = 16_384;
 
 export class DataProtocolError extends Error {
   constructor(
@@ -33,37 +19,30 @@ export function stringValue(
   protocol: DataProtocolFamily,
   label: string,
 ): string {
-  if (typeof value !== "string") fail(protocol, `${label} must be string`);
+  if (typeof value !== "string") fail(protocol, label + " must be string");
   return value;
 }
 
-function validUnicodeScalarString(value: string): boolean {
-  for (let i = 0; i < value.length; i += 1) {
-    const c = value.charCodeAt(i);
-    if (c >= 0xd800 && c <= 0xdbff) {
-      const n = value.charCodeAt(i + 1);
-      if (!(n >= 0xdc00 && n <= 0xdfff)) return false;
-      i += 1;
-    } else if (c >= 0xdc00 && c <= 0xdfff) {
-      return false;
-    }
-  }
-  return true;
-}
-
-export function boundedString(
+export function scalarString(
   value: unknown,
   protocol: DataProtocolFamily,
   label: string,
-  min: number,
-  max: number,
+  allowEmpty = false,
 ): string {
   const text = stringValue(value, protocol, label);
-  if (!validUnicodeScalarString(text)) {
-    fail(protocol, `${label} has invalid Unicode scalar sequence`);
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = text.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        fail(protocol, label + " has invalid Unicode scalar sequence");
+      }
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      fail(protocol, label + " has invalid Unicode scalar sequence");
+    }
   }
-  const bytes = utf8ByteLength(text);
-  if (bytes < min || bytes > max) fail(protocol, `${label} byte length out of range`);
+  if (!allowEmpty && text.length === 0) fail(protocol, label + " must be non-empty");
   return text;
 }
 
@@ -73,39 +52,55 @@ export function positiveSafe(
   label: string,
 ): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) {
-    fail(protocol, `${label} must be positive safe integer`);
+    fail(protocol, label + " must be positive safe integer");
   }
   return value as number;
 }
 
-export function int32(
+export function signedSafe(
   value: unknown,
   protocol: DataProtocolFamily,
   label: string,
 ): number {
-  if (
-    !Number.isInteger(value) ||
-    (value as number) < -2147483648 ||
-    (value as number) > 2147483647
-  ) {
-    fail(protocol, `${label} must be int32`);
+  if (!Number.isSafeInteger(value)) {
+    fail(protocol, label + " must be signed safe integer");
   }
   return value as number;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Exact closed-schema validation for an already parsed or Wire-encoded
+ * application unit. JSON representation validation belongs to the Wire parse
+ * / encode boundary; this function deliberately inspects only this object's
+ * own schema instead of recursively rescanning all descendants.
+ */
 export function exact(
   value: unknown,
   required: readonly string[],
   optional: readonly string[],
   protocol: DataProtocolFamily,
 ): JsonObject {
-  try {
-    assertJsonObject(value);
-    assertExactKeys(value, required, optional);
-    return value;
-  } catch (cause) {
-    fail(protocol, `invalid closed schema: ${String(cause)}`);
+  if (!isPlainObject(value)) fail(protocol, "expected plain JSON object");
+  const allowed = new Set([...required, ...optional]);
+  for (const key of required) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) {
+      fail(protocol, "missing required member: " + key);
+    }
   }
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) fail(protocol, "unknown member: " + key);
+  }
+  return value as JsonObject;
 }
 
 export function array(
@@ -113,12 +108,8 @@ export function array(
   protocol: DataProtocolFamily,
   label: string,
 ): readonly JsonValue[] {
-  try {
-    assertJsonArray(value);
-    return value;
-  } catch {
-    fail(protocol, `${label} must be array`);
-  }
+  if (!Array.isArray(value)) fail(protocol, label + " must be array");
+  return value as readonly JsonValue[];
 }
 
 export function object(
@@ -126,46 +117,8 @@ export function object(
   protocol: DataProtocolFamily,
   label: string,
 ): JsonObject {
-  try {
-    assertJsonObject(value);
-    return value;
-  } catch {
-    fail(protocol, `${label} must be object`);
-  }
-}
-
-export function assertBoundedJson(
-  value: JsonValue,
-  protocol: DataProtocolFamily,
-  maxDepth = MAX_PAYLOAD_DEPTH,
-): void {
-  if (jsonDepth(value) > maxDepth) fail(protocol, "JSON depth limit exceeded");
-  const stack: JsonValue[] = [value];
-  while (stack.length) {
-    const current = stack.pop();
-    if (current === undefined || current === null || typeof current !== "object") continue;
-    if (Array.isArray(current)) {
-      if (current.length > MAX_CONTAINER_MEMBERS) fail(protocol, "array member limit exceeded");
-      for (const child of current) stack.push(child);
-    } else {
-      const keys = Object.keys(current);
-      if (keys.length > MAX_CONTAINER_MEMBERS) fail(protocol, "object member limit exceeded");
-      for (const key of keys) stack.push((current as JsonObject)[key] as JsonValue);
-    }
-  }
-}
-
-export function assertPayload(
-  payload: unknown,
-  protocol: DataProtocolFamily,
-  maxDepth = MAX_PAYLOAD_DEPTH,
-): JsonObject {
-  const result = object(payload, protocol, "payload");
-  assertBoundedJson(result, protocol, maxDepth);
-  if (utf8ByteLength(stringifyJson(result)) > MAX_PAYLOAD_BYTES) {
-    fail(protocol, "payload byte limit exceeded");
-  }
-  return result;
+  if (!isPlainObject(value)) fail(protocol, label + " must be plain object");
+  return value as JsonObject;
 }
 
 /** UTF-8 byte lexicographic order, equivalent to Unicode code-point order for valid scalars. */
