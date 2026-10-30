@@ -317,11 +317,11 @@ else:
 
 | 实际失败 | 目标分类与状态后果 |
 |---|---|
-| malformed JSON / invalid Wire representation | protocol-fatal；按既有 Data protocol 规则 retire current Data carrier |
+| malformed JSON / invalid Wire representation | protocol-fatal；retire current Data carrier |
 | unknown message kind / wrong direction / exact closed-schema violation | protocol-fatal；不得误归类为 developer business validation |
-| authority / identity / generation / revision / Patch precondition failure | authoritative continuity failure；按既有规则 retire affected Data carrier 并 fresh-baseline recovery |
+| peer 提供的 authority / identity / generation / revision / Patch precondition violation | protocol-fatal / authoritative continuity failure；retire affected Data carrier 并 fresh-baseline recovery |
 | developer input / getter / Proxy / outbound representation error | 在对应 authoring API acceptance 边界抛出实际异常；不归咎 remote peer，不接受该次 desired state |
-| isolated inbound candidate 的本地实现异常 | discard candidate，current state/revision 不变；若 continuity 不能证明则 retire current Data carrier 并 fresh-baseline recovery；分类仍是 local implementation failure |
+| isolated inbound candidate 的本地实现异常 | discard candidate，current state/revision 不变；current Data peer 进入 existing `local-fatal` terminal，retire carrier 并 fresh-baseline recovery；不得伪装成 peer protocol violation |
 | carrier send/receive 实际失败 | transport / carrier failure；只影响对应 Data peer / carrier scope |
 | stale / inapplicable transient Event | 按既有 applicability 规则 drop only，不 replay |
 | failed Patch | no partial commit；current authoritative state 不得被 candidate 污染 |
@@ -329,7 +329,22 @@ else:
 | Renderer DOM / Canvas / component presentation-local failure | 不自动否定 authoritative Render Store，不自动 retire Data carrier |
 | Subsystem 单次 authoring operation failure | 失败该次 operation；不自动销毁 business RenderDomain |
 
-#### Failure containment
+### 5.1 Error classification 的实现边界
+
+本次不需要发明新的 public error hierarchy，也不引入 `ResourceBudgetExceeded`。现有 `DataTerminal.local-fatal` 已足以表达“peer 没错，但本地 Data mechanics 无法继续”。
+
+实施必须满足：
+
+- `DataProtocolError` / `protocol-fatal` 只用于能归因到 inbound peer message 违反 Wire/schema/direction/authority/revision/precondition 的情况；
+- Renderer Store 不再使用“catch 任意异常 → `protocol-fatal`”的 catch-all。显式 peer precondition violation 返回 protocol-fatal；candidate clone/index/freeze/host exception 等本地 mechanics failure 应 throw/传播到 DataRuntime，由 DataRuntime 归类为 `local-fatal`；
+- 对 authoritative Snapshot/Patch，只要本地 candidate 未成功 commit，就不能假装已经消费了该 revision 后继续接收后续 Patch；因此 local mechanics failure 直接 retire current Data carrier，并由 fresh Registry + Snapshot 重建 continuity；
+- Presentation 业务 handler 的同步 throw / Promise rejection 必须在 registration/presentation boundary contain，不得穿透到 DataRuntime 变成 `local-fatal`；
+- Subsystem authoring API 的 representation/ownership failure 在 API 返回前同步失败；不创建 pending publication，也不改变 committed desired state；
+- carrier error 保留原始 cause，不能被重新包装成 protocol invalid。
+
+这样无需扩展 public `DataInboundDisposition` 也可以闭环：peer-invalid 用 disposition，local mechanics failure 用异常进入已有 local-fatal terminal，业务 callback 在更外层隔离。
+
+### 5.2 Failure containment
 
 Failure scope follows the authority / ownership scope。除非另一个既有 Contract 明确要求：
 
@@ -345,31 +360,50 @@ Failure scope follows the authority / ownership scope。除非另一个既有 Co
 
 ### 6.1 RenderManager index
 
-对每个 live Domain 维护足够的内部 metadata，例如：
+对每个 live Domain 维护 Framework-owned current metadata：
 
 - `key -> current node`
-- `key -> parent key`
+- `key -> parent key / root`
 - `key -> sibling/root location`
-- live tag / consumed key history
+- live tag / generation-scoped consumed key history
 
 metadata 只用于 Framework 自身的 identity/path/COW，不作为业务数据索引。
 
-Update-only Patch：
+Update-only authoring 的目标算法：
 
-1. 先按 key 找到目标；
-2. 只 clone 目标到 root 的必要路径；
-3. attrs/data delta 只 copy 被触达 container；
-4. unchanged subtree 保持引用复用；
-5. 更新 current node index 中被 clone 的节点；
-6. commit 后再 publication。
+1. 按 committed index O(1) 找到每个 target；
+2. 只 clone target 到 root 的必要路径与被触达 attrs/data container；
+3. unchanged subtree 保持引用复用；
+4. candidate 构造期间只记录 touched key/path 的 `indexEdits`，不为了一次小 update clone 整个 Map/index；
+5. 所有 API shape、Wire representability、delta precondition 与 candidate invariant 成功后，在同一个同步 commit section 中替换 `domain.state` 并应用对应 index edits；
+6. 任意一步失败时 committed state、index、live/consumed identity history 全部保持原值；
+7. publication 只在 commit 后 enqueue。
+
+JavaScript 单线程同步 commit 足以保证外部观察不到“state 已换但 index 未换”的中间态；不得为了形式上的事务复制整个 index，从而重新引入 O(N) 热路径。
+
+Fresh generation 时 generation-scoped consumed/live identity metadata 重建；same-generation carrier replacement 只重置 publication cursor/baseline，不重建该 metadata。
 
 ### 6.2 Renderer Store index
 
-Snapshot baseline 成功后建立同类 current index。
+每个 committed Domain baseline 同时维护 current node/path index。
 
-Update-only Patch 使用 index 构造 candidate path，不再递归搜索整棵 Tree。
+Update-only Patch：
 
-Structural Patch 可以先采用保守策略：isolated full candidate + ordered operations + final single structural validation。只有 profiling 证明 structural Patch 仍是热点后，才继续做更复杂的增量结构索引算法。
+1. 所有 op 按协议顺序作用于 isolated COW candidate；
+2. target lookup 走 current/candidate index，不递归搜索整棵 Tree；
+3. path clone 与 data/attrs copy 只发生在 touched path/container；
+4. candidate 期间记录小规模 index edits；成功后 tree、revision、zIndex 与 index 在一个同步 commit section 一起切换；
+5. 不假定多个 update op 可以随意合并；除非 Contract 明确允许，否则必须保持 ordered-op observable semantics。
+
+Structural Patch 暂时采用保守但闭环的方案：
+
+1. 从 committed state 构建 isolated full candidate，并同时建立 candidate index；
+2. ordered insert/remove/move/update 直接维护 candidate index、parent/location metadata 与 Patch-local tombstone/live-tag state；
+3. 每个 op 只检查该 op 的局部 precondition，不在每个 op 后调用完整 `validateTree()`；
+4. 所有 op 完成后做一次 final full structural walk，验证 uniqueness、stable tag、one-shot/tombstone、parent/sibling/reachability/acyclicity 等 Framework invariant，并产出 canonical final index；
+5. final validation 成功后一次性 commit tree + index + identity state + revision；失败全部丢弃。
+
+Structural Patch 因 full candidate/final walk 仍可以是 O(N)，这是当前有意接受的简单正确方案；只有 profiling 证明其为真实热点，才进一步设计增量 structural persistent tree。不能为了理论最优先引入复杂数据结构。
 
 ### 6.3 JSON ownership
 
@@ -389,6 +423,18 @@ RenderManager authoring API 当前若承诺 caller/framework ownership isolation
 删除显式 tree/JSON depth cap 后，Framework 自己的遍历实现不得用递归调用栈重新制造一个隐含深度上限。对 Framework-owned JSON detach/clone、Render Tree index、Tree clone、structural validation 和 freeze 等遍历，优先使用 iterative traversal / explicit stack；可采用 frame-based stack，避免一次性 materialize 全部待处理 sibling 或制造大量临时数组。
 
 这不承诺无限资源或无限深度：显式栈、对象和平台本身仍消耗真实资源，平台实际失败时传播真实异常；但不得再添加固定深度拒绝门槛，也不得把 JavaScript call-stack exhaustion 当作预期的 Framework validation policy。原生 JSON.parse 等 Host/engine 操作仍按平台实际能力处理。
+
+### 6.5 无固定容量上限后的 queue / lifetime 模型
+
+取消 Framework queue cap 后，正确性依赖“生命周期清晰”而不是“数字足够大”：
+
+- DataRuntime serialized writer：O(1) enqueue/dequeue、单 physical send in flight、per-send Promise once-settle；
+- RenderManager publication：authoritative state 只按既有 desired-state coalescing 收敛，Event 作为 barrier/FIFO obligation 不因 backlog 长度丢弃；
+- MessagePort carrier：只保存尚未被 reader 消费的真实 units，head-index/deque 消费后及时断开引用；
+- terminal：停止接受新的内部 publication，清空尚未开始的 queue records 并 settle waiter/promise，避免 carrier 已死但 payload 仍被闭包链长期引用；
+- API 如果本来返回 Promise，则 Promise 是自然 backpressure；同步 authoring API 不新增“队列已满”异常。调用者持续产生数据而平台最终资源不足时，结果由真实 Host/engine/carrier failure 决定。
+
+本模型不承诺无限内存，也不通过隐藏 drop、silent coalescing Event 或新 budget 制造“看起来稳定”的假象。
 
 ## 7. 实施顺序
 
