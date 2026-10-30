@@ -120,7 +120,7 @@ Subsystem RenderDomain
 → business-owned Web Components
 ```
 
-这条 Data path 使用单 reader / serialized writer；每个 Carrier、Runtime send queue 与 RenderManager pending-work queue 都必须有有限的本地容量预算。资源预算耗尽属于 Data-local resource failure：入站候选状态不部分提交，当前 Data carrier 退休后通过 fresh Registry + Domain Snapshots 恢复；它不是 peer schema/protocol violation，也不自动升级为 Runtime / Frame failure。具体容量由 Host / Product composition 决定，不改变 `/3` wire identity。
+这条 Data path 使用单 reader / serialized writer，负责消息顺序、lifecycle 和必要的 state coalescing。框架不为 Carrier、Runtime send queue 或 RenderManager pending-work queue 规定容量，也不因队列达到人为数字而拒绝或丢弃应用消息。平台或 carrier 实际操作失败时传播真实异常；失败的 Render candidate 不得部分提交。
 
 DOM/Web Component 私有状态不得 reverse-sync Renderer Store，更不得成为 Main/Shared State/Subsystem authority。
 
@@ -178,7 +178,7 @@ Session Events 在 Desktop/PWA 可以使用不同 physical carrier，但必须�
 ## 7. Failure 与 lifetime
 
 - Data carrier loss != Runtime/Frame failure；
-- Data local resource-budget exhaustion != peer protocol violation：不 partial commit，退休当前 Data carrier，并由 fresh baseline 恢复；不自动 unwind Runtime / Frame；
+- Data 本地操作异常 != peer protocol violation：报告真实异常；若 inbound authoritative candidate 失败且无法继续证明 continuity，退休当前 Data carrier，并由 fresh baseline 恢复；不自动 unwind Runtime / Frame；
 - Renderer reload != Shared State / Session Events reset；
 - presentation/bootstrap error 默认 Window-local，不 rollback authoritative state；
 - Shared State binding loss终止旧 physical subscription，但不自动 fail still-live Runtime logical client；
@@ -251,8 +251,8 @@ Products               Desktop/Hostra + PWA
 17. current architecture 不从历史 qualification ledger 推导；
 18. 行为或 qualification-input 改变后，PASS 只对重新确定的 subject 有效；
 19. `Frozen != Implemented != Qualified`；
-20. 框架默认只强制执行自身运行、协议兼容和资源安全所必需的 Runtime Guard；应用业务正确性归开发者，额外 Strict Validation 必须 opt-in；
+20. 框架默认只强制执行自身运行和协议正确性所必需的 Runtime Guard；应用业务正确性与数据规模归开发者，额外 Strict Validation 必须 opt-in；
 21. 对可信应用数据优先 operation-first / error-first，失败 candidate 不得部分提交；
-22. 不得静默修改正式 Contract；numeric resource budgets 属于 Host / Product / Runtime 本地策略，可经显式配置、诊断和资格验证调整而不改变 wire identity/version；只有 wire-observable schema 或 semantics 变化才必须版本化；
+22. 不得静默修改正式 Contract；首次发布前移除历史容量阈值和容量触发的 drop 行为，必须通过 ADR0039 compatibility gate；首次发布后 wire-observable accept/reject/drop 变化必须版本化；
 23. 不得仅为严格验证而默认深复制、深冻结或全量扫描与当前操作无关的应用数据；但现有 API 要求的 ownership isolation 必须保留，并将必要复制/冻结与验证和计量融合。
-24. Data queue / retained work / candidate / serialization 必须有有限 local resource budgets；资源耗尽与协议错误分开，且不改变 wire ABI。
+24. Data queue 不设框架容量上限；保持 FIFO、single-reader / single-writer、必要 coalescing、once-settle 和 atomic commit。平台实际失败按 local/transport exception 处理，不得引入人为容量错误。
