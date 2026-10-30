@@ -1,353 +1,331 @@
-# Render Data Runtime Guard & Developer-Owned Validation
+# Framework Validation Boundary & Render Data Runtime Optimization
 
 > 状态：**架构设计提案 / Documentation-only；尚未实现、尚未通过资格验证**
 >
 > 架构准则：[Framework Responsibility and Validation Boundary](../10-architecture/framework-validation-boundary.md)
 >
-> 决策记录：[ADR 0038 — Developer Authority and Minimal Runtime Enforcement](../decisions/0038-developer-authority-minimal-runtime-enforcement.md) · [ADR 0039 — Render Update v1 Resource-Budget Correction](../decisions/0039-render-update-v1-resource-budget-correction.md)
+> 决策记录：[ADR 0038 — Developer Authority and Minimal Runtime Enforcement](../decisions/0038-developer-authority-minimal-runtime-enforcement.md) · [ADR 0039 — Render Update v1 Pre-release Removal of Framework-Imposed Capacity Caps](../decisions/0039-render-update-v1-resource-budget-correction.md)
 >
 > 触发证据：[Issue #133 — Map 投影窗口刷新卡顿来自整表瓦片的 JSON 校验](https://github.com/lithdoo/loom-realm/issues/133)
 >
 > 配套 Map 专项：[PR #134 — Incremental Projection Payload Optimization](https://github.com/lithdoo/loom-realm/pull/134)
 >
-> 适用范围：packages/wire、packages/data、packages/subsystem、packages/renderer，以及 PWA carrier adapter（apps/pwa）。当前运行时绑定的 active Renderer Data Profile 是 `/3`；本提案同时修正其 common resource/failure policy 文档，不改变 `/3` wire identity。
+> 适用范围：packages/wire、packages/data、packages/subsystem、packages/renderer，以及 PWA carrier adapter（apps/pwa）。当前运行时绑定的 Renderer Data Profile 是 /3；本文同时修正 /1 与 /3 中继承的框架容量门槛，不引入新的 Data Profile identity。
 >
 > 本文不引入 Map、Tile、depth、bridge 或 Canvas 语义。Map 是暴露共享热路径成本的高负载使用者，不是通用数据协议的特殊例外。
 
 ---
 
-## 1. 目标：减少框架强制的验证成本
+## 1. 目标：让框架少做不属于自己的工作
 
-Issue #133 的真实物理机诊断显示，projection refresh 的主要 CPU 成本之一来自大型 Render Data 在 Worker 和主线程被多次完整遍历、验证、复制、计算深度和序列化。
+Issue #133 的真实物理机诊断显示，大型 Render Data 在 Worker 和主线程被多次完整遍历、验证、复制、计算深度和序列化。
 
-此前方案把“保留完整严格验证”作为固定前提，只尝试把它合并为一次遍历。本修订改变这个前提：
+此前方案把“框架必须提前限制数据规模并完整验证”当成固定前提，只尝试把检查合并为一次遍历。这个前提本身不成立。
 
-> LoomRealm 默认只强制执行框架自身正常运行、协议兼容、状态一致性和资源安全所必需的 Runtime Guard。应用数据的业务正确性由开发者负责；额外严格验证必须由开发者显式选择。
+> LoomRealm 默认只验证协议和框架自身正确运行所必需的条件。应用数据的业务正确性和数据规模由开发者决定。框架不以自设数字限制平台本来能够处理的数据；实际操作失败时，报告实际异常。
 
-本 PR 目标：
+本 PR 的目标：
 
-1. 区分框架不变量、协议兼容约束、资源安全约束与应用层业务校验。
-2. 移除没有对应框架运行需求的重复或预先全量验证。
-3. 将必要的检查融合到实际解析、序列化、Patch 应用和提交过程，避免“先完整扫描，再做真正工作”。
-4. 对开发者控制的可信应用数据采用 operation-first / error-first 路径；失败时在明确边界捕获，并保证状态提交原子性。
-5. 将更严格的 JSON / Schema / 业务数据审查设计为独立、opt-in 的能力，不默认进入生产热路径。
-6. 按 ADR0039 在首次发布前修订 Render Update v1 的固定 numeric hard limits，以 local resource budgets 取代统一协议数字；保留 authority、revision、atomicity、identity、Event 和 exact-schema 等协议不变量。
+1. 明确区分协议/框架不变量与开发者拥有的业务正确性。
+2. 删除固定数值容量限制，不以可配置 ResourceBudgetPolicy 替代。
+3. 删除重复 JSON traversal、byte/depth preflight 和与当前操作无关的 Snapshot 扫描。
+4. 对开发者控制的数据采用 operation-first / error-first；失败时在明确边界报告异常。
+5. 保留必要 ownership isolation、candidate isolation、atomic commit 和协议连续性。
+6. 将额外业务 Schema、数据深度/大小/成员数等严格检查设计为开发者 opt-in 能力。
+7. 用 Issue #133 的同类真实工作负载证明 CPU、遍历次数、分配和 GC 改善。
 
-本 PR 不再要求建立一个覆盖所有数据的强制 ValidatedImmutableJson 类型，也不要求仅为严格验证而对所有应用数据执行全量深复制和深冻结。
+本 PR 不建立新的全局资源治理体系，不引入强制 ValidatedImmutableJson，也不要求对所有应用数据默认全量深复制或深冻结。
 
-## 2. 架构准则
+## 2. 核心责任边界
 
-规范来源：[Framework Responsibility and Validation Boundary](../10-architecture/framework-validation-boundary.md)。
+### 2.1 Framework 必须保留
 
-### 2.1 Developer Authority
+- message envelope、message type、direction、exact closed schema；
+- 当前 contract 明确规定的 JSON wire representation；
+- authority、identity、generation、revision、lifecycle 和 state continuity；
+- Patch operation preconditions；
+- Render Tree 的 identity uniqueness、parent/sibling consistency、reachability、acyclicity、one-shot key/tag history；
+- caller/framework ownership contract；
+- isolated candidate、atomic commit 和失败后的 no-partial-state；
+- single reader / single serialized writer、FIFO、terminal first-wins 和既定 coalescing semantics。
 
-开发者拥有应用数据的业务语义与正确性责任，包括：
+这些检查保护的是协议和框架自己的状态，不是替开发者审查业务。
 
-- 业务 Schema、字段含义与跨字段约束；
-- 游戏规则、业务状态转换和领域不变量；
-- 应用资源引用、业务 ID 与业务数值范围；
-- 业务希望执行的严格数据审查。
+### 2.2 默认 Runtime 必须删除
 
-LoomRealm 不应仅因为数据经过 Render/Data API，就擅自推断并验证上述业务语义。
+不得以常量、默认配置、可配置选项、Product/Host policy 或新的 ResourceBudgetPolicy 限制：
 
-### 2.2 Minimal Runtime Enforcement
+- message bytes；
+- JSON nesting depth；
+- Domain Registry entries；
+- RenderNode count、tree depth；
+- Patch operation count；
+- attrs / JSON members、array elements；
+- identity/tag/Event/key 的 byte length；
+- Render data / Event data payload bytes；
+- pending send count、queue count、queue bytes；
+- retained work、candidate growth 或其他框架自行估计的容量。
 
-默认 Runtime Guard 只覆盖：
+也不得因为这些数字拒绝 send、终止 Data peer、丢弃已接受 Event 或跳过 authoritative work。
 
-- 框架执行时实际读取/依赖的字段和必要的类型前提；
-- 消息 envelope、message type、方向和当前协议要求；
-- Session / Runtime / DataAuthority / generation / revision / identity / lifecycle；
-- Render tree / Patch 的框架状态不变量与原子提交；
-- 当前冻结协议要求的表示、硬限制和失败语义；
-- 防止无界解析、序列化、队列增长或资源耗尽所需的边界。
+平台、浏览器、JavaScript engine、操作系统和实际 carrier API 自身可能有能力边界；框架不应在平台前面再设置一道人为门槛。实际操作失败时传播可观察到的异常。进程级 OOM 可能无法被 JavaScript 捕获，不承诺能够恢复。
 
-不应默认对任意应用数据执行额外的完整业务 Schema 审查、重复 JSON 全树扫描或与本次操作无关的 Snapshot 预检。
+### 2.3 开发者可选 Strict Validation
 
-### 2.3 Opt-in Strictness
+Strict Validation 可以由开发者主动选择，提供：
 
-更严格的能力可以作为独立验证模块或显式诊断配置提供：
+- application JSON / exact Schema；
+- 业务字段、跨字段和领域约束；
+- 开发者自定的 depth/member/string/payload size limits；
+- cycle / unsupported value / mutation diagnostics；
+- 开发、测试、CI 或开发者明确选择的生产诊断。
 
-- 开发者在开发、测试、CI 或明确选择的生产场景启用；
-- 可提供 JSON shape、exact Schema、业务 Schema、深度/成员/字符串约束等检查；
-- 默认不进入普通 Runtime 热路径；
-- 不改变既有协议 ABI，也不能绕过协议本身的强制约束；
-- 具体 public API / package 名称不在本 PR 冻结。
+Strict Validation 默认不进入 Runtime 热路径，不成为框架依赖，也不改变 wire contract。开发者选择的限制只约束其 opt-in 验证流程。
 
-### 2.4 Operation-first / Error-first
+## 3. 目标执行路径
 
-对于开发者拥有且处于受信任执行路径的数据：
+### 3.1 Inbound
 
-- 不为了“提前证明整个对象树永远正确”而在每次小更新前扫描整个 Snapshot；
-- 在真正读取、应用、编码或提交数据时执行所需操作；
-- 让实际操作产生的类型/序列化/前置条件错误在明确边界抛出；
-- 捕获错误并放弃本次候选更新；
-- 不允许失败操作部分污染已提交状态。
+~~~text
+carrier string
+→ Wire / ECMAScript JSON.parse
+→ 必要的 wire representation 与 exact schema 检查
+→ authority / identity / revision 检查
+→ message-specific preconditions
+→ candidate mutation
+→ final framework structural invariants
+→ atomic commit
+~~~
 
-这不是对所有外部输入都“只靠 try/catch”。异常捕获不能防止内存耗尽、超大消息解析或无界队列，因此资源安全仍需要前置或流式 bounded guard。
+不在 parse 前执行 raw-byte gate，不执行 JSON depth/member/byte preflight，不因超过历史 1 MiB / depth 64 / 16384 members 等数字拒绝消息。
 
-## 3. Issue #133 的实测证据
+malformed JSON、wrong message type、closed-schema violation 仍按协议失败处理。协议结构正确但 Patch continuity/precondition 不成立，按 authoritative continuity failure 处理。
 
-Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
+### 3.2 Outbound
 
-- 1920×1080，y=21 窗口刷新：Worker 步进任务约 145ms，随后主线程 MessagePort::Accept 约 136ms。
-- y=16 另一刷新：Worker 约 128ms，主线程约 95ms。
-- Canvas getImageData / putImageData 只有数毫秒级；不读像素的对照仍出现 88–103ms 长任务。
-- Worker CPU profile：validateJsonValueAt 自耗时约 248ms，JSON.stringify 约 141ms，stringifyValidatedJson 约 50ms，depthOfValidatedJson 约 17ms。
-- 主线程 CPU profile：validateJsonValueAt 自耗时约 130ms，RenderStore validateData 约 11ms，getImageData 约 14ms。
+~~~text
+developer input
+→ API ownership contract
+→ actual JSON serialization (one pass)
+→ one complete application unit
+→ current carrier serialized writer
+~~~
 
-这些是整段行走采样中的 CPU 自耗时与单次窗口刷新 tracing 的不同统计口径，不能直接相加成一次刷新延迟。它们共同证明：Worker 和主线程都为大型 JSON 承担了显著的重复处理成本。
+- 不先执行完整 assertJsonValue/depth/byte scan，再重复 stringify。
+- 不计算一个框架 byte cap。
+- 序列化只执行一次；如果实际 serialization 遇到循环引用、不支持值或 getter/Proxy 异常，将真实异常返回给本次调用。
+- 只有完整 application unit 生成后才能交给 carrier；不得发送部分 JSON。
+- carrier.send 实际失败按 transport failure 处理，不伪装成资源预算错误。
 
-其中 Map Runtime 的 projectionBytes() / JSON.stringify 属于 PR #134 的 Map 专项范围；本 PR 处理 Realm 共享 Render Data 路径。
-
-此证据不是 Hostra full/native qualification 结果。正式门槛仍由 [性能资格](./performance.md) 定义。
-
-## 4. 验证分类：什么必须做，什么不应默认做
-
-| 类别 | 默认策略 | 责任 |
-|---|---|---|
-| 消息 envelope、type、方向、必要字段 | 必须 | Framework |
-| authority、identity、generation、revision、lifecycle | 必须 | Framework |
-| Patch 前置条件、状态一致性、失败原子性 | 必须 | Framework |
-| 实际序列化所需的可表示性检查 | 必须在操作中完成 | Framework |
-| 防止无界输入、队列和资源耗尽的硬边界 | 必须，按协议/平台 threat model | Framework |
-| 当前正式契约规定的 JSON 表示和 framework invariants | 必须 | Framework / Protocol |
-| message / depth / count / payload 等 numeric capacity | 不再定义统一协议数字；必须配置有限 local budget | Host / Product / Runtime |
-| 游戏/业务 Schema 与字段语义 | 不默认执行 | Developer |
-| 跨字段业务约束、领域数值范围 | 不默认执行 | Developer |
-| 对整个应用对象图重复执行 strict JSON audit | 不默认执行 | Opt-in Strict Validation |
-| 仅为证明输入“安全”而执行的重复深复制/深冻结 | 不默认执行 | 明确 ownership contract |
-
-**关键区别：** 业务 Schema 检查不是协议 envelope 检查；开发者选择不启用业务严格验证，不等于可以绕过 current wire contract、identity/revision 或资源保护。
-
-## 5. Render Update v1 resource-budget policy correction
-
-[ADR 0039](../decisions/0039-render-update-v1-resource-budget-correction.md) 将 Render Update v1 的 numeric hard-limit policy 改为 local resource-budget policy；协议 identity 保持 `loomrealm.render-update / 1`，conformance fixtureSetRevision 为 2。数值容量是本地实现策略，不是 wire ABI；仅调整容量不要求协议版本升级。
-
-修订后不再将以下数字定义为跨实现 protocol accept/reject thresholds：message bytes、JSON depth、identifier byte length、Registry/Node/operation counts、tree depth、attrs member/key/value limits、data array/object counts、data payload bytes 与 relative depth。
-
-协议继续强制：
-
-- Wire JSON representation 与 exact closed protocol schema；
-- authority、identity、generation、revision、lifecycle 与 one-shot semantics；
-- Patch operation preconditions、ordered application、candidate isolation 与 atomic commit；
-- final candidate 的 parent/sibling/reachability/cycle/identity invariants；
-- Event semantics、failure classification 与 recovery boundaries。
-
-固定数字改为 Host / Product / Runtime 明确、有限、可审计的 local resource budgets。Inbound budget exhaustion 不得 partial commit，必须 retire 当前 carrier，但诊断为 local-resource-exhaustion 而非 peer protocol violation；outbound budget exhaustion 不得发送部分 message。v1 不做 budget negotiation，产品部署必须记录 peer budget compatibility。
-
-**数值容量调整本身不构成 wire ABI 变更，也不要求创建 Render Update v2 或 Renderer Data Profile 新版本。** 旧实现可能仍保留较小的本地硬编码容量；若新发送端发出超过旧接收端容量的消息，该接收端可能拒绝该条消息，这是接收端容量不匹配，不是消息格式、identity 或协议语义不兼容。需要使用更大数据的产品，应先让接收端具备相应本地容量，再启用较大的发送负载；无需仅为放宽容量升级协议 identity。另需注意，Renderer Data Profile v1 的三-child 到四-child 组合修订属于 ADR0037 的独立兼容事项，其 cohort 要求不由本次 numeric budget correction 产生，也不在此处取消。
-
----
-## 6. 当前热路径与改造方向
-
-以下路径基于当前 main；实现 PR 开工时必须重新核对代码与调用关系。
-
-### 6.1 RenderManager：Delta 验证、复制和合并
-
-文件：packages/subsystem/src/internal/render-manager.ts
-
-当前 validateDelta()、validateJsonValue()、detachedFrozen() 和 applyDataDelta() 会对输入及合并后的 data 进行多轮处理：
-
-- 读取/检查输入对象；
-- 遍历字符串、Key 和容器；
-- 深复制并冻结；
-- 对包含未变化字段的完整 data 再做 depth / byte 检查。
-
-改造方向：
-
-- 先按 API 契约明确 caller 与 RenderManager 的 ownership / mutation 约定；
-- 仅执行 Patch operation、协议和 local resource budget 所要求的检查；
-- 避免在同一个输入值上重复执行结构 walk、copy、freeze；
-- 不要求所有业务 data 都先转换为强制 ValidatedJson wrapper；
-- 当前 RenderManager authoring API 在异步 publication 前必须隔离 caller-owned input：调用返回后，caller 修改原对象不得改变 retained Domain state、pending work 或最终 emitted message。
-- 因此 `detachedFrozen()` 的 ownership-isolation 效果不能仅为性能而删除；应把必要的 shape/type 检查、detached clone、freeze 与 retained-state accounting 融合为一次遍历。
-- 只有另一个 API 明确声明 ownership transfer / immutable handoff，并测试证明调用方在 transfer 后不得继续 mutate 时，才允许省略复制；不能把隐式约定当成现有 API 的语义。
-- 对每个 Patch operation 保留顺序语义、前置条件和原子提交；固定 numeric intermediate caps 移除，资源峰值由 local budget 在实际增长过程中保护。
-
-### 6.2 RenderManager：完整 Snapshot probe
-
-当前 update() 路径会对完整 next Snapshot 和 Patch 调用 probeLimit()。
-
-改造方向：
-
-- 不要为了每次小 Patch 预先完整 stringify 一个并未发送的 Snapshot；
-- 只有在实际构造/发送 Snapshot 时才执行 bounded serialization 与 local outbound budget；
-- Patch 的实际编码和工作量受 local outbound/operation budget 约束；
-- 如需维护 local resource budget，使用由实际更新维护的精确 accounting；不能使用低估值或未经证明的缓存；
-- 不得将完整 Snapshot 的业务正确性扫描伪装成 message-size guard。
-
-### 6.3 Data Codec：把检查融合到实际 parse / encode
-
-文件：
-
-- packages/data/src/profile-codec.ts
-- packages/data/src/render-codec.ts
-- packages/data/src/validation-common.ts
-- packages/wire/src/json-text.ts
-
-当前 encode/decode 路径可能对同一 subtree 重复执行：
-
-- assertJsonValue；
-- jsonDepth；
-- bounded walk；
-- Schema helper 内的递归检查；
-- stringifyJson 内部的结构检查；
-- 再次 UTF-8 byte count。
-
-改造方向：
-
-- Decode：在 `JSON.parse` 前执行有限的 local inbound raw-byte admission。若目标 Host 的 parser threat model 要求 parse 前限制 nesting/work，使用一个 lexical admission pass 同时计算 UTF-8 bytes 与 JSON structural depth，或采用 bounded/streaming parser；不得先计算 bytes 再单独增加第二轮 depth full scan。
-- `JSON.parse` 后，尽量用一次 iterative traversal 合并 JSON representation、finite number / Unicode、depth/member 计量和 role-specific schema 检查。若某个 Host 已证明其 native parser 在 raw-byte budget 下具有足够的有界行为，可以将 depth limit 留在该 post-parse traversal 中；parser work/depth 仍须有明确的 local budget。
-- `JSON.parse` 生成的 parser-owned JSON 不应被当成任意可执行 JavaScript 对象，再重复做 getter/proxy/accessor 审查；仍须保留必要的 JSON representation 与具体协议 Schema 检查。
-- Encode：对框架 envelope / 协议字段执行必要检查；在实际 bounded serializer 中完成可表示性检查和精确 byte accounting，不先完整 assert/depth walk 再 stringify。
-- stringifyJson 的 public contract 和 frozen compact JSON semantics 必须保持；不能通过 unchecked public serializer 逃避协议约束。
-- 业务 payload 的额外 Schema 检查由 opt-in Strict Validation 提供，不嵌入默认 codec。
-
-### 6.4 Renderer Store：Snapshot 与 Patch 的不同路径
-
-文件：packages/renderer/src/internal/render-store.ts
-
-改造方向：
-
-- 新 Snapshot：构造 isolated candidate，执行一次必要的 framework baseline / tree / identity invariant validation；candidate resource growth 由 local budget 保护，再 atomic commit。
-- Update-only Patch：对每个 operation 的目标、delta 和受影响状态执行必要检查；通过精确增量 accounting 维护 local candidate/operation resource budget；不再维护固定协议级 per-op hard bounds。
-- 当前 Store 的通用 `catch → fatal(...)` 路径不能吞掉资源耗尽类型：`ResourceBudgetExceeded` 必须保持为 typed local failure 并传播到 DataRuntime 的 local-fatal 处理；不得把 candidate memory / retained-state budget exhaustion 转成 `DataInboundDisposition.protocol-fatal`。候选仍须丢弃，当前 committed Store 保持不变。
-- data-only Patch 不应无条件重新 stringify 全部未变化的 node.data。
-- Insert / Remove / Move 等结构操作仍需检查其影响的 identity、reachability、parent、tree depth 和 node count；不承诺消除所有 tree work。
-- 失败 Patch 不改变 revision、zIndex、tree 或 current presentation。
-
-### 6.5 packages/wire：保持必要能力，不强制全量预检
-
-- 保留 public JSON serializer/parser 的可观察语义和错误处理。
-- 将 plain-JSON 可表示性检查与实际 serialization 融合：在生成输出时累计 UTF-8 bytes，达到 local outbound budget 即停止；不要先完整 `assertJsonValue` / depth walk，再对同一对象图 stringify。
-- 对输入端保留 parse 前 raw-message local byte budget；解析后在实际 decode/validation 路径完成一次必要的 bounded traversal。
-- 对外部 carrier input，在 parse 前执行 raw message byte gate。
-- 不引入一个必须由所有业务调用者创建的公开可信 JSON wrapper。
-- 不要求用深复制/深冻结证明每份业务数据正确；ownership 与 mutation contract 应由相应 API 明确。
-
-
-### 6.6 Contract-to-runtime conformance corrections
-
-The current contract already defines these semantics; the implementation must be brought into line rather than narrowing the contract:
-
-| Contract | Current implementation mismatch | Required correction |
-|---|---|---|
-| `zIndex` is a signed safe integer (`Number.isSafeInteger`) | `RenderManager` and `render-codec.ts` still enforce signed int32 | Replace int32 checks with `Number.isSafeInteger`; retain rejection of non-integers and values outside the safe-integer range |
-| Generic Render `data` keys may be empty strings | `render-codec.ts` Patch delta accepts empty keys, but `RenderManager.validateDelta()` rejects empty keys for data `set` and `remove` | Use minimum length 0 for data set/remove keys, matching full Snapshot and wire codec; attrs keys remain non-empty |
-| Protocol identity / tag / Event / attrs strings have semantic Unicode and non-empty rules, but no protocol-level byte maximum | `render-codec.ts` and `RenderManager` still contain fixed per-string maxima such as 128 / 256 / 4096 bytes | Remove fixed protocol accept/reject maxima; keep required non-empty / Unicode-scalar semantics and bound aggregate resource use through local message, queue, candidate and serialization budgets |
-| Generic data shape is plain JSON; its key / member / array / nesting / payload limits are local resource policy | Authoring and codec paths still apply several fixed member/depth/byte caps | Enforce local budgets while traversing, cloning, applying or serializing; do not make the old numeric thresholds cross-implementation protocol rules |
-
-These are conformance corrections, not a wire-version change: message shape, identity model, ordering and commit semantics remain unchanged. The zIndex safe-integer range and empty-data-key behavior are already part of Render Update v1; the Runtime must implement them.
-### 6.7 Bounded queues 与 retained work
-
-当前有三条彼此独立的队列边界，不能只依赖消息数量上限：
-
-1. **PWA MessagePort inbound queue**（`apps/pwa/src/message-port-carrier.ts`）：当前 `queue: string[]` 在没有 waiter 时持续 push，没有 count / retained-payload budget；`finish()` 也没有释放已积压的字符串引用。必须增加有限的 queued-message count 与 retained-string budget，采用 head-index / ring-buffer，避免 `shift()` 的反复搬移；Carrier terminal 时清空队列。队列满时以带类型的 `ResourceBudgetExceeded` cause 终止当前 Carrier；DataRuntime 必须识别该 cause 并映射为 `local-fatal` / `local-resource-exhaustion`，不能降格为普通 `carrier-lost`，更不能归类为 `protocol-fatal`。不得静默丢弃中间消息后继续消费后续 authoritative updates。队列计量优先复用已有元数据；若只需估算字符串保留成本，可用确定性的 code-unit weight，不要为了计量对每条消息再做一次 UTF-8 encode。
-2. **DataRuntime outbound send queue**（`packages/data/src/runtime.ts`）：当前 `MAX_PENDING_SENDS = 1024` 只限制数量，而且 `send()` 在检查 pending 数量前已调用 `encodeForRole()`。必须同时限制 pending count 与累计 encoded payload bytes；先做 O(1) count admission，之后由单次 bounded serializer 产出文本和精确 byte count，再做 byte admission。成功入队后维护累计值，在 send settle / terminal 时扣减或清零。1024 只能作为某个实现的默认配置，不能成为 Profile / wire cap。
-3. **RenderManager pending work queue**（`packages/subsystem/src/internal/render-manager.ts`）：当前 `MAX_PENDING_WORK = 1024` 只有 work item count，不能约束大型 Snapshot / Patch object graph 的 retained cost。必须增加 retained-work budget，使用状态构建时维护的精确/保守 accounting metadata；不能为了队列 admission 再调用 `probeLimit()` 或 stringify 完整 Snapshot。保留现有 Registry / Domain coalescing 和 Event barrier；只可合并尚未 emitted 且语义允许重建的 desired state。不得丢弃 Patch 中间操作后继续发送基于旧 revision 的后续 Patch。若仍无法 admission，RenderManager 必须记录本地 resource-exhaustion 诊断并 retire 当前 publication peer；不能仅通过普通 close 让故障看起来像 peer protocol violation，也不能继续发送不连续的 Patch。
-
-所有队列计数与预算应在 admission、coalesce、settle、terminal 时增量更新，避免每次 enqueue 都重新扫描队列或完整 Render Tree。Count 与 retained payload / work weight 是互补维度；两者都必须有界。
-
-### 6.8 Resource exhaustion 与协议错误分类
-
-使用内部明确的资源耗尽错误（例如 `ResourceBudgetExceeded` / `RESOURCE_BUDGET_EXCEEDED`），并映射到现有 DataRuntime `local-fatal` terminal family；不要把它包装成 `DataProtocolError`，也不新增 wire message 或 Profile identity。
-
-| 情况 | 结果 |
-|---|---|
-| malformed JSON、unknown type、wrong direction、closed-schema violation | protocol-fatal |
-| authority / identity / revision / Patch precondition / final-tree invariant violation | authoritative continuity failure，retire 当前 Data carrier |
-| inbound queue / parser / RenderStore candidate / retained-state local budget exhaustion | typed local-resource-exhaustion；DataRuntime `local-fatal`，discard candidate、no partial commit、retire 当前 Carrier；RenderStore 不得改写为 protocol-fatal |
-| DataRuntime outbound queue / serialization local budget exhaustion | 现有 DataRuntime `local-fatal`；no partial application unit；仅可 coalesce 尚未 emitted 且语义允许的 desired state |
-| RenderManager pending-work budget exhaustion | local producer failure + local diagnostic；retire 当前 publication peer；不归咎于 remote peer，也不发送不连续 Patch |
-| well-formed but inapplicable transient Event | 按既有 Event contract drop |
-
-Inbound carrier 退休后，使用现有 lifecycle 建立 fresh carrier，并由 RenderManager 重新发布 Registry + 完整 Domain Snapshots；不得沿旧 revision 继续消费。若同一个 Baseline 仍超过接收端 local budget，应报告持续性容量不足，不得自动重连并无限重发同一个超限 Baseline。资源耗尽诊断应包含预算类别、发生阶段和配置值，便于区分容量不足与 peer 协议错误。
-
-## 7. 可选 Strict Validation 模块
-
-严格验证可以作为未来独立能力提供，而不是默认 Runtime 的隐式行为。
-
-建议能力：
-
-- JSON representation / descriptor / cycle 检查；
-- exact application Schema；
-- 自定义业务 validator；
-- depth/member/size 等额外诊断限制；
-- 开发时错误定位与可读诊断。
-
-使用场景：
-
-- 单元测试和集成测试；
-- CI；
-- 开发者显式开启的 debug / diagnostic profile；
-- 开发者明确选择的生产场景。
-
-边界：
-
-- strict mode 不能成为普通 Runtime 的强制依赖；
-- strict mode 不能改变当前协议本身的强制约束；
-- public API、配置名称和 package 拆分待独立设计；
-- 本 PR 不实现该模块，只定义责任边界。
-
-## 8. Error-first 与事务提交模型
-
-对一次 authoritative update：
+### 3.3 Authoritative Patch
 
 ~~~text
 current committed state
-→ create isolated candidate / apply operation
-→ perform checks required by this operation and current contract
-→ operation/encoding error?
-    yes → capture at boundary → discard candidate
-    no  → commit once
+→ isolated candidate
+→ apply ordered operations with their own preconditions
+→ validate final framework structural invariants
+→ commit once
 ~~~
 
-要求：
+失败：
 
-- 不允许失败 Patch 部分提交；
-- 不允许吞掉协议 continuity / authority / lifecycle failure；
-- 不允许把 malformed external message 当作普通业务异常继续消费；
-- 不允许通过 catch 继续使用可能已被破坏的 current state；
-- 对资源耗尽风险必须在资源被无界消耗之前执行 bounded guard；
-- 对开发者自有业务数据，不默认增加与实际操作无关的全量验证。
+~~~text
+discard candidate
+keep current state and revision unchanged
+report the actual failure class
+~~~
 
-## 9. 测试与性能验收
+不因每个 operation 或每次小更新重新扫描整棵 Tree。最终 candidate 仍必须满足 identity、parent/sibling、reachability、acyclicity 等框架不变量；不设置 node-count、tree-depth 或 operation-count cap。
 
-### 9.1 Frozen Contract 行为等价
+## 4. Ownership 与复制
 
-- 合法消息的 accept / commit 结果保持一致；
-- 非法 envelope、方向、identity、revision、framework invariant 仍按协议拒绝；local resource exhaustion 独立分类，不作为 peer protocol invalid；
-- protocol-fatal / authoritative-continuity failure 的 retire 语义不变；
-- Patch operation 顺序与前置条件保持；local resource budget 在资源增长时执行；
-- 失败时旧 state / revision / presentation 不变；
-- Snapshot + Patch 序列结果与 reference full snapshot 相同。
+- RenderManager authoring API 若承诺在异步 publication 前与 caller-owned input 脱离，必须继续执行必要 detach/clone。
+- caller 在 API 返回后修改原对象，不得改变 retained state、pending work 或已发出的 message。
+- 将必要 shape/type 检查与 detached clone/freeze 融合到一次必要遍历；不得为计量容量再遍历一次。
+- Renderer 收到的 JSON.parse object 已由 parser 创建；RenderStore 通过 isolated candidate / COW 保证失败 Patch 不污染 committed state。
+- 不为严格验证而默认冻结所有业务对象；不引入强制 ValidatedImmutableJson public wrapper。
+- 如果实际 ownership contract 允许直接 transfer，则必须由显式 API contract 定义，不能擅自推断现有 API 已 transfer ownership。
 
-### 9.2 Runtime Guard 与 opt-in Strict 分离
+## 5. Package 改造清单
 
-- 默认 Runtime 不执行额外的业务 Schema validator；
-- Strict Validation 未启用时，不调用其全树遍历路径；
-- Strict Validation 开启时能检测其声明覆盖的错误；
-- strict mode 开关不改变 frozen wire accept/reject 语义；
-- 开发者自定义 validator 失败时，失败结果按明确的业务/API 边界处理，不污染已提交状态。
+### 5.1 packages/wire
 
-### 9.3 错误与资源边界
+目标文件：packages/wire/src/json-text.ts 及相关 JSON representation helpers。
 
-- malformed carrier / invalid JSON / closed-schema message 按协议规则拒绝；超过本地 raw-message budget 则以 local-resource-exhaustion 在进入业务处理前终止，不得报告为 peer protocol violation；
-- bounded serializer 在 local outbound budget 耗尽时停止继续生成输出；
-- getter / Proxy trap 等异常在 authoring boundary 明确失败，不产生 partial commit；
-- cyclic / unsupported value 在实际编码时产生确定错误；
-- Patch 中间超限不能靠后续 op 缩回；
-- 所有可能随输入增长的 local resource budgets 继续有限且显式；分别验证 count、retained payload/work、candidate growth 和 outbound bytes。具体数字属于 Host/Product qualification input，不属于跨实现 wire conformance；本地预算耗尽不得伪装为 protocol-fatal。
+- 保留既定 JSON wire representation 与错误语义。
+- 删除 raw-message byte cap、JSON depth cap 和为这些 cap 服务的 preflight。
+- 不在 stringify 前先完整 assertJsonValue/depth traversal，再执行第二次 stringify。
+- 使用单次实际 serialization 完成 JSON representation 处理与输出。
+- Parse 使用既定 JSON.parse semantics；只保留 contract 真正要求的 representation 检查。
+- 不计算 UTF-8 byte length 作为框架拒绝条件。
+- 对同一对象图不得重复执行完整 traversal。
 
-### 9.4 性能对比
+### 5.2 packages/data codecs
 
-使用固定规模 fixture：小对象、中型 RenderNode.data、大型 1,675 / 3,000+ Tile 等价嵌套数组、稀疏更新、字段替换、结构 Patch。
+目标文件包括：
+
+- packages/data/src/validation-common.ts
+- packages/data/src/render-codec.ts
+- packages/data/src/profile-codec.ts
+- packages/data/src/presentation-codec.ts
+
+改造要求：
+
+- 删除旧 message/data/depth/member/element/string byte capacity caps。
+- 删除 assertBoundedJson、固定 depth、member、payload byte 和字符串长度上限中仅服务于容量拒绝的部分。
+- 保留 message kind、exact schema、direction、field type、identity/revision 与各 child contract 的语义检查。
+- 不对同一 subtree 重复 assertJsonValue、depth traversal 或 stringify。
+- Presentation / Interest 中的数量限制必须逐项判断：若它只是历史容量数字则删除；若它是明确的 closed-schema / role semantic 则保留并说明 owner。不得因为位于 codec 就自动认定所有数字都是协议语义。
+- Render zIndex 接受 signed safe integer；Render revision/baseRevision 继续为 positive safe integer。
+- Generic Render data Patch set/remove 接受空字符串 key；attrs key 仍遵守其非空语义。
+
+### 5.3 packages/data Runtime send queue
+
+目标文件：packages/data/src/runtime.ts。
+
+当前 MAX_PENDING_SENDS = 1024 是框架自行设定的容量拒绝条件，应删除。
+
+- 保留单 serialized writer 和 FIFO。
+- 不限制 pending send count 或累计 encoded bytes。
+- 不在昂贵编码前执行 queue-count admission。
+- 每个 send 保持自己的 once-settle 结果；调用者可以 await 自己的 send completion。
+- JSON serialization error 只失败当前 send/API 调用，不自动 terminal 整个 Data Connection。
+- carrier.send 实际 rejection 按 carrier failure / transport failure 处理。
+- terminal 时 settle pending operation 并释放队列引用；不得静默丢弃仍属于 current stream 的 authoritative unit。
+
+### 5.4 packages/subsystem RenderManager
+
+目标文件：packages/subsystem/src/internal/render-manager.ts。
+
+当前 MAX_PENDING_WORK = 1024、probeLimit 和固定 string/data capacity checks 不应继续作为默认拒绝逻辑。
+
+- 删除 pending-work 数量上限及其触发的 Event 丢弃、peer invalidation。
+- 删除为 node/depth/data/byte capacity 执行的完整 Snapshot probe。
+- 保留 RenderManager authoring API 所要求的 caller/framework ownership isolation。
+- 保留 Registry / Domain desired-state coalescing，但只能合并尚未 emitted 且语义允许重建的 state。
+- 保留 Event barrier；已接受 Event 不因队列容量而丢弃。
+- Patch operation 依序应用，不能丢弃中间操作后继续发送基于旧 revision 的 Patch。
+- 对实际 getter/Proxy/clone/encode exception，在 authoring API 边界报告本次调用失败；不得仅因异常 retire peer。
+- 对外发送前生成完整 application unit；carrier 实际失败时按 transport failure 处理。
+
+### 5.5 packages/renderer RenderStore
+
+目标文件：packages/renderer/src/internal/render-store.ts。
+
+删除以下人为容量检查：
+
+- MAX Nodes / Tree depth；
+- attrs / JSON member count；
+- JSON depth / array element count；
+- Render data byte / payload size；
+- 对这些容量数字执行的 validateData 全对象图扫描。
+
+保留：
+
+- exact Render message schema；
+- identity uniqueness / one-shot history / stable tag；
+- parent/sibling consistency、reachability、acyclicity；
+- Patch operation preconditions；
+- final candidate structural invariants；
+- isolated candidate、COW 和 atomic commit。
+
+Snapshot 可以执行一次必要的完整 Tree structural validation；Update-only Patch 应处理受影响的目标和路径，不重复检查未变化的 data subtree。结构操作在最终 commit 前验证最终框架不变量，不因每个 operation 重扫整棵 Tree。
+
+错误处理必须区分：
+
+- malformed wire / schema invalid：protocol-fatal；
+- revision / identity / Patch precondition violation：authoritative continuity failure；
+- unexpected local candidate operation exception：discard candidate、报告 local implementation error；若 continuity 无法证明，可退休当前 carrier，但不能标记为 peer protocol-fatal。
+
+当前 catch-all → fatal(String(cause)) 不能把所有本地异常一律映射为 protocol-fatal。
+
+### 5.6 PWA MessagePort carrier
+
+目标文件：apps/pwa/src/message-port-carrier.ts。
+
+- 不增加 inbound message count 或 retained-string byte cap。
+- 保留接收顺序和单 reader。
+- 可用 head-index / ring-buffer 避免反复 Array.shift 搬移。
+- terminal / finish 时清空已积压引用并使 pending waiter once-settle。
+- postMessage / carrier 实际失败时传播真实 transport error。
+- 不因人为 queue capacity 关闭 Carrier 或丢弃中间消息。
+
+### 5.7 Renderer Data Profile / Presentation producer
+
+目标文件：Renderer Data Profile v1、v3 与对应 conformance。
+
+- 删除 common message-byte/depth budget。
+- 删除 Presentation Event 的 256 pending cap 和满载丢弃新 Event。
+- 删除 DataRuntime 的 1024 pending-send cap 及 encoded-byte budget。
+- 保留 single reader / single serialized writer / FIFO / once-settle。
+- Viewport 是 latest-value state；只 coalesce 尚未发送的旧 size，这是该 state child 的语义，不是通用容量限制。
+- Stale/inapplicable Event 仍按其 contract drop；carrier loss 不 replay；不得因 queue capacity 压力丢弃已接受 Event。
+
+## 6. Failure semantics
+
+| 实际情况 | 处理 |
+|---|---|
+| malformed JSON / invalid Wire representation | protocol-fatal |
+| unknown message kind / wrong direction / exact closed-schema violation | protocol-fatal |
+| authority / identity / revision / Patch precondition violation | authoritative continuity failure |
+| developer input / getter / Proxy / JSON serialization exception | 失败当前 API 调用并报告实际异常；不自动终止 peer |
+| inbound candidate 的意外本地实现异常 | discard candidate、报告 local implementation failure；continuity 不可证明时 retire 当前 carrier，但不归咎 peer |
+| carrier.send / receive 实际失败 | transport failure，按 carrier lifecycle 处理 |
+| well-formed but stale/inapplicable Event | drop only |
+| failed Patch | no partial commit；current state/revision unchanged |
+| failed serialization | no partial application unit |
+
+不引入 ResourceBudgetExceeded、local-resource-exhaustion 或其他为了框架人为容量限制服务的错误体系。
+
+## 7. Conformance 与测试
+
+### 7.1 Protocol behavior
+
+保留并验证：
+
+- exact message schema / direction / identity；
+- revision continuity；
+- Registry / Snapshot / Patch / Event semantics；
+- Patch operation order 与 preconditions；
+- final Tree structural invariants；
+- no partial commit；
+- no partial application unit；
+- Event ordering barrier、applicability 和 no replay；
+- carrier loss / fresh baseline recovery。
+
+### 7.2 Historical-cap regression
+
+使用测试运行环境能够正常处理的代表性数据，超过历史数字：
+
+- message > 1 MiB；
+- JSON depth > 64；
+- Node count > 16384；
+- Tree depth > 30；
+- Patch operations > 4096；
+- Render data > 256 KiB；
+- attrs / JSON members / array elements 超过旧上限；
+- identity/tag/Event strings 超过旧 byte thresholds。
+
+这些是证明旧数字不再拒绝数据的测试样本，不建立新的上限。若测试平台自身真实失败，应记录实际 platform failure，不得把失败改写成协议 cap。
+
+### 7.3 Error behavior
+
+- malformed JSON 仍为 protocol-fatal；
+- 开发者 serialization error 只失败当前调用，不自动关闭 Data peer；
+- unexpected local candidate exception 不被映射为 peer protocol-fatal；
+- Patch failure 丢弃 candidate，revision/current state 不变；
+- carrier send failure 保留真实 transport cause；
+- 不测试 ResourceBudgetExceeded 或 budget exhaustion，因为默认 Runtime 不定义这些机制。
+
+### 7.4 Performance evidence
+
+使用 Issue #133 同等 PokeMan Map 7 路线，以及大型普通 RenderNode.data fixture。
 
 至少报告：
 
 - 每次 update 的 object/container visits；
 - 完整 Snapshot 被扫描的次数；
-- stringify / bounded serialize 次数与字节数；
+- JSON parse / stringify 次数；
 - clone/freeze 对象数；
 - changed data subtree 与 unchanged subtree 大小；
 - Worker 与 Renderer 端 P50/P95/P99；
@@ -358,51 +336,80 @@ current committed state
 
 - 普通小 Patch 不触发与本次操作无关的完整 Snapshot stringify；
 - 同一 encode/decode 路径不重复完整验证同一 subtree；
-- local resource budgets 通过局部/增量方式满足，而不是重复全树预检；
-- 每条实际发送消息仍执行一次必要的 bounded serialization；
+- 没有 raw-byte/depth/member/queue capacity preflight；
+- 每条实际 application unit 只执行一次必要 serialization；
 - 默认 Runtime 不执行 opt-in business strict validation。
 
-毫秒阈值必须由目标运行环境基准制定。不得通过取消 bounded resource protection、样本过滤或弱化失败语义获得 PASS。
+毫秒阈值由目标运行环境基准制定。不得通过样本过滤或弱化协议/atomicity 语义获得 PASS。
 
-## 10. 实施顺序
+## 8. 实施顺序
 
 ### Phase 0 — Validation inventory
 
-为现有检查逐项标注：
+逐项标记现有检查属于：
 
 - protocol / authority invariant；
-- resource-safety guard；
-- frozen-contract compatibility requirement；
+- framework structural invariant；
 - developer-owned business validation；
+- arbitrary capacity cap；
 - duplicate / implementation-only preflight。
 
-没有明确 owner 和必要性证明的默认热路径验证，不应自动保留。
+没有明确 framework owner / protocol obligation 的默认验证和容量拒绝逻辑，不应保留。
 
-### Phase 0.5 — Close queue and failure-boundary gaps
+### Phase 1 — Wire / Data codec
 
-先补齐 PWA inbound queue、DataRuntime outbound queue、RenderManager pending-work queue 的 count + retained payload/work budgets；终止时释放引用；资源耗尽映射到 local-fatal / local-resource-exhaustion，并验证 no partial commit / no partial send。此阶段不改变 wire message shape。
+删除固定数值校验、raw-byte/depth preflight 和重复 traversal；实现单次实际 JSON serialization / representation handling。先用 wire/data tests 证明行为一致。
 
-### Phase 1 — Remove redundant work without changing the contract
+### Phase 2 — RenderManager
 
-先合并 wire/data codec 的重复 traversal，并让实际 bounded serialization 同时完成必要的字节计量。protocol invariants 与 failure/atomicity semantics 保持不变；numeric caps 按 ADR0039 改为 local resource budgets。
+删除 MAX_PENDING_WORK、probeLimit 和容量触发的 drop/peer invalidation；保留 ownership isolation、desired-state coalescing、Event barrier、revision 和 publication ordering。
 
-### Phase 2 — RenderManager operation-first update
+### Phase 3 — Renderer Store
 
-移除与当前 Patch 无关的 Snapshot 预检；在实际 Snapshot/Patch encode 时执行必要 message bound。保留 candidate isolation、operation preconditions、local resource budgets 与 atomic commit。
+删除 node/depth/data/member/byte caps；保留 final structural invariants、COW、candidate isolation 和 atomic commit。拆分 protocol/continuity/local exception 分类。
 
-### Phase 3 — Renderer Store incremental enforcement
+### Phase 4 — Queue / carrier lifecycle
 
-对 data-only Patch 做局部/增量 accounting；结构操作保留所需的 tree invariants。通过 full recompute oracle 测试 accounting 正确性，但生产热路径不因每次小 Patch 重跑 oracle。
+删除 DataRuntime 与 Presentation 的人为队列容量；保留 FIFO、single writer、once-settle。PWA terminal 时释放 queue references，优化 head-index。不得引入新的 queue cap。
 
-### Phase 4 — Optional Strict Validation design
+### Phase 5 — Optional Strict Validation design
 
-单独设计 strict validation module / configuration / authoring API。它不得成为默认 Runtime 依赖，也不得覆盖协议必需检查。
+单独设计 strict validation module / configuration / authoring API。它不得成为默认 Runtime 依赖，也不得覆盖协议必需检查。本 PR 不实现该模块。
 
-### Phase 5 — Integrated physical workload
+### Phase 6 — Integrated physical workload
 
-使用 Issue #133 相同 PokeMan Map 7 路线验证 Worker 与主线程。Map 专属 payload 缩减由 PR #134 负责；本 PR 必须使用大型普通 RenderNode.data fixture 证明通用收益。
+使用 Issue #133 同一路线验证 Worker 与主线程。Map 专属 payload 缩减由 PR #134 负责；本 PR 必须使用大型普通 RenderNode.data fixture 证明通用收益。
 
-## 11. 与 Map PR 的边界
+## 9. PR 合并与激活门槛
+
+### 9.1 Design merge gate（本 docs-only PR）
+
+- [ ] ADR0038 明确 Developer Authority / Minimal Runtime Enforcement / Opt-in Strictness。
+- [ ] ADR0039 明确删除固定 numeric caps，不以 local budgets 替代。
+- [ ] Framework Validation Boundary、Render Update v1、Renderer Data Profile v1/v3、Conformance 与本实施方案不存在相互矛盾的 budget / cap 要求。
+- [ ] 明确 same-identity pre-release compatibility gate；存在 deployed/independent/rollback/persisted compatibility obligation 时必须 STOP 并 version/migrate。
+- [ ] 保留协议、identity、revision、Tree structural invariants、ownership isolation 和 atomicity。
+- [ ] 将设计状态标为 proposed/candidate；不声称 Runtime 已实现或 Conformance 已通过。
+
+### 9.2 Runtime activation gate（后续 implementation work）
+
+- [ ] 所有历史固定容量拒绝逻辑已从默认 Runtime 删除；无 ResourceBudgetPolicy 替代。
+- [ ] 无 raw-byte、depth、member、payload-byte、queue-count 或 retained-work preflight。
+- [ ] Data Codec 不再对同一 subtree 重复完整 traversal。
+- [ ] 普通小 Patch 不再完整 stringify 与本次操作无关的 Snapshot。
+- [ ] Renderer Store 不再对未变化 data subtree 重复扫描。
+- [ ] DataRuntime / RenderManager / Presentation 不因人为 queue cap 拒绝或丢弃消息。
+- [ ] PWA carrier terminal 时释放 queue references；无容量上限。
+- [ ] zIndex 在 RenderManager 与 Codec 两端接受完整 signed-safe-integer 范围，拒绝范围外值；不再使用 int32。
+- [ ] generic data Patch set/remove 接受空字符串 key，与 Snapshot 和 wire Codec 一致；attrs key 仍保持非空。
+- [ ] 序列化异常返回调用者，不自动 terminal 整个 Data peer。
+- [ ] 本地 candidate exception 不被映射成 peer protocol-fatal；失败 Patch 不改变已提交状态。
+- [ ] 超过历史数值阈值的代表性 fixture 被正确处理，且不建立新最大值。
+- [ ] 所有 wire/data/subsystem/renderer 现有测试通过。
+- [ ] Issue #133 同一路线的 Worker 与主线程长任务均有对比报告。
+- [ ] 正式 qualification 按 performance.md 执行；不得用 PWA diagnostic run 代替 Hostra full/native qualification。
+
+## 10. 与 Map PR 的边界
 
 Map 专项 PR #134 负责：
 
@@ -413,47 +420,22 @@ Map 专项 PR #134 负责：
 
 本架构 PR #135 负责：
 
-- 将框架强制检查限制在 runtime / protocol / resource safety 所必需的范围；
+- 将框架强制检查限制在 protocol / framework correctness 所必需的范围；
+- 删除框架自行设定的 Render/Data 容量限制；
 - 移除 Realm 通用数据通路的重复与无关全量预检；
-- 保持修订后 Render Update v1 的 authority、identity、revision、atomicity 与 Event 可观察语义；
+- 保持 authority、identity、revision、atomicity 与 Event ordering；
 - 为未来 opt-in Strict Validation 留出独立边界。
 
 架构层不得识别 Map tag 或 Tile tuple；Map 层不得绕过通用协议约束。两项改造独立评审，集成时共同使用 Issue #133 的物理机工作负载复测。
 
-## 12. 合并门槛
-
-- [ ] Framework Responsibility and Validation Boundary 已进入 Current Architecture 文档。
-- [ ] Developer Authority、Minimal Runtime Enforcement、Opt-in Strictness 三项原则有明确规范定义。
-- [ ] 未将应用业务 Schema / 业务正确性检查强制放入默认 Runtime。
-- [ ] Render Update v1 numeric hard limits 已按 ADR0039 改为 local resource-budget policy；active Renderer Data Profile `/3` 的 common gate / failure 文档同步一致；不因数值容量变化升级 wire identity。
-- [ ] Profile v1 的三-child → 四-child pre-release composition gate（ADR0037）与本次 numeric budget policy 分开处理，不混为同一个兼容性问题。
-- [ ] 原始消息在 parse 前受 local inbound budget 约束；不额外增加无实测收益的 pre-parse depth full scan；实际序列化在单次 bounded serializer 中完成精确 byte accounting。
-- [ ] PWA MessagePort inbound queue 同时受 count 与 retained-string budget 约束，terminal 时释放队列引用。
-- [ ] DataRuntime outbound queue 同时受 pending count 与 encoded bytes budget 约束；count admission 在昂贵编码之前完成。
-- [ ] RenderManager pending work 同时受 item count 与 retained-work budget 约束，计量不触发完整 Snapshot stringify。
-- [ ] local resource exhaustion 与 protocol-fatal / continuity failure 分开；PWA typed carrier cause、Codec parse-budget cause、RenderStore candidate-budget cause 均由 DataRuntime 映射为 local-fatal；inbound no-partial-commit + carrier retirement，outbound no-partial-send；RenderManager queue exhaustion 有独立 local diagnostic。
-- [ ] caller 在 RenderManager API 返回后修改原输入对象，不影响 retained state / pending publication；必要 clone + freeze 已与校验和计量融合。
-- [ ] zIndex 在 RenderManager 与 Codec 两端接受完整 signed-safe-integer 范围，拒绝范围外值；不再使用 int32。
-- [ ] generic data Patch set / remove 接受空字符串 key，与 Snapshot 和 wire Codec 一致；attrs key 仍保持非空。
-- [ ] protocol strings 不再因旧 128 / 256 / 4096 byte cap 被拒绝；aggregate local budgets 仍能阻止无界资源增长。
-- [ ] 普通小 Patch 不再完整 stringify 与本次操作无关的 Snapshot。
-- [ ] Data Codec 不再对同一 subtree 重复完整 traversal。
-- [ ] Renderer Store data-only Patch 不再无条件重新扫描全部未变化 data。
-- [ ] Patch operation 依序执行，candidate resource growth 始终受 local budget 约束，失败不 partial commit。
-- [ ] 失败 Patch 不改变已提交状态。
-- [ ] 可选 Strict Validation 与默认 Runtime Guard 在代码依赖和测试上可分离。
-- [ ] 所有 wire/data/subsystem/renderer 现有测试通过。
-- [ ] Issue #133 同一路线的 Worker 与主线程长任务均有对比报告。
-- [ ] 正式 qualification 按 performance.md 执行；不得用 PWA diagnostic run 代替 Hostra full/native qualification。
-
-## 13. 明确非目标
+## 11. 明确非目标
 
 - 将所有应用数据默认做完整业务 Schema 审查。
 - 将所有应用对象包装成强制 ValidatedImmutableJson public abstraction。
 - 仅为严格验证而强制深复制或深冻结所有应用数据。
 - 通过全局 disableValidation 开关绕过当前协议。
-- 未经正式 ADR / compatibility gate / conformance revision / qualification 而变更已发布 Render Update v1 wire semantics。
-- 信任跨 MessagePort / JSON 的 sender-side brand 或 WeakMap metadata。
-- 为 Map 增加通用协议例外。
+- 用可配置 ResourceBudgetPolicy 替代旧固定容量限制。
+- 引入 ResourceBudgetExceeded / local-resource-exhaustion 作为人为容量机制。
+- 引入 ACK/NACK、budget negotiation、通用资源协调器或 Map 专属协议例外。
 - 在本 PR 实现 Map Tile Band / fixed-world Canvas cache。
 - 改变 RenderDomain authority、Patch revision、Renderer identity 或事务提交语义。
