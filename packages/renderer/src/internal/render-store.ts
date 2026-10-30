@@ -12,12 +12,6 @@ type JsonValue = null | boolean | number | string | readonly JsonValue[] | JsonO
 interface JsonObject { readonly [key: string]: JsonValue; }
 
 const accepted: DataInboundDisposition = Object.freeze({ kind: "accepted" });
-const MAX_NODES = 16_384;
-const MAX_TREE_DEPTH = 30;
-const MAX_ATTRS = 256;
-const MAX_CONTAINER_MEMBERS = 16_384;
-const MAX_DATA_BYTES = 262_144;
-const MAX_DATA_DEPTH = 32;
 
 interface MutableNode {
   key: string;
@@ -27,12 +21,24 @@ interface MutableNode {
   children: MutableNode[];
 }
 
+interface NodeLocation {
+  readonly parentKey: string | null;
+  readonly index: number;
+}
+
+interface TreeIndex {
+  readonly nodes: Map<string, MutableNode>;
+  readonly locations: Map<string, NodeLocation>;
+}
+
 interface DomainReplica {
   readonly domainId: string;
   baselined: boolean;
   revision: number | null;
   zIndex: number;
   roots: MutableNode[];
+  nodes: Map<string, MutableNode>;
+  locations: Map<string, NodeLocation>;
 }
 
 interface DomainIdentity {
@@ -44,104 +50,233 @@ function fatal(message: string): DataInboundDisposition {
   return Object.freeze({ kind: "protocol-fatal", cause: new Error(message) });
 }
 
+/** Detach and freeze one JSON subtree without recursion or a second validation pass. */
 function cloneJson<T extends JsonValue>(value: T): T {
   if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map((child) => cloneJson(child)) as unknown as T;
-  const output = Object.create(null) as Record<string, JsonValue>;
-  for (const key of Object.keys(value)) output[key] = cloneJson((value as JsonObject)[key] as JsonValue);
-  return output as T;
-}
-
-function jsonDepth(value: JsonValue): number {
-  let maximum = 0;
-  const stack: Array<{ readonly value: JsonValue; readonly depth: number }> = [{ value, depth: 0 }];
-  while (stack.length > 0) {
-    const entry = stack.pop();
-    if (entry === undefined || entry.value === null || typeof entry.value !== "object") continue;
-    const depth = entry.depth + 1;
-    maximum = Math.max(maximum, depth);
-    for (const child of Object.values(entry.value)) stack.push({ value: child as JsonValue, depth });
-  }
-  return maximum;
-}
-
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).byteLength;
-}
-
-function cloneNode(node: RenderNodeV1 | MutableNode): MutableNode {
-  const attrs = Object.create(null) as Record<string, string>;
-  for (const key of Object.keys(node.attrs)) attrs[key] = node.attrs[key] as string;
-  return {
-    key: node.key,
-    tag: node.tag,
-    attrs,
-    data: cloneJson(node.data) as Record<string, JsonValue>,
-    children: node.children.map(cloneNode),
+  const active = new WeakSet<object>();
+  const completed = new WeakMap<object, Record<string, JsonValue> | JsonValue[]>();
+  const make = (source: object): {
+    target: Record<string, JsonValue> | JsonValue[];
+    entries: Array<{ key: string | number; value: unknown }>;
+  } => {
+    if (Array.isArray(source)) {
+      const target = new Array<JsonValue>(source.length);
+      const entries: Array<{ key: string | number; value: unknown }> = [];
+      const keys = Reflect.ownKeys(source);
+      if (keys.length !== source.length + 1 || !keys.includes("length")) {
+        throw new TypeError("Invalid JSON array shape");
+      }
+      for (let index = 0; index < source.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(source, String(index));
+        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+          throw new TypeError("Invalid JSON array element");
+        }
+        entries.push({ key: index, value: descriptor.value });
+      }
+      return { target, entries };
+    }
+    const prototype = Object.getPrototypeOf(source);
+    if (prototype !== Object.prototype && prototype !== null) throw new TypeError("Invalid JSON object");
+    const target = Object.create(null) as Record<string, JsonValue>;
+    const entries: Array<{ key: string | number; value: unknown }> = [];
+    for (const key of Reflect.ownKeys(source)) {
+      if (typeof key !== "string") throw new TypeError("JSON object cannot contain symbol keys");
+      const descriptor = Object.getOwnPropertyDescriptor(source, key);
+      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+        throw new TypeError("Invalid JSON object member");
+      }
+      entries.push({ key, value: descriptor.value });
+    }
+    return { target, entries };
   };
-}
 
-function freezeJson<T extends JsonValue>(value: T): T {
-  if (value !== null && typeof value === "object") {
-    for (const child of Object.values(value)) freezeJson(child as JsonValue);
-    Object.freeze(value);
-  }
-  return value;
-}
+  const root = make(value as object);
+  active.add(value as object);
+  completed.set(value as object, root.target);
+  const stack: Array<{
+    source: object;
+    target: Record<string, JsonValue> | JsonValue[];
+    entries: Array<{ key: string | number; value: unknown }>;
+    next: number;
+  }> = [{ source: value as object, target: root.target, entries: root.entries, next: 0 }];
+  const assign = (
+    target: Record<string, JsonValue> | JsonValue[],
+    key: string | number,
+    child: JsonValue,
+  ): void => {
+    if (Array.isArray(target)) target[key as number] = child;
+    else target[key as string] = child;
+  };
 
-function freezeNode(node: MutableNode): RenderNodeV1 {
-  for (const child of node.children) freezeNode(child);
-  Object.freeze(node.attrs);
-  freezeJson(node.data);
-  Object.freeze(node.children);
-  return Object.freeze(node);
-}
-
-function validateData(value: JsonObject): void {
-  if (jsonDepth(value) > MAX_DATA_DEPTH) throw new Error("Render data depth limit exceeded");
-  const stack: JsonValue[] = [value];
   while (stack.length > 0) {
-    const current = stack.pop();
-    if (current === undefined || current === null || typeof current !== "object") continue;
-    if (Array.isArray(current)) {
-      if (current.length > MAX_CONTAINER_MEMBERS) throw new Error("Render data array limit exceeded");
-      stack.push(...current);
-    } else {
-      const keys = Object.keys(current);
-      if (keys.length > MAX_CONTAINER_MEMBERS) throw new Error("Render data member limit exceeded");
-      for (const key of keys) {
-        if (byteLength(key) > 256) throw new Error("Render data key limit exceeded");
-        stack.push((current as JsonObject)[key] as JsonValue);
-      }
+    const frame = stack[stack.length - 1]!;
+    if (frame.next >= frame.entries.length) {
+      Object.freeze(frame.target);
+      active.delete(frame.source);
+      stack.pop();
+      continue;
+    }
+    const entry = frame.entries[frame.next++]!;
+    const child = entry.value;
+    if (child === null || typeof child === "string" || typeof child === "boolean") {
+      assign(frame.target, entry.key, child);
+      continue;
+    }
+    if (typeof child === "number") {
+      if (!Number.isFinite(child)) throw new TypeError("JSON number must be finite");
+      assign(frame.target, entry.key, child);
+      continue;
+    }
+    if (typeof child !== "object") throw new TypeError("Invalid JSON value");
+    if (active.has(child)) throw new TypeError("Cyclic JSON value");
+    const prior = completed.get(child);
+    if (prior !== undefined) {
+      assign(frame.target, entry.key, prior as JsonValue);
+      continue;
+    }
+    const nested = make(child);
+    active.add(child);
+    completed.set(child, nested.target);
+    assign(frame.target, entry.key, nested.target as JsonValue);
+    stack.push({ source: child, target: nested.target, entries: nested.entries, next: 0 });
+  }
+  return root.target as T;
+}
+
+function cloneTree(roots: readonly RenderNodeV1[] | readonly MutableNode[]): {
+  readonly roots: MutableNode[];
+  readonly index: TreeIndex;
+} {
+  const copiedRoots = new Array<MutableNode>(roots.length);
+  const nodes = new Map<string, MutableNode>();
+  const locations = new Map<string, NodeLocation>();
+  const stack: Array<{
+    raw: RenderNodeV1 | MutableNode;
+    parentChildren: MutableNode[];
+    index: number;
+    parentKey: string | null;
+  }> = [];
+  for (let index = roots.length - 1; index >= 0; index -= 1) {
+    stack.push({ raw: roots[index]!, parentChildren: copiedRoots, index, parentKey: null });
+  }
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    const raw = frame.raw;
+    if (typeof raw.key !== "string" || raw.key.length === 0) throw new TypeError("Invalid Render node key");
+    if (nodes.has(raw.key)) throw new TypeError("Duplicate Render node key");
+    const attrs = Object.create(null) as Record<string, string>;
+    for (const key of Object.keys(raw.attrs)) attrs[key] = raw.attrs[key] as string;
+    const data = cloneJson(raw.data) as Record<string, JsonValue>;
+    const children = new Array<MutableNode>(raw.children.length);
+    const node: MutableNode = { key: raw.key, tag: raw.tag, attrs, data, children };
+    frame.parentChildren[frame.index] = node;
+    nodes.set(node.key, node);
+    locations.set(node.key, { parentKey: frame.parentKey, index: frame.index });
+    for (let index = raw.children.length - 1; index >= 0; index -= 1) {
+      stack.push({ raw: raw.children[index]!, parentChildren: children, index, parentKey: node.key });
     }
   }
-  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > MAX_DATA_BYTES) {
-    throw new Error("Render data byte limit exceeded");
+  return { roots: copiedRoots, index: { nodes, locations } };
+}
+
+function indexTree(roots: readonly MutableNode[]): TreeIndex {
+  const nodes = new Map<string, MutableNode>();
+  const locations = new Map<string, NodeLocation>();
+  const stack = roots.map((node, index) => ({ node, parentKey: null as string | null, index }));
+  while (stack.length > 0) {
+    const entry = stack.pop()!;
+    if (nodes.has(entry.node.key)) throw new Error("Duplicate Render node key");
+    nodes.set(entry.node.key, entry.node);
+    locations.set(entry.node.key, { parentKey: entry.parentKey, index: entry.index });
+    for (let index = entry.node.children.length - 1; index >= 0; index -= 1) {
+      stack.push({ node: entry.node.children[index]!, parentKey: entry.node.key, index });
+    }
+  }
+  return { nodes, locations };
+}
+
+function freezeTree(roots: readonly MutableNode[]): void {
+  const stack: Array<{ node: MutableNode; visited: boolean }> = [];
+  for (let index = roots.length - 1; index >= 0; index -= 1) {
+    stack.push({ node: roots[index]!, visited: false });
+  }
+  while (stack.length > 0) {
+    const entry = stack.pop()!;
+    if (entry.visited) {
+      Object.freeze(entry.node.attrs);
+      Object.freeze(entry.node.children);
+      Object.freeze(entry.node);
+      continue;
+    }
+    stack.push({ node: entry.node, visited: true });
+    for (let index = entry.node.children.length - 1; index >= 0; index -= 1) {
+      stack.push({ node: entry.node.children[index]!, visited: false });
+    }
   }
 }
 
-function validateTree(roots: readonly MutableNode[]): Map<string, MutableNode> {
-  const index = new Map<string, MutableNode>();
-  const stack = roots.map((node) => ({ node, depth: 1 }));
+function findContainer(
+  roots: MutableNode[],
+  key: string,
+): { readonly container: MutableNode[]; readonly index: number } | null {
+  const stack: MutableNode[][] = [roots];
   while (stack.length > 0) {
-    const entry = stack.pop();
-    if (entry === undefined) continue;
-    if (entry.depth > MAX_TREE_DEPTH) throw new Error("Render tree depth limit exceeded");
-    if (index.has(entry.node.key)) throw new Error("Duplicate Render node key");
-    index.set(entry.node.key, entry.node);
-    if (index.size > MAX_NODES) throw new Error("Render node count limit exceeded");
-    if (Object.keys(entry.node.attrs).length > MAX_ATTRS) throw new Error("Render attrs limit exceeded");
-    for (const [key, value] of Object.entries(entry.node.attrs)) {
-      const keyBytes = byteLength(key);
-      const valueBytes = byteLength(value);
-      if (keyBytes < 1 || keyBytes > 128 || valueBytes > 4096) {
-        throw new Error("Render attrs string limit exceeded");
-      }
+    const container = stack.pop();
+    if (container === undefined) continue;
+    for (let index = 0; index < container.length; index += 1) {
+      const node = container[index];
+      if (node === undefined) continue;
+      if (node.key === key) return { container, index };
+      stack.push(node.children);
     }
-    validateData(entry.node.data);
-    for (const child of entry.node.children) stack.push({ node: child, depth: entry.depth + 1 });
   }
-  return index;
+  return null;
+}
+
+function collectKeys(node: MutableNode): string[] {
+  const result: string[] = [];
+  const stack = [node];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    result.push(current.key);
+    for (const child of current.children) stack.push(child);
+  }
+  return result;
+}
+
+function destination(
+  roots: MutableNode[],
+  parentKey: string | null,
+  beforeKey: string | null,
+): { readonly container: MutableNode[]; readonly index: number } {
+  const container = parentKey === null
+    ? roots
+    : (() => {
+      const parent = findContainer(roots, parentKey);
+      return parent?.container[parent.index]?.children;
+    })();
+  if (container === undefined) throw new Error("Missing Patch destination parent");
+  if (beforeKey === null) return { container, index: container.length };
+  const before = findContainer(roots, beforeKey);
+  if (before === null || before.container !== container) throw new Error("beforeKey is not a destination sibling");
+  return { container, index: before.index };
+}
+
+function applyDelta<T extends string | JsonValue>(
+  target: Record<string, T>,
+  delta: { readonly set?: Readonly<Record<string, T>>; readonly remove?: readonly string[] },
+): void {
+  if (delta.set !== undefined) {
+    for (const key of Object.keys(delta.set)) {
+      target[key] = cloneJson(delta.set[key] as JsonValue) as T;
+    }
+  }
+  if (delta.remove !== undefined) {
+    for (const key of delta.remove) {
+      if (!Object.prototype.hasOwnProperty.call(target, key)) throw new Error("Delta removes missing member");
+      delete target[key];
+    }
+  }
 }
 
 function findContainer(
