@@ -808,13 +808,15 @@ transient
 non-authoritative
 MUST NOT coalesce
 MUST NOT replay
-MAY be dropped/lost
+not dropped because of a framework queue-capacity policy
 MUST NOT change Domain revision/store
 ```
 
+Event 可能因 current carrier 在发送或交付前终止而丢失；well-formed but inapplicable Event 按 §13.1 drop。框架不得因为自行设定的 queue count / byte cap 静默丢弃已接受 Event。
+
 ### 13.1 Receiver applicability
 
-一个 schema/limits 合法的 Event 只有在：
+一个 schema-valid Event 只有在：
 
 ```text
 Domain current
@@ -836,7 +838,7 @@ no Data retirement solely for this applicability miss
 
 因此 stale Domain Event、pre-baseline Event、stale/missing target Event 都是 transient-inapplicable，不是 authoritative continuity failure。
 
-注意：malformed / closed-schema-invalid Event 仍是 protocol-fatal；若仅超过 local resource budget，则按 §16.2 作为 local-resource-exhaustion 处理。
+注意：malformed / closed-schema-invalid Event 仍是 protocol-fatal。Render Update 不定义 Event size 或 queue-capacity budget。
 
 ### 13.2 Event / authoritative barrier
 
@@ -862,7 +864,7 @@ Event 必须先 logical-deliver，再处理 removal。
 
 **未 emitted 但决定保留的 Event 是 authoritative coalescing barrier。** Sender不得把 Event 之前建立其 target/lifetime 的 authoritative commit 重写到 Event 之后，也不得在 Event 前把 target lifetime coalesce away。
 
-Sender MAY在 Event 尚未 emitted 时按 backpressure policy 丢弃该 Event；一旦 Event 被丢弃，对应 barrier 消失，尚未 emitted desired authoritative state可继续正常 coalesce。
+一旦 RenderManager 接受 Event，sender MUST 保留其 FIFO wire position 与 coalescing barrier；不得因框架队列容量或人为 backpressure threshold 丢弃。若在接受前实际操作失败，应向调用者报告真实异常；若 current carrier 在发送前终止，Event 不 replay。
 
 不要求等待 physical paint/vsync，也不增加 `afterRevision`。
 
@@ -956,9 +958,16 @@ invalid primitive type / integer range
 
 → MUST retire current Data Connection；不得交给 Render business/presentation handler。
 
-### 16.2 Local resource exhaustion
+### 16.2 Local operation / transport failure
 
-实现的 inbound parse、candidate construction 或 retained-state budget 耗尽时，Renderer MUST 不提交任何部分状态，并停止处理当前 carrier；由于 authoritative continuity 无法继续证明，当前 Data Connection MUST retire。该结果属于 local-resource-exhaustion，不是 peer protocol violation，不得报告为 malformed/invalid message。发送端 outbound budget 耗尽时，不得发送部分消息；可 coalesce 尚未 emitted 的 desired state，或向本地调用边界报告 resource failure。
+本节处理真实操作异常，不定义框架容量错误：
+
+- Developer-owned input 在读取、clone、encode 或 JSON serialization 时抛出异常：失败当前 API 调用并向调用者报告，不因此自动终止整个 Data Connection。
+- carrier / Host API 的 send 或 receive 实际失败：按 carrier failure 处理；不得伪装为 peer protocol violation。
+- 已通过 wire schema 检查的 inbound message 在 candidate construction / mutation 中触发意外本地异常：丢弃 candidate、报告 local implementation failure；若无法继续证明 authoritative continuity，可退休当前 Data Connection，但不得标记为 malformed peer 或 protocol-fatal。
+- malformed JSON SyntaxError、invalid Wire representation、exact closed-schema violation 仍按 §16.1 处理；协议语义或 Patch precondition failure 仍按 §16.3 处理。
+
+任何失败 Patch 都不得 partial commit；任何失败序列化都不得发送 partial application unit。进程级 OOM 可能无法被 JavaScript 捕获，框架不承诺将其转换为普通异常。
 
 ### 16.3 Authoritative continuity failure
 
@@ -1035,83 +1044,31 @@ resume cursor
 
 ## 17. Plain JSON / Exact Closed Schema
 
-Render v1 使用 frozen Wire JSON representation semantics；Render 不增加第二 tokenizer/parser。
+Render v1 使用 frozen Wire JSON representation semantics；Render 不增加第二 tokenizer/parser，也不在解析前执行 raw-byte 或 depth preflight。
 
 解析：
 
-```text
+~~~text
 raw carrier string
-→ actual UTF-8 byte gate
 → Wire parseJsonText / ECMAScript JSON.parse observable semantics
-→ Wire JsonValue representation validation
+→ required Wire representation checks
 → Render exact-schema/domain validation
-```
+~~~
 
-因此 source-level duplicate JSON object member **不由 Render 额外检测**；parse 后 resulting object仍必须满足 exact closed schema。
+Wire representation 和协议字段的必要语义检查仍然有效，例如 plain JSON values、Unicode scalar identity strings、精确字段类型。不得为 message bytes、JSON depth、member count 或 string byte length 增加容量门槛，也不得对同一对象图重复执行全量 traversal。
 
-禁止 representation：
-
-```text
-undefined
-NaN / Infinity
-BigInt
-Function / Symbol
-DOM/Host object
-MessagePort / Blob
-class instance
-invalid Unicode scalar sequence
-```
-
-所有 protocol objects exact key set：
-
-```text
-render.domains
-    {type, domains}
-
-render.snapshot
-    {type, domainId, revision, zIndex, roots}
-
-render.patch
-    {type, domainId, baseRevision, revision, ops, zIndex?}
-
-render.event
-    {type, domainId, targetKey, name, data}
-
-RenderNode
-    {key, tag, attrs, data, children}
-
-insert
-    {op, parentKey, beforeKey, node}
-
-remove
-    {op, key}
-
-move
-    {op, key, parentKey, beforeKey}
-
-update
-    {op, key, attrs?, data?}
-
-StringMapDelta / JsonObjectDelta
-    {set?, remove?}
-```
-
-Unknown field MUST reject；optional 只表示 member absence，不存在 `undefined`。
-
----
+因此 source-level duplicate JSON object member 不由 Render 额外检测；parse 后 resulting object 仍必须满足 exact closed schema。
 
 ## 18. Validation Order
 
 Inbound 固定：
 
-```text
+~~~text
 carrier string
-↓
-actual UTF-8 byte gate
 ↓
 Wire parseJsonText
 ↓
-Wire representation + local parser resource budget
+required Wire representation checks (once)
 ↓
 top-level Render type discrimination
 ↓
@@ -1127,40 +1084,38 @@ message-specific semantic/precondition validation
 ↓
 isolated candidate mutation when authoritative
 ↓
-intermediate/final structural + one-shot/tag validation
+final structural + one-shot/tag validation
 ↓
 atomic commit OR Event applicability/delivery
-```
+~~~
 
-Representation/schema-invalid input不得进入 authority/presentation logic；失败 Patch不得 partial apply。
+Representation/schema-invalid input 不得进入 authority/presentation logic；失败 Patch 不得 partial apply。不得插入 raw-byte gate、depth/member/byte preflight 或 local resource-budget stage。
 
 不冻结 human-readable error wording；冻结 accept/reject/drop/retire 与 authoritative state outcome。
 
----
+## 19. Runtime Capacity and Host Failures
 
-## 19. Bounded Resource Policy
+Render Update v1 不定义、也不要求 Runtime 实现通用容量上限。以下均不得成为框架自行拒绝消息或操作的理由：
 
-Render Update v1 不定义统一的协议级数值上限。以下容量由 Host / Product composition / Runtime implementation 通过显式、有限、可审计的 local resource budget 管理：
-
-- inbound carrier message bytes 与 parser nesting/work；
-- JSON object/array members、string/key bytes 与 retained payload bytes；
+- inbound / outbound message bytes；
+- JSON container 或 application data depth；
+- JSON object/array members、string/key bytes；
 - Domain Registry entries、RenderNode count、tree depth；
-- Patch operation count、candidate allocation 与 retained tombstone/index state；
-- outbound serialized bytes、pending messages、queues 与 in-flight work。
+- Patch operation count、candidate growth、retained state；
+- pending messages、queue count、queue bytes、in-flight work；
+- Render data / Event data payload bytes。
 
-要求：
+框架不得通过固定常量、默认配置、可配置 local budget、Product/Host policy 或 ResourceBudgetPolicy 重新引入这些门槛。平台本身可能因内存、调用栈、传输实现或其他实际能力限制而失败；框架应传播可观察到的实际异常，不应提前以自己的数字拒绝。不可捕获的进程级 OOM 不承诺可恢复。
 
-1. 所有可能随输入增长的资源必须有 bounded policy；不得把“无协议级固定上限”解释为无界分配或无界队列。
-2. 在 parse、serialize、candidate mutation、queue admission 的实际工作过程中执行 bounded guard；能融合到单次遍历的检查不得再触发重复全树预检。
-3. local budgets 可以按 Host / 平台 / 产品配置，不构成 wire accept/reject 的统一数字，也不得被伪装成业务 Schema。
-4. local budget exhaustion 与 malformed JSON / exact-schema violation 分开分类；inbound exhaustion 不得部分提交，并 retire 当前 carrier 以避免继续处理失去 continuity 的消息；outbound exhaustion 不得发送部分 application unit。
-5. v1 不提供 budget negotiation。产品组合必须选择互操作 peer 可承受的预算，并记录具体部署约束；独立实现之间不保证对超出接收端 local budget 的消息成功交付。
-6. revision/baseRevision 必须为 positive safe integer；zIndex 必须为 signed safe integer，以保持 JavaScript number 精确性与跨实现确定排序。
-7. 所有 protocol identity strings 必须是非空 Unicode scalar strings；不定义 UTF-8 byte 长度上限。Generic data keys 可以为空字符串。
+这不取消协议语义约束：
 
-本节定义 resource-safety obligation，不冻结任何统一 numeric cap。
+- revision/baseRevision 必须为 positive safe integer；
+- zIndex 必须为 signed safe integer，以保持 JavaScript number 精确性与跨实现确定排序；
+- protocol identity strings 必须为非空 Unicode scalar strings，但没有 UTF-8 byte 长度上限；
+- Generic data keys 可以为空字符串；
+- exact schema、plain JSON representation、identity、revision、Patch preconditions 和 final tree invariants 继续强制。
 
----
+编码只做实际需要的一次 serialization；解析只做实际需要的一次 parse 与协议检查。不得为了估算 byte/depth/member capacity 增加额外全量扫描。
 
 ## 20. Frame / Input / Data / Content Independence
 
@@ -1262,47 +1217,36 @@ presentation scheduler policy
 
 1. Render Update 只有 Subsystem → Renderer 单向 Render application data；
 2. wire Domain identity = Session + subsystemKey + DataAuthority generation + domainId；
-3. same-generation reconnect保留 Domain/Node wire lifetime，fresh generation重置 wire universe；
-4. Registry full replacement且原子决定 wire Domain membership；
+3. same-generation reconnect 保留 Domain/Node wire lifetime，fresh generation 重置 wire universe；
+4. Registry full replacement 且原子决定 wire Domain membership；
 5. fresh carrier first Render message = Registry；每个 Domain 独立 unbaselined→Snapshot→baselined；
-6. Domain/Node published identity在其 wire lifetime内 one-shot；
-7. Snapshot full replacement仍受 one-shot key + stable-tag history约束；
+6. Domain/Node published identity 在其 wire lifetime 内 one-shot；
+7. Snapshot full replacement 仍受 one-shot key + stable-tag history 约束；
 8. roots/children 是 authoritative ordered siblings；
-9. zIndex高者在上，同值按 domainId UTF-8 lexical tie-break；
-10. revision continuity只在 current carrier baseline后严格 `R→R+1`；fresh baseline不与旧 carrier revision比较；
-11. sender用 carrier-local `lastEmittedRevision`，emitted = ordered-send boundary accepted；
-12. Patch仅 insert/remove/move/update，whole candidate atomic；
-13. empty Patch只有携 zIndex 才合法；Update/Delta不得结构性空操作；
-14. Patch ops 按序应用并满足 operation preconditions；local resource budget 在实际增长过程中受控，最终 candidate 满足 framework structural invariants；
+9. zIndex 高者在上，同值按 domainId UTF-8 lexical tie-break；
+10. revision continuity 只在 current carrier baseline 后严格 R→R+1；fresh baseline 不与旧 carrier revision 比较；
+11. sender 使用 carrier-local lastEmittedRevision，emitted = ordered-send boundary accepted；
+12. Patch 仅 insert/remove/move/update，whole candidate atomic；
+13. empty Patch 只有携 zIndex 才合法；Update/Delta 不得结构性空操作；
+14. Patch ops 按序应用并满足 operation preconditions；最终 candidate 满足 framework structural invariants，不设 node-count / tree-depth / operation-count cap；
 15. Event transient/no replay，不修改 revision/store；retained Event 是 authoritative coalescing barrier；
-16. well-formed stale/inapplicable Event drop-only；schema/limit invalid message与 authoritative continuity error retire Data；
-17. Data loss后旧 Store最多是 stale presentation cache，不是 current authority/Patch base；
-18. recovery固定 fresh carrier + Registry + current Domain Snapshots；
+16. well-formed stale/inapplicable Event drop-only；schema-invalid message 与 authoritative continuity error 按各自 failure semantics 处理；
+17. Data loss 后旧 Store 最多是 stale presentation cache，不是 current authority/Patch base；
+18. recovery 固定 fresh carrier + Registry + current Domain Snapshots；
 19. no ACK/NACK/replay/resync RPC；
-20. tag/presentation/component implementation不属于 Render protocol authority；
-21. Frame/Input/Data transport/Content capability 与 Render authority保持分离；
-22. exact closed schema、authority/revision semantics、structural integrity、failure/recovery 与 atomic commit 属协议不变量；numeric resource budgets 由 local policy 管理，并可在 pre-release correction 中调整。
-
----
+20. tag/presentation/component implementation 不属于 Render protocol authority；
+21. Frame/Input/Data transport/Content capability 与 Render authority 保持分离；
+22. exact closed schema、authority/revision semantics、structural integrity、failure/recovery 与 atomic commit 属协议不变量；应用容量由平台和开发者决定，框架不增加人为容量上限。
 
 ## 24. Compatibility Boundary
 
-Render Update v1 的 numeric resource-budget policy 属于 Host / Product / Runtime 本地资源策略，不是 wire ABI。调整或移除这些本地容量阈值，在正式发布前后都不要求创建新 protocol version，也不要求改变 `/1` identity。旧接收端若仍有较小的本地容量，可能无法处理超过该容量的具体负载；这是 receiver capacity mismatch，不是消息格式或协议语义不兼容。v1 不提供 budget negotiation，产品应为实际 workload 配置相互可承受的 sender / receiver budgets。只有 message schema、direction、authority、identity、ordering、revision、atomicity、Event 或 recovery semantics 真正改变时，才需要 protocol versioning。Conformance fixture revision 是测试语料版本，不等同于 wire protocol version。
+旧 Render Update v1 的 numeric hard limits 和容量触发的队列行为会影响跨实现可观察的 accept/reject/drop 结果。移除它们是明确的 wire-observable pre-release correction，不得声称完全没有语义变化。
 
-```text
-message kind / schema
-application-unit encoding
-wire Domain identity/lifetime scope
-Registry/baseline rules
-revision continuity scope
-Snapshot semantics
-Patch algebra/preconditions/atomicity
-Node one-shot/tag rules
-Event ordering/barrier/drop semantics
-zIndex logical ordering
-protocol-owned schema/authority/revision/atomicity semantics
-resource-budget policy
-validation/failure/recovery semantics
-```
+保持 /1 identity 的前提是 release owner 确认首次正式发布前不存在 deployed old-hard-limit /1 peers、独立旧实现、rolling upgrade / rollback cohort 或 persisted compatibility obligation。若任何一项存在，必须停止 same-identity correction，另行提交 protocol version / migration ADR。
+
+若兼容性核查通过，可以在首次正式发布前通过 ADR0039 和 fixtureSetRevision 2 修订同一 /1。首次正式发布后，改变 wire-observable accept/reject/drop semantics 必须版本化。
+
+Conformance fixture revision 是测试语料版本，不等同于 wire protocol version。message kind/schema、application-unit encoding、identity/lifecycle、revision、Patch atomicity、Event ordering 与 recovery semantics 仍受版本治理。
 
 新增 Component Profile、tag semantic grammar、Render ACK、resync RPC 或第五种 Render message 同样不属于 v1 兼容扩展。
+
