@@ -17,7 +17,7 @@
 - [Renderer Data Profile `/3`](./renderer-data-profile-v3.md) · [v2 historical contract](./renderer-data-profile-v2.md) · [v1 pre-release correction](./renderer-data-profile-v1.md) — `/3` identity and message set remain current; common byte/depth/queue capacities are finite local budgets, not wire-level numeric caps. Profile v1's separate four-child correction remains under ADR0037; its conformance revision 4 is a candidate.
 - [Viewport State v1](./viewport-state-v1.md) · [Conformance](./viewport-state-conformance-v1.md)
 - [Game Common Controls Input v1](./game-common-controls-input-v1.md) · [Framework User Input v1 historical contract](./user-input-v1.md)
-- [Render Update v1](./render-update-v1.md) · [Conformance](./render-update-conformance-v1.md) — pre-release numeric hard-limit correction under ADR0039; fixture revision 2 candidate
+- [Render Update v1](./render-update-v1.md) · [Conformance](./render-update-conformance-v1.md) — local resource-budget policy under ADR0039; wire identity remains `/1`, conformance fixture revision 2 candidate
 - [Readonly Content API v1](./content-api-v1.md)
 
 ## Web Presentation
