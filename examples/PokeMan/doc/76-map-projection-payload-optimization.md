@@ -75,7 +75,9 @@ Map Browser 当前也将 tiles 作为 lr-map-view 的一个整体字段消费。
 
 ### 4.2 不扩大 projection window 来掩盖刷新成本
 
-保留当前 margin 优先顺序与 VIEW_DATA_GUARD。不得通过增加 prefetch margin、扩大 196,608-byte guard 或静默裁剪 Tile 来降低刷新频率。
+保留当前 margin 优先顺序与 Map 专项 `VIEW_DATA_GUARD`（当前 196,608 bytes）。不得通过增加 prefetch margin、扩大该 Map guard 或静默裁剪 Tile 来降低刷新频率。
+
+Realm 通用层由 PR #135 将固定 message/data/depth numeric caps 改为有限 local resource budgets；这不是关闭通用资源保护。Map payload 必须同时满足 Map projection guard 与当前 Host / Product / Runtime 的 Realm local budget，不能绕过通用 Codec、queue 或 candidate budget。Map guard 与 Realm local budget 是两个不同责任层。
 
 ### 4.3 区分 payload 优化与像素缓存优化
 
@@ -168,7 +170,7 @@ VIEW_DATA_GUARD 仍是硬限制。字节计量必须覆盖完整的 Map 投影�
 - 固定 envelope / key / punctuation 开销只计算一次；
 - 对不同 margin 的候选复用已计算的 Tile/band 元数据；
 - 预算判断仍使用精确字节数，不使用可能低估的平均值或近似值；
-- 最终消息仍由 Realm 通用边界进行必要的 Schema、大小和序列化处理。
+- 最终消息仍由 Realm 通用边界执行必要的 closed-schema / role / authority / revision 检查，并在单次 bounded serialization 中执行当前 Realm local outbound budget；不依赖跨实现统一的 protocol message-byte cap，也不得绕过通用队列预算。
 
 若后续 Realm 架构 PR 提供通用、可信的 JSON size metadata，Map 可以在不引入 Map 语义到通用层的前提下复用该能力；本 PR 不依赖关闭或绕过通用验证。
 
@@ -260,7 +262,7 @@ camera-only 不更新 band；projection shift 只更新进入或变化的 slot�
 
 ### Merge gates
 
-- [ ] 不放宽 VIEW_DATA_GUARD 或 Realm message/data limits。
+- [ ] 不放宽 Map `VIEW_DATA_GUARD`；Realm 通用 message/data/queue/candidate 容量继续受有限 local budgets 约束，不将本地预算写成统一 wire cap，也不移除 bounded resource protection。
 - [ ] projection byte counter 与真实 JSON UTF-8 bytes 精确一致。
 - [ ] camera-only 不发送 Tile payload。
 - [ ] projection shift 不再发送未变化的整个 Tile window。
@@ -277,5 +279,5 @@ camera-only 不更新 band；projection shift 只更新进入或变化的 slot�
 - 为 Map 增加跳过通用验证的特权 API。
 - 在通用 RenderStore 中加入 Tile/depth/bridge 语义。
 - 在本 PR 中实现 PR #128 的固定世界 Canvas cache / ring buffer。
-- 放宽性能资格、消息大小限制或 Map projection guard。
+- 放宽性能资格或 Map projection guard；移除 Realm 通用层的有限 local resource budgets。
 - 用这次 PWA 物理机路线代替正式 Hostra full/native qualification。
