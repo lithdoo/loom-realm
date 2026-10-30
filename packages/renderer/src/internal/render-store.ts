@@ -549,104 +549,105 @@ export class RendererRenderStore {
         revision: message.revision,
         zIndex: message.zIndex,
         roots: current.roots,
+        nodes: current.nodes,
+        locations: current.locations,
       });
       return;
     }
-    const created = new Set<object>();
-    const builderByKey = new Map<string, MutableNode>();
-    const cloneNodeShallow = (node: MutableNode): MutableNode => {
-      const known = builderByKey.get(node.key);
-      if (known !== undefined) return known;
-      const clone: MutableNode = {
-        key: node.key,
-        tag: node.tag,
-        attrs: node.attrs,
-        data: node.data,
-        children: node.children,
-      };
-      builderByKey.set(node.key, clone);
-      created.add(clone);
-      return clone;
-    };
-    const clonePathTo = (node: MutableNode, key: string): MutableNode | null => {
-      if (node.key === key) return cloneNodeShallow(node);
-      for (let index = 0; index < node.children.length; index += 1) {
-        const child = node.children[index];
-        if (child === undefined) continue;
-        const found = clonePathTo(child, key);
-        if (found === null) continue;
-        const parent = cloneNodeShallow(node);
-        if (!created.has(parent.children)) {
-          parent.children = parent.children.slice();
-          created.add(parent.children);
-        }
-        parent.children[index] = cloneNodeShallow(child);
-        return found;
+
+    const clones = new Map<string, MutableNode>();
+    const clonedChildren = new Set<string>();
+    const mutableContainers = new WeakSet<object>();
+    let roots = current.roots;
+    let rootsCopied = false;
+
+    const ensurePath = (targetKey: string): MutableNode => {
+      const path: string[] = [];
+      let key: string | null = targetKey;
+      while (key !== null) {
+        path.push(key);
+        const location = current.locations.get(key);
+        if (location === undefined) throw new Error("Updated Render node is missing");
+        key = location.parentKey;
       }
-      return null;
+
+      for (let index = path.length - 1; index >= 0; index -= 1) {
+        const pathKey = path[index]!;
+        if (clones.has(pathKey)) continue;
+        const original = current.nodes.get(pathKey);
+        const location = current.locations.get(pathKey);
+        if (original === undefined || location === undefined) {
+          throw new Error("Updated Render node is missing");
+        }
+        const clone: MutableNode = {
+          key: original.key,
+          tag: original.tag,
+          attrs: original.attrs,
+          data: original.data,
+          children: original.children,
+        };
+        clones.set(pathKey, clone);
+
+        if (location.parentKey === null) {
+          if (!rootsCopied) {
+            roots = roots.slice();
+            rootsCopied = true;
+          }
+          roots[location.index] = clone;
+        } else {
+          const parent = clones.get(location.parentKey);
+          if (parent === undefined) throw new Error("Render parent path is missing");
+          if (!clonedChildren.has(location.parentKey)) {
+            parent.children = parent.children.slice();
+            clonedChildren.add(location.parentKey);
+          }
+          parent.children[location.index] = clone;
+        }
+      }
+      const result = clones.get(targetKey);
+      if (result === undefined) throw new Error("Updated Render node is missing");
+      return result;
     };
+
     const touch = <T extends Record<string, string> | Record<string, JsonValue>>(container: T): T => {
-      if (created.has(container)) return container;
+      if (mutableContainers.has(container)) return container;
       const copy = Object.create(null) as T;
-      for (const key of Object.keys(container)) (copy as Record<string, string | JsonValue>)[key] = container[key] as string | JsonValue;
-      created.add(copy);
+      for (const key of Object.keys(container)) {
+        (copy as Record<string, string | JsonValue>)[key] = container[key] as string | JsonValue;
+      }
+      mutableContainers.add(copy);
       return copy;
     };
-    let roots = current.roots;
+
     for (const op of message.ops) {
       if (op.op !== "update") throw new Error("Update-only Patch expected");
-      let node = builderByKey.get(op.key);
-      if (node === undefined) {
-        let found: MutableNode | null = null;
-        let rootIndex = -1;
-        for (let index = 0; index < roots.length; index += 1) {
-          const root = roots[index];
-          if (root === undefined) continue;
-          found = clonePathTo(root, op.key);
-          if (found === null) continue;
-          rootIndex = index;
-          break;
-        }
-        if (found === null || rootIndex < 0) throw new Error("Updated Render node is missing");
-        if (!created.has(roots)) {
-          roots = roots.slice();
-          created.add(roots);
-        }
-        roots[rootIndex] = cloneNodeShallow(roots[rootIndex] as MutableNode);
-        node = found;
-      }
+      const node = ensurePath(op.key);
       if (op.attrs !== undefined) {
         node.attrs = touch(node.attrs);
         applyDelta(node.attrs, op.attrs);
-        if (Object.keys(node.attrs).length > MAX_ATTRS) throw new Error("Render attrs limit exceeded");
-        for (const [key, value] of Object.entries(node.attrs)) {
-          const keyBytes = byteLength(key);
-          const valueBytes = byteLength(value);
-          if (keyBytes < 1 || keyBytes > 128 || valueBytes > 4096) throw new Error("Render attrs string limit exceeded");
-        }
       }
       if (op.data !== undefined) {
         node.data = touch(node.data);
         applyDelta(node.data, op.data);
-        validateData(node.data);
       }
     }
-    const freezeCreated = (value: object): void => {
-      if (!created.has(value) || Object.isFrozen(value)) return;
-      if (Array.isArray(value)) {
-        for (const child of value) if (child !== null && typeof child === "object") freezeCreated(child);
-      } else {
-        for (const child of Object.values(value)) if (child !== null && typeof child === "object") freezeCreated(child as object);
-      }
-      Object.freeze(value);
-    };
-    freezeCreated(roots);
+
+    for (const [key, node] of clones) {
+      if (clonedChildren.has(key)) Object.freeze(node.children);
+      Object.freeze(node.attrs);
+      Object.freeze(node.data);
+      Object.freeze(node);
+      current.nodes.set(key, node);
+    }
+    if (rootsCopied) Object.freeze(roots);
     this.domains.set(current.domainId, {
       domainId: current.domainId,
       baselined: true,
       revision: message.revision,
       zIndex: message.zIndex ?? current.zIndex,
       roots,
+      nodes: current.nodes,
+      locations: current.locations,
     });
   }
 
