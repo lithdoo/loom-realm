@@ -211,6 +211,7 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 
 - 新 Snapshot：构造 isolated candidate，执行一次必要的 framework baseline / tree / identity invariant validation；candidate resource growth 由 local budget 保护，再 atomic commit。
 - Update-only Patch：对每个 operation 的目标、delta 和受影响状态执行必要检查；通过精确增量 accounting 维护 local candidate/operation resource budget；不再维护固定协议级 per-op hard bounds。
+- 当前 Store 的通用 `catch → fatal(...)` 路径不能吞掉资源耗尽类型：`ResourceBudgetExceeded` 必须保持为 typed local failure 并传播到 DataRuntime 的 local-fatal 处理；不得把 candidate memory / retained-state budget exhaustion 转成 `DataInboundDisposition.protocol-fatal`。候选仍须丢弃，当前 committed Store 保持不变。
 - data-only Patch 不应无条件重新 stringify 全部未变化的 node.data。
 - Insert / Remove / Move 等结构操作仍需检查其影响的 identity、reachability、parent、tree depth 和 node count；不承诺消除所有 tree work。
 - 失败 Patch 不改变 revision、zIndex、tree 或 current presentation。
@@ -243,7 +244,7 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 |---|---|
 | malformed JSON、unknown type、wrong direction、closed-schema violation | protocol-fatal |
 | authority / identity / revision / Patch precondition / final-tree invariant violation | authoritative continuity failure，retire 当前 Data carrier |
-| inbound queue、parse、candidate 或 retained-state local budget exhaustion | local-resource-exhaustion；discard candidate、no partial commit、retire 当前 Carrier |
+| inbound queue / parser / RenderStore candidate / retained-state local budget exhaustion | typed local-resource-exhaustion；DataRuntime `local-fatal`，discard candidate、no partial commit、retire 当前 Carrier；RenderStore 不得改写为 protocol-fatal |
 | DataRuntime outbound queue / serialization local budget exhaustion | 现有 DataRuntime `local-fatal`；no partial application unit；仅可 coalesce 尚未 emitted 且语义允许的 desired state |
 | RenderManager pending-work budget exhaustion | local producer failure + local diagnostic；retire 当前 publication peer；不归咎于 remote peer，也不发送不连续 Patch |
 | well-formed but inapplicable transient Event | 按既有 Event contract drop |
@@ -418,7 +419,7 @@ Map 专项 PR #134 负责：
 - [ ] PWA MessagePort inbound queue 同时受 count 与 retained-string budget 约束，terminal 时释放队列引用。
 - [ ] DataRuntime outbound queue 同时受 pending count 与 encoded bytes budget 约束；count admission 在昂贵编码之前完成。
 - [ ] RenderManager pending work 同时受 item count 与 retained-work budget 约束，计量不触发完整 Snapshot stringify。
-- [ ] local resource exhaustion 与 protocol-fatal / continuity failure 分开；PWA typed carrier cause 由 DataRuntime 映射为 local-fatal；inbound no-partial-commit + carrier retirement，outbound no-partial-send；RenderManager queue exhaustion 有独立 local diagnostic。
+- [ ] local resource exhaustion 与 protocol-fatal / continuity failure 分开；PWA typed carrier cause、Codec parse-budget cause、RenderStore candidate-budget cause 均由 DataRuntime 映射为 local-fatal；inbound no-partial-commit + carrier retirement，outbound no-partial-send；RenderManager queue exhaustion 有独立 local diagnostic。
 - [ ] caller 在 RenderManager API 返回后修改原输入对象，不影响 retained state / pending publication；必要 clone + freeze 已与校验和计量融合。
 - [ ] 普通小 Patch 不再完整 stringify 与本次操作无关的 Snapshot。
 - [ ] Data Codec 不再对同一 subtree 重复完整 traversal。
