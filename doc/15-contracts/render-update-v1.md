@@ -1,10 +1,10 @@
 # Renderer ⇐ Subsystem Render Update Protocol v1
 
 > 层级：正式契约  
-> 状态：Active / Normative / local resource-budget policy correction pending implementation and qualification  
+> 状态：Proposed pre-release correction / implementation and qualification pending  
 > 协议版本：1  
 > 协议标识：`loomrealm.render-update / 1`  
-> 稳定程度：Local resource-budget policy correction candidate  
+> 稳定程度：Candidate correction  
 > 方向：Subsystem → Renderer only  
 > Carrier：[Renderer ⇄ Subsystem Data Connection Contract v1](./renderer-subsystem-data-connection-v1.md)  
 > 架构：[渲染系统](../10-architecture/rendering-system.md)  
@@ -176,7 +176,7 @@ interface RenderDomainsV1 {
 `domains` 是 current generation 的 full replacement set：
 
 ```text
-0..N entries, subject only to local resource budget
+0..N entries
 no duplicates
 array order has no presentation meaning
 ```
@@ -578,7 +578,7 @@ patch.baseRevision == currentRevision
 patch.revision == patch.baseRevision + 1
 ```
 
-`ops`：0..N entries，但仅受发送端/接收端显式 local resource budget 约束：
+`ops`：0..N entries；协议不定义 Patch operation count 上限：
 
 ```text
 ops.length > 0 OR zIndex member is present
