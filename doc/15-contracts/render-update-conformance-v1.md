@@ -3,10 +3,10 @@
 > 层级：正式契约 / Conformance Profile  
 > 状态：Active / Normative / Frozen  
 > Profile 版本：1  
-> fixtureSetRevision：1  
+> fixtureSetRevision：2
 > 适用协议：`loomrealm.render-update / 1`  
 > 依赖：[Render Update Protocol v1](./render-update-v1.md)、[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)  
-> 最近复核：2026-08-21
+> 最近复核：2026-10-30
 
 本文定义 Frozen Render Update v1 如何被独立实现验证；与主协议冲突时以主协议为准。
 
@@ -27,7 +27,7 @@ LoomRealm Render Update v1 Transport Mapping Conformant
 ```text
 protocol = loomrealm.render-update
 protocolVersion = 1
-fixtureSetRevision = 1
+fixtureSetRevision = 2
 role = subsystem-sender | renderer-receiver | transport
 result = pass
 ```
@@ -53,7 +53,7 @@ interface RenderUpdateFixtureManifestV1 {
   readonly fixtureFormatVersion: 1;
   readonly protocol: "loomrealm.render-update";
   readonly protocolVersion: 1;
-  readonly fixtureSetRevision: 1;
+  readonly fixtureSetRevision: 2;
   readonly fixtures: readonly RenderUpdateFixtureDescriptorV1[];
 }
 
@@ -65,7 +65,7 @@ interface RenderUpdateFixtureDescriptorV1 {
     | "transport";
   readonly group:
     | "wire-schema"
-    | "limits"
+    | "representation"
     | "registry-lifecycle"
     | "baseline-revision"
     | "snapshot"
@@ -110,48 +110,22 @@ success → one atomic authoritative commit
 
 ---
 
-## 4. Frozen Hard Limits
+## 4. Representation and historical-cap correction
+
+Conformance 验证 exact Wire JSON representation、closed schema、valid Unicode scalar sequence、non-empty identity/tag/Event-name/attrs-key、positive-safe revision/baseRevision 与 signed-safe `zIndex`。不定义 Framework message/depth/count/byte/string/queue hard cap。
+
+Historical-cap fixtures MUST 证明曾经的阈值不再构成 reject/drop/retire rule；这些数值只是回归取样，不建立新的最大值：
 
 ```text
-application message UTF-8 bytes        <= 1,048,576
-JSON container nesting depth           <= 64
-render.domains entries                 <= 256
-RenderNode count / Domain State        <= 16,384
-Render tree depth                      <= 30
-Patch operations                       <= 4,096
-attrs members / Node                   <= 256
-Render data array elements             <= 16,384
-Render data object members             <= 16,384
-Render data/event-data compact size    <= 262,144 UTF-8 bytes
-Render data relative container depth   <= 32
+message > 1 MiB; JSON depth > 64
+domains > 256; nodes > 16,384; tree depth > 30
+Patch ops > 4,096; attrs/data members or array elements > historical counts
+Render/Event data > 256 KiB; identity/tag/Event strings > historical byte thresholds
+zIndex outside int32 but inside signed-safe range
+writer/Event backlog > historical 1024/256 thresholds
 ```
 
-Strings：
-
-```text
-domainId            1..128 UTF-8 bytes
-Node key            1..128
-tag                 1..256
-Event name          1..128
-attrs member key    1..128
-attrs member value  0..4096
-generic data key    0..256
-```
-
-`zIndex`：
-
-```text
--2,147,483,648 .. 2,147,483,647
-```
-
-每个 hard boundary至少验证：
-
-```text
-exactly-at → ACCEPT
-one-over   → REJECT + retire when inbound protocol message
-```
-
-UTF-8 fixtures必须覆盖多字节字符，防止 UTF-16 `.length` 实现错误。
+Invalid scalar strings、unsafe integers、sparse/augmented arrays、accessors、symbols、exotic objects、cycles、non-finite/unsupported values仍必须拒绝。getter/Proxy exception 按相应 local boundary 传播，不得延迟接受。
 
 ---
 
@@ -171,10 +145,8 @@ wire-unknown-type
 wire-extra-top-level-member
 wire-missing-required-member
 wire-wrong-member-type
-wire-message-exact-byte-limit
-wire-message-one-byte-over
-wire-json-depth-exact-limit
-wire-json-depth-one-over
+wire-message-over-historical-byte-threshold-valid
+wire-json-depth-over-historical-threshold-valid
 wire-duplicate-source-member-follows-wire-jsonparse
 ```
 
@@ -223,8 +195,7 @@ fresh-carrier-first-render-message-domains
 registry-empty-valid
 registry-full-replacement-atomic
 registry-duplicate-domain-rejected
-registry-exact-count-limit
-registry-one-over-count-limit
+registry-over-historical-count-threshold-valid
 domain-absent-present-absent
 domain-present-present-same-lifetime
 emitted-domain-id-one-shot-within-generation
@@ -281,10 +252,8 @@ snapshot-previously-removed-key-reintroduced-rejected
 snapshot-removal-consumes-key
 same-generation-fresh-baseline-can-contain-still-live-key
 snapshot-invalid-tree-no-partial-commit
-snapshot-exact-node-count-limit
-snapshot-one-over-node-count-limit
-snapshot-exact-tree-depth-limit
-snapshot-one-over-tree-depth-limit
+snapshot-over-historical-node-count-valid
+snapshot-over-historical-tree-depth-valid
 ```
 
 ---
@@ -294,10 +263,11 @@ snapshot-one-over-tree-depth-limit
 Required：
 
 ```text
-zindex-min
-zindex-max
-zindex-below-min
-zindex-above-max
+zindex-signed-safe-min
+zindex-signed-safe-max
+zindex-unsafe-low-rejected
+zindex-unsafe-high-rejected
+zindex-outside-int32-inside-safe-valid
 higher-zindex-above-lower
 same-zindex-domainid-utf8-lexical-tiebreak
 registry-order-not-stacking-order
@@ -313,8 +283,7 @@ Required：
 
 ```text
 patch-no-partial-apply
-patch-exact-op-count-limit
-patch-one-over-op-count-limit
+patch-over-historical-op-count-valid
 patch-empty-ops-without-zindex-rejected
 patch-empty-ops-with-zindex-valid
 patch-zindex-only-commit
@@ -330,7 +299,7 @@ zIndex unchanged
 tree unchanged
 ```
 
-每个 op 后的 intermediate candidate也必须满足 hard structural limits。
+每个 op 按 ordered candidate 验证局部 precondition；最终 candidate 在一次 atomic commit 前满足全部 structural invariants。
 
 ---
 
@@ -348,8 +317,8 @@ insert-duplicate-key-rejected
 insert-key-seen-earlier-in-domain-lifetime-rejected
 insert-subtree-internal-duplicate-key-rejected
 insert-before-key-not-destination-sibling-rejected
-insert-over-intermediate-node-count-rejected
-insert-over-intermediate-tree-depth-rejected
+insert-over-historical-node-count-valid
+insert-over-historical-tree-depth-valid
 insert-then-later-op-targets-new-key
 ```
 
@@ -413,18 +382,13 @@ update-remove-missing-member-rejected
 update-key-not-allowed
 update-tag-not-allowed
 update-children-not-allowed
-attrs-exact-member-count-limit
-attrs-one-over-member-count-limit
-data-exact-size-limit
-data-one-byte-over-size-limit
-data-exact-relative-depth-limit
-data-one-over-relative-depth-limit
-data-array-exact-count-limit
-data-array-one-over-count-limit
-data-object-exact-member-count-limit
-data-object-one-over-member-count-limit
+attrs-over-historical-member-count-valid
+data-over-historical-size-valid
+data-over-historical-relative-depth-valid
+data-array-over-historical-count-valid
+data-object-over-historical-member-count-valid
 generic-data-empty-key-valid
-generic-data-key-one-over-limit
+generic-data-key-over-historical-byte-threshold-valid
 ```
 
 ---
@@ -440,13 +404,13 @@ wellformed-event-unknown-domain-dropped
 wellformed-event-after-domain-removal-dropped
 wellformed-event-stale-target-dropped
 malformed-event-retires-data
-oversize-event-retires-data
+event-over-historical-size-depth-member-thresholds-valid
 patch-insert-then-event-targets-new-lifetime
 event-before-remove-targets-old-lifetime
 event-order-preserved
 event-not-coalesced
 event-loss-not-replayed
-event-overflow-does-not-block-authoritative-progress
+event-backlog-over-historical-threshold-retained-fifo
 retained-event-blocks-authoritative-coalesce-across-barrier
 dropped-unemitted-event-releases-coalescing-barrier
 ```
@@ -500,7 +464,10 @@ Required：
 protocol-invalid-json-retires-data
 protocol-unknown-type-retires-data
 protocol-closed-schema-violation-retires-data
-protocol-hard-limit-violation-retires-data
+protocol-wire-representation-violation-retires-data
+local-candidate-mechanics-failure-propagates-local-cause
+local-candidate-mechanics-failure-no-partial-commit
+local-candidate-mechanics-failure-retires-current-data-as-local-fatal
 continuity-domain-lifecycle-violation-retires-data
 continuity-patch-before-baseline-retires-data
 continuity-patch-base-mismatch-retires-data
@@ -534,7 +501,8 @@ domain-removal-discards-pending-unsent-domain-messages
 retained-event-is-coalescing-barrier
 no-ack-wait
 no-event-replay
-outbound-preflight-before-send
+outbound-representation-acceptance-before-send
+outbound-authoring-error-fails-current-call-without-retiring-peer
 ```
 
 Sender 本地产生非法 v1 message 是 implementation/programming failure；不得依赖 Renderer 宽容解析。
@@ -572,7 +540,7 @@ hostra-pwa-same-render-application-trace
 
 ## 22. Frozen Compatibility Boundary
 
-任何实现声明 Render Update v1 conformant，必须满足 fixtureSetRevision 1 的全部 relevant role obligations。
+任何实现声明 Render Update v1 conformant，必须满足 fixtureSetRevision 2 的全部 relevant role obligations。
 
 以下 protocol change 必须新版本：
 
@@ -583,11 +551,11 @@ Registry/baseline rules
 revision continuity scope
 Snapshot one-shot semantics
 Patch algebra/atomicity/no-op rules
-Event barrier/drop behavior
+Event barrier/applicability behavior
 zIndex order
-hard limits
+Wire representation and Framework invariants
 application-unit encoding
 failure/recovery
 ```
 
-fixtureSetRevision 后续 MAY只增加“证明既有 Frozen v1 事实”的 coverage；不得借 fixture revision 改变 v1 semantics。
+Revision 2 记录首次实质公开发布前的 same-identity correction：删除 arbitrary capacity rules、将 zIndex 扩为 signed-safe，并新增 generation/local-failure/stack-safe/indexed-COW/backlog regressions。之后 fixtureSetRevision MAY 增加证明当前 v1 invariant 的 coverage；不得静默恢复 Framework capacity gate。

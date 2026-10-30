@@ -177,7 +177,7 @@ internal NPC render-key UTF-8      <= 128 bytes
 
 The viewport projection window attempts bounded retained margins and accepts the first candidate below the viewport-data guard; inability to produce a legal candidate fails rather than silently dropping tiles.
 
-A deterministic candidate-capacity failure caused by NPC content maps to `MAP_NPC_INVALID`; a map/content-owned deterministic capacity failure maps to `MAP_CONTENT_FAILED`. These map-local guards do **not** replace or weaken lower-layer RenderManager/Data hard limits. The game library must not bypass limits by truncating NPCs/tiles or by splitting one logical truth into hidden partial commits.
+A deterministic candidate-capacity failure caused by NPC content maps to `MAP_NPC_INVALID`; a map/content-owned deterministic capacity failure maps to `MAP_CONTENT_FAILED`. These are deliberate Product/Developer-owned policies, including `VIEW_DATA_GUARD` and the projection-window strategy; generic RenderManager/Data no longer supplies application-capacity hard limits. The game library must not bypass its own policy by silently truncating NPCs/tiles or splitting one logical truth into hidden partial commits.
 
 ## Browser currentness and resource lifetime
 

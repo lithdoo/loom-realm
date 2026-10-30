@@ -24,7 +24,7 @@
 
 ## 不变范围与明确拒绝
 
-不改变 Control v1/Connection v1 wire、Main Frame/InputTarget authority、User Input v1/Render Update v1 schema、common 1 MiB/depth64 limits、JSON text unit、single reader/writer、M13 Render Store/Projector/WC ownership。拒绝 Environment service、Main geometry mirror、InputTarget bypass、generic scheduler、ACK/cross-child barrier、surfaceId/multi-pane router、产品 rollout MUST 上升协议和 map-special Core fast path。
+不改变 Control v1/Connection v1 wire、Main Frame/InputTarget authority、User Input v1/Render Update v1 schema、JSON text unit、single reader/writer、M13 Render Store/Projector/WC ownership。其历史 common 1 MiB/depth64 limits 声明由 ADR 0038 的首次发布前 same-identity correction 覆盖。拒绝 Environment service、Main geometry mirror、InputTarget bypass、generic scheduler、ACK/cross-child barrier、surfaceId/multi-pane router、产品 rollout MUST 上升协议和 map-special Core fast path。
 
 ## 状态与重新开启条件
 

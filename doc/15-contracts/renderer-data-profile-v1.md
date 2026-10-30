@@ -10,7 +10,7 @@
 
 **本文件是一项显式治理的首次发布前 Frozen 设计纠正，绝不声称已发布系统可静默接受新的相同 identity。** 若兼容核查发现任何真实外部使用/共存义务，STOP direct reset并另行 version/migrate。当前旧三-child `/1`代码仍存在、候选修正尚未实现；不生产`/2`。以下 MUST 等为 Frozen 行为。代码尚未实现。
 
-**原文保全规则：** 原三-child 完整基线是本修订的受保护语义来源，而非另一个 current profile。它的 §2 identity/authority、§3 UTF-8 JSON encoding/Wire/parser/limits、§5 one-reader ordered demux（除新增 viewport branch）、§6 serialized writer、§7 原 Input/Render handler outcome、§8 independent ordering、§9 原 Input/Render fresh baseline、§10 first-wins Data-local terminal、§11 bounded backpressure中所有未明确改变的逐项约束继续适用；原 §13 revision-2 obligations 不因 revision-3 而撤销。**唯一覆盖旧文的范围**是：§1/§4/§14 原「只含三 child」的 closed set改为四 child；§5/§6 增加 viewport demux和有界 producer；§7/§9/§10 增加独立 Viewport 语义与 diagnostic；§12/§13 接受 ADR0037 授权的发布前直接修正及 fixture revision-3。原文关于未来真实不同 profile identity 的 fresh-generation规则不变。任何未列入此 delta 的冲突必须 STOP 并由设计者处理，执行者不得擅自删掉旧规则。旧基线标题的 Frozen 只证明旧实现历史状态，不宣称本候选已冻结。
+**原文保全规则：** 原三-child 完整基线是本修订的历史语义来源，而非另一个 current profile。它的 identity/authority、UTF-8 JSON encoding/Wire/parser representation、one-reader ordered demux、serialized writer、child handler outcome、independent ordering、fresh baseline 与 first-wins Data-local terminal继续适用。2026-10-30 pre-release correction 明确覆盖其 common byte/depth/member/string/queue capacity gates 和 capacity-triggered drop/retirement；这些历史数值不再是 current `/1` semantics。原文关于未来真实不同 profile identity 的 fresh-generation规则不变。
 
 ## 1. Exact complete profile
 
@@ -40,7 +40,7 @@ Hostra WebSocket: one complete text message, binary forbidden
 PWA MessagePort: postMessage(string), structured clone/transfer仅Platform bootstrap
 ```
 
-Receiver MUST 在任何 child mutation 之前：unit 为 string→actual UTF-8 bytes≤1,048,576→existing Wire parseJsonText/representation→JSON container depth≤64→exact top-level type/role direction→child exact validation。不得先无界 buffer/parse。Unknown extra/malformed family/shape 均 fail closed；原 Input/Render 的 identifier/count/payload/structural limits 不修改，Profile 不建第二套 business limit。非法 application 值包括 undefined/BigInt/NaN/Infinity/ArrayBuffer/Blob/Port/host object/Function/Symbol/JSON-RPC Batch/一个 unit 多条；duplicate JSON keys 沿现有 Wire/ECMAScript JSON.parse observable，不另造 parser。Viewport 不能绕过通用 gate。
+Receiver MUST 在任何 child mutation 之前：unit 为 string→existing Wire parseJsonText/representation→exact top-level type/role direction→child exact validation。Unknown extra/malformed family/shape 均 fail closed；Profile 不建立 message/depth/member/string/queue business limit。非法 application 值包括 undefined/BigInt/NaN/Infinity/ArrayBuffer/Blob/Port/host object/Function/Symbol/JSON-RPC Batch/一个 unit 多条；duplicate JSON keys 沿现有 Wire/ECMAScript JSON.parse observable，不另造 parser。Viewport 不能绕过通用 gate。
 
 ## 4. Exact namespace/direction
 
@@ -64,7 +64,7 @@ Renderer → Subsystem:
 
 每 carrier 每方向只有一个 ordered/serialized writer，max concurrent physical `carrier.send=1`；所有 Input/Render/Viewport 经同 writer，admitted units 不可撤回/重排/bypass/dup/retry或跨 carrier 迁移。Single writer 只保证本方向 unit 顺序及 Data-local terminal，不造 cross-child authority/revision/transaction/ACK/barrier/replay；Input State/Event/Reset、Render publication barriers 仍由各 child 自己维护。
 
-Viewport 在 writer admission 前 per carrier 最多一个 admitted/in-flight unit 加一个 not-yet-admitted latest pending slot；新合法 size 覆盖 pending，前一个 send 结算再提交 latest 直到 converge。普通 geometry burst 本身不得无界积累、填满 shared queue 导致 Data fatal 或永久饿死 Input/Render。`send()` fulfilled 仅 carrier local acceptance，不是 author ACK。Old carrier pending/cursor 失效且不可迁移；fresh carrier 使用当时最新合法 physical observation 作独立 baseline。不改现有 writer capacity/limits、不引入 generic priority scheduler。见[Viewport §3](./viewport-state-v1.md)。
+Viewport 在 writer admission 前 per carrier 最多一个 admitted/in-flight unit 加一个 not-yet-admitted latest pending slot；新合法 size 覆盖 pending，前一个 send 结算再提交 latest 直到 converge。普通 geometry burst 不得线性积累或永久饿死 Input/Render。`send()` fulfilled 仅 carrier local acceptance，不是 author ACK。Old carrier pending/cursor 失效且不可迁移；fresh carrier 使用当时最新合法 physical observation 作独立 baseline。不引入 generic priority scheduler。见[Viewport §3](./viewport-state-v1.md)。
 
 ## 7. Child state/diagnostics
 
@@ -86,7 +86,11 @@ Viewport: current legal physical size fresh baseline, otherwise first legal samp
 
 ## 9. Terminal / failure / bounded work
 
-Carrier close/loss、common/profile violation、child invalid/explicit fatal、writer send failure、local mechanics fatal first-wins terminal 当前 Data peer：停止 ordinary 读写、queued sends settle once、local fatal best-effort close。Data unusable≠Runtime terminal/Frame unwind/Main InputTarget或 DataAuthority mutation/Renderer participant failure；若 authority 仍 current Platform 可另建 fresh paired carrier，Profile 不提供 reconnect API。Writer/child queues bounded，teardown 不永久阻塞；具体 `MAX_PENDING_SENDS` 属于 implementation，不升格为协议阈值。
+Carrier close/loss、common/profile violation、child invalid/explicit fatal、writer send failure、local mechanics fatal first-wins terminal 当前 Data peer：停止 ordinary 读写、queued sends settle once、释放未开始 work 的 retained references、local fatal best-effort close。Data unusable≠Runtime terminal/Frame unwind/Main InputTarget或 DataAuthority mutation/Renderer participant failure；若 authority 仍 current Platform 可另建 fresh paired carrier，Profile 不提供 reconnect API。Writer/child queue 不以固定 pending count/byte admission 拒绝合法 unit；实现使用 O(1) drain 与 transport Promise 自然 backpressure，teardown 不永久阻塞。
+
+### 9.1 2026-10-30 pre-release correction
+
+同一 `/1` identity 在首次实质公开发布前删除历史 common 1 MiB/depth64/member/string/queue capacity gates，不做 migration/version bump。Exact Wire/closed schema、direction、authority、child ownership、single reader/writer、FIFO、terminal first-wins、same-generation reconnect 与 fresh-generation fencing 保持不变。
 
 ## 10. Conformance and Freeze
 

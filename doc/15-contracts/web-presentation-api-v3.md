@@ -3,7 +3,7 @@
 > 状态：Active / Normative / Frozen
 > 取代部署事实：[Web Presentation API v2](./web-presentation-api-v2.md)
 > 新增传输：[Frame-targeted Presentation Event v1](./frame-targeted-presentation-event-v1.md)
-> 最近复核：2026-10-23
+> 最近复核：2026-10-30
 
 v3 保留 v2 的 Render Data、Render Event、Resource、currentness 与 boolean publication 语义，只新增精确 Top Frame reverse Event。
 
@@ -22,7 +22,7 @@ interface CustomEventOptions {
 - `true`：原 Session-wide Session Events publication；
 - `"top-frame"`：Renderer 内分支，经 Renderer Data `/3` 投递到接受时的 Top Active Frame。
 
-`"top-frame"` 不进入 Platform Presentation endpoint 或 SessionEventHub。`name`、`channel`、`data` 与 options 继续使用 v2 的 closed-shape、Unicode、大小和同步校验规则。
+`"top-frame"` 不进入 Platform Presentation endpoint 或 SessionEventHub。`name`、`channel`、`data` 与 options 继续使用 v2 的 closed-shape、Unicode 与同步校验规则；2026-10-30 pre-release correction 删除 inherited identity/name/channel byte 及 JSON depth/member/byte capacity gates。Name/channel 为 non-empty Unicode scalar string，channel 继续禁止 C0/DEL；data 继续是 exact plain JsonObject/finite values。Framework 不决定业务 payload 规模。
 
 ## 2. Currentness-first 与可信字段
 
@@ -35,3 +35,5 @@ Event 接受时固定 destination lease，之后只允许发送或丢弃，禁�
 ## 3. 兼容性
 
 v2 的 boolean wire publication 没有扩展；Desktop/PWA 的既有 Session Events routing 保持不变。v3 与 Renderer Data Profile `/3` 协同部署；Renderer Control wire 仍为 v2。
+
+同一 v3 identity 直接修订，不做 migration/version bump。Already-accepted publication 不因固定 queue threshold drop；stale/revoked/currentness/Interest applicability drop、FIFO、terminal/no-replay 与可信 provenance 保持不变。
