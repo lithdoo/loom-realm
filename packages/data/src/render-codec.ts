@@ -1,5 +1,4 @@
 import type { JsonObject } from "@loomrealm/wire";
-import { assertJsonValue, stringifyJson, utf8ByteLength } from "@loomrealm/wire";
 import type {
   RenderDomainsV1,
   RenderEventV1,
@@ -8,87 +7,137 @@ import type {
 } from "./model.js";
 import {
   array,
-  assertBoundedJson,
-  boundedString,
   exact,
   fail,
-  int32,
-  MAX_PAYLOAD_BYTES,
   object,
   positiveSafe,
+  scalarString,
+  signedSafe,
 } from "./validation-common.js";
 
-function renderId(value: unknown, label: string, max = 128): string {
-  return boundedString(value, "render", label, 1, max);
+function renderId(value: unknown, label: string): string {
+  return scalarString(value, "render", label);
 }
 
 function attrs(raw: unknown): void {
-  const a = object(raw, "render", "attrs");
-  const keys = Object.keys(a);
-  if (keys.length > 256) fail("render", "attrs member limit");
-  for (const k of keys) {
-    boundedString(k, "render", "attrs key", 1, 128);
-    const v = a[k];
+  const value = object(raw, "render", "attrs");
+  let descriptors: PropertyDescriptorMap;
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch (cause) {
+    fail("render", `invalid attrs: ${String(cause)}`);
+  }
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== "string") fail("render", "attrs cannot contain symbol members");
+    scalarString(key, "render", "attrs key");
+    const descriptor = descriptors[key];
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+      fail("render", "attrs members must be enumerable data properties");
+    }
+    const v = descriptor.value;
     if (typeof v !== "string") fail("render", "attrs value must string");
-    boundedString(v, "render", "attrs value", 0, 4096);
+    scalarString(v, "render", "attrs value", true);
   }
 }
 
 function renderJsonValue(raw: unknown): void {
-  try {
-    assertJsonValue(raw);
-  } catch {
-    fail("render", "data must be plain JSON");
-  }
-  const stack = [raw];
+  const active = new WeakSet<object>();
+  const stack: Array<{ readonly value: unknown; readonly leave?: false } | { readonly value: object; readonly leave: true }> = [
+    { value: raw },
+  ];
   while (stack.length > 0) {
-    const current = stack.pop();
+    const task = stack.pop();
+    if (task === undefined) break;
+    if (task.leave) {
+      active.delete(task.value);
+      continue;
+    }
+    const current = task.value;
     if (typeof current === "string") {
-      boundedString(current, "render", "data string", 0, Number.POSITIVE_INFINITY);
+      scalarString(current, "render", "data string", true);
     } else if (Array.isArray(current)) {
-      for (const child of current) stack.push(child);
+      if (active.has(current)) fail("render", "cyclic data is not supported");
+      active.add(current);
+      stack.push({ value: current, leave: true });
+      let descriptors: PropertyDescriptorMap;
+      try {
+        descriptors = Object.getOwnPropertyDescriptors(current) as unknown as PropertyDescriptorMap;
+      } catch (cause) {
+        fail("render", `invalid data array: ${String(cause)}`);
+      }
+      const length = current.length;
+      let elements = 0;
+      for (const key of Reflect.ownKeys(descriptors)) {
+        if (key === "length") continue;
+        if (typeof key !== "string" || !/^(0|[1-9][0-9]*)$/.test(key)) {
+          fail("render", "data arrays cannot contain augmented members");
+        }
+        const index = Number(key);
+        const descriptor = descriptors[key];
+        if (!Number.isSafeInteger(index) || index < 0 || index >= length
+          || descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+          fail("render", "data arrays must be dense enumerable data properties");
+        }
+        elements += 1;
+        stack.push({ value: descriptor.value });
+      }
+      if (elements !== length) fail("render", "data arrays cannot be sparse");
     } else if (current !== null && typeof current === "object") {
-      for (const [key, value] of Object.entries(current)) {
-        boundedString(key, "render", "data key", 0, 256);
-        stack.push(value);
+      if (active.has(current)) fail("render", "cyclic data is not supported");
+      active.add(current);
+      stack.push({ value: current, leave: true });
+      let prototype: object | null;
+      let descriptors: PropertyDescriptorMap;
+      try {
+        prototype = Object.getPrototypeOf(current) as object | null;
+        descriptors = Object.getOwnPropertyDescriptors(current);
+      } catch (cause) {
+        fail("render", `invalid data object: ${String(cause)}`);
+      }
+      if (prototype !== Object.prototype && prototype !== null) {
+        fail("render", "data must contain only plain JSON objects");
+      }
+      for (const key of Reflect.ownKeys(descriptors)) {
+        if (typeof key !== "string") fail("render", "data cannot contain symbol members");
+        scalarString(key, "render", "data key", true);
+        const descriptor = descriptors[key];
+        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+          fail("render", "data members must be enumerable data properties");
+        }
+        stack.push({ value: descriptor.value });
       }
     }
   }
 }
 
 function renderData(raw: unknown): JsonObject {
-  const d = object(raw, "render", "data");
-  renderJsonValue(d);
-  assertBoundedJson(d, "render");
-  if (utf8ByteLength(stringifyJson(d)) > MAX_PAYLOAD_BYTES) fail("render", "render data byte limit");
-  return d;
+  const value = object(raw, "render", "data");
+  renderJsonValue(value);
+  return value;
 }
 
-function renderNode(
-  raw: unknown,
-  seen: Set<string>,
-  depth: number,
-  counter: { n: number },
-): void {
-  if (depth > 30) fail("render", "render tree depth limit");
-  const n = exact(raw, ["key", "tag", "attrs", "data", "children"], [], "render");
-  const key = renderId(n.key, "node key");
-  if (seen.has(key)) fail("render", "duplicate node key");
-  seen.add(key);
-  renderId(n.tag, "tag", 256);
-  attrs(n.attrs);
-  renderData(n.data);
-  const children = array(n.children, "render", "children");
-  counter.n += 1;
-  if (counter.n > 16384) fail("render", "node count limit");
-  for (const c of children) renderNode(c, seen, depth + 1, counter);
+function renderNode(raw: unknown, seen: Set<string>): void {
+  const stack: unknown[] = [raw];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const node = exact(current, ["key", "tag", "attrs", "data", "children"], [], "render");
+    const key = renderId(node.key, "node key");
+    if (seen.has(key)) fail("render", "duplicate node key");
+    seen.add(key);
+    renderId(node.tag, "tag");
+    attrs(node.attrs);
+    renderData(node.data);
+    const children = array(node.children, "render", "children");
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push(children[index]);
+    }
+  }
 }
 
 function renderRoots(raw: unknown): void {
   const roots = array(raw, "render", "roots");
   const seen = new Set<string>();
-  const counter = { n: 0 };
-  for (const r of roots) renderNode(r, seen, 1, counter);
+  for (const root of roots) renderNode(root, seen);
 }
 
 function nullableRenderId(v: unknown, label: string): void {
@@ -105,11 +154,11 @@ function stringDelta(raw: unknown, json: boolean): void {
     if (keys.length) nonempty = true;
     for (const k of keys) {
       if (json) {
-        boundedString(k, "render", "data delta key", 0, 256);
+        scalarString(k, "render", "data delta key", true);
         renderJsonValue(s[k]);
       } else {
-        boundedString(k, "render", "attrs delta key", 1, 128);
-        boundedString(s[k], "render", "attrs delta value", 0, 4096);
+        scalarString(k, "render", "attrs delta key");
+        scalarString(s[k], "render", "attrs delta value", true);
       }
     }
   }
@@ -119,7 +168,7 @@ function stringDelta(raw: unknown, json: boolean): void {
     const seen = new Set<string>();
     for (const x of r) {
       if (typeof x !== "string" || seen.has(x)) fail("render", "invalid delta remove");
-      boundedString(x, "render", json ? "data delta key" : "attrs delta key", json ? 0 : 1, json ? 256 : 128);
+      scalarString(x, "render", json ? "data delta key" : "attrs delta key", json);
       seen.add(x);
       if (d.set !== undefined && Object.prototype.hasOwnProperty.call(d.set, x)) {
         fail("render", "delta set/remove overlap");
@@ -136,7 +185,7 @@ function renderOp(raw: unknown): void {
     const p = exact(base, ["op", "parentKey", "beforeKey", "node"], [], "render");
     nullableRenderId(p.parentKey, "parentKey");
     nullableRenderId(p.beforeKey, "beforeKey");
-    renderNode(p.node, new Set<string>(), 1, { n: 0 });
+    renderNode(p.node, new Set<string>());
   } else if (op === "remove") {
     const p = exact(base, ["op", "key"], [], "render");
     renderId(p.key, "key");
@@ -160,7 +209,6 @@ export function validateRenderDomains(raw: unknown): RenderDomainsV1 {
   const p = exact(raw, ["type", "domains"], [], "render");
   if (p.type !== "render.domains") fail("render", "wrong type");
   const domains = array(p.domains, "render", "domains");
-  if (domains.length > 256) fail("render", "domain limit");
   const seen = new Set<string>();
   for (const d of domains) {
     const id = renderId(d, "domainId");
@@ -175,7 +223,7 @@ export function validateRenderSnapshot(raw: unknown): RenderSnapshotV1 {
   if (p.type !== "render.snapshot") fail("render", "wrong type");
   renderId(p.domainId, "domainId");
   positiveSafe(p.revision, "render", "revision");
-  int32(p.zIndex, "render", "zIndex");
+  signedSafe(p.zIndex, "render", "zIndex");
   renderRoots(p.roots);
   return p as unknown as RenderSnapshotV1;
 }
@@ -189,9 +237,8 @@ export function validateRenderPatch(raw: unknown): RenderPatchV1 {
   if (base === Number.MAX_SAFE_INTEGER || rev !== base + 1) {
     fail("render", "invalid patch revision step");
   }
-  if (p.zIndex !== undefined) int32(p.zIndex, "render", "zIndex");
+  if (p.zIndex !== undefined) signedSafe(p.zIndex, "render", "zIndex");
   const ops = array(p.ops, "render", "ops");
-  if (ops.length > 4096) fail("render", "patch op limit");
   if (ops.length === 0 && p.zIndex === undefined) fail("render", "empty patch");
   for (const op of ops) renderOp(op);
   return p as unknown as RenderPatchV1;
@@ -202,7 +249,7 @@ export function validateRenderEvent(raw: unknown): RenderEventV1 {
   if (p.type !== "render.event") fail("render", "wrong type");
   renderId(p.domainId, "domainId");
   renderId(p.targetKey, "targetKey");
-  boundedString(p.name, "render", "event name", 1, 128);
+  scalarString(p.name, "render", "event name");
   renderData(p.data);
   return p as unknown as RenderEventV1;
 }
