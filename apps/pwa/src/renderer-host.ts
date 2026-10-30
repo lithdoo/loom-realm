@@ -56,7 +56,6 @@ class PwaPresentationEventBinding implements RendererPresentationEventBinding {
   publish(event: PresentationEventPublication): Promise<void> {
     if (this.closed) return Promise.reject(new Error("PWA Presentation Events binding closed"));
     if (this.current !== null) return this.current.binding.publish(event);
-    if (this.pending.length >= 256) return Promise.reject(new Error("PWA Presentation Events binding queue overflow"));
     return new Promise((resolve, reject) => { this.pending.push({ event, resolve, reject }); });
   }
 
