@@ -6,12 +6,7 @@ import type {
   RenderSnapshotV1,
   SubsystemDataPeer,
 } from "@loomrealm/data";
-import {
-  assertJsonValue,
-  utf8ByteLength,
-  type JsonObject,
-  type JsonValue,
-} from "@loomrealm/wire";
+import type { JsonObject, JsonValue } from "@loomrealm/wire";
 import type {
   RenderDomain,
   RenderDomainState,
@@ -20,23 +15,19 @@ import type {
   RenderNode,
 } from "../render.js";
 
-const MAX_DOMAINS = 256;
-const MAX_NODES = 16_384;
-const MAX_TREE_DEPTH = 30;
-const MAX_ATTRS = 256;
-const MAX_CONTAINER_MEMBERS = 16_384;
-const MAX_DATA_BYTES = 262_144;
-const MAX_DATA_DEPTH = 32;
-const MAX_MESSAGE_BYTES = 1_048_576;
-const MAX_PENDING_WORK = 1_024;
-const MAX_NODE_OPS = 4_096;
-const PROBE_DOMAIN_ID = "d".repeat(128);
+interface NodeLocation {
+  readonly parentKey: string | null;
+  readonly index: number;
+}
 
 interface DomainRecord {
   wireId: string;
   state: RenderDomainState;
   readonly liveKeys: Set<string>;
   readonly consumedKeys: Set<string>;
+  tags: Map<string, string>;
+  nodes: Map<string, RenderNode>;
+  locations: Map<string, NodeLocation>;
   closed: boolean;
 }
 
@@ -121,7 +112,7 @@ function optionalMember<T>(value: Record<string, unknown>, key: string, label: s
   return member as T;
 }
 
-function scalarString(value: unknown, min: number, max: number, label: string): string {
+function scalarString(value: unknown, allowEmpty: boolean, label: string): string {
   if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
   for (let index = 0; index < value.length; index += 1) {
     const unit = value.charCodeAt(index);
@@ -133,283 +124,203 @@ function scalarString(value: unknown, min: number, max: number, label: string): 
       throw new TypeError(`${label} has invalid Unicode`);
     }
   }
-  const bytes = utf8ByteLength(value);
-  if (bytes < min) throw new TypeError(`${label} cannot be empty`);
-  if (bytes > max) throw new RangeError(`${label} byte limit exceeded`);
+  if (!allowEmpty && value.length === 0) throw new TypeError(`${label} cannot be empty`);
   return value;
 }
 
-function validatedChildren(value: JsonObject | readonly JsonValue[]): JsonValue[] {
-  if (Array.isArray(value)) {
-    const children: JsonValue[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-        throw new TypeError("Validated JSON array changed during inspection");
+interface CloneFrame {
+  readonly source: object;
+  readonly target: Record<string, JsonValue> | JsonValue[];
+  readonly entries: readonly { readonly key: string | number; readonly value: unknown }[];
+  next: number;
+}
+
+function cloneJsonValue(value: unknown, label: string): JsonValue {
+  const primitive = (candidate: unknown): JsonValue | undefined => {
+    if (candidate === null || typeof candidate === "boolean") {
+      return candidate;
+    }
+    if (typeof candidate === "string") return scalarString(candidate, true, `${label} string`);
+    if (typeof candidate === "number") {
+      if (!Number.isFinite(candidate)) throw new TypeError(`${label} must be plain JSON with finite numbers`);
+      return candidate;
+    }
+    return undefined;
+  };
+  const direct = primitive(value);
+  if (direct !== undefined || value === null) return direct as JsonValue;
+  if (typeof value !== "object") throw new TypeError(`${label} must be plain JSON`);
+
+  const active = new WeakSet<object>();
+  const completed = new WeakMap<object, Record<string, JsonValue> | JsonValue[]>();
+  const inspect = (source: object): Omit<CloneFrame, "source" | "next"> => {
+    if (Array.isArray(source)) {
+      const keys = Reflect.ownKeys(source);
+      if (keys.length !== source.length + 1 || !keys.includes("length")) {
+        throw new TypeError(`${label} arrays must be dense and unaugmented`);
       }
-      children.push(descriptor.value as JsonValue);
-    }
-    return children;
-  }
-  const children: JsonValue[] = [];
-  for (const key of Object.keys(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-      throw new TypeError("Validated JSON object changed during inspection");
-    }
-    children.push(descriptor.value as JsonValue);
-  }
-  return children;
-}
-
-/** Depth of an already assertJsonValue-validated JSON tree. */
-function depthOfValidatedJson(value: JsonValue): number {
-  let maximum = 0;
-  const stack: Array<{ readonly value: JsonValue; readonly depth: number }> = [
-    { value, depth: 0 },
-  ];
-  while (stack.length > 0) {
-    const entry = stack.pop();
-    if (entry === undefined || entry.value === null || typeof entry.value !== "object") continue;
-    const containerDepth = entry.depth + 1;
-    if (containerDepth > maximum) maximum = containerDepth;
-    for (const child of validatedChildren(entry.value)) {
-      stack.push({ value: child, depth: containerDepth });
-    }
-  }
-  return maximum;
-}
-
-interface ValidatedValueTask {
-  readonly kind: "value";
-  readonly value: JsonValue;
-}
-
-interface ValidatedTextTask {
-  readonly kind: "text";
-  readonly text: string;
-}
-
-/**
- * Wire-compatible serialization for an already validated tree.
- *
- * Native JSON.stringify cannot be used here: assertJsonValue permits normal
- * objects and arrays, so an inherited Object.prototype/Array.prototype
- * `toJSON` would be invoked by the native serializer. Wire stringifyJson does
- * not invoke inherited methods. Keeping the iterative serializer local removes
- * its redundant validation without weakening that behavior or its mutation
- * checks.
- */
-function stringifyValidatedJson(value: JsonValue): string {
-  const output: string[] = [];
-  const stack: Array<ValidatedValueTask | ValidatedTextTask> = [{ kind: "value", value }];
-  while (stack.length > 0) {
-    const task = stack.pop();
-    if (task === undefined) break;
-    if (task.kind === "text") {
-      output.push(task.text);
-      continue;
-    }
-    const current = task.value;
-    if (current === null || typeof current !== "object") {
-      output.push(current === null ? "null" : typeof current === "boolean" ? (current ? "true" : "false") : JSON.stringify(current));
-      continue;
-    }
-    if (Array.isArray(current)) {
-      stack.push({ kind: "text", text: "]" });
-      for (let index = current.length - 1; index >= 0; index -= 1) {
-        const descriptor = Object.getOwnPropertyDescriptor(current, String(index));
+      const target = new Array<JsonValue>(source.length);
+      const entries: Array<{ key: number; value: unknown }> = [];
+      for (let index = 0; index < source.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(source, String(index));
         if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-          throw new TypeError("Validated JSON array changed during serialization");
+          throw new TypeError(`${label} arrays must contain enumerable data properties`);
         }
-        stack.push({ kind: "value", value: descriptor.value as JsonValue });
-        if (index > 0) stack.push({ kind: "text", text: "," });
+        entries.push({ key: index, value: descriptor.value });
       }
-      stack.push({ kind: "text", text: "[" });
+      return { target, entries };
+    }
+    const prototype = Object.getPrototypeOf(source);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError(`${label} must contain plain JSON objects`);
+    }
+    const target = Object.create(null) as Record<string, JsonValue>;
+    const entries: Array<{ key: string; value: unknown }> = [];
+    for (const key of Reflect.ownKeys(source)) {
+      if (typeof key !== "string") throw new TypeError(`${label} must be plain JSON without symbol keys`);
+      scalarString(key, true, `${label} key`);
+      const descriptor = Object.getOwnPropertyDescriptor(source, key);
+      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+        throw new TypeError(`${label} members must be enumerable data properties`);
+      }
+      entries.push({ key, value: descriptor.value });
+    }
+    return { target, entries };
+  };
+  const root = inspect(value);
+  active.add(value);
+  completed.set(value, root.target);
+  const stack: CloneFrame[] = [{ source: value, target: root.target, entries: root.entries, next: 0 }];
+  const assign = (
+    target: Record<string, JsonValue> | JsonValue[],
+    key: string | number,
+    child: JsonValue,
+  ): void => {
+    if (Array.isArray(target)) target[key as number] = child;
+    else target[key as string] = child;
+  };
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    if (frame.next >= frame.entries.length) {
+      Object.freeze(frame.target);
+      active.delete(frame.source);
+      stack.pop();
       continue;
     }
-    const keys = Object.keys(current);
-    stack.push({ kind: "text", text: "}" });
-    for (let index = keys.length - 1; index >= 0; index -= 1) {
-      const key = keys[index];
-      if (key === undefined) continue;
-      const descriptor = Object.getOwnPropertyDescriptor(current, key);
-      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-        throw new TypeError("Validated JSON object changed during serialization");
-      }
-      stack.push({ kind: "value", value: descriptor.value as JsonValue });
-      stack.push({ kind: "text", text: `${JSON.stringify(key)}:` });
-      if (index > 0) stack.push({ kind: "text", text: "," });
+    const entry = frame.entries[frame.next++]!;
+    const childPrimitive = primitive(entry.value);
+    if (childPrimitive !== undefined || entry.value === null) {
+      assign(frame.target, entry.key, childPrimitive as JsonValue);
+      continue;
     }
-    stack.push({ kind: "text", text: "{" });
+    if (typeof entry.value !== "object") throw new TypeError(`${label} must be plain JSON`);
+    if (active.has(entry.value)) throw new TypeError(`${label} cannot contain a cycle`);
+    const prior = completed.get(entry.value);
+    if (prior !== undefined) {
+      assign(frame.target, entry.key, prior as JsonValue);
+      continue;
+    }
+    const nested = inspect(entry.value);
+    active.add(entry.value);
+    completed.set(entry.value, nested.target);
+    assign(frame.target, entry.key, nested.target as JsonValue);
+    stack.push({ source: entry.value, target: nested.target, entries: nested.entries, next: 0 });
   }
-  return output.join("");
+  return root.target as JsonValue;
 }
 
-function validateJsonData(value: unknown, label: string): asserts value is JsonObject {
-  try {
-    assertJsonValue(value);
-  } catch {
-    throw new TypeError(`${label} must be plain JSON`);
-  }
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+function cloneJsonObject(value: unknown, label: string): JsonObject {
+  const cloned = cloneJsonValue(value, label);
+  if (cloned === null || typeof cloned !== "object" || Array.isArray(cloned)) {
     throw new TypeError(`${label} must be a JSON object`);
   }
-  if (depthOfValidatedJson(value) > MAX_DATA_DEPTH) throw new RangeError(`${label} depth limit exceeded`);
-  const stack: JsonValue[] = [value];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (typeof current === "string") {
-      scalarString(current, 0, Number.POSITIVE_INFINITY, `${label} string`);
-      continue;
-    }
-    if (current === undefined || current === null || typeof current !== "object") continue;
-    if (Array.isArray(current)) {
-      if (current.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} array limit exceeded`);
-      for (const child of current) stack.push(child);
-    } else {
-      const keys = Object.keys(current);
-      if (keys.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} member limit exceeded`);
-      for (const key of keys) {
-        scalarString(key, 0, 256, `${label} key`);
-        stack.push((current as JsonObject)[key] as JsonValue);
-      }
-    }
-  }
-  if (utf8ByteLength(stringifyValidatedJson(value)) > MAX_DATA_BYTES) {
-    throw new RangeError(`${label} byte limit exceeded`);
-  }
+  return cloned as JsonObject;
 }
 
-function validateJsonValue(value: unknown, label: string): JsonValue {
-  try {
-    assertJsonValue(value);
-  } catch {
-    throw new TypeError(`${label} must be plain JSON`);
-  }
-  const walk = (current: JsonValue): void => {
-    if (typeof current === "string") {
-      scalarString(current, 0, Number.POSITIVE_INFINITY, `${label} string`);
-      return;
-    }
-    if (current === null || typeof current !== "object") return;
-    if (Array.isArray(current)) {
-      if (current.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} array limit exceeded`);
-      for (const child of current) walk(child);
-      return;
-    }
-    const keys = Object.keys(current);
-    if (keys.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} member limit exceeded`);
-    for (const key of keys) {
-      scalarString(key, 0, 256, `${label} key`);
-      walk((current as JsonObject)[key] as JsonValue);
-    }
-  };
-  walk(value as JsonValue);
-  return value as JsonValue;
-}
-
-function detachedFrozen<T>(value: T, seen = new WeakMap<object, object>()): T {
-  if (value === null || typeof value !== "object") return value;
-  const prior = seen.get(value);
-  if (prior !== undefined) return prior as T;
-  const output: object = Array.isArray(value) ? [] : Object.create(null);
-  seen.set(value, output);
-  if (Array.isArray(value)) {
-    for (const child of value) (output as unknown[]).push(detachedFrozen(child, seen));
-  } else {
-    for (const key of Object.keys(value)) {
-      Object.defineProperty(output, key, {
-        value: detachedFrozen((value as Record<string, unknown>)[key], seen),
-        enumerable: true,
-        configurable: false,
-        writable: false,
-      });
-    }
-  }
-  return Object.freeze(output) as T;
-}
-
-function probeLimit(value: unknown, label: string): void {
-  try {
-    assertJsonValue(value);
-  } catch {
-    throw new TypeError(`${label} must be plain JSON`);
-  }
-  const json = value as JsonValue;
-  if (depthOfValidatedJson(json) > 64 || utf8ByteLength(stringifyValidatedJson(json)) > MAX_MESSAGE_BYTES) {
-    throw new RangeError(`${label} message limit exceeded`);
-  }
+function detachedFrozen<T>(value: T): T {
+  return cloneJsonValue(value, "qualification snapshot") as T;
 }
 
 function validateStateShape(value: unknown): {
   readonly state: RenderDomainState;
   readonly keys: Set<string>;
   readonly tags: Map<string, string>;
+  readonly nodes: Map<string, RenderNode>;
+  readonly locations: Map<string, NodeLocation>;
 } {
-  try {
-    assertJsonValue(value);
-  } catch {
-    throw new TypeError("RenderDomainState must be plain JSON");
-  }
   ownDataObject(value, "RenderDomainState");
   exactKeys(value, ["zIndex", "roots"], "RenderDomainState");
-  if (!Number.isInteger(value.zIndex)) throw new TypeError("zIndex must be an integer");
-  if ((value.zIndex as number) < -2_147_483_648 || (value.zIndex as number) > 2_147_483_647) {
-    throw new RangeError("zIndex limit exceeded");
-  }
-  if (!Array.isArray(value.roots)) throw new TypeError("roots must be an array");
+  if (!Number.isSafeInteger(value.zIndex)) throw new TypeError("zIndex must be a signed safe integer");
+  const rawRoots = denseArray(value.roots, "roots");
   const keys = new Set<string>();
   const tags = new Map<string, string>();
-  let count = 0;
-  const visit = (raw: unknown, depth: number): void => {
-    if (depth > MAX_TREE_DEPTH) throw new RangeError("Render tree depth limit exceeded");
-    ownDataObject(raw, "RenderNode");
-    exactKeys(raw, ["key", "tag", "attrs", "data", "children"], "RenderNode");
-    const key = scalarString(raw.key, 1, 128, "RenderNode key");
+  const nodes = new Map<string, RenderNode>();
+  const locations = new Map<string, NodeLocation>();
+  const roots = new Array<RenderNode>(rawRoots.length);
+  const built: Array<{ readonly node: RenderNode; readonly children: RenderNode[] }> = [];
+  const stack: Array<{
+    readonly raw: unknown;
+    readonly parentChildren: RenderNode[];
+    readonly index: number;
+    readonly parentKey: string | null;
+  }> = [];
+  for (let index = rawRoots.length - 1; index >= 0; index -= 1) {
+    stack.push({ raw: rawRoots[index], parentChildren: roots, index, parentKey: null });
+  }
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    ownDataObject(frame.raw, "RenderNode");
+    exactKeys(frame.raw, ["key", "tag", "attrs", "data", "children"], "RenderNode");
+    const key = scalarString(frame.raw.key, false, "RenderNode key");
     if (keys.has(key)) throw new TypeError("Duplicate RenderNode key");
     keys.add(key);
-    const tag = scalarString(raw.tag, 1, 256, "RenderNode tag");
+    const tag = scalarString(frame.raw.tag, false, "RenderNode tag");
     tags.set(key, tag);
-    ownDataObject(raw.attrs, "RenderNode attrs");
-    const attrKeys = Object.keys(raw.attrs);
-    if (attrKeys.length > MAX_ATTRS) throw new RangeError("RenderNode attrs limit exceeded");
-    for (const attrKey of attrKeys) {
-      scalarString(attrKey, 1, 128, "RenderNode attr key");
-      scalarString(raw.attrs[attrKey], 0, 4096, "RenderNode attr value");
+    ownDataObject(frame.raw.attrs, "RenderNode attrs");
+    const attrs = Object.create(null) as Record<string, string>;
+    for (const attrKey of Object.keys(frame.raw.attrs)) {
+      scalarString(attrKey, false, "RenderNode attr key");
+      attrs[attrKey] = scalarString(frame.raw.attrs[attrKey], true, "RenderNode attr value");
     }
-    validateJsonData(raw.data, "RenderNode data");
-    if (!Array.isArray(raw.children)) throw new TypeError("RenderNode children must be an array");
-    count += 1;
-    if (count > MAX_NODES) throw new RangeError("RenderNode count limit exceeded");
-    for (const child of raw.children) visit(child, depth + 1);
+    Object.freeze(attrs);
+    const data = cloneJsonObject(frame.raw.data, "RenderNode data");
+    const rawChildren = denseArray(frame.raw.children, "RenderNode children");
+    const children = new Array<RenderNode>(rawChildren.length);
+    const node = { key, tag, attrs, data, children } as RenderNode;
+    frame.parentChildren[frame.index] = node;
+    nodes.set(key, node);
+    locations.set(key, { parentKey: frame.parentKey, index: frame.index });
+    built.push({ node, children });
+    for (let index = rawChildren.length - 1; index >= 0; index -= 1) {
+      stack.push({ raw: rawChildren[index], parentChildren: children, index, parentKey: key });
+    }
+  }
+  for (const { node, children } of built) {
+    Object.freeze(children);
+    Object.freeze(node);
+  }
+  Object.freeze(roots);
+  return {
+    state: Object.freeze({ zIndex: value.zIndex as number, roots }),
+    keys,
+    tags,
+    nodes,
+    locations,
   };
-  for (const root of value.roots) visit(root, 1);
-  const detached = detachedFrozen(value as unknown as RenderDomainState);
-  probeLimit({
-    type: "render.snapshot",
-    domainId: PROBE_DOMAIN_ID,
-    revision: Number.MAX_SAFE_INTEGER,
-    zIndex: detached.zIndex,
-    roots: detached.roots,
-  }, "Render Snapshot");
-  return { state: detached, keys, tags };
 }
 
 function validateEventShape(value: unknown): RenderEvent {
   ownDataObject(value, "RenderEvent");
   exactKeys(value, ["targetKey", "name", "data"], "RenderEvent");
-  scalarString(value.targetKey, 1, 128, "RenderEvent targetKey");
-  scalarString(value.name, 1, 128, "RenderEvent name");
-  validateJsonData(value.data, "RenderEvent data");
-  const detached = detachedFrozen(value as unknown as RenderEvent);
-  probeLimit({ type: "render.event", domainId: PROBE_DOMAIN_ID, ...detached }, "Render Event");
-  return detached;
+  const targetKey = scalarString(value.targetKey, false, "RenderEvent targetKey");
+  const name = scalarString(value.name, false, "RenderEvent name");
+  const data = cloneJsonObject(value.data, "RenderEvent data");
+  return Object.freeze({ targetKey, name, data });
 }
 
-function denseArray(value: unknown, max: number, label: string): readonly unknown[] {
+function denseArray(value: unknown, label: string): readonly unknown[] {
   if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
-  if (value.length > max) throw new RangeError(`${label} length limit exceeded`);
   const keys = Reflect.ownKeys(value);
   if (keys.length !== value.length + 1 || !keys.includes("length")) {
     throw new TypeError(`${label} must be a dense array`);
@@ -443,11 +354,11 @@ function validateDelta(
     const copied = Object.create(null) as Record<string, string | JsonValue>;
     for (const key of Object.keys(setRaw)) {
       if (kind === "attrs") {
-        scalarString(key, 1, 128, `${label}.set key`);
-        copied[key] = scalarString(setRaw[key], 0, 4096, `${label}.set value`);
+        scalarString(key, false, `${label}.set key`);
+        copied[key] = scalarString(setRaw[key], true, `${label}.set value`);
       } else {
-        scalarString(key, 1, 256, `${label}.set key`);
-        copied[key] = detachedFrozen(validateJsonValue(setRaw[key], `${label}.set value`));
+        scalarString(key, true, `${label}.set key`);
+        copied[key] = cloneJsonValue(setRaw[key], `${label}.set value`);
       }
     }
     if (Object.keys(copied).length === 0 && removeRaw === undefined) throw new TypeError(`${label} is empty`);
@@ -455,9 +366,9 @@ function validateDelta(
   }
   let remove: string[] | undefined;
   if (removeRaw !== undefined) {
-    const items = denseArray(removeRaw, MAX_CONTAINER_MEMBERS, `${label}.remove`);
+    const items = denseArray(removeRaw, `${label}.remove`);
     if (items.length === 0 && setRaw === undefined) throw new TypeError(`${label} is empty`);
-    remove = items.map((item, index) => scalarString(item, 1, kind === "attrs" ? 128 : 256, `${label}.remove[${index}]`));
+    remove = items.map((item, index) => scalarString(item, kind === "data", `${label}.remove[${index}]`));
   }
   if ((set === undefined || Object.keys(set).length === 0) && (remove === undefined || remove.length === 0)) {
     throw new TypeError(`${label} is empty`);
@@ -472,15 +383,6 @@ function validateDelta(
     ...(set === undefined ? {} : { set: Object.freeze(set) }),
     ...(remove === undefined ? {} : { remove: Object.freeze(remove) }),
   } as StringDelta | DataDelta;
-}
-
-function validateAttrs(attrs: Readonly<Record<string, string>>): void {
-  const keys = Object.keys(attrs);
-  if (keys.length > MAX_ATTRS) throw new RangeError("RenderNode attrs limit exceeded");
-  for (const key of keys) {
-    scalarString(key, 1, 128, "RenderNode attr key");
-    scalarString(attrs[key], 0, 4096, "RenderNode attr value");
-  }
 }
 
 function applyStringDelta(
@@ -500,7 +402,6 @@ function applyStringDelta(
   if (delta.set) {
     for (const key of Object.keys(delta.set)) next[key] = delta.set[key] as string;
   }
-  validateAttrs(next);
   return Object.freeze(next);
 }
 
@@ -521,63 +422,87 @@ function applyDataDelta(
   if (delta.set) {
     for (const key of Object.keys(delta.set)) next[key] = delta.set[key] as JsonValue;
   }
-  validateJsonData(next, "RenderNode data");
   return Object.freeze(next) as JsonObject;
 }
 
-function freezeNode(node: {
+interface MutableNode {
   readonly key: string;
   readonly tag: string;
-  readonly attrs: Readonly<Record<string, string>>;
-  readonly data: JsonObject;
-  readonly children: readonly RenderNode[];
-}): RenderNode {
-  return Object.freeze({
-    key: node.key,
-    tag: node.tag,
-    attrs: node.attrs,
-    data: node.data,
-    children: node.children,
-  }) as RenderNode;
+  attrs: Readonly<Record<string, string>>;
+  data: JsonObject;
+  children: RenderNode[];
 }
 
 function applyCow(
   state: RenderDomainState,
   zIndex: number,
   updates: readonly ValidatedNodeUpdate[],
-): RenderDomainState {
-  const pending = new Map(updates.map((item) => [item.key, item]));
-  const seen = new Set<string>();
-  const visit = (node: RenderNode): RenderNode => {
-    const children = node.children.map(visit);
-    const childrenChanged = children.some((child, index) => child !== node.children[index]);
-    const delta = pending.get(node.key);
-    if (delta === undefined) {
-      if (!childrenChanged) return node;
-      return freezeNode({
-        key: node.key,
-        tag: node.tag,
-        attrs: node.attrs,
-        data: node.data,
-        children: Object.freeze(children),
-      });
+  nodes: ReadonlyMap<string, RenderNode>,
+  locations: ReadonlyMap<string, NodeLocation>,
+): { readonly state: RenderDomainState; readonly clones: ReadonlyMap<string, RenderNode> } {
+  const clones = new Map<string, MutableNode>();
+  const copiedChildren = new Set<string>();
+  let roots = state.roots as RenderNode[];
+  let rootsCopied = false;
+
+  const ensurePath = (targetKey: string): MutableNode => {
+    const path: string[] = [];
+    let current: string | null = targetKey;
+    while (current !== null) {
+      path.push(current);
+      const location = locations.get(current);
+      if (location === undefined) throw new TypeError("Updated Render node is missing");
+      current = location.parentKey;
     }
-    seen.add(node.key);
-    return freezeNode({
-      key: node.key,
-      tag: node.tag,
-      attrs: delta.attrs === undefined ? node.attrs : applyStringDelta(node.attrs, delta.attrs),
-      data: delta.data === undefined ? node.data : applyDataDelta(node.data, delta.data),
-      children: childrenChanged ? Object.freeze(children) : node.children,
-    });
+    for (let index = path.length - 1; index >= 0; index -= 1) {
+      const key = path[index]!;
+      if (clones.has(key)) continue;
+      const original = nodes.get(key);
+      const location = locations.get(key);
+      if (original === undefined || location === undefined) throw new TypeError("Updated Render node is missing");
+      const clone: MutableNode = {
+        key: original.key,
+        tag: original.tag,
+        attrs: original.attrs,
+        data: original.data,
+        children: original.children as RenderNode[],
+      };
+      clones.set(key, clone);
+      if (location.parentKey === null) {
+        if (!rootsCopied) {
+          roots = roots.slice();
+          rootsCopied = true;
+        }
+        roots[location.index] = clone as RenderNode;
+      } else {
+        const parent = clones.get(location.parentKey);
+        if (parent === undefined) throw new TypeError("Render parent path is missing");
+        if (!copiedChildren.has(location.parentKey)) {
+          parent.children = parent.children.slice();
+          copiedChildren.add(location.parentKey);
+        }
+        parent.children[location.index] = clone as RenderNode;
+      }
+    }
+    const result = clones.get(targetKey);
+    if (result === undefined) throw new TypeError("Updated Render node is missing");
+    return result;
   };
-  const roots = state.roots.map(visit);
-  if (seen.size !== pending.size) throw new TypeError("Updated Render node is missing");
-  const rootsChanged = roots.some((node, index) => node !== state.roots[index]);
-  return Object.freeze({
-    zIndex,
-    roots: rootsChanged ? Object.freeze(roots) : state.roots,
-  });
+
+  for (const update of updates) {
+    const node = ensurePath(update.key);
+    if (update.attrs !== undefined) node.attrs = applyStringDelta(node.attrs, update.attrs);
+    if (update.data !== undefined) node.data = applyDataDelta(node.data, update.data);
+  }
+  for (const [key, node] of clones) {
+    if (copiedChildren.has(key)) Object.freeze(node.children);
+    Object.freeze(node);
+  }
+  const nextRoots = rootsCopied ? Object.freeze(roots) : state.roots;
+  return {
+    state: Object.freeze({ zIndex, roots: nextRoots }),
+    clones: new Map([...clones].map(([key, node]) => [key, node as RenderNode])),
+  };
 }
 
 function toWireOps(nodes: readonly ValidatedNodeUpdate[]): readonly RenderNodeUpdateV1[] {
@@ -613,13 +538,16 @@ export class RenderManager {
   private peerEpoch = 0;
   private generation: number | null = null;
   private readonly cursors = new Map<DomainRecord, CarrierCursor>();
-  private work: Work[] = [];
+  private work: Array<Work | undefined> = [];
+  private workHead = 0;
+  private queuedCount = 0;
+  private pendingRegistry: Extract<Work, { readonly kind: "registry" }> | null = null;
+  private readonly coalescibleSnapshots = new Map<DomainRecord, Extract<StateWork, { readonly kind: "snapshot" }>>();
   private inFlight: InFlightPublication | null = null;
   private closed = false;
 
   createDomain(initialState: RenderDomainState): RenderDomain {
     if (this.closed) throw new TypeError("RenderManager is closed");
-    if (this.domains.size >= MAX_DOMAINS) throw new RangeError("Render Domain limit exceeded");
     const validated = validateStateShape(initialState);
     const serial = this.nextSerial;
     this.nextSerial += 1n;
@@ -628,6 +556,9 @@ export class RenderManager {
       state: validated.state,
       liveKeys: validated.keys,
       consumedKeys: new Set(),
+      tags: validated.tags,
+      nodes: validated.nodes,
+      locations: validated.locations,
       closed: false,
     };
     this.domains.add(record);
@@ -645,10 +576,18 @@ export class RenderManager {
     this.peerEpoch += 1;
     this.peer = peer;
     this.inFlight = null;
-    this.work = [];
+    this.resetQueue();
     this.cursors.clear();
     if (peer === null || this.closed) return;
-    if (this.generation !== peer.binding.generation) this.generation = peer.binding.generation;
+    if (this.generation !== peer.binding.generation) {
+      this.generation = peer.binding.generation;
+      this.nextSerial = 1n;
+      for (const domain of this.domains) {
+        domain.wireId = `d${this.nextSerial.toString(36)}`;
+        this.nextSerial += 1n;
+        domain.consumedKeys.clear();
+      }
+    }
     this.enqueueRegistry();
     for (const domain of this.domains) this.enqueueSnapshot(domain, domain.state);
     this.pump();
@@ -662,7 +601,7 @@ export class RenderManager {
     this.peerEpoch += 1;
     this.peer = null;
     this.inFlight = null;
-    this.work = [];
+    this.resetQueue();
     this.cursors.clear();
   }
 
@@ -674,7 +613,7 @@ export class RenderManager {
         closed: domain.closed,
         state: domain.state,
       })),
-      pendingWork: this.work.length,
+      pendingWork: this.queuedCount,
     });
   }
 
@@ -689,16 +628,8 @@ export class RenderManager {
   private replace(domain: DomainRecord, state: RenderDomainState): void {
     this.requireLive(domain);
     const validated = validateStateShape(state);
-    const oldTags = new Map<string, string>();
-    const stack = [...domain.state.roots];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (node === undefined) continue;
-      oldTags.set(node.key, node.tag);
-      stack.push(...node.children);
-    }
     for (const key of validated.keys) {
-      const oldTag = oldTags.get(key) ?? null;
+      const oldTag = domain.tags.get(key) ?? null;
       const nextTag = validated.tags.get(key);
       if (oldTag !== null && oldTag !== nextTag) throw new TypeError("Live RenderNode tag cannot change");
       if (!domain.liveKeys.has(key) && domain.consumedKeys.has(key)) {
@@ -711,6 +642,9 @@ export class RenderManager {
     domain.liveKeys.clear();
     for (const key of validated.keys) domain.liveKeys.add(key);
     domain.state = validated.state;
+    domain.tags = validated.tags;
+    domain.nodes = validated.nodes;
+    domain.locations = validated.locations;
     this.enqueueState(domain, "snapshot");
   }
 
@@ -727,15 +661,12 @@ export class RenderManager {
     }
     let zIndex: number | undefined;
     if (zIndexRaw !== undefined) {
-      if (!Number.isInteger(zIndexRaw)) throw new TypeError("zIndex must be an integer");
-      if ((zIndexRaw as number) < -2_147_483_648 || (zIndexRaw as number) > 2_147_483_647) {
-        throw new RangeError("zIndex limit exceeded");
-      }
+      if (!Number.isSafeInteger(zIndexRaw)) throw new TypeError("zIndex must be a signed safe integer");
       zIndex = zIndexRaw as number;
     }
     const nodes: ValidatedNodeUpdate[] = [];
     if (nodesRaw !== undefined) {
-      const list = denseArray(nodesRaw, MAX_NODE_OPS, "nodes");
+      const list = denseArray(nodesRaw, "nodes");
       const seen = new Set<string>();
       for (const item of list) {
         ownDataObject(item, "RenderNodeUpdate");
@@ -744,7 +675,7 @@ export class RenderManager {
             throw new TypeError("RenderNodeUpdate has invalid members");
           }
         }
-        const key = scalarString(optionalMember(item, "key", "RenderNodeUpdate.key"), 1, 128, "RenderNodeUpdate key");
+        const key = scalarString(optionalMember(item, "key", "RenderNodeUpdate.key"), false, "RenderNodeUpdate key");
         if (seen.has(key)) throw new TypeError("Duplicate RenderNodeUpdate key");
         seen.add(key);
         if (!domain.liveKeys.has(key)) throw new TypeError("Updated Render node is missing");
@@ -760,25 +691,16 @@ export class RenderManager {
         });
       }
     }
-    const nextState = applyCow(domain.state, zIndex ?? domain.state.zIndex, nodes);
-    probeLimit({
-      type: "render.snapshot",
-      domainId: PROBE_DOMAIN_ID,
-      revision: Number.MAX_SAFE_INTEGER,
-      zIndex: nextState.zIndex,
-      roots: nextState.roots,
-    }, "Render Snapshot");
+    const next = applyCow(
+      domain.state,
+      zIndex ?? domain.state.zIndex,
+      nodes,
+      domain.nodes,
+      domain.locations,
+    );
     const ops = toWireOps(nodes);
-    const patch: Record<string, unknown> = {
-      type: "render.patch",
-      domainId: PROBE_DOMAIN_ID,
-      baseRevision: Number.MAX_SAFE_INTEGER - 1,
-      revision: Number.MAX_SAFE_INTEGER,
-      ops,
-    };
-    if (zIndex !== undefined) patch.zIndex = zIndex;
-    probeLimit(patch, "Render Patch");
-    domain.state = nextState;
+    domain.state = next.state;
+    for (const [key, node] of next.clones) domain.nodes.set(key, node);
     this.enqueueState(domain, "update", ops, zIndex);
   }
 
@@ -787,24 +709,8 @@ export class RenderManager {
     const event = validateEventShape(raw);
     if (!domain.liveKeys.has(event.targetKey)) throw new TypeError("Stale Render Event target");
     if (this.peer === null) return;
-    if (this.work.length >= MAX_PENDING_WORK) {
-      if (!this.dropOldestEvent()) return;
-    }
-    const cursor = this.cursors.get(domain);
-    const baselined = cursor?.baselined === true;
-    if (!baselined) {
-      let insertAt = this.work.length;
-      for (let index = this.work.length - 1; index >= 0; index -= 1) {
-        const item = this.work[index];
-        if (item !== undefined && isStateWork(item) && item.domain === domain) {
-          insertAt = index + 1;
-          break;
-        }
-      }
-      this.work.splice(insertAt, 0, { kind: "event", domain, event });
-    } else {
-      this.work.push({ kind: "event", domain, event });
-    }
+    this.coalescibleSnapshots.delete(domain);
+    this.enqueue({ kind: "event", domain, event });
     this.pump();
   }
 
@@ -812,7 +718,7 @@ export class RenderManager {
     if (domain.closed) return;
     domain.closed = true;
     this.domains.delete(domain);
-    this.work = this.work.filter((item) => item.kind === "registry" || item.domain !== domain);
+    this.coalescibleSnapshots.delete(domain);
     this.cursors.delete(domain);
     this.enqueueRegistry();
   }
@@ -833,17 +739,14 @@ export class RenderManager {
   private enqueueRegistry(): void {
     if (this.peer === null) return;
     const message = this.registryMessage();
-    let updated = false;
-    for (const item of this.work) {
-      if (item.kind !== "registry") continue;
-      item.message = message;
-      updated = true;
-    }
-    if (updated) {
+    if (this.pendingRegistry !== null) {
+      this.pendingRegistry.message = message;
       this.pump();
       return;
     }
-    if (this.makeRoomForAuthoritative()) this.work.push({ kind: "registry", message });
+    const work: Extract<Work, { readonly kind: "registry" }> = { kind: "registry", message };
+    this.pendingRegistry = work;
+    this.enqueue(work);
     this.pump();
   }
 
@@ -861,73 +764,66 @@ export class RenderManager {
     if (this.peer === null || domain.closed) return;
     const cursor = this.cursors.get(domain);
     const baselined = cursor?.baselined === true;
-    const lastBarrier = this.lastBarrierIndex(domain);
-    for (let index = this.work.length - 1; index > lastBarrier; index -= 1) {
-      const item = this.work[index];
-      if (item?.kind === "snapshot" && item.domain === domain) {
-        item.state = state;
-        this.pump();
-        return;
-      }
+    const pendingSnapshot = this.coalescibleSnapshots.get(domain);
+    if (pendingSnapshot !== undefined) {
+      pendingSnapshot.state = state;
+      this.pump();
+      return;
     }
-    const work: Work = !baselined || kind === "snapshot" || ops === undefined
+    const work: StateWork = !baselined || kind === "snapshot" || ops === undefined
       ? { kind: "snapshot", domain, state }
       : { kind: "update", domain, state, ops, ...(zIndex === undefined ? {} : { zIndex }) };
-    if (this.makeRoomForAuthoritative()) this.work.push(work);
+    if (work.kind === "snapshot") this.coalescibleSnapshots.set(domain, work);
+    this.enqueue(work);
     this.pump();
   }
 
-  private lastBarrierIndex(domain: DomainRecord): number {
-    for (let index = this.work.length - 1; index >= 0; index -= 1) {
-      const item = this.work[index];
-      if (item?.kind === "event" && item.domain === domain) return index;
-    }
-    return -1;
+  private enqueue(work: Work): void {
+    this.work.push(work);
+    this.queuedCount += 1;
   }
 
-  private makeRoomForAuthoritative(): boolean {
-    while (this.work.length >= MAX_PENDING_WORK) {
-      if (this.dropOldestEvent()) continue;
-      let candidate = -1;
-      for (let index = 0; index < this.work.length; index += 1) {
-        const item = this.work[index];
-        if (item === undefined || !isStateWork(item)) continue;
-        const later = this.work.slice(index + 1).some((entry) => isStateWork(entry) && entry.domain === item.domain);
-        if (later) {
-          candidate = index;
-          break;
-        }
+  private dequeue(): Work | undefined {
+    while (this.workHead < this.work.length) {
+      const index = this.workHead;
+      this.workHead += 1;
+      const work = this.work[index];
+      this.work[index] = undefined;
+      if (work === undefined) continue;
+      this.queuedCount -= 1;
+      if (work === this.pendingRegistry) this.pendingRegistry = null;
+      if (work.kind === "snapshot" && this.coalescibleSnapshots.get(work.domain) === work) {
+        this.coalescibleSnapshots.delete(work.domain);
       }
-      if (candidate < 0) {
-        this.invalidateOldPeer(true);
-        return false;
+      if (this.workHead > 1024 && this.workHead * 2 > this.work.length) {
+        this.work = this.work.slice(this.workHead);
+        this.workHead = 0;
       }
-      const domain = (this.work[candidate] as StateWork).domain;
-      const indices: number[] = [];
-      for (let index = 0; index < this.work.length; index += 1) {
-        const item = this.work[index];
-        if (item !== undefined && isStateWork(item) && item.domain === domain) indices.push(index);
-      }
-      const lastIndex = indices[indices.length - 1];
-      if (lastIndex === undefined) {
-        this.invalidateOldPeer(true);
-        return false;
-      }
-      const last = this.work[lastIndex] as StateWork;
-      this.work[lastIndex] = { kind: "snapshot", domain, state: last.state };
-      for (let index = indices.length - 2; index >= 0; index -= 1) {
-        const removeAt = indices[index];
-        if (removeAt !== undefined) this.work.splice(removeAt, 1);
-      }
+      return work;
     }
-    return this.peer !== null;
+    this.work = [];
+    this.workHead = 0;
+    return undefined;
   }
 
-  private dropOldestEvent(): boolean {
-    const index = this.work.findIndex((item) => item.kind === "event");
-    if (index < 0) return false;
-    this.work.splice(index, 1);
-    return true;
+  private resetQueue(): void {
+    for (let index = this.workHead; index < this.work.length; index += 1) this.work[index] = undefined;
+    this.work = [];
+    this.workHead = 0;
+    this.queuedCount = 0;
+    this.pendingRegistry = null;
+    this.coalescibleSnapshots.clear();
+  }
+
+  private discardDomainWork(domain: DomainRecord): void {
+    for (let index = this.workHead; index < this.work.length; index += 1) {
+      const work = this.work[index];
+      if (work !== undefined && work.kind !== "registry" && work.domain === domain) {
+        this.work[index] = undefined;
+        this.queuedCount -= 1;
+      }
+    }
+    this.coalescibleSnapshots.delete(domain);
   }
 
   private invalidateOldPeer(closePeer: boolean): void {
@@ -935,58 +831,55 @@ export class RenderManager {
     this.peer = null;
     this.peerEpoch += 1;
     this.inFlight = null;
-    this.work = [];
+    this.resetQueue();
     this.cursors.clear();
     if (closePeer && oldPeer !== null) void oldPeer.close();
   }
 
   private pump(): void {
     const peer = this.peer;
-    if (peer === null || this.inFlight !== null || this.work.length === 0) return;
-    const work = this.work.shift();
-    if (work === undefined) return;
-    if (work.kind !== "registry" && (work.domain.closed || !this.domains.has(work.domain))) {
-      this.pump();
-      return;
-    }
-    if (isStateWork(work)) {
-      const cursor = this.cursors.get(work.domain);
-      if (cursor?.revision === Number.MAX_SAFE_INTEGER) {
-        const oldId = work.domain.wireId;
-        work.domain.wireId = `d${this.nextSerial.toString(36)}`;
-        this.nextSerial += 1n;
-        this.cursors.delete(work.domain);
-        this.work = this.work.filter((item) => item.kind === "registry" || item.domain !== work.domain);
-        this.work.unshift({ kind: "snapshot", domain: work.domain, state: work.domain.state });
-        this.work.unshift({ kind: "registry", message: this.registryMessage() });
-        if (oldId === work.domain.wireId) throw new Error("Render wire identity rollover failed");
-        this.pump();
-        return;
+    if (peer === null || this.inFlight !== null) return;
+    while (this.queuedCount > 0) {
+      const work = this.dequeue();
+      if (work === undefined) return;
+      if (work.kind !== "registry" && (work.domain.closed || !this.domains.has(work.domain))) continue;
+      if (isStateWork(work)) {
+        const cursor = this.cursors.get(work.domain);
+        if (cursor?.revision === Number.MAX_SAFE_INTEGER) {
+          const oldId = work.domain.wireId;
+          work.domain.wireId = `d${this.nextSerial.toString(36)}`;
+          this.nextSerial += 1n;
+          work.domain.consumedKeys.clear();
+          this.cursors.delete(work.domain);
+          this.discardDomainWork(work.domain);
+          this.enqueueRegistry();
+          this.enqueueSnapshot(work.domain, work.domain.state);
+          if (oldId === work.domain.wireId) throw new Error("Render wire identity rollover failed");
+          continue;
+        }
       }
-    }
-    const message = this.materialize(work);
-    if (message === null) {
-      this.pump();
+      const message = this.materialize(work);
+      if (message === null) continue;
+      const inFlight: InFlightPublication = {
+        epoch: this.peerEpoch,
+        peer,
+        work,
+        message,
+      };
+      this.inFlight = inFlight;
+      const operation = message.type === "render.domains"
+        ? peer.render.sendDomains(message)
+        : message.type === "render.snapshot"
+        ? peer.render.sendSnapshot(message)
+        : message.type === "render.patch"
+        ? peer.render.sendPatch(message)
+        : peer.render.sendEvent(message);
+      void operation.then(
+        (outcome) => this.finishSend(inFlight, outcome.kind === "sent"),
+        () => this.finishSend(inFlight, false),
+      );
       return;
     }
-    const inFlight: InFlightPublication = {
-      epoch: this.peerEpoch,
-      peer,
-      work,
-      message,
-    };
-    this.inFlight = inFlight;
-    const operation = message.type === "render.domains"
-      ? peer.render.sendDomains(message)
-      : message.type === "render.snapshot"
-      ? peer.render.sendSnapshot(message)
-      : message.type === "render.patch"
-      ? peer.render.sendPatch(message)
-      : peer.render.sendEvent(message);
-    void operation.then(
-      (outcome) => this.finishSend(inFlight, outcome.kind === "sent"),
-      () => this.finishSend(inFlight, false),
-    );
   }
 
   private materialize(work: Work): PublicationMessage | null {

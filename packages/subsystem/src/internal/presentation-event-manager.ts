@@ -4,7 +4,6 @@ import type {
   PresentationInterestV1,
   SubsystemDataPeer,
 } from "@loomrealm/data";
-import { utf8ByteLength } from "@loomrealm/wire";
 import { FrameClosedError } from "../errors.js";
 import type { Frame } from "../model.js";
 import type {
@@ -68,7 +67,7 @@ function validateChannel(value: unknown): asserts value is string {
     const code = character.codePointAt(0)!;
     if (code <= 0x1f || code === 0x7f || (code >= 0xd800 && code <= 0xdfff)) valid = false;
   }
-  if (!valid || utf8ByteLength(value) < 1 || utf8ByteLength(value) > 256) {
+  if (!valid || value.length === 0) {
     throw new TypeError("Invalid Presentation channel");
   }
 }
@@ -84,25 +83,59 @@ function validateContribution(channels: readonly string[]): Set<string> {
   return result;
 }
 
-function detachedFrozen<T>(value: T, seen = new WeakMap<object, object>()): T {
+function detachedFrozen<T>(value: T): T {
   if (value === null || typeof value !== "object") return value;
-  const existing = seen.get(value);
-  if (existing !== undefined) return existing as T;
-  const output: object = Array.isArray(value) ? [] : {};
-  seen.set(value, output);
-  if (Array.isArray(value)) {
-    for (const item of value) (output as unknown[]).push(detachedFrozen(item, seen));
-  } else {
-    for (const [key, item] of Object.entries(value)) {
-      Object.defineProperty(output, key, {
-        value: detachedFrozen(item, seen),
-        enumerable: true,
-        writable: false,
-        configurable: false,
-      });
+  const root: Record<string, unknown> | unknown[] = Array.isArray(value) ? new Array(value.length) : {};
+  const completed = new WeakMap<object, object>([[value, root]]);
+  const active = new WeakSet<object>([value]);
+  const stack: Array<{
+    readonly source: object;
+    readonly target: Record<string, unknown> | unknown[];
+    readonly entries: readonly { readonly key: string | number; readonly value: unknown }[];
+    next: number;
+  }> = [{
+    source: value,
+    target: root,
+    entries: Array.isArray(value)
+      ? value.map((item, index) => ({ key: index, value: item }))
+      : Object.entries(value).map(([key, item]) => ({ key, value: item })),
+    next: 0,
+  }];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    if (frame.next >= frame.entries.length) {
+      Object.freeze(frame.target);
+      active.delete(frame.source);
+      stack.pop();
+      continue;
     }
+    const entry = frame.entries[frame.next++]!;
+    if (entry.value === null || typeof entry.value !== "object") {
+      (frame.target as Record<string | number, unknown>)[entry.key] = entry.value;
+      continue;
+    }
+    if (active.has(entry.value)) throw new TypeError("Cyclic Presentation Event data");
+    const prior = completed.get(entry.value);
+    if (prior !== undefined) {
+      (frame.target as Record<string | number, unknown>)[entry.key] = prior;
+      continue;
+    }
+    const target: Record<string, unknown> | unknown[] = Array.isArray(entry.value)
+      ? new Array(entry.value.length)
+      : {};
+    completed.set(entry.value, target);
+    active.add(entry.value);
+    (frame.target as Record<string | number, unknown>)[entry.key] = target;
+    stack.push({
+      source: entry.value,
+      target,
+      entries: Array.isArray(entry.value)
+        ? entry.value.map((item, index) => ({ key: index, value: item }))
+        : Object.entries(entry.value).map(([key, item]) => ({ key, value: item })),
+      next: 0,
+    });
   }
-  return Object.freeze(output) as T;
+  return root as T;
 }
 
 export class PresentationEventManager implements PresentationEventClient {
@@ -126,7 +159,6 @@ export class PresentationEventManager implements PresentationEventClient {
     if (options === null || typeof options !== "object") throw new TypeError("Invalid Presentation listener options");
     const view = this.requireFrame(options.frame);
     const channels = validateContribution(options.channels);
-    this.assertRegistryWithinLimits(view.frameId, channels, null);
     const record: ListenerRecord = {
       frame: options.frame,
       frameId: view.frameId,
@@ -252,7 +284,6 @@ export class PresentationEventManager implements PresentationEventClient {
   private setChannels(listener: ListenerRecord, channels: readonly string[]): void {
     this.requireOpen(listener);
     const next = validateContribution(channels);
-    this.assertRegistryWithinLimits(listener.frameId, next, listener);
     listener.channels = next;
     this.rebuildDesired();
   }
@@ -282,23 +313,6 @@ export class PresentationEventManager implements PresentationEventClient {
 
   private requireOpen(listener: ListenerRecord): void {
     if (listener.closed) throw new TypeError("Presentation listener is closed");
-  }
-
-  private assertRegistryWithinLimits(frameId: string, channels: Set<string>, replaced: ListenerRecord | null): void {
-    const prospective = new Map<string, Set<string>>();
-    for (const listener of this.listeners) {
-      if (listener.closed || listener === replaced) continue;
-      const union = prospective.get(listener.frameId) ?? new Set<string>();
-      for (const channel of listener.channels) union.add(channel);
-      if (union.size > 0) prospective.set(listener.frameId, union);
-    }
-    const union = prospective.get(frameId) ?? new Set<string>();
-    for (const channel of channels) union.add(channel);
-    if (union.size > 64) throw new RangeError("Presentation channels per Frame limit exceeded");
-    if (union.size > 0) prospective.set(frameId, union);
-    let pairs = 0;
-    for (const value of prospective.values()) pairs += value.size;
-    if (prospective.size > 128 || pairs > 4096) throw new RangeError("Presentation Interest registry limit exceeded");
   }
 
   private rebuildDesired(): void {
