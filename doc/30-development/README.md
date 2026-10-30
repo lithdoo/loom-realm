@@ -9,7 +9,6 @@
 | subject / staleness / requalification | [资格规则](./qualification.md) |
 | 性能 measurement 与 current profile | [性能资格](./performance.md) |
 | Render Data Runtime Guard、Developer Authority 与可选严格验证 | [Render Data Runtime Guard & Developer-Owned Validation](./render-data-validation-pipeline-optimization.md) |
-| Render Data 重复验证与大对象 Patch 热路径优化 | [Render Data Validation Pipeline Optimization](./render-data-validation-pipeline-optimization.md) |
 | 仓库目录职责 | [仓库布局](./repository-layout.md) |
 | package/app/example 依赖与文档边界 | [Package 边界](./package-boundaries.md) |
 
