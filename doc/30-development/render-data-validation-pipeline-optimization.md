@@ -4,6 +4,8 @@
 >
 > 触发证据：[Issue #133 — Map 投影窗口刷新卡顿来自整表瓦片的 JSON 校验](https://github.com/lithdoo/loom-realm/issues/133)
 >
+> 配套 Map 专项：[PR #134 — Incremental Projection Payload Optimization](https://github.com/lithdoo/loom-realm/pull/134)
+>
 > 适用范围：packages/wire、packages/data、packages/subsystem、packages/renderer。
 >
 > 本文不引入 Map、Tile、depth、bridge 或 Canvas 语义。Map 是暴露共享热路径成本的高负载使用者，不是通用数据协议的特殊例外。
