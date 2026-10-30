@@ -226,7 +226,7 @@ Issue #133 报告的特定物理机 / Chromium / PokeMan Map 7 路线：
 - 不要求用深复制/深冻结证明每份业务数据正确；ownership 与 mutation contract 应由相应 API 明确。
 
 
-### 6.8 Contract-to-runtime conformance corrections
+### 6.6 Contract-to-runtime conformance corrections
 
 The current contract already defines these semantics; the implementation must be brought into line rather than narrowing the contract:
 
@@ -238,7 +238,7 @@ The current contract already defines these semantics; the implementation must be
 | Generic data shape is plain JSON; its key / member / array / nesting / payload limits are local resource policy | Authoring and codec paths still apply several fixed member/depth/byte caps | Enforce local budgets while traversing, cloning, applying or serializing; do not make the old numeric thresholds cross-implementation protocol rules |
 
 These are conformance corrections, not a wire-version change: message shape, identity model, ordering and commit semantics remain unchanged. The zIndex safe-integer range and empty-data-key behavior are already part of Render Update v1; the Runtime must implement them.
-### 6.6 Bounded queues 与 retained work
+### 6.7 Bounded queues 与 retained work
 
 当前有三条彼此独立的队列边界，不能只依赖消息数量上限：
 
@@ -248,7 +248,7 @@ These are conformance corrections, not a wire-version change: message shape, ide
 
 所有队列计数与预算应在 admission、coalesce、settle、terminal 时增量更新，避免每次 enqueue 都重新扫描队列或完整 Render Tree。Count 与 retained payload / work weight 是互补维度；两者都必须有界。
 
-### 6.7 Resource exhaustion 与协议错误分类
+### 6.8 Resource exhaustion 与协议错误分类
 
 使用内部明确的资源耗尽错误（例如 `ResourceBudgetExceeded` / `RESOURCE_BUDGET_EXCEEDED`），并映射到现有 DataRuntime `local-fatal` terminal family；不要把它包装成 `DataProtocolError`，也不新增 wire message 或 Profile identity。
 
