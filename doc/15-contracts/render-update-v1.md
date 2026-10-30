@@ -4,7 +4,7 @@
 > 状态：Active / Normative / local resource-budget policy correction pending implementation and qualification  
 > 协议版本：1  
 > 协议标识：`loomrealm.render-update / 1`  
-> 稳定程度：Pre-release correction candidate  
+> 稳定程度：Local resource-budget policy correction candidate  
 > 方向：Subsystem → Renderer only  
 > Carrier：[Renderer ⇄ Subsystem Data Connection Contract v1](./renderer-subsystem-data-connection-v1.md)  
 > 架构：[渲染系统](../10-architecture/rendering-system.md)  
