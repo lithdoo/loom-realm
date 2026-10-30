@@ -3,16 +3,16 @@
 > 层级：系统架构 / Framework design principle
 > 状态：Proposed in PR #135；合并后成为 Current Architecture 准则
 > 决策：[ADR 0038 — Developer Authority and Minimal Runtime Enforcement](../decisions/0038-developer-authority-minimal-runtime-enforcement.md)
-> 关联：[系统架构总览](./system-overview.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[Renderer Data Profile `/3`](../15-contracts/renderer-data-profile-v3.md)、[性能资格](../30-development/performance.md)
+> 关联：[系统架构总览](./system-overview.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[Renderer Data Profile /3](../15-contracts/renderer-data-profile-v3.md)、[性能资格](../30-development/performance.md)
 > 最近复核：2026-10-30
 
 ## 1. 核心原则
 
-**LoomRealm 负责保证框架能够正确运行，不负责替开发者保证应用业务数据正确。**
+**LoomRealm 负责保证框架按协议正确运行，不负责替开发者决定应用数据规模或业务数据是否正确。**
 
-框架必须维护自己的 authority、protocol、identity、lifecycle、state transition、atomicity 和 resource safety。应用数据的业务含义、业务 Schema、跨字段关系和领域规则由开发者负责。
+开发者拥有应用数据的业务含义、业务 Schema、跨字段关系、领域规则和资源使用决策。框架拥有自己的协议、authority、identity、lifecycle、state transition、ownership contract 与 atomicity。
 
-框架不得仅因为应用数据经过某个 framework API，就默认对整个对象图执行额外的、与当前操作无关的严格正确性审查。
+框架不得仅因为应用数据经过某个 framework API，就默认对整个对象图执行额外的、与当前操作无关的严格审查；也不得用自己设定的容量数字拒绝平台本来能够处理的数据。
 
 ## 2. 三项设计准则
 
@@ -23,22 +23,34 @@
 - 应用数据的业务 Schema 与字段语义；
 - 业务状态转换、跨字段约束和领域不变量；
 - 游戏规则、业务数值范围、业务资源引用；
-- 应用自身希望强制执行的严格数据质量规则。
+- 应用自身希望强制执行的数据质量和容量规则。
 
-框架不得推断并强制执行没有被 framework protocol 明确拥有的业务规则。
+框架不得推断并强制执行没有被 framework protocol 明确拥有的业务规则或数据容量规则。
 
 ### 2.2 Minimal Runtime Enforcement
 
-默认 Runtime Guard 仅执行框架运行所必需的约束：
+默认 Runtime Guard 仅执行框架自身正确运行所必需的检查：
 
-- 当前操作实际读取/依赖的类型和字段前提；
+- 当前操作实际读取或依赖的类型、字段和前置条件；
 - 消息 envelope、协议 discriminator、direction 和当前 contract；
 - authority、identity、generation、revision、lifecycle 和 state continuity；
-- Patch / Snapshot 的 candidate isolation、commit atomicity 和 framework-owned tree invariants；
-- bounded parse/serialize、队列、内存和其他防止资源耗尽的约束；
-- 当前正式契约明确规定的 representation、framework invariants 和 failure semantics；numeric resource budgets 由显式 local policy 管理，pre-release correction 按正式 ADR 修订。
+- Patch / Snapshot 的 candidate isolation、commit atomicity 和 framework-owned structural invariants；
+- 当前正式契约明确规定的 JSON representation、字段语义和协议不变量。
 
-默认 Runtime 不应额外执行：
+默认 Runtime 不得自行添加以下容量上限或对应拒绝逻辑：
+
+- application message bytes；
+- JSON nesting depth；
+- Domain Registry entries、RenderNode count、tree depth；
+- Patch operation count；
+- attrs / JSON members、array elements；
+- key / string byte length；
+- Render data payload bytes；
+- pending message count、queue bytes、retained work 或 candidate growth。
+
+这些数字不能以固定常量、默认配置、可配置 ResourceBudgetPolicy 或 Host/Product 强制配置的形式重新引入。平台、浏览器、操作系统和实际传输 API 自身的能力边界仍然存在；框架不应另行缩窄它们。
+
+默认 Runtime 也不应额外执行：
 
 - 应用业务 Schema 或跨字段业务语义审查；
 - 与本次操作无关的完整 Snapshot preflight；
@@ -49,75 +61,75 @@
 
 更严格的检查由开发者主动选择，可在开发、测试、CI 或明确配置的生产环境使用。
 
-Strict Validation 可以提供 JSON representation、exact Schema、业务 validator、深度/成员/字符串限制和诊断信息，但必须满足：
+Strict Validation 可以提供 JSON representation、exact application Schema、业务 validator、深度/成员/字符串/大小限制和诊断信息，但必须满足：
 
 - 默认不进入普通 Runtime 热路径；
 - 不成为框架运行的强制依赖；
 - 不改变既有 wire ABI；
-- 不能绕过当前协议本身的强制约束；
+- 不替代当前协议本身的强制约束；
 - 具体 API / package / configuration 由独立设计决定。
+
+开发者选择的限制只约束该开发者启用的验证流程，不得被包装成所有应用必须遵守的框架容量上限。
 
 ## 3. Operation-first 与错误处理
 
 对开发者拥有、处于受信任执行路径的数据，默认采用 operation-first：
 
 1. 不为每次小更新预先完整扫描整个应用状态；
-2. 在实际读取、应用、编码或提交时执行该操作所需的检查；
-3. 让操作自身报告可捕获的类型、序列化或前置条件错误；
-4. 在清晰的 API / subsystem / transport 边界处理错误；
+2. 在实际读取、应用、编码或提交时执行该操作和当前协议真正需要的检查；
+3. 让实际操作报告类型、序列化、平台 API 或前置条件错误；
+4. 在清晰的 API / subsystem / transport 边界传播或捕获实际异常；
 5. 失败操作必须放弃候选状态，不得部分提交或污染 current state。
 
-这不等于所有错误都可以事后捕获。对于可能导致无界内存分配、超大输入解析、无界队列或不安全 transport 的风险，必须在资源被消耗之前或消耗过程中执行 bounded guard。
+错误分类必须反映真实原因：
+
+- malformed JSON、错误 message type、closed-schema violation：protocol failure；
+- authority、identity、revision 或 Patch 前置条件不成立：authoritative continuity failure；
+- 开发者输入、getter、Proxy、JSON serialization 或本地实现操作抛出的异常：local operation error，不得伪装成 peer protocol violation；
+- carrier / host API 实际 send 或 receive 失败：传播实际 transport failure。
+
+Catch 不能让失败后的 current state 继续被当作有效状态使用。对于 authoritative Patch，失败时丢弃 candidate；如果无法继续证明 stream continuity，则退休当前 Data carrier，但不得把本地异常归咎于远端协议。
+
+框架不通过自设 byte、depth、count 或 queue cap 预防这些异常。平台本身无法完成操作时，报告平台实际产生的异常；不可捕获的进程级 OOM 不承诺能够由 JavaScript catch。
 
 ## 4. Ownership 与不可变性
 
 - 不得把深复制 / 深冻结当作默认业务严格验证，但也不得为了性能删除必要的 authority / ownership isolation。
-- 当前 RenderManager authoring API 在异步 publication 前必须与 caller-owned input 脱离；API 返回后 caller mutation 不得改变 retained state、pending work 或 emitted message。
-- 将必要的 shape/type validation、detached clone、freeze 和 retained-state accounting 融合为一次遍历；ownership transfer 仅能由显式的新 API contract 定义，不能推定为现有 API 行为。
-- Renderer 收到的 JSON.parse object 已由 parser 创建；RenderStore 可在证明无外部别名后利用其 ownership，但仍必须通过 isolated candidate + atomic commit 保证 current state 不被失败 Patch 污染。
+- RenderManager authoring API 若承诺在异步 publication 前与 caller-owned input 脱离，就必须兑现该 ownership contract；API 返回后 caller mutation 不得改变 retained state、pending work 或 emitted message。
+- 将必要的类型/shape 检查与 detached clone / freeze 融合为一次必要遍历；不得为了资源计量再执行第二轮完整遍历。
+- Renderer 收到的 JSON.parse object 已由 parser 创建；RenderStore 可在证明无外部别名后利用其 ownership，并通过 isolated candidate + atomic commit 保证 current state 不被失败 Patch 污染。
 - Strict Validation 可以在 opt-in 模式检测业务 mutation / shape 问题。
-- 缓存 metadata 只能用于它实际证明的内部计算或资源计量；metadata 不是业务正确性证明，也不是跨进程信任凭证。
+- 缓存 metadata 只能用于它实际证明的内部计算；不得将其作为业务正确性证明或跨进程信任凭证。
 
-## 5. 安全与资源边界
+## 5. 平台能力与实际异常
 
-异常捕获不能替代资源保护。默认 Runtime 仍应在必要边界保留：
+框架不定义通用的 message-size、parser-depth、tree-size、Patch-count、payload-size、queue-capacity 或 retained-memory budget。
 
-- raw message byte gate before parse；
-- bounded serialization / byte accounting；
-- bounded queues and retained work；
-- finite local resource budgets：raw inbound bytes / parser work、candidate growth、retained state、queue count + retained payload/work、outbound serialization bytes；这些是 Host / Product / Runtime policy，不是跨实现统一 wire limits；
-- operation-level candidate isolation and atomic commit。
+平台原生限制由平台拥有。例如 WebSocket、MessagePort、JavaScript engine、浏览器和操作系统可能因实际能力或故障拒绝操作；框架应传播可观察到的真实异常，不应在其前面再放一道人为数字门槛。
 
-优先将检查融合到实际 parse、serialize、Patch operation 或 commit 中，而不是在实际工作前增加一轮完整扫描。
+序列化应在实际编码过程中完成，不得先完整扫描对象计算一个框架容量值，再重复 stringify。解析应直接使用既定 Wire / ECMAScript JSON.parse 语义，不得先做 raw-byte gate 或额外 depth preflight。结构检查只验证协议和 Render Tree 不变量，不验证节点数、深度或业务数据规模。
 
-硬限制应由明确的协议义务或平台 threat model 支持，不应仅因为“严格一些比较安全”就无限增加。
+队列只承担既定的 FIFO、single-reader / single-writer、lifecycle 和 coalescing 语义；不得因框架自设容量而丢弃消息或终止 peer。状态型数据仅在协议允许时 coalesce；Event 不因队列容量压力而静默丢弃。真实 carrier send failure 按 transport failure 处理。
 
 ## 6. Frozen Contract 兼容规则
 
-本原则不允许静默修改正式契约，但正式契约本身可以在首次发布前通过明确的 correction 重新评估历史 numeric limits。
+本原则不允许静默修改正式契约。Render Update v1 历史固定数字和容量触发的队列行为曾经属于可观察的 accept/reject/drop 语义；本次必须作为明确的首次发布前 correction 处理，而不能声称它们从未影响协议行为。
 
-当前 [Render Update v1](../15-contracts/render-update-v1.md) 保留 JSON representation、closed message schema、authority/identity/revision、Patch atomicity、framework structural invariants、failure/recovery semantics；active [Renderer Data Profile `/3`](../15-contracts/renderer-data-profile-v3.md) 的 message set 与 direction 也保持不变。Numeric capacity 是本地资源策略，不是 wire ABI：移除或放宽固定 numeric threshold 不要求创建新 protocol/profile version，也不要求仅因旧实现存在较小容量就停止 same-identity correction。旧接收端仍可能拒绝超过其自身容量的负载；这是 workload capacity mismatch，应通过部署预算与目标负载管理，而不是伪装成 schema incompatibility。
+同一 /1 identity 只允许在兼容性核查确认没有已部署旧实现、独立旧 Peer、rolling/rollback cohort 或 persisted compatibility obligation 时采用。若任何此类义务存在，必须停止 same-identity correction，另行提交明确的 protocol version / migration ADR。
 
-任何正式契约修订仍须：
-
-1. 明确区分 framework invariant、wire semantics 与 local resource-safety policy；
-2. 对真正改变 message schema、direction、authority、ordering、revision、atomicity 或 recovery semantics 的修改，提交独立 ADR / versioning plan；
-3. 对 local budget 修改更新实现配置、诊断和相关测试，不要求协议版本升级；
-4. 更新 conformance / qualification inputs，并按目标 Host/Product 重新验证容量与性能。
-
-首次正式发布后，wire-observable protocol semantics 变化必须版本化；本地资源预算调整不属于此类变化。
+本次 correction 保留 JSON representation、closed message schema、authority/identity/revision、Patch atomicity、framework structural invariants 和必要 Event ordering；删除人为 numeric capacity 和容量触发的丢弃语义。首次正式发布后，任何 wire-observable accept/reject/drop semantics 变化必须按版本治理处理。
 
 ## 7. 设计审查清单
 
 新增或修改 framework validation 时，必须回答：
 
-- 这个检查保护的是 framework invariant、protocol compatibility 还是 resource safety？
-- 如果删除它，框架是否无法继续正确运行，或是否会违反当前 Frozen Contract？
+- 这个检查保护的是 framework invariant、protocol compatibility，还是开发者业务规则？
+- 这个数字是否来自协议语义，还是框架自行估计的平台容量？
+- 如果平台实际能够处理更大的数据，框架是否仍会因为自己的数字拒绝？
 - 检查能否融合到实际 parse / serialize / operation / commit？
 - 是否对本次操作没有改变的数据做了全量重复遍历？
-- 这是业务 Schema / domain invariant 吗？如果是，为什么不由开发者或 opt-in validator 拥有？
-- 是否可以通过 operation-first error handling 和 atomic candidate commit 处理？
+- 是否能通过 operation-first error handling 和 atomic candidate commit 处理？
 - 若需要 strict validation，它是否与默认 Runtime Guard 解耦？
-- 如果涉及 Frozen Contract，是否有明确 correction / migration / qualification 计划？
+- 如果修改 wire-observable behavior，是否有明确 correction / migration / qualification 计划？
 
 若无法说明检查的 framework owner 和必要性，不应默认把它加入每次 Runtime 热路径。
