@@ -107,7 +107,7 @@ Catch 不能让失败后的 current state 继续被当作有效状态使用。�
 
 平台原生限制由平台拥有。例如 WebSocket、MessagePort、JavaScript engine、浏览器和操作系统可能因实际能力或故障拒绝操作；框架应传播可观察到的真实异常，不应在其前面再放一道人为数字门槛。
 
-序列化应在实际编码过程中完成，不得先完整扫描对象计算一个框架容量值，再重复 stringify。解析应直接使用既定 Wire / ECMAScript JSON.parse 语义，不得先做 raw-byte gate 或额外 depth preflight。结构检查只验证协议和 Render Tree 不变量，不验证节点数、深度或业务数据规模。
+出站编码必须保留既定 Wire JSON representation：如果 JSON.stringify 会静默省略 undefined / function / symbol 或把 NaN / Infinity 改写为 null，单次 Wire encoder 必须在生成输出的同一遍历中拒绝这些非 JSON 值；不得先完整 assertJsonValue/depth/byte preflight，再重复 stringify。解析直接使用既定 Wire / ECMAScript JSON.parse 语义，并只执行 contract 要求的一次 representation 检查；不得先做 raw-byte gate 或额外 depth preflight。结构检查只验证协议和 Render Tree 不变量，不验证节点数、深度或业务数据规模。
 
 队列只承担既定的 FIFO、single-reader / single-writer、lifecycle 和 coalescing 语义；不得因框架自设容量而丢弃消息或终止 peer。状态型数据仅在协议允许时 coalesce；Event 不因队列容量压力而静默丢弃。真实 carrier send failure 按 transport failure 处理。
 
