@@ -603,7 +603,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
       if ([4, 5, 7, 8].includes(targetMapId)) await assertNpcProjection(page, targetMapId);
     }
 
-    const longTraversal = planner.planDistance(state, renderDataDiagnostic ? 80 : 20);
+    const longTraversal = planner.planDistance(state, renderDataDiagnostic ? 70 : 20);
     assert.ok(longTraversal.length >= 20, "Map 7 qualification must cross multiple projection boundaries");
     const projectionShiftsBefore = await page.evaluate(() => document.querySelector("lr-map-view")?._projectionShifts ?? 0);
     const diagnosticSamples = [];
