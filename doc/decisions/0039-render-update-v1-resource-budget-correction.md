@@ -85,7 +85,7 @@ revision/baseRevision 仍为 positive safe integer。zIndex 从 signed 32-bit �
 
 - malformed JSON / invalid Wire representation / unknown message kind / exact closed-schema violation：protocol-fatal，retire current Data Connection；
 - Domain lifecycle / revision / Patch precondition / candidate invariant violation：authoritative continuity failure，retire current Data Connection；
-- local bounded-resource exhaustion：local-resource-exhaustion，不归咎于 peer protocol violation；inbound retire carrier、outbound 不发送部分消息；
+- local bounded-resource exhaustion：local-resource-exhaustion，不归咎于 peer protocol violation；inbound retire carrier、outbound 不发送部分消息；PWA Carrier 的 typed resource cause 必须穿过 DataRuntime terminal mapping；RenderManager pending-work exhaustion 必须产生 Subsystem-local diagnostic；
 - well-formed Event applicability miss：drop only；
 - presentation-local failure：不改变 authoritative Render validity。
 
