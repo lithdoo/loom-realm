@@ -1,7 +1,7 @@
 # Render Update Protocol v1 Conformance Profile
 
 > 层级：正式契约 / Conformance Profile  
-> 状态：Active / Normative / Pre-release correction reopened  
+> 状态：Active / Normative / local resource-budget correction pending implementation and qualification  
 > Profile 版本：1  
 > fixtureSetRevision：2  
 > 适用协议：`loomrealm.render-update / 1`  
@@ -544,4 +544,4 @@ application-unit encoding
 failure/recovery
 ```
 
-fixtureSetRevision 2 是 ADR0039 授权的首次发布前 v1 correction：它移除固定 numeric hard-limit semantics，并增加 local resource-budget obligations。首次发布后不得借 fixture revision 改变已发布 wire semantics。
+fixtureSetRevision 2 记录 ADR0039 的 local resource-budget obligations：它移除跨实现固定 numeric hard-limit semantics，并增加 bounded local-budget、no-partial-commit / no-partial-send 与错误分类测试。Fixture revision 只版本化 conformance corpus，不是 wire protocol version；后续可随本地预算策略与实现资格要求演进，但不得借 fixture revision 改变 message schema、direction、authority、ordering、revision、atomicity 或其他 wire-observable semantics。
