@@ -124,8 +124,10 @@ jobs:
         if: needs.impact.outputs.pwa == 'true'
         run: node scripts/ci/run-capability.mjs pwa
       - name: Session Events v1 qualification
-        if: needs.impact.outputs.pwa == 'true'
-        run: node scripts/ci/run-capability.mjs session-events
+        # Core package regression covers the package/integration tests and the
+        # preceding PWA capability already ran the full m17 browser suite.
+        if: needs.impact.outputs.core == 'true' && needs.impact.outputs.pwa == 'true'
+        run: node scripts/ci/run-capability.mjs session-events-after-pwa
       - name: Battle browser qualification
         if: needs.impact.outputs.battle == 'true'
         run: node scripts/ci/run-capability.mjs battle
