@@ -304,6 +304,8 @@ close() 应是 callback 中最后一个有意义的控制操作。调用 close()
 - callback 正常结束但没有 close() 时，control 失效，表单回到 IDLE。
 - callback 正常结束时如果仍处于 Loading，Runtime 自动清除 Loading；这只是防止 UI 卡死的安全回收，不代表业务成功。
 - form 已 settlement、Frame 已 abort、或 attempt 已结束后，旧 control 的 setLoading() / cancelLoading() / sendValidateError() / close() 均安全 no-op。
+- **所有 control method 固定先检查 control 是否仍为 current。stale 时立即 return，不再校验参数、不 emit、不 update、不 throw。**
+- 只有 current control 才继续执行 method-specific validation。current sendValidateError(errors) 若参数非法，必须在任何 Render Event / state mutation 前同步抛 TypeError；若 caller 捕获该 TypeError，attempt 本身仍保持 active。
 - callback throw 或 Promise rejection 是 program / operation failure，不是 validation failure；若尚未 terminal settlement，统一 cleanup 并 reject openSchemaForm()。
 - 所有 terminal path 使用 settle-once / first-terminal-wins 规则。若 close() 已先成功 settlement，之后 callback rejection 不得把结果改成 reject；Runtime 必须仍然消费该 Promise rejection，避免产生 unhandled rejection。
 
@@ -519,6 +521,7 @@ field 发生本地 change 时：
 
 因此本提案**不引入 validationRevision / errorRevision**。Browser 不推测 Runtime 是否“重新验证过”，只消费自己实际收到的 RenderData / RenderEvent。实现上维护一个 current displayed error 即可。**唯一主动清空 current displayed error 的普通交互是该 field 自己发生本地 change；Submit Attempt 开始本身不清错误。**
 
+
 ## 10. localstorageKey 语义
 
 ### 10.1 定位
@@ -544,44 +547,111 @@ localstorageKey 只表示：
 打开表单时，每个 field 的初始值优先级定义为：
 
     explicit request.initialValue[field.key]
-    → valid localStorage value (only when restoreAllowed)
+    → valid localStorage value (when restore is eligible and pending)
     → field.default
     → field-kind empty value
 
-initialValue 的优先级按 field 判断：只要 initialValue 显式包含该 field key，就禁止该字段从 localStorage 恢复；其他未显式提供的字段仍可恢复。
+initialValue 的优先级按 field 判断：只要 initialValue 显式包含该 field key，即使值是 ""、0 或 false，也禁止该字段从 localStorage 恢复；其他未显式提供的字段可以恢复。
 
-为了让 Browser 无需猜测初始值来源，内部 projection 增加以下 private metadata：
+### 10.3 Internal projection exact shape
 
-- root RenderData：fieldCount，表示本次表单预期的直接 field 子节点数量；
-- field RenderData：localstorageKey；
-- field RenderData：restoreAllowed，由 Runtime 根据 !Object.hasOwn(initialValue, field.key) 计算。
+为了让 Browser 不猜测初始值来源和 restore lifetime，V1 internal Browser projection 固定扩展为：
 
-这些是 Schema Form 内部 Browser projection metadata，不是额外 public Schema 字段，也不改变 initialValue 的对外语义。
+    export interface SchemaFormRenderDataV1 {
+      readonly title?: string;
+      readonly description?: string;
+      readonly cancelable: boolean;
+      readonly fieldCount: number;
+      readonly restorePending: boolean;
+    }
 
-### 10.3 One-shot restore initialization protocol
+    interface SchemaFormFieldRenderBaseV1 {
+      readonly key: string;
+      readonly label: string;
+      readonly description?: string;
+      readonly required: boolean;
+      readonly error?: string;
 
-Browser 必须执行一次性初始化 barrier，避免字段还没准备好就恢复或让用户输入覆盖恢复值：
+      readonly restoreAllowed: boolean;
+      readonly localstorageKey?: string;
+    }
 
-    1. lr-schema-form receives initial root RenderData (fieldCount)
-    2. each lr-schema-form-field receives its first RenderData
-    3. each ready field notifies its root
-    4. root waits until ready field count == fieldCount
-    5. root reads localStorage only for fields with localstorageKey + restoreAllowed
-    6. invalid/missing values are ignored
-    7. root applies valid restored values to the corresponding controls
-    8. if at least one value restored, root emits one complete ordinary "change" snapshot
-    9. root ends initialization barrier and enables normal interaction
+这些字段属于 Schema Form 的 RenderData ABI，不是新增 public Schema declaration。
 
-规则：
+精确规则：
 
-- 初始化 barrier 完成前，Root action buttons 和 Field controls 暂时 disabled；不得接受用户输入。
-- fieldCount === 0 时可立即完成 barrier。
-- restore 只在当前表单 presentation instance 执行一次；普通 RenderData refresh 不得重复覆盖用户编辑。
-- initialValue 显式提供的字段不读取 localStorage。
-- restore 通过普通 change 输入路径回流 Runtime；不增加新的 Framework event 或 ACK。
-- Browser 不把 localStorage / DOM 直接当成 canonical authority。
+- fieldCount 必须等于 schema.fields.length，整数范围 0..128；
+- localstorageKey 存在时必须与已通过 schema preflight 的 public declaration 完全相同；
+- restoreAllowed 是每个 field 的 immutable session fact；
+- restoreAllowed=true 当且仅当 field 声明 localstorageKey 且 request.initialValue 没有 own property field.key；
+- 没有 localstorageKey 时 restoreAllowed 必须为 false；
+- restorePending 是 Runtime/Session retained fact，不是 Browser private flag；
+- restorePending 初始值 = 是否存在至少一个 restoreAllowed=true 的 field；
+- restorePending 只能 true → false，一旦 Runtime 消费 restore phase，当前 Schema Form Session 内不得再次变回 true；
+- Browser 的 validateRootData / validateFieldData 必须继续使用 exact closed-shape validation：新增字段是上述 required/optional 关系，不接受额外成员。
 
-### 10.4 Storage encoding and validation
+loading 仍然是 root RenderNode attribute；restorePending 是 root RenderData。两者不得混用。
+
+### 10.4 Session-level one-shot restore protocol
+
+LocalStorage restore 属于 **Schema Form Session lifetime**，不是 WebComponent instance lifetime。
+
+Browser root 收到：
+
+    restorePending=false
+    → 不读取 localStorage
+    → 不执行 restore barrier
+
+    restorePending=true
+    → 执行一次当前 Presentation instance 的 restore attempt
+
+restore attempt：
+
+    1. root enters local initialization barrier
+    2. wait until exactly fieldCount direct lr-schema-form-field children
+       have received their first valid RenderData
+    3. inspect only fields with restoreAllowed=true + localstorageKey
+    4. read/parse/type-check localStorage values
+    5. build a detached complete presentation snapshot in memory
+       without mutating controls yet
+    6. compact-size preflight the complete { values } payload
+    7. if restored candidate is oversized:
+         discard all localStorage substitutions
+         use the original current RenderData-derived snapshot instead
+    8. apply the accepted restored substitutions to the controls
+    9. emit one Schema Form-private custom event:
+         name = "restore"
+         data = { values: completeSnapshot }
+    10. end the local initialization barrier; do not wait for ACK
+
+restore event 使用与 change/submit 完全相同的 complete values payload grammar 和 131,072-byte limit，但 event name 独立为 "restore"。这是 Schema Form 自己新增的 reverse custom event，不新增 Framework protocol。
+
+Runtime 规则：
+
+- 只在 restorePending=true 时接受合法 restore event；
+- restore payload malformed / oversize → ignore，restorePending 保持 true，zero canonical/error mutation；
+- 合法 restore candidate 与 current canonical 语义相同：
+  - 只把 restorePending 设置为 false；
+  - 不运行 built-in / validateOnChange；
+  - 不制造打开表单即显示 validation error 的新行为；
+- 合法 restore candidate 与 current canonical 不同：
+  - restorePending 设置为 false；
+  - candidate 走与 ordinary change 相同的 built-in + validateOnChange；
+  - canonical/errors 按该 validation pass 更新；
+- restorePending=false 后收到任何 restore event → ignore；
+- restorePending=false 必须通过 retained root RenderData 投影，因此任何后续 Renderer/WebComponent instance 都能看到 restore 已经消费，不再读取 localStorage。
+
+为了处理 reverse input 可能丢失的情况：
+
+- Browser 发出 restore 后不等待 ACK，避免 UI 永久锁住；
+- 如果 restore event 丢失，restorePending 仍可能保持 true；
+- Runtime 在 restorePending=true 时收到任意 **合法 ordinary change 或 submit**，必须先把 restorePending 消费为 false，再按原 change/submit 语义处理完整 snapshot；
+- 因此一旦用户编辑/提交已经到达 Runtime，后续 Renderer 重建就绝不会再用旧 localStorage 覆盖该已接受的 canonical state；
+- 只有在 restore event 和后续用户输入都尚未被 Runtime 接受时，新 Presentation instance 才可能再次尝试 restore；此时 Runtime 尚没有更新后的用户 authority，重复尝试是安全的。
+
+这定义的是 Session-level authoritative one-shot，而不是“每个 WC instance 无条件 restore 一次”。
+
+### 10.5 Storage encoding and validation
 
 每个 localstorageKey 保存一个 JSON primitive：
 
@@ -599,27 +669,33 @@ Browser 必须执行一次性初始化 barrier，避免字段还没准备好就�
 - boolean field 只接受 boolean；
 - select field 只接受当前 options 中存在的 string；
 - number/select 的 JSON null 表示 unset；
-- storage API throw → ignore，并继续正常打开表单。
+- storage API throw → ignore，并继续 restore attempt。
 
-值的 JSON 类型不匹配或 select option 已失效时忽略该值。值类型正确但违反 minLength、min、max、integer 或 scripted validation 时，仍恢复为草稿，再由现有 Runtime validation 显示错误；草稿恢复不得绕过验证。
+值的 JSON 类型不匹配或 select option 已失效时忽略该字段的 storage value。
+
+值类型正确但违反 minLength、min、max、integer 或 scripted validation 时，仍允许进入 restored candidate；若该 candidate 与 canonical 不同，则由 Runtime built-in / validateOnChange 正常产生错误。Browser 不自行执行这些 schema validation rules。
 
 无效 storage 数据不得导致 openSchemaForm() reject。
 
-### 10.5 Restore → Runtime authority
+### 10.6 Restore → Runtime authority
 
 localStorage 是 Browser source，不是 canonical authority。
 
-Browser 恢复值后必须通过普通 Web Presentation → Subsystem input path，把完整 candidate 送回 Schema Form Runtime；Runtime 仍使用当前 schema 对 candidate 做结构、类型和业务规则检查，最终 canonical state 仍由 Schema Form Session 持有。
+Browser 只能产生 restore candidate；Runtime 接受合法 restore/change/submit snapshot 后，canonical state 才发生变化。
 
-恢复必须：
+restore candidate 必须：
 
 - 保留所有未恢复字段的当前 RenderData 值；
-- 只覆盖 restoreAllowed=true 且 storage value 合法的字段；
-- 将完整 candidate 作为一个 change snapshot 发送，而不是每个字段单独发送；
-- 在用户可交互前完成本地恢复和 snapshot emit；
-- 不绕过现有 candidate validation。
+- 只替换 restoreAllowed=true 且 storage primitive/type/option 合法的字段；
+- 始终包含 schema 的完整 field-key set；
+- number/select unset 使用 null；
+- string/boolean 使用 concrete value；
+- 不绕过 Runtime candidate validation；
+- 不直接修改 Shared State / gameplay state。
 
-### 10.6 Submit-time persistence
+Renderer/WebComponent reload 不能重新定义 restore authority；是否还能 restore 只由 Runtime retained restorePending 决定。
+
+### 10.7 Submit-time persistence
 
 localstorageKey 的保存时点固定为：
 
@@ -645,7 +721,7 @@ localstorageKey 的保存时点固定为：
 
 如果产品需要“只有业务成功才持久化”，应由 caller 的业务 persistence 负责，而不是复用该 field hint。
 
-### 10.7 Key scope, collision and lifecycle
+### 10.8 Key scope, collision and lifecycle
 
 - Browser localStorage 按 origin 共享，不按 Schema Form、Subsystem 或 package 自动隔离。
 - 同一 SchemaFormV1 内重复 localstorageKey 必须被 schema preflight 拒绝。
@@ -666,53 +742,65 @@ localstorageKey 的保存时点固定为：
 
 新增职责：
 
+- validate/consume root fieldCount + restorePending RenderData；
 - consume root retained loading attribute；
-- 根据 loading 状态禁用 root action buttons；
+- 根据 loading / restore initialization barrier 禁用 root action buttons；
 - 将 disabled 状态传递给所有直接 lr-schema-form-field 子节点；
 - 阻止 loading 时 cancel / dialog hide；
 - implement receiveRenderEvent()；
 - handle validate-error；
-- coordinate field readiness + one-shot localStorage restore barrier；
-- submit 前执行 size preflight 和 localStorage best-effort save；
-- 清理 transient external errors。
+- maintain event-ordered current displayed errors without source priority；
+- coordinate field readiness + restorePending-gated localStorage restore attempt；
+- emit Schema Form-private restore custom event；
+- submit 前执行 size preflight 和 localStorage best-effort save。
 
 ### lr-schema-form-field
 
 新增职责：
 
-- consume private localstorageKey / restoreAllowed projection metadata；
-- 在初始 RenderData ready 时通知 root；
+- validate/consume required restoreAllowed 和 optional localstorageKey projection metadata；
+- 在首次 valid RenderData ready 时通知 root；
 - 接收 root 的 disabled 状态并禁用具体 WebAwesome control；
-- display transient external validation error；
-- field edit 清除自己的 transient external error。
+- maintain/render one current displayed error；
+- field local edit 时立即清空自己的 current displayed error，然后通知 root emit complete change snapshot。
 
 Root 的 loading attribute 是唯一 Loading authority；Field 的 disabled 只是 Browser 内部向具体控件传播的 presentation state，不回写 Runtime。
+
+restorePending 是 Runtime retained restore authority；Browser private restore-attempt flag 只能防止同一 WC instance 重复执行 barrier，不能覆盖 restorePending=false/true 的 Runtime 事实。
 
 现有 stable editing DOM、number lexical draft、select private token mapping、focus restoration 等规则必须保持。
 
 
 ## 12. Validation compatibility
 
-现有 validation 顺序保持：
+validation 顺序扩展为：
 
     schema preflight
     → initialValue preflight
     → compile validators
 
-    initial Browser restore
+    restorePending=true Browser restore attempt
     → validate storage primitive/type/option
-    → emit one ordinary complete change snapshot
-    → Runtime candidate validation
-    → canonical state + retained errors
+    → emit one private complete "restore" snapshot
+    → Runtime candidate structural/type validation
+    → candidate == canonical:
+         consume restorePending only
+       candidate != canonical:
+         built-in
+         → validateOnChange
+         → canonical + retained errors
+         → consume restorePending
 
-    change
+    ordinary change
     → candidate
+    → consume restorePending if still true
     → built-in
     → validateOnChange
     → retained errors
 
     submit
     → candidate
+    → consume restorePending if still true
     → built-in
     → validateOnSubmit
     → if no errors:
@@ -728,7 +816,7 @@ Root 的 loading attribute 是唯一 Loading authority；Field 的 disabled 只�
     onSubmit
     → 网络/账户/库存/权限/服务端/业务状态等异步验证与保存
 
-LocalStorage restore 不绕过 Runtime validation；它只是把候选草稿通过已有 change 输入路径重新交给 Runtime。
+LocalStorage restore 不绕过 Runtime validation，也不直接成为 canonical authority；restore event 只是把 Browser-local candidate 送回当前 Session。restore candidate 与 canonical 完全相同时不运行 validateOnChange，以保持“没有实际恢复变化时不新增打开即报错行为”。
 
 
 ## 13. Failure semantics
@@ -740,6 +828,14 @@ LocalStorage restore 不绕过 Runtime validation；它只是把候选草稿通�
 
     sendValidateError
     → transient Presentation feedback
+
+    invalid sendValidateError arguments on current control
+    → synchronous TypeError
+    → zero Render Event / loading / settlement mutation
+
+    any method call on stale submit control
+    → immediate no-op before argument validation
+    → no throw / no emit / no state mutation
 
     onSubmit returns normally without close
     → clear loading if necessary
@@ -769,6 +865,16 @@ LocalStorage restore 不绕过 Runtime validation；它只是把候选草稿通�
     → presentation-local best effort failure
     → form remains usable
 
+    malformed/oversize restore event
+    → ignore
+    → restorePending remains true
+    → zero canonical/error mutation
+
+    restore event lost before Runtime acceptance
+    → Browser does not wait
+    → later valid change/submit consumes restorePending
+    → future Presentation may retry only while retained restorePending is still true
+
     oversized submit snapshot
     → show size error
     → no localStorage write
@@ -779,7 +885,6 @@ LocalStorage restore 不绕过 Runtime validation；它只是把候选草稿通�
     → transient error may be lost
 
 不得把 program failure 自动转换成 { type: "cancelled" }。
-
 
 ## 14. Compatibility and V1 contract update
 
@@ -816,6 +921,7 @@ LocalStorage restore 不绕过 Runtime validation；它只是把候选草稿通�
 仅当实现证明现有 Framework 行为不足时，才允许另开设计评审讨论 Framework Contract；本提案本身不授权修改 Framework。
 
 
+
 ## 16. 最低验收条件
 
 后续代码 PR 至少必须证明：
@@ -840,36 +946,49 @@ LocalStorage restore 不绕过 Runtime validation；它只是把候选草稿通�
 18. cancelable=true + loading=true 暂时禁止用户取消；
 19. Frame abort 在 loading 中仍立即终止并 reject AbortError；
 20. duplicate submit 不产生并发 callback；
-21. stale submit control 不能关闭或修改后续 attempt；
-22. 用户在非 Loading 状态取消时 control 失效，后续异步控制调用 no-op；
-23. sendValidateError() 使用现有 Render Event path；
-24. unknown field / duplicate field / invalid errorMsg / oversize payload 被拒绝；sendValidateError([]) 是合法 no-op，不修改当前展示错误且不产生 Render Event；
-25. Browser 正确显示 transient external errors；field edit 时清空该 field 当前展示错误，Submit Attempt 开始本身不清错误；
-26. 同一 field 不按 Runtime / Subsystem 来源设固定优先级；只有 Browser 实际收到的新 field RenderData 或 validate-error Render Event 才算新的错误更新；
-27. Browser 收到带 error 的新 field RenderData 时，该 error 覆盖当前展示错误；收到不带 error 的新 field RenderData 时，清除当前展示错误；
-28. Browser 收到 validate-error Render Event 时，对应 field 的 business error 覆盖当前展示错误；
-29. field 本地 change 时立即清空该 field 当前展示错误，再发出普通 complete change snapshot；
-30. field change 后即使 Runtime 内部重新执行 validation，只要 Browser 没有收到新的该 field RenderData，就不得据此推测或恢复任何错误；
-31. field change 后如果 Runtime 实际下发新的 field RenderData，Browser 按该 RenderData 的 error presence 重新设置或保持清空；
-32. 已被 field change 清除或被后续 presentation input 覆盖的旧 Runtime / business error 不得自动恢复；
-33. 不引入 validationRevision / errorRevision；错误事件顺序完全由 Browser 实际接收顺序定义；
-34. Renderer reload 不 replay transient validation Render Event；reload 后展示由当前 retained RenderData 决定；
-35. root fieldCount 与每个 Field ready handshake 正确完成 one-shot restore barrier；
-36. restore barrier 完成前不允许用户输入或提交；
-37. explicit initialValue 高于 localStorage，其他字段仍可独立恢复；
-38. valid localStorage draft 可恢复并通过一个完整 ordinary change snapshot 回流 Runtime canonical state；
-39. malformed JSON、类型错误、失效 select option、storage API throw 不影响表单打开；
-40. 类型正确但违反 field validation rule 的草稿仍恢复，并由 Runtime 显示验证错误；
-41. 同一表单内重复 localstorageKey 被拒绝；跨表单相同 key 按 origin 共享；
-42. string ""、number 0、boolean false、select value 与 number/select unset null round-trip 正确；
-43. oversized submit snapshot 不写 localStorage，也不发 submit event；
-44. submit attempt 在 submit event 前 best-effort 更新所有配置的 localStorage fields；
-45. failed async validation 后 localStorage 仍保留最近一次 submit-attempt draft；
-46. 单个 storage key 读写失败不阻止其他字段或表单正常工作；
-47. real Chromium qualification 覆盖 loading、async failure、async success、cancelability、Render Event error、restore barrier 和 localStorage reopen round-trip；
-48. 当前 Schema Form tests 和 repository affected CI 全部通过；
-49. 实现 PR 同步更新 DESIGN.md，且不修改 Framework Contract。
-
+21. current control 的 sendValidateError 非法参数在任何 mutation/emit 前同步 TypeError；
+22. stale control 的 setLoading / cancelLoading / sendValidateError / close 全部先判 stale 并直接 no-op，即使 sendValidateError 参数非法也不 throw；
+23. 用户在非 Loading 状态取消时 control 失效，后续 control 调用符合 stale no-op；
+24. sendValidateError() 使用现有 Render Event path；
+25. unknown field / duplicate field / invalid errorMsg / oversize payload 被拒绝；sendValidateError([]) 是合法 no-op，不修改当前展示错误且不产生 Render Event；
+26. Browser 正确显示 transient external errors；field edit 时清空该 field 当前展示错误，Submit Attempt 开始本身不清错误；
+27. 同一 field 不按 Runtime / Subsystem 来源设固定优先级；只有 Browser 实际收到的新 field RenderData 或 validate-error Render Event 才算新的错误更新；
+28. Browser 收到带 error 的新 field RenderData 时，该 error 覆盖当前展示错误；收到不带 error 的新 field RenderData 时，清除当前展示错误；
+29. Browser 收到 validate-error Render Event 时，对应 field 的 business error 覆盖当前展示错误；
+30. field 本地 change 时立即清空该 field 当前展示错误，再发出普通 complete change snapshot；
+31. field change 后即使 Runtime 内部重新执行 validation，只要 Browser 没有收到新的该 field RenderData，就不得据此推测或恢复任何错误；
+32. field change 后如果 Runtime 实际下发新的 field RenderData，Browser 按该 RenderData 的 error presence 重新设置或保持清空；
+33. 已被 field change 清除或被后续 presentation input 覆盖的旧 Runtime / business error 不得自动恢复；
+34. 不引入 validationRevision / errorRevision；错误事件顺序完全由 Browser 实际接收顺序定义；
+35. Renderer reload 不 replay transient validation Render Event；reload 后展示由当前 retained RenderData 决定；
+36. root RenderData exact shape 要求 cancelable、fieldCount、restorePending，title/description optional；fieldCount == schema.fields.length 且范围 0..128；
+37. field RenderData base exact shape 要求 restoreAllowed boolean，localstorageKey optional；没有 localstorageKey 时 restoreAllowed 必须 false；
+38. restoreAllowed=true 当且仅当 field 有 localstorageKey 且 initialValue 没有 own field key；显式 "" / 0 / false 也会禁止 restore；
+39. restorePending 初始值等于是否存在任一 restoreAllowed field，并且 Session 内只能 true → false；
+40. restorePending=false 的 Presentation 不读取 localStorage、不执行 restore barrier；
+41. restorePending=true 时，root 等待 exactly fieldCount 个 field 首次 valid RenderData 后才执行 restore attempt，barrier 期间禁止用户输入/提交；
+42. restore candidate 在内存中完成 type/option/size preflight 后才写入 controls；
+43. oversized restored candidate 不应用任何 localStorage substitution，而使用原 RenderData-derived snapshot 发 restore；
+44. Browser 每次 restore attempt 发一个 private "restore" complete snapshot，随后解除本地 barrier且不等待 ACK；
+45. restore event payload 与 change/submit 使用相同 complete values grammar 和 131,072-byte limit；
+46. Runtime 只在 restorePending=true 时接受合法 restore；pending=false 的 restore 被忽略；
+47. 合法 restore candidate == canonical 时只 consume restorePending，不运行 validateOnChange、不新增 validation error；
+48. 合法 restore candidate != canonical 时走 built-in + validateOnChange，并与 consume restorePending 一起更新 current Session；
+49. malformed/oversize restore 被忽略且 restorePending 保持 true，zero canonical/error mutation；
+50. restorePending=true 时任意合法 ordinary change 或 submit 都会先 consume restorePending，再按原语义处理，从而防止 Renderer 重建后重新覆盖已接受用户状态；
+51. restore event 丢失不会锁死 UI；在 Runtime 尚未消费 restorePending 前新 Presentation 可以重试，一旦 pending=false 永不再 restore；
+52. Renderer/WebComponent 重建后 restorePending=false 时不会重新从 localStorage 覆盖 Runtime 当前 canonical state；
+53. malformed JSON、类型错误、失效 select option、storage API throw 不影响表单打开；
+54. 类型正确但违反 field validation rule 的 restored value 可进入 candidate，并由 Runtime 在 candidate 发生变化时显示 validation error；
+55. 同一表单内重复 localstorageKey 被拒绝；跨表单相同 key 按 origin 共享；
+56. string ""、number 0、boolean false、select value 与 number/select unset null round-trip 正确；
+57. oversized submit snapshot 不写 localStorage，也不发 submit event；
+58. submit attempt 在 submit event 前 best-effort 更新所有配置的 localStorage fields；
+59. failed async validation 后 localStorage 仍保留最近一次 submit-attempt draft；
+60. 单个 storage key 读写失败不阻止其他字段或表单正常工作；
+61. real Chromium qualification 覆盖 loading、async failure、async success、cancelability、Render Event error、Session-level restore、Renderer rebuild 和 localStorage reopen round-trip；
+62. 当前 Schema Form tests 和 repository affected CI 全部通过；
+63. 实现 PR 同步更新 DESIGN.md，且不修改 Framework Contract。
 
 ## 17. 实现建议顺序
 
@@ -889,8 +1008,8 @@ LocalStorage restore 不绕过 Runtime validation；它只是把候选草稿通�
     → validate-error Render Event + transient browser errors
 
     Phase 5
-    → localStorage field projection metadata + one-shot restore barrier
-    → submit-time best-effort save
+    → exact localStorage projection metadata + Session-level restorePending protocol
+    → private restore input + restore barrier + submit-time best-effort save
 
     Phase 6
     → unit/browser/real Chromium qualification
