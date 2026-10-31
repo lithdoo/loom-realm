@@ -2,7 +2,7 @@
 
 > 状态：Proposed / Design-only
 > 适用范围：examples/PokeMan 当前产品集成
-> 不修改 Framework / Battle Core frozen contract
+> 不修改 Framework / Battle Core public contract；当前 PokeMan 明确接受 credential placement / direct provider network 的 product-private 阶段性例外
 > 目标：在接入 PokeMan Battle 前，为当前 Session 建立一个已验证可用的 DeepSeek API Key，并阻止未完成配置的游戏继续进入后续 Frame。
 
 ## 1. 背景
@@ -36,19 +36,22 @@ DeepSeekDecision 的 public constructor 只接收 configured DeepSeekTransport�
 Browser localStorage
 → 记住用户上一次提交的 DEEPSEEK_API_KEY 草稿
 
+Base
+→ 读取用户提交的 raw key
+→ 直接请求 DeepSeek provider 做启动 probe
+→ probe success 后写 PokeMan Shared State
+
 PokeMan Shared State
 → 保存当前 Session 已经验证成功的 DEEPSEEK_API_KEY
-
-Base
-→ 在进入 Map 之前负责配置 Gate
 
 future Battle composition
 → 从 PokeMan Session State 读取 key
 → 构造 PokeMan-private DeepSeekTransport
+→ 由该 transport 完成 Battle provider HTTP
 → 注入 DeepSeekDecision
 ~~~
 
-该方案是 PokeMan 当前阶段的 product-private integration decision，不建立 Framework 通用 credential storage pattern。
+该方案是 PokeMan 当前阶段的 product-private integration decision，不建立 Framework 通用 credential storage pattern。它保留 Battle Core 的 `DeepSeekDecision({ transport })` public boundary，但明确偏离当前 architecture 对“credential / physical network 默认归 Platform binding”的推荐 ownership；该偏离必须局限在 PokeMan concrete integration。
 
 ## 2. 目标
 
@@ -65,6 +68,7 @@ future Battle composition
 9. future Battle 不修改 DeepSeekDecision public API，而是继续通过 DeepSeekTransport 注入。
 10. API Key 不进入 Frame params、Session Events、Content、Battle Simulation state、Replay 或 Presentation retained business state。
 11. future Save/Load 明确不持久化该 Session credential Record。
+12. 当前阶段由 Base concrete subsystem 直接完成 DeepSeek startup HTTP probe；future Battle concrete integration 再从 State 读取 key 构造自己的 PokeMan-private DeepSeekTransport。
 
 ## 3. 非目标
 
@@ -135,6 +139,33 @@ examples/PokeMan/
 
 文件名不是 public contract；重点是该逻辑保持 PokeMan-private，不创建新的通用 game library。
 
+### 4.1 当前 DeepSeek network ownership
+
+本设计明确决定：**启动校验由 Base concrete subsystem 自己发起 provider HTTP**。
+
+~~~text
+Base / deepseek-config helper
+→ raw DEEPSEEK_API_KEY
+→ direct HTTPS request to DeepSeek
+→ validate response
+→ state.commit(SessionConfig/deepseek)
+~~~
+
+当前阶段不新增 generic NetworkClient、CredentialService、Platform Secret Store 或 product service locator。Base 可以使用当前 PokeMan host 可用的 direct HTTPS/fetch realization。
+
+这是一项有意识的 PokeMan 阶段性例外：
+
+~~~text
+Framework / Subsystem architecture recommendation
+→ credential + physical network belong to Platform binding
+
+current PokeMan exception
+→ Base concrete subsystem owns startup credential probe
+→ future Battle concrete integration owns PokeMan-private DeepSeekTransport realization
+~~~
+
+该例外只允许存在于 PokeMan concrete integration。它不得反向改变 `@loomrealm/subsystem` author API，也不得把 raw network/credential surface加入 Battle Core。
+
 ## 5. Session Shared State Record
 
 当前设计新增一个非 gameplay-core、Session-only 的 PokeMan Shared State Record：
@@ -144,7 +175,7 @@ namespace = pokeman.SessionConfig
 key       = deepseek
 ~~~
 
-value：
+value 的 exact schema：
 
 ~~~json
 {
@@ -152,9 +183,20 @@ value：
 }
 ~~~
 
+固定约束：
+
+~~~text
+value MUST be a non-null plain JSON object
+own property set MUST equal exactly ["apiKey"]
+apiKey MUST be a non-empty valid Unicode scalar-value string
+apiKey MUST NOT be trim/normalize/case-folded
+generic Shared State JsonValue / byte / depth limits still apply
+unknown properties are invalid
+~~~
+
 语义：
 
-pokeman.SessionConfig/deepseek 存在，表示当前 live Session 已经获得一个通过启动 probe 的 DeepSeek API Key。
+`pokeman.SessionConfig/deepseek` **存在且满足上述 exact schema**，表示当前 live Session 已经获得一个通过启动 probe 的 DeepSeek API Key。单纯“Record 已 materialize”不够形成 READY。
 
 因此不增加冗余字段：
 
@@ -164,9 +206,24 @@ connected: true
 ready: true
 ~~~
 
-Record presence 本身就是当前 Session 的 ready fact。
+Valid Record presence 本身就是当前 Session 的 ready fact。
 
 该 Record 不修改 67-shared-state-records.md 已冻结的四类 PokeMan gameplay-core Shared State。它属于 product/session integration configuration，而不是 World、Event、Relationship 或 Card gameplay state。
+
+文档 SSOT 分工固定为：
+
+~~~text
+67-shared-state-records.md
+→ gameplay-core Shared State physical Records
+
+76-deepseek-session-configuration.md
+→ session-only pokeman.SessionConfig/deepseek exact Record
+
+68-content-fsdb.md
+→ Content / FSDB
+~~~
+
+因此 `pokeman.SessionConfig/deepseek` 的 exact physical schema 以本文为准。
 
 ### 5.1 为什么独立 Record
 
@@ -202,7 +259,7 @@ pokeman.SessionConfig / deepseek
 规则：
 
 ~~~text
-record value has valid expected shape
+record value matches Section 5 exact schema
 → 当前 Session 已配置
 → 不打开表单
 → 继续启动
@@ -210,9 +267,10 @@ record value has valid expected shape
 record absent / null
 → 打开 Schema Form
 
-record malformed
-→ 不信任该值
-→ 按未配置处理
+record non-null but malformed
+→ invariant/configuration corruption
+→ MUST NOT silently overwrite
+→ reject startup Gate
 ~~~
 
 正常情况下初始 Game baseline 不声明该 Record，因此新 Session：
@@ -223,6 +281,8 @@ version = 0
 ~~~
 
 read() 不 materialize unknown Record。
+
+初始 `state.read()` 本身如果失败，Base MUST NOT 把失败解释成 “Record absent”。Gate 无法证明当前 Session readiness 时不得继续 Map；该 read failure 应按 Shared State failure 传播/终止当前启动流程，而不是打开一个可能覆盖未知 authoritative state 的表单。
 
 当前设计不要求 Base 对一个已经存在的 SessionConfig/deepseek 每次重新 probe。Record 的创建规则保证它只在成功 probe 后写入。
 
@@ -386,6 +446,8 @@ probe success
 
 ## 10. DeepSeek credential probe
 
+probe 由 Base concrete subsystem / PokeMan-private helper 直接发起，不经 Battle library 或 generic Framework network capability。
+
 启动 Gate 使用低成本 authenticated endpoint 验证 credential 与 provider connectivity：
 
 ~~~text
@@ -412,7 +474,32 @@ data 中存在 Battle v0 当前要求的 model id: deepseek-flash
 
 probe 不执行实际 Battle Decision，也不调用 POST /responses，因此不会为了启动游戏额外生成一轮 LLM response。
 
-### 10.1 Provider error mapping
+### 10.1 Timeout / abort
+
+probe MUST 有有限 deadline；当前 PokeMan 固定为：
+
+~~~text
+15_000 ms
+~~~
+
+实现可以使用任意等价的 timer / AbortController 组合，但必须区分两个原因：
+
+~~~text
+Base Frame signal aborted
+→ abort underlying probe best-effort
+→ propagate Frame abort / AbortError semantics
+→ MUST NOT 显示成 “网络超时”
+→ MUST NOT 继续 State commit
+
+15 s probe deadline reached while Frame remains active
+→ cancel underlying request best-effort
+→ treat as recoverable provider/network failure
+→ show field error
+→ cancelLoading()
+→ form remains active
+~~~
+
+### 10.2 Provider error mapping
 
 预期 provider/network failure 必须作为可恢复表单错误处理，不应让 onSubmit Promise 直接 reject。
 
@@ -468,56 +555,54 @@ read current record
 
 State commit 成功后才允许 control.close()。
 
-### 11.1 commit failure
+### 11.1 commit failure taxonomy
 
 State failure 与 provider validation failure 是不同问题，UI 不应混成“API Key 无效”。
 
-例如：
+固定分类：
 
 ~~~text
 CONFLICT
-BINDING_UNAVAILABLE
+→ re-read exact Record
+→ if value exactly equals { apiKey: submittedCandidate }
+     reconciled success
+  else
+     unexpected concurrent/invariant conflict
+     MUST NOT silently accept another credential
+
 OUTCOME_UNKNOWN
+→ MUST NOT blind retry
+→ re-read exact Record
+→ if value exactly equals { apiKey: submittedCandidate }
+     reconciled success
+  else
+     current attempt is not proven committed
+     keep form active / report configuration-save uncertainty
+
+BINDING_UNAVAILABLE with known no-commit
+→ recoverable infrastructure failure
+→ report “无法保存当前配置，请重试”
+→ cancelLoading()
+→ keep form active
+
+INVALID_REQUEST / LIMIT_EXCEEDED
+→ programmer/design invariant failure
+→ reject onSubmit / startup operation
+→ MUST NOT blame API key
+
 TERMINAL
-other state failures
+→ propagate terminal/unwind
+→ user editing the key cannot repair it
+
+other unknown/unclassified State failure
+→ propagate as operation failure
 ~~~
 
-应映射为配置保存失败或按 Shared State evidence 做 reconciliation。
-
-禁止 blind retry OUTCOME_UNKNOWN。
-
-对于 OUTCOME_UNKNOWN：
-
-~~~text
-commit outcome unknown
-↓
-read pokeman.SessionConfig/deepseek
-↓
-if current value is valid-shaped Session config
-   → Gate 已经存在 authoritative ready fact
-   → 可视为 reconciled success
-else
-   → 保持表单 active
-   → 告知无法确认配置是否保存
-~~~
-
-对于 CONFLICT：
-
-~~~text
-re-read current record
-↓
-if another valid SessionConfig/deepseek already exists
-   → 当前 Session 已 READY
-   → 可完成 Gate
-else
-   → 保持表单 active / retry with fresh version
-~~~
-
-在正常 PokeMan topology 中 Base 是该启动 Gate 的唯一预期 writer，因此 conflict 是异常并发而不是普通 happy path。
+在正常 PokeMan topology 中 Base 是该启动 Gate 的唯一预期 writer，因此 CONFLICT 不是普通 happy path。只有 read-back 与当前 submit attempt 的 candidate **完全相同** 时，才能把 CONFLICT / OUTCOME_UNKNOWN reconcile 为该 attempt success。
 
 ## 12. Abort / Frame lifecycle
 
-probe 必须绑定当前 Base Frame 的 abort lifecycle。
+probe 必须绑定当前 Base Frame 的 abort lifecycle，并遵守 Section 10.1 对 Frame abort 与 probe timeout 的区分。
 
 目标：
 
@@ -582,7 +667,7 @@ Game Entry
 
 ## 14. Future Battle integration
 
-本设计不修改 @loomrealm-game/battle 的 frozen public API。
+本设计不修改 @loomrealm-game/battle 的 frozen public API。它只在 PokeMan concrete integration 层保留当前阶段的 credential/network ownership 例外。
 
 未来 PokeMan battle subsystem 的 product composition 应保持：
 
@@ -592,6 +677,8 @@ scope.state.read(pokeman.SessionConfig/deepseek)
 apiKey
 ↓
 construct PokeMan-specific configured DeepSeekTransport
+↓
+transport uses the State-provided key for provider HTTP
 ↓
 new DeepSeekDecision({ transport })
 ↓
@@ -635,12 +722,20 @@ PokeMan concrete integration 读取 key 的唯一目的，是建立当前 provid
 
 Shared State v1 的 general guidance 把 transport credential 默认归为 Platform binding；Battle v0 Integration 也把 credential source/storage 与 physical network realization 放在 trusted product/platform composition。
 
-本设计有意识地选择一个阶段性 PokeMan product exception：
+本设计有意识地选择阶段性 PokeMan product exceptions：
 
 ~~~text
+Exception A — credential placement
 DEEPSEEK_API_KEY
 → pokeman.SessionConfig/deepseek Shared State
 → concrete PokeMan integration may read it
+
+Exception B — physical provider network ownership
+Base concrete subsystem
+→ direct DeepSeek startup probe
+
+future Battle concrete integration
+→ PokeMan-private DeepSeekTransport performs provider HTTP
 ~~~
 
 理由是：
@@ -707,15 +802,27 @@ DO NOT persist
 └─ pokeman.SessionConfig
 ~~~
 
-因此：
+因此 Save 与 Load 的精确语义必须区分 Session lifecycle：
 
 ~~~text
-new Session / Load Session
-→ SessionConfig/deepseek absent
+fresh Session
+→ SessionConfig/deepseek starts absent/null
 → Base Gate runs
 → localStorage may restore last submitted draft
 → user submits / probe
-→ new Session gets validated credential
+→ current Session gets validated credential
+
+Load into the same live Session
+→ restore only allowlisted gameplay Records
+→ MUST NOT write/delete pokeman.SessionConfig
+→ existing validated Session credential remains unchanged
+→ MUST NOT re-open Base Gate solely because a save was loaded
+
+future product chooses “Load = replace entire Session”
+→ old Session ends
+→ fresh Session starts
+→ new Session has no SessionConfig
+→ Base Gate runs again
 ~~~
 
 Save document 不应知道 apiKey 字段，也不应依赖“过滤 JSON 某个字段名”。
@@ -734,6 +841,8 @@ PokeMan concrete Runtime can read raw credential
 ~~~
 
 这是已知技术债，不在本改造中隐藏或伪装成 secure storage。
+
+Schema Form 当前 README 明确建议不要用 `localstorageKey` 保存 password/token/credential。本设计有意识地对 PokeMan 当前阶段作例外：`localstorageKey` 仍用于保存 last-submitted API-key draft。该例外必须在未来 password/secret field 与 credential-at-rest hardening 落地时重新审查，不得据此修改 Schema Form 的通用安全建议。
 
 后续计划可以分别增加：
 
@@ -758,24 +867,48 @@ localStorage
 
 ## 18. 推荐 implementation boundary
 
-后续实现 PR 建议保持小范围：
+后续实现 PR 建议保持小范围，但必须形成 Runtime + Browser Presentation 的完整闭环：
 
 ~~~text
 examples/PokeMan/package.json
-→ add @loomrealm-game/schema-form dependency if needed
+→ add @loomrealm-game/schema-form dependency
+→ ensure schema-form Browser build artifact is available
 
 examples/PokeMan/subsystems/base.mjs
 → add startup Gate call
 
 examples/PokeMan/subsystems/deepseek-config.mjs
-→ PokeMan-private form/probe/state helper
+→ PokeMan-private form/direct-probe/state helper
+
+examples/PokeMan/presentation.json
+→ add Schema Form Browser script/style refs
+
+PokeMan Presentation FSDB resources / sync script
+→ copy/sync:
+   @loomrealm-game/schema-form/browser/schema-form.browser.js
+   @loomrealm-game/schema-form/browser/schema-form.browser.css
+→ into stable Presentation resource keys referenced by presentation.json
+
+examples/PokeMan/scripts/prepare-pwa-content.mjs
+→ current implementation already includes every presentation.json style/script ref
+→ no new selection mechanism is expected
+→ tests MUST prove the new Schema Form refs are present in prepared PWA content
 
 PokeMan tests
-→ startup Gate qualification
+→ startup Gate + real Browser Schema Form qualification
 
 future battle integration
 → separate PR
 ~~~
+
+推荐 stable resource identities：
+
+~~~text
+Presentation / schema-form/schema-form.browser.js
+Presentation / schema-form/schema-form.browser.css
+~~~
+
+如果 implementation 使用不同 exact resource key，应在同一个 integration PR 中同步修改 `presentation.json`、FSDB resource、sync/test evidence；不得依赖 Browser 全局或开发环境偶然加载 Schema Form。
 
 本设计不要求修改：
 
@@ -797,21 +930,26 @@ Framework launch protocol
 实现阶段至少覆盖：
 
 1. SessionConfig absent 时 Base 在 Map 前打开不可取消表单。
-2. localStorage 有 draft 时字段恢复该值，但不会跳过 probe。
-3. 空值被 Schema Form built-in validation 拦截。
-4. valid key Submit 后进入 loading，重复 submit/cancel 被阻止。
-5. 401 显示字段错误，Shared State 仍 absent，Map 未启动。
-6. network/5xx 显示可恢复错误，Shared State 仍 absent。
-7. probe 200 但模型列表 malformed 时不能完成 Gate。
-8. probe 200 但缺少 deepseek-flash 时不能完成 Gate。
-9. probe success + State commit success 后才 close form。
-10. Gate 完成后 Map 只启动一次。
-11. SessionConfig 已存在时重新进入 ensure logic 不再打开表单。
-12. Shared State commit failure 不被错误显示成 credential invalid。
-13. OUTCOME_UNKNOWN 按 State read reconciliation，不 blind retry。
-14. Base Frame abort 会终止/失效 probe，且绝不进入 Map。
-15. API Key 不出现在 Frame params、Session Events、Battle payload 或 Replay 测试快照中。
-16. future Save qualification 必须证明 SessionConfig 不进入 save document。
+2. valid exact SessionConfig 已存在时不打开表单；malformed non-null value 作为 invariant failure，不静默覆盖。
+3. initial Shared State read failure 不被解释成 absent。
+4. localStorage 有 draft 时字段恢复该值，但不会跳过 probe。
+5. 空值被 Schema Form built-in validation 拦截。
+6. valid key Submit 后进入 loading，重复 submit/cancel 被阻止。
+7. 401 显示字段错误，Shared State 仍 absent，Map 未启动。
+8. network/5xx 显示可恢复错误，Shared State 仍 absent。
+9. 15 s probe deadline 显示 recoverable timeout；Base Frame abort 则按 Abort/unwind，不显示成 timeout。
+10. probe 200 但模型列表 malformed 时不能完成 Gate。
+11. probe 200 但缺少 deepseek-flash 时不能完成 Gate。
+12. probe success + State commit success 后才 close form。
+13. Gate 完成后 Map 只启动一次。
+14. BINDING_UNAVAILABLE known-no-commit 显示配置保存失败，不显示 credential invalid。
+15. INVALID_REQUEST / LIMIT_EXCEEDED / TERMINAL 不伪装成用户可修复的 API-key error。
+16. OUTCOME_UNKNOWN 不 blind retry；只有 read-back exact `{apiKey: submittedCandidate}` 才 reconciled success。
+17. CONFLICT read-back 为不同 credential 时不得静默 success。
+18. API Key 不出现在 Frame params、Session Events、Battle payload 或 Replay 测试快照中。
+19. Schema Form JS/CSS 确实进入 Presentation resources、`presentation.json` 与 prepared PWA content，并在真实 Browser 中完成 restore + async submit。
+20. future Save qualification 证明 SessionConfig 不进入 save document。
+21. same-live-Session Load 不修改/删除现有 SessionConfig；fresh Session 才重新运行 Gate。
 
 Browser qualification 应至少有一条真实 Schema Form + localStorage restore + async submit path，避免只用纯 unit test 模拟 caller-controlled submit。
 
