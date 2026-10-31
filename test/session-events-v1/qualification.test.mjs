@@ -102,6 +102,7 @@ test("root and CI expose build, integration, qualification-only, and full gates"
     "test:session-events:qualification:run",
     "test:session-events:qualification",
   ]) assert.match(pkg, new RegExp(`"${script}"`));
-  assert.match(ci, /name: Session Events v1 qualification[\s\S]*run-capability\.mjs session-events/);
+  assert.match(ci, /name: Session Events v1 qualification[\s\S]*run-capability\.mjs session-events-after-pwa/);
   assert.match(runner, /"session-events"\(\)[\s\S]*test:session-events:qualification/);
+  assert.match(runner, /"session-events-after-pwa"\(\)[\s\S]*session-events-v1\/qualification\.test\.mjs/);
 });
