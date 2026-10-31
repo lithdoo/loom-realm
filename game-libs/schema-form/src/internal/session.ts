@@ -8,9 +8,11 @@ import type {
 } from "@loomrealm/subsystem";
 import type {
   SchemaFormDataV1,
+  SchemaFormExternalValidationErrorV1,
   SchemaFormFieldRenderDataV1,
   SchemaFormRequestV1,
   SchemaFormResultV1,
+  SchemaFormSubmitControlV1,
   SchemaFormV1,
   SchemaFormValueV1,
 } from "../model.js";
@@ -23,6 +25,7 @@ import {
   ownDataObject,
   runValidator,
   validateEventData,
+  validateExternalValidationErrors,
   validateInitialValue,
   validateSchema,
   type CompiledValidator,
@@ -58,6 +61,8 @@ function validateOuter(scope: unknown, frame: unknown, request: unknown): assert
   }
   const cancelable = (request as { cancelable?: unknown }).cancelable;
   if (cancelable !== undefined && typeof cancelable !== "boolean") throw new TypeError("Invalid cancelable");
+  const onSubmit = (request as { onSubmit?: unknown }).onSubmit;
+  if (onSubmit !== undefined && typeof onSubmit !== "function") throw new TypeError("Invalid onSubmit");
 }
 
 function allocateSerial(): number {
@@ -78,6 +83,7 @@ function fieldRenderData(
   field: SchemaFormV1["fields"][number],
   canonical: SchemaFormDataV1,
   errors: Readonly<Record<string, string>>,
+  restoreAllowed: boolean,
 ): SchemaFormFieldRenderDataV1 {
   const error = Object.hasOwn(errors, field.key) ? errors[field.key] : undefined;
   const base = {
@@ -86,6 +92,8 @@ function fieldRenderData(
     ...(field.description === undefined ? {} : { description: field.description }),
     required: field.required === true,
     ...(error === undefined ? {} : { error }),
+    restoreAllowed,
+    ...(field.localstorageKey === undefined ? {} : { localstorageKey: field.localstorageKey }),
   };
   if (field.kind === "string") return {
     ...base,
@@ -121,6 +129,8 @@ function initialState(
   schema: SchemaFormV1,
   canonical: SchemaFormDataV1,
   request: SchemaFormRequestV1,
+  restoreAllowed: readonly boolean[],
+  restorePending: boolean,
   serial: number,
 ): RenderDomainState {
   return {
@@ -133,16 +143,34 @@ function initialState(
         ...(schema.title === undefined ? {} : { title: schema.title }),
         ...(schema.description === undefined ? {} : { description: schema.description }),
         cancelable: request.cancelable === true,
+        fieldCount: schema.fields.length,
+        restorePending,
       },
       children: schema.fields.map((field, index) => ({
         key: `sf:${serial}:f:${index}`,
         tag: "lr-schema-form-field",
         attrs: {},
-        data: fieldRenderData(field, canonical, {}) as never,
+        data: fieldRenderData(field, canonical, {}, restoreAllowed[index]) as never,
         children: [],
       })),
     }],
   };
+}
+
+interface SubmitAttempt {
+  readonly identity: number;
+  readonly snapshot: SchemaFormDataV1;
+  state: "CALLBACK_ACTIVE" | "LOADING";
+}
+
+function sameCanonical(
+  left: Readonly<Record<string, SchemaFormValueV1>>,
+  right: Readonly<Record<string, SchemaFormValueV1>>,
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length &&
+    leftKeys.every((key) => Object.hasOwn(right, key) && left[key] === right[key]);
 }
 
 class Session {
@@ -150,6 +178,9 @@ class Session {
   private canonical: Record<string, SchemaFormValueV1>;
   private errors: Record<string, string> = {};
   private fieldRender: SchemaFormFieldRenderDataV1[];
+  private restorePending: boolean;
+  private attempt?: SubmitAttempt;
+  private nextAttemptIdentity = 1;
   private domain?: RenderDomain;
   private subscription?: SessionEventSubscription;
   private settled = false;
@@ -165,12 +196,16 @@ class Session {
     private readonly schema: SchemaFormV1,
     initial: Record<string, SchemaFormValueV1>,
     private readonly validators: CompiledValidators,
+    private readonly restoreAllowed: readonly boolean[],
+    restorePending: boolean,
     private readonly serial: number,
     private readonly state: RenderDomainState,
   ) {
     this.rootKey = `sf:${serial}`;
     this.canonical = initial;
-    this.fieldRender = schema.fields.map((field) => fieldRenderData(field, initial, {}));
+    this.restorePending = restorePending;
+    this.fieldRender = schema.fields.map((field, index) =>
+      fieldRenderData(field, initial, {}, restoreAllowed[index]));
     this.result = new Promise((resolve, reject) => {
       this.resolve = resolve;
       this.reject = reject;
@@ -201,18 +236,29 @@ class Session {
     const payload = event.payload;
     if (this.settled || event.channel !== WEB_PRESENTATION_EVENT_CHANNEL || !ownDataObject(payload) || payload.targetKey !== this.rootKey) return;
     const data = payload.data;
+    if (this.attempt?.state === "LOADING") return;
     if (event.type === "cancel") {
       if (this.request.cancelable === true && isEmptyData(data)) this.finishResolve({ type: "cancelled" });
       return;
     }
+    if (event.type === "restore") {
+      if (!this.restorePending) return;
+      const candidate = validateEventData(data, this.schema);
+      if (candidate === null) return;
+      try { this.applyRestore(candidate); } catch (cause) { this.finishReject(cause); }
+      return;
+    }
     if (event.type !== "change" && event.type !== "submit") return;
+    if (event.type === "submit" && this.attempt !== undefined) return;
     const candidate = validateEventData(data, this.schema);
     if (candidate === null) return;
     try {
+      const consumedRestore = this.consumeRestorePending();
       if (event.type === "change") {
-        this.applyCandidate(candidate, this.validators.change, "schema.validateOnChange", false);
+        this.applyCandidate(candidate, this.validators.change, "schema.validateOnChange");
+        this.refresh(true, consumedRestore);
       } else {
-        this.applyCandidate(candidate, this.validators.submit, "schema.validateOnSubmit", true);
+        this.submitCandidate(candidate, consumedRestore);
       }
     } catch (cause) {
       this.finishReject(cause);
@@ -223,26 +269,65 @@ class Session {
     candidate: Record<string, SchemaFormValueV1>,
     validator: CompiledValidator | undefined,
     path: "schema.validateOnChange" | "schema.validateOnSubmit",
-    submit: boolean,
   ): void {
     const builtIn = builtInErrors(this.schema, candidate);
     const scripted = runValidator(validator, candidate, this.schema, path);
     const errors = { ...scripted, ...builtIn };
-    if (submit && Object.keys(errors).length === 0) {
-      this.canonical = candidate;
-      this.finishResolve({ type: "submitted", value: Object.freeze({ ...candidate }) });
-      return;
-    }
     this.canonical = candidate;
     this.errors = errors;
-    this.refresh();
   }
 
-  private refresh(): void {
+  private submitCandidate(
+    candidate: Record<string, SchemaFormValueV1>,
+    consumedRestore: boolean,
+  ): void {
+    const builtIn = builtInErrors(this.schema, candidate);
+    const scripted = runValidator(this.validators.submit, candidate, this.schema, "schema.validateOnSubmit");
+    const errors = { ...scripted, ...builtIn };
+    this.canonical = candidate;
+    this.errors = errors;
+    if (Object.keys(errors).length !== 0) {
+      this.refresh(true, consumedRestore);
+      return;
+    }
+    const snapshot = Object.freeze({ ...candidate });
+    if (this.request.onSubmit === undefined) {
+      this.finishResolve({ type: "submitted", value: snapshot });
+      return;
+    }
+    this.beginSubmitAttempt(snapshot);
+    if (!this.settled && consumedRestore) this.refresh(false, true);
+  }
+
+  private applyRestore(candidate: Record<string, SchemaFormValueV1>): void {
+    if (!this.consumeRestorePending()) return;
+    if (sameCanonical(this.canonical, candidate)) {
+      this.refresh(false, true);
+      return;
+    }
+    this.applyCandidate(candidate, this.validators.change, "schema.validateOnChange");
+    this.refresh(true, true);
+  }
+
+  private consumeRestorePending(): boolean {
+    if (!this.restorePending) return false;
+    this.restorePending = false;
+    return true;
+  }
+
+  private refresh(fields: boolean, root: boolean): void {
     const optional = ["description", "error", "placeholder", "minLength", "maxLength", "min", "max", "value"];
-    const nextRender = this.schema.fields.map((field) => fieldRenderData(field, this.canonical, this.errors));
-    this.domain?.update({
-      nodes: nextRender.map((renderData, index) => {
+    const nextRender = this.schema.fields.map((field, index) =>
+      fieldRenderData(field, this.canonical, this.errors, this.restoreAllowed[index]));
+    const nodes = [];
+    if (root) {
+      nodes.push({
+        key: this.rootKey,
+        data: { set: { restorePending: this.restorePending } as never },
+      });
+    }
+    if (fields) {
+      nodes.push(...nextRender.map((renderData, index) => {
         const data = renderData as unknown as Record<string, unknown>;
         const previous = this.fieldRender[index] as unknown as Record<string, unknown>;
         const remove = optional.filter((key) => Object.hasOwn(previous, key) && !Object.hasOwn(data, key));
@@ -253,9 +338,92 @@ class Session {
             ...(remove.length === 0 ? {} : { remove }),
           },
         };
-      }),
+      }));
+    }
+    this.domain?.update({
+      nodes,
     });
-    this.fieldRender = nextRender;
+    if (fields) this.fieldRender = nextRender;
+  }
+
+  private beginSubmitAttempt(snapshot: SchemaFormDataV1): void {
+    if (!Number.isSafeInteger(this.nextAttemptIdentity)) {
+      throw new Error("Schema Form submit attempt identity space exhausted");
+    }
+    const attempt: SubmitAttempt = {
+      identity: this.nextAttemptIdentity,
+      snapshot,
+      state: "CALLBACK_ACTIVE",
+    };
+    this.nextAttemptIdentity += 1;
+    this.attempt = attempt;
+    const control: SchemaFormSubmitControlV1 = Object.freeze({
+      setLoading: (): void => this.setLoading(attempt),
+      cancelLoading: (): void => this.cancelLoading(attempt),
+      sendValidateError: (errors: readonly SchemaFormExternalValidationErrorV1[]): void =>
+        this.sendValidateError(attempt, errors),
+      close: (): void => this.closeAttempt(attempt),
+    });
+    let callbackResult: void | Promise<void>;
+    try {
+      callbackResult = this.request.onSubmit!(snapshot, control);
+    } catch (cause) {
+      this.finishReject(cause);
+      return;
+    }
+    if (callbackResult === undefined) {
+      this.completeAttempt(attempt);
+      return;
+    }
+    void Promise.resolve(callbackResult).then(
+      () => this.completeAttempt(attempt),
+      (cause) => { if (this.isCurrent(attempt)) this.finishReject(cause); },
+    );
+  }
+
+  private isCurrent(attempt: SubmitAttempt): boolean {
+    return !this.settled && this.attempt === attempt;
+  }
+
+  private setLoading(attempt: SubmitAttempt): void {
+    if (!this.isCurrent(attempt) || attempt.state === "LOADING") return;
+    this.domain?.update({ nodes: [{ key: this.rootKey, attrs: { set: { loading: "true" } } }] });
+    attempt.state = "LOADING";
+  }
+
+  private cancelLoading(attempt: SubmitAttempt): void {
+    if (!this.isCurrent(attempt) || attempt.state !== "LOADING") return;
+    this.domain?.update({ nodes: [{ key: this.rootKey, attrs: { remove: ["loading"] } }] });
+    attempt.state = "CALLBACK_ACTIVE";
+  }
+
+  private sendValidateError(attempt: SubmitAttempt, value: unknown): void {
+    if (!this.isCurrent(attempt)) return;
+    const errors = validateExternalValidationErrors(value, this.schema);
+    if (errors.length === 0) return;
+    this.domain?.emit({
+      targetKey: this.rootKey,
+      name: "validate-error",
+      data: { errors: errors.map((error) => ({ ...error })) } as never,
+    });
+  }
+
+  private closeAttempt(attempt: SubmitAttempt): void {
+    if (!this.isCurrent(attempt)) return;
+    this.finishResolve({ type: "submitted", value: attempt.snapshot });
+  }
+
+  private completeAttempt(attempt: SubmitAttempt): void {
+    if (!this.isCurrent(attempt)) return;
+    if (attempt.state === "LOADING") {
+      try {
+        this.domain?.update({ nodes: [{ key: this.rootKey, attrs: { remove: ["loading"] } }] });
+      } catch (cause) {
+        this.finishReject(cause);
+        return;
+      }
+    }
+    if (this.isCurrent(attempt)) this.attempt = undefined;
   }
 
   private cleanup(): void {
@@ -273,6 +441,7 @@ class Session {
   private finishResolve(value: SchemaFormResultV1): void {
     if (this.settled) return;
     this.settled = true;
+    this.attempt = undefined;
     this.cleanup();
     this.resolve(value);
   }
@@ -280,6 +449,7 @@ class Session {
   private finishReject(cause: unknown): void {
     if (this.settled) return;
     this.settled = true;
+    this.attempt = undefined;
     this.cleanup();
     this.reject(cause);
   }
@@ -299,8 +469,13 @@ export async function openSchemaForm(
   const validators = compileValidators(schema);
   const serial = allocateSerial();
   const canonical = canonicalInitial(schema, initial);
-  const state = initialState(schema, canonical, request, serial);
-  const session = new Session(scope, frame, request, schema, canonical, validators, serial, state);
+  const restoreAllowed = schema.fields.map((field) =>
+    field.localstorageKey !== undefined && !(initial !== undefined && Object.hasOwn(initial, field.key)));
+  const restorePending = restoreAllowed.some(Boolean);
+  const state = initialState(schema, canonical, request, restoreAllowed, restorePending, serial);
+  const session = new Session(
+    scope, frame, request, schema, canonical, validators, restoreAllowed, restorePending, serial, state,
+  );
   activeForms.set(frame, session);
   return session.start();
 }

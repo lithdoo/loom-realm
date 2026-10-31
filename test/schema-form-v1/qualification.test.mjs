@@ -77,9 +77,9 @@ async function browserPage(t) {
   return browser.newPage();
 }
 
-async function setup(page, origin, { cancelable = true } = {}) {
+async function setup(page, origin, { cancelable = true, mode = "legacy", localstorage = false } = {}) {
   await page.goto(origin);
-  await page.evaluate(async ({ cancelable }) => {
+  await page.evaluate(async ({ cancelable, mode, localstorage }) => {
     const outsideFocusTarget = document.createElement("button");
     outsideFocusTarget.id = "schema-form-focus-origin";
     outsideFocusTarget.textContent = "Outside focus target";
@@ -120,6 +120,9 @@ async function setup(page, origin, { cancelable = true } = {}) {
     const statuses = [];
     const returns = [];
     const observations = [];
+    let submitDecision = "success";
+    let releaseSubmit;
+    const submitGate = new Promise((resolve) => { releaseSubmit = resolve; });
     const mainRuntime = runtimeControl.createMainRuntimeControlPeer({
       carrier: runtimePair.left,
       scheduler,
@@ -136,20 +139,34 @@ async function setup(page, origin, { cancelable = true } = {}) {
       definition: subsystem.defineSubsystem((scope) => ({
         async frame(frame) {
           try {
-            const result = await schemaForm.openSchemaForm(scope, frame, {
+            const request = {
               cancelable,
               schema: {
                 version: 1,
                 title: "Qualified Form",
                 description: "Real Schema Form path",
                 fields: [
-                  { key: "name", kind: "string", label: "Name", required: true },
+                  { key: "name", kind: "string", label: "Name", required: true,
+                    ...(localstorage ? { localstorageKey: "qualification.schema-form.name" } : {}) },
                   { key: "enabled", kind: "boolean", label: "Enabled", default: false },
                 ],
                 validateOnChange: `(data) => data.name.length < 2 ? { name: "Too short" } : null`,
                 validateOnSubmit: `(data) => data.name === "blocked" ? { name: "Blocked" } : null`,
               },
-            });
+              ...(mode === "async" ? {
+                async onSubmit(_value, control) {
+                  control.setLoading();
+                  await submitGate;
+                  if (submitDecision === "failure") {
+                    control.sendValidateError([{ field: "name", errorMsg: "Remote name rejected" }]);
+                    control.cancelLoading();
+                    return;
+                  }
+                  control.close();
+                },
+              } : {}),
+            };
+            const result = await schemaForm.openSchemaForm(scope, frame, request);
             observations.push({ observation: "resolved", result });
             return subsystem.completed({ observation: "resolved", result });
           } catch (error) {
@@ -192,20 +209,23 @@ async function setup(page, origin, { cancelable = true } = {}) {
       },
     });
     const projectorFailures = [];
-    const projector = new presentation.WebProjector({
+    const projectorOptions = {
       document,
       resourceClient: { async resource() { throw new Error("unused"); } },
       reportFailure(error) { projectorFailures.push(String(error)); },
-    });
+    };
+    let projector = new presentation.WebProjector(projectorOptions);
     const nodeEvents = [];
-    const detach = presentation.attachRendererPresentation(holder, {
+    const attachProjector = () => presentation.attachRendererPresentation(holder, {
       reevaluate(source, emitNodeEvent) {
         projector.reevaluate(source, (event) => {
           nodeEvents.push(structuredClone(event));
           emitNodeEvent(event);
         });
       },
+      deliverRenderEvent(event) { projector.deliverRenderEvent(event); },
     });
+    let detach = attachProjector();
     const snapshot = {
       sessionId: "schema-form-qualification",
       revision: 1,
@@ -227,6 +247,14 @@ async function setup(page, origin, { cancelable = true } = {}) {
     await waitFor(() => document.querySelector("lr-schema-form") !== null, "projected Schema Form");
     globalThis.schemaQualification = {
       mainRuntime, runtime, returns, observations, nodeEvents, statuses, publisher, projector, detach, projectorFailures, waitFor,
+      completeSubmit(decision) { submitDecision = decision; releaseSubmit(); },
+      async rebuildPresentation() {
+        detach();
+        projector.teardown();
+        projector = new presentation.WebProjector(projectorOptions);
+        detach = attachProjector();
+        await waitFor(() => document.querySelector("lr-schema-form") !== null, "rebuilt Schema Form");
+      },
       async finish() {
         await waitFor(() => returns.length === 1, "Frame return");
         await waitFor(() => document.querySelector("lr-schema-form") === null, "Schema Form removal");
@@ -239,7 +267,7 @@ async function setup(page, origin, { cancelable = true } = {}) {
         };
       },
     };
-  }, { cancelable });
+  }, { cancelable, mode, localstorage });
 }
 
 async function diagnostic(page) {
@@ -329,4 +357,97 @@ test("real Frame abort rejects openSchemaForm with AbortError and removes presen
     formPresent: false,
     focusRestored: true,
   });
+});
+
+test("real Chromium caller-controlled async failure shows loading and transient validation feedback", { timeout: TIMEOUT }, async (t) => {
+  const server = await fixture(t);
+  const page = await browserPage(t);
+  await setup(page, server.origin, { cancelable: true, mode: "async", localstorage: true });
+  await page.locator("lr-schema-form-field").nth(0).locator("wa-input input").fill("Alice");
+  await page.locator("lr-schema-form").locator('wa-button[variant="brand"] button').click();
+  await page.waitForFunction(() => document.querySelector("lr-schema-form")?.getAttribute("loading") === "true");
+  const loading = await page.evaluate(() => {
+    const root = document.querySelector("lr-schema-form");
+    root.cancel();
+    const field = root.querySelector("lr-schema-form-field");
+    return {
+      formPresent: root.isConnected,
+      fieldDisabled: field.shadowRoot.querySelector("wa-input").disabled,
+      buttonsDisabled: [...root.shadowRoot.querySelectorAll("wa-button")].every((button) => button.disabled),
+    };
+  });
+  assert.deepEqual(loading, { formPresent: true, fieldDisabled: true, buttonsDisabled: true });
+  await page.evaluate(() => globalThis.schemaQualification.completeSubmit("failure"));
+  await page.waitForFunction(() => {
+    const root = document.querySelector("lr-schema-form");
+    const error = document.querySelector("lr-schema-form-field")?.shadowRoot?.querySelector(".error")?.textContent;
+    return root?.hasAttribute("loading") === false && error === "Remote name rejected";
+  });
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("qualification.schema-form.name"))), "Alice");
+  await page.locator("lr-schema-form").locator("wa-button").filter({ hasText: "Cancel" }).locator("button").click();
+  const result = await page.evaluate(() => globalThis.schemaQualification.finish());
+  assert.deepEqual(result.returned, {
+    type: "completed",
+    value: { observation: "resolved", result: { type: "cancelled" } },
+  });
+  assert.deepEqual(result.projectorFailures, []);
+});
+
+test("real Chromium caller-controlled async success closes with its submit snapshot", { timeout: TIMEOUT }, async (t) => {
+  const server = await fixture(t);
+  const page = await browserPage(t);
+  await setup(page, server.origin, { cancelable: true, mode: "async" });
+  await page.locator("lr-schema-form-field").nth(0).locator("wa-input input").fill("Alice");
+  await page.locator("lr-schema-form").locator('wa-button[variant="brand"] button').click();
+  await page.waitForFunction(() => document.querySelector("lr-schema-form")?.getAttribute("loading") === "true");
+  await page.evaluate(() => globalThis.schemaQualification.completeSubmit("success"));
+  const result = await page.evaluate(() => globalThis.schemaQualification.finish());
+  assert.deepEqual(result, {
+    returned: { type: "completed", value: { observation: "resolved", result: {
+      type: "submitted", value: { name: "Alice", enabled: false },
+    } } },
+    projectorFailures: [],
+    focusRestored: true,
+  });
+});
+
+test("real Chromium Session restore survives projector rebuild and localStorage reopen", { timeout: TIMEOUT }, async (t) => {
+  const server = await fixture(t);
+  const page = await browserPage(t);
+  await page.goto(server.origin);
+  await page.evaluate(() => localStorage.setItem("qualification.schema-form.name", JSON.stringify("Browser draft")));
+  await setup(page, server.origin, { localstorage: true });
+  const nativeInput = page.locator("lr-schema-form-field").nth(0).locator("wa-input input");
+  await page.waitForFunction(() => {
+    const field = document.querySelector("lr-schema-form-field");
+    return field?.shadowRoot?.querySelector("wa-input")?.value === "Browser draft";
+  });
+  await page.evaluate(async () => {
+    localStorage.setItem("qualification.schema-form.name", JSON.stringify("Stale browser draft"));
+    await globalThis.schemaQualification.rebuildPresentation();
+  });
+  await page.waitForFunction(() => {
+    const field = document.querySelector("lr-schema-form-field");
+    return field?.shadowRoot?.querySelector("wa-input")?.value === "Browser draft";
+  });
+  assert.equal(await nativeInput.inputValue(), "Browser draft");
+  await page.locator("lr-schema-form").locator('wa-button[variant="brand"] button').click();
+  const first = await page.evaluate(() => globalThis.schemaQualification.finish());
+  assert.deepEqual(first.returned.value.result, {
+    type: "submitted", value: { name: "Browser draft", enabled: false },
+  });
+  assert.deepEqual(first.projectorFailures, []);
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("qualification.schema-form.name"))), "Browser draft");
+
+  await setup(page, server.origin, { localstorage: true });
+  await page.waitForFunction(() => {
+    const field = document.querySelector("lr-schema-form-field");
+    return field?.shadowRoot?.querySelector("wa-input")?.value === "Browser draft";
+  });
+  await page.locator("lr-schema-form").locator('wa-button[variant="brand"] button').click();
+  const reopened = await page.evaluate(() => globalThis.schemaQualification.finish());
+  assert.deepEqual(reopened.returned.value.result, {
+    type: "submitted", value: { name: "Browser draft", enabled: false },
+  });
+  assert.deepEqual(reopened.projectorFailures, []);
 });
