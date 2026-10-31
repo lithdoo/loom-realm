@@ -338,12 +338,13 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     await verifyDialogueObserverDetectsFlash(page);
     await observeDialogueShell(page);
 
-    // Dialogue is now the Top Active Frame. Custom south must reveal Dialogue
-    // without the still-mounted Map consuming the same action.
+    // Let Conversation A reveal naturally first. The Custom action is qualified
+    // only by the non-automatic A -> B transition, not by _revealComplete.
+    await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 25_000 });
     const mapBeforeCustomDialogue = await page.evaluate(() => structuredClone(document.querySelector("lr-map-sprite")._latestData));
     await sendCustomControls(page, ["south"]);
     try {
-      await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 25_000 });
+      await waitForDialogue(page, "准备好出发了吗？");
     } finally {
       await sendCustomControls(page, []);
     }
@@ -354,8 +355,6 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     );
 
     // A → READY → B must keep one continuous visible shell.
-    await page.keyboard.press("KeyZ");
-    await waitForDialogue(page, "准备好出发了吗？");
     await assertDialogueNeverHidden(page, "Conversation A → READY → B");
 
     // History stays interactive and full-width while the Conversation pauses.
