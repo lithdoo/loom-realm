@@ -1,7 +1,7 @@
 # KONKR Pocket Block 掌机连接与调试指南
 
 > 面向需要在 Windows 主机上连接这台掌机做 adb / Chrome DevTools 实测的 agent。
-> 最后验证日期：2026-10-29。文末附验收清单，照做即可确认链路正常。
+> 最后验证日期：2026-10-31。文末附验收清单，照做即可确认链路正常。
 
 ## 1. 设备概况（已核实，勿重复排查）
 
@@ -52,7 +52,7 @@ if ($model -match 'Pocket Block') {
 & $adb devices -l   # 确认只剩一条 transport
 ```
 
-> 注意第 3 步 `${lan}:5555` 的花括号写法，原因见 §8。
+> 注意第 3 步 `${lan}:5555` 的花括号写法，原因见 §9。
 > 若主机与掌机不在同一局域网，步骤 3 会连不上（超时），流程自动落到 ZeroTier，属预期行为。
 
 ### 3.2 兜底：mDNS（ZeroTier 整体不通时）
@@ -134,15 +134,89 @@ python C:\Users\lithd\AppData\Local\Temp\cdp_eval.py <pageId> <exprfile>
 - 四根轴恒为 0。
 - **刚 navigate/reload 后 `getGamepads()` 是空的，直到页面发生真实交互**；且实测仅屏幕触摸（user activation）不够，还需手柄本身有一次实体按键。空列表 ≠ 手柄不存在，不要据此下结论。
 - adb root 不可用；shell 写不了 event5（`sendevent` Permission denied）。
+- 要让 agent 驱动已部署的 PWA，用 §7 的 `loomrealm:debug-input`。不要把 `getGamepads()` 为空理解成调试输入也不可用。
 
-## 7. 禁止事项
+## 7. 调试输入（`loomrealm:debug-input`）
 
-- 不要把手柄输入伪造进实测：`input keyevent KEYCODE_DPAD_*` 不能代替实体按键；不要新建虚拟 uhid 设备。
+实体手柄仍受 §6 限制。agent 要推动已部署 PWA 里的地图或对话时，向**当前活动**的 `<game-controls-input>` 直接派发调试事件。这是 Controls 的 held 快照，不是 Chrome Gamepad 事件，也不能用来证明 AYANEO 实体键或 #111。
+
+前置：页面 `document.documentElement.dataset.loomrealmProduct === "ready"`，且恰好有一个未禁用的控件：
+
+```js
+document.querySelectorAll("game-controls-input:not([data-input-disabled])").length === 1
+```
+
+`data-input-disabled="duplicate"` 的副本没有监听器。若已安装的 `controls/device-input.browser.js` 里没有字符串 `loomrealm:debug-input`，说明掌机还在旧游戏包上。先用 CDP 对 `https://lithd.ltd/pwa/pokeman/` 做 `Page.reload` 且 `ignoreCache: true`，让新的 `pokeman-bundle.json` 装进去。这次改动在游戏包里，Service Worker 外壳代际可以不变。
+
+事件必须 **direct-dispatch** 到那个元素。下面任一不满足都会被静默忽略，角色不动：
+
+- 类型是 `CustomEvent`，且 `event.target` 就是该元素（不要派到 `window` / `document` / 父节点）
+- `bubbles`、`composed`、`cancelable` 都是 `false`
+- `detail` 是普通对象，自有键恰好是 `version` 和 `down`
+- `version === 1`
+- `down` 是按钮名数组，无重复，最多 14 个
+
+按钮名：`up` `down` `left` `right` `south` `east` `west` `north` `leftBumper` `rightBumper` `leftTrigger` `rightTrigger` `start` `select`。
+
+这是**当前按住的完整快照**，不是一次点按。`down: ["left"]` 会一直按住左，直到下一次事件改掉它。动作完成后必须再送 `down: []`，否则角色会连续走格。相同快照重复发送不会再产生边沿。CDP 里合成的 `KeyboardEvent` 不是 `isTrusted`，游戏会丢掉；不要改用 `keyevent`。
+
+把下面的表达式存成 js 文件，再用 `cdp_eval.py <pageId> <exprfile>` 跑。把 `BUTTON` 换成要按住的按钮名。
+
+```js
+(async () => {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const button = "BUTTON";
+  const elements = [...document.querySelectorAll("game-controls-input:not([data-input-disabled])")];
+  if (document.documentElement.dataset.loomrealmProduct !== "ready") throw new Error("PWA not ready");
+  if (elements.length !== 1) throw new Error(`expected one active game-controls-input, got ${elements.length}`);
+  const snapshot = () => {
+    const data = document.querySelector("lr-map-sprite")?._latestData ?? null;
+    const mapView = document.querySelector("lr-map-view");
+    return {
+      mapId: mapView?._acceptedVisualScene?.view?.mapId ?? mapView?._latestData?.mapId ?? null,
+      x: data ? data.x : null,
+      y: data ? data.y : null,
+      direction: data ? data.direction : null,
+      motion: data ? data.motion : null,
+    };
+  };
+  const send = (down) => elements[0].dispatchEvent(new CustomEvent("loomrealm:debug-input", {
+    detail: { version: 1, down },
+    bubbles: false,
+    composed: false,
+    cancelable: false,
+  }));
+  const before = snapshot();
+  send([button]);
+  const deadline = Date.now() + 2500;
+  let during = snapshot();
+  while (Date.now() < deadline) {
+    during = snapshot();
+    if (during.motion !== null || during.x !== before.x || during.y !== before.y || during.mapId !== before.mapId) break;
+    await sleep(16);
+  }
+  send([]);
+  const releaseDeadline = Date.now() + 3000;
+  let after = snapshot();
+  while (Date.now() < releaseDeadline) {
+    after = snapshot();
+    if (after.motion === null) break;
+    await sleep(16);
+  }
+  return { before, during, after, failure: window.__loomrealmPwa?.failure ?? null };
+})()
+```
+
+方向按钮推动地图角色；`south` 走确认/交互。生效与否看返回的坐标、朝向或 `motion`，没有单独的 ACK。2026-10-31 在已部署的 #140 PWA 上核实：冒泡的 `down` 不移动角色；direct `left` 使地图 2 上的角色从 `(8, 8)` 走到 `(7, 8)` 后停住。
+
+## 8. 禁止事项
+
+- 不要把手柄输入伪造进实测：`input keyevent KEYCODE_DPAD_*` 不能代替实体按键；不要新建虚拟 uhid 设备。agent 驱动 PWA 只用 §7，且不能把 §7 的结果写成实体手柄或 #111 已通过。
 - 不要回装出厂 Chrome 110；Play 商店不会给这台 Android Go 设备提供 Chrome 更新。
 - 未经明确要求：不改本仓库代码、不提交、不动 issue（尤其 #100、#111）。
 - 访问 GitHub 需代理 `http://127.0.0.1:17890`；本机无 `gh`。**不要打印 git credential / token。**
 
-## 8. PowerShell 陷阱
+## 9. PowerShell 陷阱
 
 - 不要写内联 `python -c "..."`——PowerShell 会吃掉 `$?`、引号和正则。**一律存成文件再运行**（上文 `cdp_eval.py <pageId> <exprfile>` 的用法就是为此设计）。
 - 变量拼端口必须写 `"${lan}:5555"`：`$lan:5555` 会被 PowerShell 当作驱动器/作用域限定符解析，结果为空或报错。
@@ -152,7 +226,7 @@ python C:\Users\lithd\AppData\Local\Temp\cdp_eval.py <pageId> <exprfile>
 & $adb -s <addr> shell "grep -i devtools /proc/net/unix"
 ```
 
-## 9. 验收清单（新 agent 照做）
+## 10. 验收清单（新 agent 照做）
 
 1. 按 §3.1 流程连接：ZeroTier 探路 → 内网优先 → 单通道收尾（ZeroTier 不通则走 §3.2 mDNS）
 2. `adb connect` → `devices -l` 确认 `product:Pocket_Block`
@@ -160,6 +234,7 @@ python C:\Users\lithd\AppData\Local\Temp\cdp_eval.py <pageId> <exprfile>
 4. `forward` → `http://127.0.0.1:9222/json` 拿到页面列表
 5. `cdp_eval.py` 在 PWA 页面求值 `navigator.userAgent`，应含 `Chrome/155`
 6. （可选）`getGamepads()` 为空属正常，解释见 §6；要出 AYANEO Controller 需人手按一次实体键
+7. （需要驱动 PWA 时）按 §7 direct-dispatch `loomrealm:debug-input`，松开时送 `down: []`；角色位置或对话发生变化，且 `failure` 仍为 `null`
 
 ## 附录 A：getGamepads 求值脚本示例（gp_check.js）
 
