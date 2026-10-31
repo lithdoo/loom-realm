@@ -1,5 +1,6 @@
 import type {
   SchemaFormDataV1,
+  SchemaFormExternalValidationErrorV1,
   SchemaFormFieldV1,
   SchemaFormPresentationValuesV1,
   SchemaFormV1,
@@ -50,7 +51,7 @@ function denseArray(value: unknown, path: string): readonly unknown[] {
   return value;
 }
 
-function unicodeScalarString(value: unknown): value is string {
+export function unicodeScalarString(value: unknown): value is string {
   if (typeof value !== "string") return false;
   for (let index = 0; index < value.length; index += 1) {
     const unit = value.charCodeAt(index);
@@ -145,11 +146,16 @@ function validateFieldValue(field: SchemaFormFieldV1, value: unknown): boolean {
   }
 }
 
-function validateField(value: unknown, index: number, keys: Set<string>): SchemaFormFieldV1 {
+function validateField(
+  value: unknown,
+  index: number,
+  keys: Set<string>,
+  localstorageKeys: Set<string>,
+): SchemaFormFieldV1 {
   const path = `schema.fields[${index}]`;
   if (!ownDataObject(value)) schemaFailure(path);
   const kind = value.kind;
-  const base = ["key", "kind", "label", "description", "required"];
+  const base = ["key", "kind", "label", "description", "required", "localstorageKey"];
   const allowed = kind === "string" ? [...base, "default", "placeholder", "multiline", "minLength", "maxLength"]
     : kind === "number" ? [...base, "default", "min", "max", "integer"]
     : kind === "boolean" ? [...base, "default"]
@@ -166,6 +172,15 @@ function validateField(value: unknown, index: number, keys: Set<string>): Schema
   requireString(value.label, `${path}.label`);
   validateOptionalString(value, "description", path);
   validateOptionalBoolean(value, "required", path);
+  if (Object.hasOwn(value, "localstorageKey")) {
+    requireString(value.localstorageKey, `${path}.localstorageKey`);
+    if (value.localstorageKey.length === 0 ||
+        new TextEncoder().encode(value.localstorageKey).byteLength > 256 ||
+        localstorageKeys.has(value.localstorageKey)) {
+      schemaFailure(`${path}.localstorageKey`);
+    }
+    localstorageKeys.add(value.localstorageKey);
+  }
 
   if (kind === "string") {
     validateOptionalString(value, "default", path);
@@ -227,7 +242,8 @@ export function validateSchema(value: unknown): SchemaFormV1 {
   const fields = denseArray(value.fields, "schema.fields");
   if (fields.length > 128) schemaFailure("schema");
   const keys = new Set<string>();
-  fields.forEach((field, index) => validateField(field, index, keys));
+  const localstorageKeys = new Set<string>();
+  fields.forEach((field, index) => validateField(field, index, keys, localstorageKeys));
   if (compactJsonBytes(value) > SCHEMA_FORM_DOCUMENT_LIMIT) schemaFailure("schema");
   return value as unknown as SchemaFormV1;
 }
@@ -372,6 +388,42 @@ export function validateEventData(
     return null;
   }
   return validateCandidate(schema, data.values as SchemaFormPresentationValuesV1);
+}
+
+export function validateExternalValidationErrors(
+  value: unknown,
+  schema: SchemaFormV1,
+): readonly SchemaFormExternalValidationErrorV1[] {
+  if (!Array.isArray(value)) throw new TypeError("Invalid external validation errors");
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1 || !keys.includes("length") || value.length > schema.fields.length) {
+    throw new TypeError("Invalid external validation errors");
+  }
+  const known = new Set(schema.fields.map((field) => field.key));
+  const seen = new Set<string>();
+  const errors: SchemaFormExternalValidationErrorV1[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    const entry = descriptor?.enumerable === true && "value" in descriptor ? descriptor.value : undefined;
+    if (!ownDataObject(entry) || !exactMembers(entry, ["field", "errorMsg"]) ||
+        Object.keys(entry).length !== 2 || !unicodeScalarString(entry.field) ||
+        !known.has(entry.field) || seen.has(entry.field) ||
+        !unicodeScalarString(entry.errorMsg) || entry.errorMsg.length === 0) {
+      throw new TypeError("Invalid external validation errors");
+    }
+    seen.add(entry.field);
+    errors.push(Object.freeze({ field: entry.field, errorMsg: entry.errorMsg }));
+  }
+  const output = Object.freeze(errors);
+  try {
+    if (compactJsonBytes({ errors: output }) > SCHEMA_FORM_EVENT_LIMIT) {
+      throw new TypeError("External validation errors are too large");
+    }
+  } catch (cause) {
+    if (cause instanceof TypeError) throw cause;
+    throw new TypeError("Invalid external validation errors", { cause });
+  }
+  return output;
 }
 
 export function isEmptyData(data: unknown): boolean {

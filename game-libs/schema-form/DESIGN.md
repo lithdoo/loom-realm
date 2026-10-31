@@ -6,7 +6,7 @@
 
 本文定义 Schema Form v1 的 public declaration/API、canonical value/validation semantics、interaction lifetime、RenderData projection 与 browser Presentation contract。
 
-Schema Form 是 caller 当前 Subsystem/Frame 内的一次性 game-lib interaction。它不注册独立 Subsystem，不通过 `frame.call()` 调用自己，也不拥有 submitted result 之后的 gameplay side effect。
+Schema Form 是 caller 当前 Subsystem/Frame 内的一次性 game-lib interaction。它不注册独立 Subsystem，不通过 `frame.call()` 调用自己。Caller 通过可选 `onSubmit` 拥有异步业务校验、持久化和最终成功决定；Schema Form 只拥有输入、同步 schema validation、presentation state 与 interaction lifetime。
 
 ## 1. Goals and module boundary
 
@@ -55,10 +55,28 @@ export type SchemaFormValueV1 = string | number | boolean;
 export type SchemaFormDataV1 =
   Readonly<Record<string, SchemaFormValueV1>>;
 
+export interface SchemaFormExternalValidationErrorV1 {
+  readonly field: string;
+  readonly errorMsg: string;
+}
+
+export interface SchemaFormSubmitControlV1 {
+  setLoading(): void;
+  cancelLoading(): void;
+  sendValidateError(
+    errors: readonly SchemaFormExternalValidationErrorV1[],
+  ): void;
+  close(): void;
+}
+
 export interface SchemaFormRequestV1 {
   readonly schema: SchemaFormV1;
   readonly initialValue?: SchemaFormDataV1;
   readonly cancelable?: boolean;
+  readonly onSubmit?: (
+    value: SchemaFormDataV1,
+    control: SchemaFormSubmitControlV1,
+  ) => void | Promise<void>;
 }
 
 export type SchemaFormResultV1 =
@@ -104,6 +122,8 @@ false / undefined
 ```
 
 Frame abort is independent from user cancel.
+
+`onSubmit` 缺省时保持 legacy automatic-submit。配置后，callback return/Promise resolve 不表示成功；只有当前 attempt 的 `control.close()` resolve submitted。推荐异步路径是在第一个 `await` 前 `setLoading()`，失败时 `sendValidateError()` + `cancelLoading()` + return，成功时 `close()`。
 
 ## 3. Lifetime, concurrency and settlement
 
@@ -188,6 +208,7 @@ interface SchemaFormFieldBaseV1 {
   readonly label: string;
   readonly description?: string;
   readonly required?: boolean;
+  readonly localstorageKey?: string;
 }
 ```
 
@@ -262,6 +283,7 @@ Precedence：
 
 ```text
 initialValue[field.key]
+→ valid Browser localStorage value when restore is allowed and pending
 → field.default
 → field-kind empty value
 ```
@@ -325,10 +347,11 @@ Exact v1 limits：
 ```text
 maximum fields                             128
 maximum field.key UTF-8 bytes              128
+maximum localstorageKey UTF-8 bytes        256
 maximum compact SchemaFormV1 JSON          65,536 bytes
 maximum compact initialValue JSON          65,536 bytes
 maximum compact validator error-map JSON   65,536 bytes
-maximum Change/Submit event data           131,072 bytes
+maximum Change/Submit/Restore event data   131,072 bytes
 ```
 
 The 65,536-byte limits are Schema Form boundaries, intentionally below generic Render/User Input ceilings.
@@ -338,6 +361,7 @@ Rules：
 ```text
 fields.length                  0..128
 field.key                      valid Unicode, non-empty, unique, 1..128 UTF-8 bytes
+localstorageKey                valid Unicode, non-empty, unique within one schema, 1..256 UTF-8 bytes
 other schema strings           valid Unicode; may be empty
 validator error strings        non-empty
 
@@ -625,6 +649,8 @@ export interface SchemaFormRenderDataV1 {
   readonly title?: string;
   readonly description?: string;
   readonly cancelable: boolean;
+  readonly fieldCount: number;
+  readonly restorePending: boolean;
 }
 ```
 
@@ -637,6 +663,8 @@ interface SchemaFormFieldRenderBaseV1 {
   readonly description?: string;
   readonly required: boolean;
   readonly error?: string;
+  readonly restoreAllowed: boolean;
+  readonly localstorageKey?: string;
 }
 ```
 
@@ -859,11 +887,12 @@ Outward names：
 change
 submit
 cancel
+restore
 ```
 
 All originate from the current root node (`targetKey = rootKey`). Root key is the form-instance correlation token.
 
-Change and Submit carry a complete current presentation snapshot：
+Change、Submit 与 private Restore carry a complete current presentation snapshot：
 
 ```ts
 export type SchemaFormPresentationValueV1 =
@@ -934,8 +963,11 @@ validate exact snapshot
 → built-in validation
 → validateOnSubmit
 → errors: update RenderData, remain open
-→ valid: resolve submitted snapshot, close resources
+→ valid + onSubmit absent: resolve submitted snapshot, close resources
+→ valid + onSubmit present: project accepted candidate/submit-validation result, freeze snapshot, create Submit Attempt, invoke callback
 ```
+
+For caller-controlled valid Submit, Runtime must project the accepted submit candidate and submit-validation result before invoking `onSubmit`.
 
 WC never hides/removes itself on Submit; authoritative RenderDomain removal closes it.
 
@@ -949,7 +981,7 @@ Used by header close, footer Cancel and Escape only when cancelable. WC never di
 
 ## 16. Event-size boundary and fail-closed consumption
 
-Component-supplied Change/Submit `data` compact JSON UTF-8 size must be <= 131,072 bytes.
+Component-supplied Change/Submit/Restore `data` compact JSON UTF-8 size must be <= 131,072 bytes.
 
 Browser preflight：
 
@@ -973,12 +1005,12 @@ Fail-closed rules：
 ```text
 targetKey != active rootKey      → ignore
 unknown event name               → ignore
-malformed/oversize change/submit → ignore, zero state/error mutation
+malformed/oversize change/submit/restore → ignore, zero state/error mutation
 cancel when cancelable=false     → ignore
 duplicate after settlement       → ignore
 ```
 
-For Change/Submit, `data.values` must contain exactly the schema field-key set, legal presentation value types, finite numbers, and valid select values. Malformed presentation input does not create a new public `SchemaFormErrorCode`.
+For Change/Submit/Restore, `data.values` must contain exactly the schema field-key set, legal presentation value types, finite numbers, and valid select values. Malformed presentation input does not create a new public `SchemaFormErrorCode`.
 
 `domainId` remains generic Renderer provenance; it is not Schema Form semantic identity.
 
@@ -1012,7 +1044,7 @@ v1 does not define：
 JSON Schema compatibility / uiSchema
 conditional visibility / dynamic fields
 cross-field dependency declaration language
-async validation
+async scripted validation DSL（caller `onSubmit` 的异步业务校验不在此排除项内）
 remote options
 nested arbitrary objects / recursive arrays
 widget registry
@@ -1024,12 +1056,112 @@ arbitrary extension/metadata bags
 multiple concurrent forms in one Frame
 multi-page wizard
 independent Schema Form subsystem
-gameplay side effects after submit
+Schema Form-owned gameplay side effects（业务 side effects 始终由 caller/onSubmit 拥有）
 ```
 
 These are outside v1 rather than implementation discretion.
 
-## 19. Compatibility rule
+## 19. Submit Attempt lifecycle
+
+配置 `onSubmit` 时，每个通过 built-in 与 `validateOnSubmit` 的 submit 创建单调 identity、冻结 immutable submit snapshot，并进入下列状态机：
+
+```text
+IDLE
+→ CALLBACK_ACTIVE
+→ LOADING
+→ CALLBACK_ACTIVE
+→ IDLE
+
+任意 active state
+→ SUBMITTED / CANCELLED / REJECTED / ABORTED
+```
+
+- 同时最多一个 active attempt；active callback lifetime 内重复 Submit 被忽略。
+- `setLoading()` 从 `CALLBACK_ACTIVE` 进入 `LOADING`；`cancelLoading()` 回到 `CALLBACK_ACTIVE`，但不释放 attempt lock。
+- callback 正常结束而未 `close()` 时，attempt 结束并回到 `IDLE`；若仍 loading，Runtime 先自动移除 loading。
+- callback throw/reject 在 terminal settlement 前 cleanup 并 reject `openSchemaForm()`；`close()` 先成功后发生的 rejection 必须被消费且不得改写结果。
+- `close()` 是 caller-controlled path 唯一 success settlement，submitted value 固定为该 attempt 创建时的 snapshot。
+- non-loading 且 `cancelable=true` 的用户 Cancel 可以 settlement，并使 control stale；Loading 不允许用户取消。Frame abort 始终立即 reject `AbortError`。
+- 所有 control method 必须先检查 control 是否仍属于 current attempt。stale 时立即 no-op，不校验参数、不 throw、不 emit、不 update、不 settlement。
+- current `sendValidateError()` 参数非法时同步 `TypeError`，并保证 zero Render Event / Runtime mutation；caller 捕获后 attempt 仍 active。
+
+所有 terminal path first-terminal-wins，并使用 §3 的 settle-once cleanup。
+
+## 20. Loading retained presentation state
+
+Loading 是 root RenderNode retained attribute，不是 `SchemaFormRenderDataV1` member：
+
+```text
+loading absent   → false
+loading="true"  → true
+```
+
+`setLoading()`/`cancelLoading()` 通过 `RenderDomain.update()` set/remove root attr。Loading 时 root 必须禁用 Submit、Cancel、Close，把 disabled 传播到全部 direct `lr-schema-form-field` 及其 `wa-input`/`wa-textarea`/`wa-checkbox`/`wa-select`，Submit 展示 progress，并拦截 Escape/dialog hide。Root 与 Field event handlers 都必须 gate；Browser 不发 change/submit/cancel，Runtime 也忽略 loading 期间的 stale input。Frame abort 不受 Loading 影响。
+
+`setLoading()` 与 `cancelLoading()` 对相同状态 idempotent。Loading 结束只恢复 interaction，不表示业务失败或成功，也不取消 caller-owned Promise/fetch。
+
+## 21. Transient validation feedback and displayed-error ordering
+
+`sendValidateError()` 复用现有 forward Render Event：
+
+```text
+RenderDomain.emit({
+  targetKey: rootKey,
+  name: "validate-error",
+  data: { errors: [{ field, errorMsg }, ...] },
+})
+```
+
+Payload 是 partial field update。每个 field 必须存在；一个 payload 内 field 不得重复；`errorMsg` 必须是 non-empty Unicode scalar string；errors 数不超过 fields 数；compact payload 不超过 131,072 bytes。`sendValidateError([])` 是合法 no-op，不清错也不发 Event。
+
+该反馈 transient、non-authoritative、no-history：不进入 retained Store、Shared State、canonical data，Renderer rebuild 不 replay。每个 Field 只维护一个 current displayed error，且没有 Runtime-vs-business source priority：
+
+```text
+later Browser-delivered presentation input replaces earlier display
+```
+
+- 新 field RenderData 有 `error` 则 set/replace；没有 `error` 则 clear。
+- `validate-error` 只 replace payload 中 fields，未列出 fields 保持不变。
+- field 本地 change 先立即 clear 自己当前展示错误，再 emit complete change snapshot。
+- Submit Attempt 开始不主动清错。
+- Runtime 内部重新 validation 但 Browser 未收到新的 field RenderData 时，不构成新的错误 delivery；已清除/覆盖的旧错误不得推测或恢复。
+- 不引入 `validationRevision`/`errorRevision`。
+
+## 22. Browser-local draft storage and Session one-shot restore
+
+`localstorageKey` 是 Browser origin-local 最近 submit-attempt draft key，不是 gameplay persistence、save slot、account/Shared State authority 或成功提交标记。不得用于 password、token、credential、payment 等敏感值。不同表单复用同 key 表示有意共享；同一 schema 内重复 key preflight reject。
+
+每 field 存一个 JSON primitive：string → JSON string，finite number → JSON number，boolean → JSON boolean，number/select unset → JSON null。Read missing、parse failure、wrong type、non-finite、invalid select option 或 Storage API throw 都按 field ignore。类型正确但违反 min/max/minLength/integer/script rule 的值可进入 candidate，由 Runtime validation 产生 error。
+
+Session projection invariants：
+
+- `fieldCount === schema.fields.length`，范围 0..128。
+- `restoreAllowed=true` iff field 有 `localstorageKey` 且 request `initialValue` 没有 own `field.key`；显式 `""`、`0`、`false` 都禁止该 field restore。
+- `restoreAllowed` 是 Session immutable fact；无 key 时必须 false。
+- `restorePending` 初始为是否存在任一 allowed field，是 Runtime retained fact，只能 `true → false`。
+
+Browser 仅在 `restorePending=true` 时执行本 Presentation instance 的一次 barrier：等待 exactly `fieldCount` 个 direct Fields 首次 valid RenderData；基于 RenderData 构造 detached complete baseline；best-effort 读取 eligible storage；先完成 primitive/type/option 与 131,072-byte preflight，再原子应用 substitutions；emit 一个 private `restore` complete snapshot；不等待 ACK 即释放 barrier。
+
+若 restored candidate 超限，必须丢弃全部 substitutions 并 size-preflight baseline fallback；fallback 合法则 emit fallback restore，fallback 也超限则不应用、不 emit、释放 barrier并保持 usable/pending。Local storage read/write failure不得阻塞其他 field 或表单。
+
+Runtime 规则：
+
+- pending=false 的 restore ignore；malformed/oversize restore ignore，pending 保持 true，zero canonical/error mutation。
+- valid restore 与 canonical（exact own keys；primitive equality；`-0`/`0` 相同）相等时只 consume pending，不跑 `validateOnChange`。
+- valid restore 不等时 consume pending，并走 built-in + `validateOnChange` 更新 canonical/errors。
+- pending=true 时任意合法 ordinary change/submit 先 consume pending，再走原语义。
+- 每次 pending true→false 且 form 仍 active，必须投影新的 root RenderData；同一步 terminal close 时不发无意义 root update。
+- restore event 丢失不锁 Browser。pending 仍 true 时 fresh Presentation 可以重试；一旦 false，Renderer/WebComponent rebuild 不得再读 localStorage，必须保留 Runtime canonical state。
+
+Browser submit 顺序固定为：collect complete snapshot → 131,072-byte preflight → best-effort write every configured field → emit submit。超限时 show size error、zero write、zero submit。单 key write failure不阻止其他 key 或 submit；后续 validation/async failure/cancelLoading 不回滚最近 submit-attempt draft。
+
+## 23. Framework boundary and failure semantics
+
+本 V1 extension 只使用现有 `RenderDomain.update()`、`RenderDomain.emit()`、Render Event 与 `WebPresentationContext.emitCustomEvent()`。它不修改 Web Presentation identity、Render Update/Event protocol、ACK/retry/replay、Shared State 或 Renderer authority。Schema Form-private outward event set 是 `change / submit / cancel / restore`。
+
+Failure classification：ordinary validation keeps active；external validation is transient feedback；callback/program failure rejects；user cancel resolves cancelled；Frame abort rejects `AbortError`；storage failure is presentation-local best effort；malformed input fail-closed；dropped transient Render Event不触发 Runtime rollback。
+
+## 24. Compatibility rule
 
 The public request/result/error/model, validation/value semantics, event names/payload shapes, lifecycle, limits and Browser Presentation ABI in this document are the v1 compatibility surface.
 

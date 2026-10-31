@@ -30,6 +30,20 @@ async function pageWithBundle(t) {
   return page;
 }
 
+async function pageWithStorageBundle(t) {
+  const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route("http://schema-form.test/", (route) => route.fulfill({
+    contentType: "text/html",
+    body: "<!doctype html><html><body></body></html>",
+  }));
+  await page.goto("http://schema-form.test/");
+  await page.addStyleTag({ path: cssPath });
+  await page.addScriptTag({ path: bundlePath });
+  return page;
+}
+
 test("classic bundle is isolated and CSS contains only the selected style layers", async () => {
   const [javascript, stylesheet] = await Promise.all([readFile(bundlePath, "utf8"), readFile(cssPath, "utf8")]);
   assert.doesNotMatch(javascript, /\bimport\s*\(/);
@@ -81,17 +95,17 @@ test("field controls keep stable DOM, exact event mapping, number drafts and sel
     const events = [];
     const root = document.createElement("lr-schema-form");
     root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
-    root.receiveRenderData({ title: "Form", cancelable: true });
+    root.receiveRenderData({ fieldCount: root.children.length, restorePending: false, title: "Form", cancelable: true });
     const stringField = document.createElement("lr-schema-form-field");
     const numberField = document.createElement("lr-schema-form-field");
     const selectField = document.createElement("lr-schema-form-field");
     const booleanField = document.createElement("lr-schema-form-field");
     root.append(stringField, numberField, selectField, booleanField);
     document.body.append(root);
-    stringField.receiveRenderData({ key: "text", kind: "string", label: "Text", required: true, value: "", multiline: false, description: "Hint" });
-    numberField.receiveRenderData({ key: "number", kind: "number", label: "Number", required: false, value: 1, integer: false });
-    selectField.receiveRenderData({ key: "select", kind: "select", label: "Select", required: false, options: [{ value: "", label: "Empty" }, { value: "x", label: "X" }] });
-    booleanField.receiveRenderData({ key: "boolean", kind: "boolean", label: "Boolean", required: false, value: false });
+    stringField.receiveRenderData({ key: "text", kind: "string", label: "Text", required: true, restoreAllowed: false, value: "", multiline: false, description: "Hint" });
+    numberField.receiveRenderData({ key: "number", kind: "number", label: "Number", required: false, restoreAllowed: false, value: 1, integer: false });
+    selectField.receiveRenderData({ key: "select", kind: "select", label: "Select", required: false, restoreAllowed: false, options: [{ value: "", label: "Empty" }, { value: "x", label: "X" }] });
+    booleanField.receiveRenderData({ key: "boolean", kind: "boolean", label: "Boolean", required: false, restoreAllowed: false, value: false });
     await Promise.all([root.updateComplete, stringField.updateComplete, numberField.updateComplete, selectField.updateComplete, booleanField.updateComplete]);
     const stringControl = stringField.shadowRoot.querySelector("wa-input");
     const numberControl = numberField.shadowRoot.querySelector("wa-input");
@@ -108,8 +122,8 @@ test("field controls keep stable DOM, exact event mapping, number drafts and sel
     booleanControl.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
     const afterEvents = events.map((event) => structuredClone(event));
 
-    numberField.receiveRenderData({ key: "number", kind: "number", label: "Changed", required: false, integer: false, error: "Required" });
-    stringField.receiveRenderData({ key: "text", kind: "string", label: "Text 2", required: false, value: "server", multiline: false });
+    numberField.receiveRenderData({ key: "number", kind: "number", label: "Changed", required: false, restoreAllowed: false, integer: false, error: "Required" });
+    stringField.receiveRenderData({ key: "text", kind: "string", label: "Text 2", required: false, restoreAllowed: false, value: "server", multiline: false });
     await Promise.all([numberField.updateComplete, stringField.updateComplete]);
     const stable = stringField.shadowRoot.querySelector("wa-input") === stringControl &&
       numberField.shadowRoot.querySelector("wa-input") === numberControl;
@@ -118,7 +132,7 @@ test("field controls keep stable DOM, exact event mapping, number drafts and sel
 
     const oldLabel = stringField.shadowRoot.querySelector(".label").textContent;
     let invalidThrew = false;
-    try { stringField.receiveRenderData({ key: "text", kind: "string", label: "Bad", required: false, value: "changed", multiline: false, unknown: true }); }
+    try { stringField.receiveRenderData({ key: "text", kind: "string", label: "Bad", required: false, restoreAllowed: false, value: "changed", multiline: false, unknown: true }); }
     catch (error) { invalidThrew = error instanceof TypeError; }
     await stringField.updateComplete;
 
@@ -156,11 +170,11 @@ test("browser snapshots preserve prototype-like field keys as own properties", a
     const events = [];
     const root = document.createElement("lr-schema-form");
     root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
-    root.receiveRenderData({ cancelable: false });
+    root.receiveRenderData({ fieldCount: root.children.length, restorePending: false, cancelable: false });
     const keys = ["constructor", "toString", "__proto__"];
     const fields = keys.map((key) => {
       const field = document.createElement("lr-schema-form-field");
-      field.receiveRenderData({ key, kind: "string", label: key, required: false, value: key, multiline: false });
+      field.receiveRenderData({ key, kind: "string", label: key, required: false, restoreAllowed: false, value: key, multiline: false });
       root.append(field);
       return field;
     });
@@ -198,8 +212,8 @@ test("modal cancel semantics, propagation blocking and local size limit are exac
     root.append(field);
     document.body.append(root);
     root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
-    root.receiveRenderData({ cancelable: false });
-    field.receiveRenderData({ key: "text", kind: "string", label: "", required: false, value: "", multiline: false });
+    root.receiveRenderData({ fieldCount: root.children.length, restorePending: false, cancelable: false });
+    field.receiveRenderData({ key: "text", kind: "string", label: "", required: false, restoreAllowed: false, value: "", multiline: false });
     await Promise.all([root.updateComplete, field.updateComplete]);
     const dialog = root.shadowRoot.querySelector("wa-dialog");
     const denied = new CustomEvent("wa-hide", { bubbles: true, cancelable: true, composed: true });
@@ -212,7 +226,7 @@ test("modal cancel semantics, propagation blocking and local size limit are exac
     }
     const deniedEvents = events.length;
 
-    root.receiveRenderData({ title: "Title", cancelable: true });
+    root.receiveRenderData({ fieldCount: root.children.length, restorePending: false, title: "Title", cancelable: true });
     await root.updateComplete;
     const allowed = new CustomEvent("wa-hide", { bubbles: true, cancelable: true, composed: true });
     root.shadowRoot.querySelector("wa-dialog").dispatchEvent(allowed);
@@ -265,9 +279,9 @@ test("short dialog stays compact without creating a scroll range", async (t) => 
   const result = await page.evaluate(async () => {
     const root = document.createElement("lr-schema-form");
     root.receiveRenderContext({ resources: {}, emitCustomEvent() {} });
-    root.receiveRenderData({ title: "Compact", description: "One field", cancelable: true });
+    root.receiveRenderData({ fieldCount: root.children.length, restorePending: false, title: "Compact", description: "One field", cancelable: true });
     const field = document.createElement("lr-schema-form-field");
-    field.receiveRenderData({ key: "field", kind: "string", label: "Field", required: false, value: "", multiline: false });
+    field.receiveRenderData({ key: "field", kind: "string", label: "Field", required: false, restoreAllowed: false, value: "", multiline: false });
     root.append(field);
     document.body.append(root);
     await Promise.all([root.updateComplete, field.updateComplete]);
@@ -323,26 +337,26 @@ test("real wheel scrolling is owned only by the long-form body and survives refr
       emitCustomEvent(name) {
         if (name !== "change") return;
         refreshes += 1;
-        root.receiveRenderData({ title: "Long form refreshed", description: `refreshed-${longText}`, cancelable: true });
+        root.receiveRenderData({ fieldCount: root.children.length, restorePending: false, title: "Long form refreshed", description: `refreshed-${longText}`, cancelable: true });
         fields[0].receiveRenderData({
           key: "field-0", kind: "string", label: longText, description: longText,
-          error: `updated-${longText}`, required: false, value: "changed", multiline: false,
+          error: `updated-${longText}`, required: false, restoreAllowed: false, value: "changed", multiline: false,
         });
       },
     });
-    root.receiveRenderData({ title: "Long form", description: longText, cancelable: true });
+    root.receiveRenderData({ fieldCount: root.children.length, restorePending: false, title: "Long form", description: longText, cancelable: true });
     fields = Array.from({ length: 36 }, (_, index) => {
       const field = document.createElement("lr-schema-form-field");
       if (index === 35) {
         field.receiveRenderData({
           key: `field-${index}`, kind: "select", label: longText, description: longText,
-          error: longText, required: false, value: "selected",
+          error: longText, required: false, restoreAllowed: false, value: "selected",
           options: [{ value: "selected", label: longText }],
         });
       } else {
         field.receiveRenderData({
           key: `field-${index}`, kind: "string", label: longText, description: longText,
-          error: longText, required: false, value: longText, multiline: false,
+          error: longText, required: false, restoreAllowed: false, value: longText, multiline: false,
         });
       }
       root.append(field);
@@ -499,7 +513,7 @@ test("focus returns after cancel and submit, and removed targets are ignored", a
       outside.focus();
       const root = document.createElement("lr-schema-form");
       const field = document.createElement("lr-schema-form-field");
-      field.receiveRenderData({ key: "text", kind: "string", label: "Text", required: false, value: "ok", multiline: false });
+      field.receiveRenderData({ key: "text", kind: "string", label: "Text", required: false, restoreAllowed: false, value: "ok", multiline: false });
       root.append(field);
       root.receiveRenderContext({
         resources: {},
@@ -507,7 +521,7 @@ test("focus returns after cancel and submit, and removed targets are ignored", a
           if (name === action) root.remove();
         },
       });
-      root.receiveRenderData({ title: "Focus", cancelable: true });
+      root.receiveRenderData({ fieldCount: root.children.length, restorePending: false, title: "Focus", cancelable: true });
       document.body.append(root);
       await Promise.all([root.updateComplete, field.updateComplete]);
       const dialog = root.shadowRoot.querySelector("wa-dialog");
@@ -535,7 +549,7 @@ test("focus returns after cancel and submit, and removed targets are ignored", a
     removedTarget.focus();
     const root = document.createElement("lr-schema-form");
     root.receiveRenderContext({ resources: {}, emitCustomEvent() {} });
-    root.receiveRenderData({ cancelable: false });
+    root.receiveRenderData({ fieldCount: root.children.length, restorePending: false, cancelable: false });
     document.body.append(root);
     await root.updateComplete;
     removedTarget.remove();
@@ -546,4 +560,328 @@ test("focus returns after cancel and submit, and removed targets are ignored", a
   assert.deepEqual(result.cancel, { focusedInside: true, restored: true });
   assert.deepEqual(result.submit, { focusedInside: true, restored: true });
   assert.equal(result.removedTargetErrors, 0);
+});
+
+test("loading disables every control, blocks events and hide, then restores interaction", async (t) => {
+  const page = await pageWithBundle(t);
+  const result = await page.evaluate(async () => {
+    const events = [];
+    const root = document.createElement("lr-schema-form");
+    const field = document.createElement("lr-schema-form-field");
+    root.append(field);
+    document.body.append(root);
+    root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
+    field.receiveRenderData({
+      key: "text", kind: "string", label: "Text", required: false,
+      restoreAllowed: false, value: "", multiline: false,
+    });
+    root.receiveRenderData({ cancelable: true, fieldCount: 1, restorePending: false });
+    await Promise.all([root.updateComplete, field.updateComplete]);
+    root.setAttribute("loading", "true");
+    await root.updateComplete;
+    await field.updateComplete;
+    const input = field.shadowRoot.querySelector("wa-input");
+    input.value = "blocked";
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    root.submit();
+    root.cancel();
+    const hide = new CustomEvent("wa-hide", { bubbles: true, cancelable: true, composed: true });
+    root.shadowRoot.querySelector("wa-dialog").dispatchEvent(hide);
+    const buttonsWhileLoading = [...root.shadowRoot.querySelectorAll("wa-button")].map((button) => ({
+      disabled: button.disabled,
+      loading: button.loading,
+    }));
+    const fieldDisabled = input.disabled;
+    root.removeAttribute("loading");
+    await root.updateComplete;
+    await field.updateComplete;
+    input.value = "allowed";
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    return {
+      events: events.map((event) => structuredClone(event)),
+      hidePrevented: hide.defaultPrevented,
+      fieldDisabled,
+      buttonsWhileLoading,
+      fieldEnabledAfter: !input.disabled,
+    };
+  });
+  assert.deepEqual(result.events, [{ name: "change", data: { values: { text: "allowed" } } }]);
+  assert.equal(result.hidePrevented, true);
+  assert.equal(result.fieldDisabled, true);
+  assert.ok(result.buttonsWhileLoading.every((button) => button.disabled));
+  assert.equal(result.buttonsWhileLoading.at(-1).loading, true);
+  assert.equal(result.fieldEnabledAfter, true);
+});
+
+test("displayed errors follow delivery order, partial updates, and local edit clearing", async (t) => {
+  const page = await pageWithBundle(t);
+  const result = await page.evaluate(async () => {
+    const events = [];
+    const root = document.createElement("lr-schema-form");
+    const first = document.createElement("lr-schema-form-field");
+    const second = document.createElement("lr-schema-form-field");
+    root.append(first, second);
+    document.body.append(root);
+    root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
+    first.receiveRenderData({
+      key: "first", kind: "string", label: "First", required: false, restoreAllowed: false,
+      value: "a", multiline: false, error: "Runtime first",
+    });
+    second.receiveRenderData({
+      key: "second", kind: "string", label: "Second", required: false, restoreAllowed: false,
+      value: "b", multiline: false, error: "Runtime second",
+    });
+    root.receiveRenderData({ cancelable: false, fieldCount: 2, restorePending: false });
+    await Promise.all([root.updateComplete, first.updateComplete, second.updateComplete]);
+    const errorText = (field) => field.shadowRoot.querySelector(".error")?.textContent ?? null;
+    const initial = [errorText(first), errorText(second)];
+    root.receiveRenderEvent({ name: "validate-error", data: { errors: [{ field: "first", errorMsg: "Business first" }] } });
+    await first.updateComplete;
+    const partial = [errorText(first), errorText(second)];
+    const input = first.shadowRoot.querySelector("wa-input");
+    input.value = "edited";
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    await first.updateComplete;
+    const cleared = errorText(first);
+    root.receiveRenderEvent({ name: "validate-error", data: { errors: [{ field: "first", errorMsg: "Business later" }] } });
+    await first.updateComplete;
+    const businessLater = errorText(first);
+    first.receiveRenderData({
+      key: "first", kind: "string", label: "First", required: false, restoreAllowed: false,
+      value: "edited", multiline: false, error: "Runtime later",
+    });
+    await first.updateComplete;
+    const runtimeLater = errorText(first);
+    first.receiveRenderData({
+      key: "first", kind: "string", label: "First", required: false, restoreAllowed: false,
+      value: "edited", multiline: false,
+    });
+    await first.updateComplete;
+    const runtimeCleared = errorText(first);
+    return { initial, partial, cleared, businessLater, runtimeLater, runtimeCleared, events };
+  });
+  assert.deepEqual(result.initial, ["Runtime first", "Runtime second"]);
+  assert.deepEqual(result.partial, ["Business first", "Runtime second"]);
+  assert.equal(result.cleared, null);
+  assert.equal(result.businessLater, "Business later");
+  assert.equal(result.runtimeLater, "Runtime later");
+  assert.equal(result.runtimeCleared, null);
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0].name, "change");
+});
+
+test("Session-gated restore honors precedence, invalid storage and renderer rebuild", async (t) => {
+  const page = await pageWithStorageBundle(t);
+  const result = await page.evaluate(async () => {
+    localStorage.clear();
+    localStorage.setItem("draft.text", JSON.stringify("restored"));
+    localStorage.setItem("draft.number", JSON.stringify(null));
+    localStorage.setItem("draft.boolean", JSON.stringify(true));
+    localStorage.setItem("draft.select", JSON.stringify("removed-option"));
+    const events = [];
+    const root = document.createElement("lr-schema-form");
+    const fields = ["text", "number", "boolean", "select"].map(() => document.createElement("lr-schema-form-field"));
+    root.append(...fields);
+    document.body.append(root);
+    root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
+    root.receiveRenderData({ cancelable: true, fieldCount: 4, restorePending: true });
+    const barrierBeforeFields = root.interactionDisabled();
+    fields[0].receiveRenderData({ key: "text", kind: "string", label: "Text", required: false, restoreAllowed: true, localstorageKey: "draft.text", value: "default", multiline: false });
+    fields[1].receiveRenderData({ key: "number", kind: "number", label: "Number", required: false, restoreAllowed: true, localstorageKey: "draft.number", value: 5, integer: false });
+    fields[2].receiveRenderData({ key: "boolean", kind: "boolean", label: "Boolean", required: false, restoreAllowed: false, localstorageKey: "draft.boolean", value: false });
+    const eventsBeforeLastField = events.length;
+    fields[3].receiveRenderData({ key: "select", kind: "select", label: "Select", required: false, restoreAllowed: true, localstorageKey: "draft.select", value: "valid", options: [{ value: "valid", label: "Valid" }] });
+    await Promise.all([root.updateComplete, ...fields.map((field) => field.updateComplete)]);
+    const restoredValues = root.collectValues();
+
+    const rebuildEvents = [];
+    const rebuilt = document.createElement("lr-schema-form");
+    const rebuiltField = document.createElement("lr-schema-form-field");
+    rebuilt.append(rebuiltField);
+    document.body.append(rebuilt);
+    rebuilt.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { rebuildEvents.push({ name, data }); } });
+    rebuiltField.receiveRenderData({ key: "text", kind: "string", label: "Text", required: false, restoreAllowed: true, localstorageKey: "draft.text", value: "runtime-current", multiline: false });
+    rebuilt.receiveRenderData({ cancelable: false, fieldCount: 1, restorePending: false });
+    await Promise.all([rebuilt.updateComplete, rebuiltField.updateComplete]);
+    return {
+      events: events.map((event) => structuredClone(event)),
+      restoredValues: structuredClone(restoredValues),
+      barrierBeforeFields,
+      eventsBeforeLastField,
+      barrierReleased: !root.interactionDisabled(),
+      rebuildEvents,
+      rebuiltValue: rebuilt.collectValues().text,
+    };
+  });
+  assert.deepEqual(result.events, [{ name: "restore", data: { values: {
+    text: "restored", number: null, boolean: false, select: "valid",
+  } } }]);
+  assert.deepEqual(result.restoredValues, { text: "restored", number: null, boolean: false, select: "valid" });
+  assert.equal(result.barrierBeforeFields, true);
+  assert.equal(result.eventsBeforeLastField, 0);
+  assert.equal(result.barrierReleased, true);
+  assert.deepEqual(result.rebuildEvents, []);
+  assert.equal(result.rebuiltValue, "runtime-current");
+});
+
+test("oversize restore falls back atomically and always releases its local barrier", async (t) => {
+  const page = await pageWithStorageBundle(t);
+  const result = await page.evaluate(async () => {
+    localStorage.clear();
+    localStorage.setItem("draft", JSON.stringify("x".repeat(140_000)));
+    const run = async (baseline) => {
+      const events = [];
+      const root = document.createElement("lr-schema-form");
+      const field = document.createElement("lr-schema-form-field");
+      root.append(field);
+      document.body.append(root);
+      root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
+      field.receiveRenderData({ key: "text", kind: "string", label: "Text", required: false, restoreAllowed: true, localstorageKey: "draft", value: baseline, multiline: false });
+      root.receiveRenderData({ cancelable: false, fieldCount: 1, restorePending: true });
+      await Promise.all([root.updateComplete, field.updateComplete]);
+      return { events: events.map((event) => structuredClone(event)), disabled: root.interactionDisabled(), value: root.collectValues().text };
+    };
+    return { fallback: await run("baseline"), bothOversize: await run("b".repeat(140_000)) };
+  });
+  assert.deepEqual(result.fallback.events, [{ name: "restore", data: { values: { text: "baseline" } } }]);
+  assert.equal(result.fallback.value, "baseline");
+  assert.equal(result.fallback.disabled, false);
+  assert.deepEqual(result.bothOversize.events, []);
+  assert.equal(result.bothOversize.value.length, 140_000);
+  assert.equal(result.bothOversize.disabled, false);
+});
+
+test("submit saves every local draft best-effort before emitting and oversize writes nothing", async (t) => {
+  const page = await pageWithStorageBundle(t);
+  const result = await page.evaluate(async () => {
+    localStorage.clear();
+    const events = [];
+    let storageSeenAtSubmit = null;
+    const root = document.createElement("lr-schema-form");
+    const good = document.createElement("lr-schema-form-field");
+    const bad = document.createElement("lr-schema-form-field");
+    const unset = document.createElement("lr-schema-form-field");
+    root.append(good, bad, unset);
+    document.body.append(root);
+    root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) {
+      if (name === "submit") storageSeenAtSubmit = localStorage.getItem("draft.good");
+      events.push({ name, data });
+    } });
+    good.receiveRenderData({ key: "good", kind: "string", label: "Good", required: false, restoreAllowed: false, localstorageKey: "draft.good", value: "saved", multiline: false });
+    bad.receiveRenderData({ key: "bad", kind: "number", label: "Bad", required: false, restoreAllowed: false, localstorageKey: "draft.fail", integer: false });
+    unset.receiveRenderData({ key: "unset", kind: "select", label: "Unset", required: false, restoreAllowed: false, localstorageKey: "draft.unset", options: [] });
+    root.receiveRenderData({ cancelable: false, fieldCount: 3, restorePending: false });
+    await Promise.all([root.updateComplete, good.updateComplete, bad.updateComplete, unset.updateComplete]);
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (key === "draft.fail") throw new DOMException("denied", "QuotaExceededError");
+      return original.call(this, key, value);
+    };
+    try { root.submit(); } finally { Storage.prototype.setItem = original; }
+    const stored = localStorage.getItem("draft.good");
+
+    const oversizeEvents = [];
+    const oversized = document.createElement("lr-schema-form");
+    const huge = document.createElement("lr-schema-form-field");
+    oversized.append(huge);
+    document.body.append(oversized);
+    oversized.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { oversizeEvents.push({ name, data }); } });
+    huge.receiveRenderData({ key: "huge", kind: "string", label: "Huge", required: false, restoreAllowed: false, localstorageKey: "draft.huge", value: "x".repeat(140_000), multiline: false });
+    oversized.receiveRenderData({ cancelable: false, fieldCount: 1, restorePending: false });
+    await Promise.all([oversized.updateComplete, huge.updateComplete]);
+    oversized.submit();
+    await oversized.updateComplete;
+    return {
+      events: events.map((event) => structuredClone(event)), stored, storageSeenAtSubmit,
+      failedMissing: localStorage.getItem("draft.fail") === null,
+      unsetStored: localStorage.getItem("draft.unset"),
+      oversizeEvents, oversizeStored: localStorage.getItem("draft.huge"),
+      oversizeError: oversized.shadowRoot.querySelector(".size-error")?.textContent,
+    };
+  });
+  assert.deepEqual(result.events, [{ name: "submit", data: { values: { good: "saved", bad: null, unset: null } } }]);
+  assert.equal(result.stored, JSON.stringify("saved"));
+  assert.equal(result.storageSeenAtSubmit, JSON.stringify("saved"));
+  assert.equal(result.failedMissing, true);
+  assert.equal(result.unsetStored, "null");
+  assert.deepEqual(result.oversizeEvents, []);
+  assert.equal(result.oversizeStored, null);
+  assert.equal(result.oversizeError, "Form data is too large");
+});
+
+test("Browser RenderData validation keeps the extended ABI exact and closed", async (t) => {
+  const page = await pageWithBundle(t);
+  const result = await page.evaluate(() => {
+    const root = document.createElement("lr-schema-form");
+    const field = document.createElement("lr-schema-form-field");
+    const failures = [];
+    for (const data of [
+      { cancelable: false, restorePending: false },
+      { cancelable: false, fieldCount: 0, restorePending: false, extra: true },
+      { cancelable: false, fieldCount: 129, restorePending: false },
+    ]) {
+      try { root.receiveRenderData(data); failures.push(false); } catch (error) { failures.push(error instanceof TypeError); }
+    }
+    for (const data of [
+      { key: "x", kind: "string", label: "X", required: false, value: "", multiline: false },
+      { key: "x", kind: "string", label: "X", required: false, restoreAllowed: true, value: "", multiline: false },
+      { key: "x", kind: "string", label: "X", required: false, restoreAllowed: false, localstorageKey: "", value: "", multiline: false },
+      { key: "x", kind: "string", label: "X", required: false, restoreAllowed: false, value: "", multiline: false, extra: true },
+    ]) {
+      try { field.receiveRenderData(data); failures.push(false); } catch (error) { failures.push(error instanceof TypeError); }
+    }
+    root.receiveRenderData({ cancelable: false, fieldCount: 1, restorePending: false });
+    field.receiveRenderData({ key: "x", kind: "string", label: "X", required: false, restoreAllowed: true, localstorageKey: "draft.x", value: "", multiline: false });
+    return { failures, validRoot: root.collectValues(), validField: field.fieldKey() };
+  });
+  assert.ok(result.failures.every(Boolean));
+  assert.deepEqual(result.validRoot, {});
+  assert.equal(result.validField, "x");
+});
+
+test("storage read failure is isolated per field and transient errors are not replayed on rebuild", async (t) => {
+  const page = await pageWithStorageBundle(t);
+  const result = await page.evaluate(async () => {
+    localStorage.clear();
+    localStorage.setItem("draft.good", JSON.stringify("restored"));
+    localStorage.setItem("draft.throw", JSON.stringify("ignored"));
+    const events = [];
+    const root = document.createElement("lr-schema-form");
+    const good = document.createElement("lr-schema-form-field");
+    const failed = document.createElement("lr-schema-form-field");
+    root.append(good, failed);
+    document.body.append(root);
+    root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
+    good.receiveRenderData({ key: "good", kind: "string", label: "Good", required: false, restoreAllowed: true, localstorageKey: "draft.good", value: "base", multiline: false });
+    failed.receiveRenderData({ key: "failed", kind: "string", label: "Failed", required: false, restoreAllowed: true, localstorageKey: "draft.throw", value: "fallback", multiline: false });
+    const original = Storage.prototype.getItem;
+    Storage.prototype.getItem = function(key) {
+      if (key === "draft.throw") throw new DOMException("denied", "SecurityError");
+      return original.call(this, key);
+    };
+    try { root.receiveRenderData({ cancelable: false, fieldCount: 2, restorePending: true }); }
+    finally { Storage.prototype.getItem = original; }
+    await Promise.all([root.updateComplete, good.updateComplete, failed.updateComplete]);
+    root.receiveRenderEvent({ name: "validate-error", data: { errors: [{ field: "good", errorMsg: "Transient" }] } });
+    await good.updateComplete;
+    const transient = good.shadowRoot.querySelector(".error")?.textContent;
+
+    const rebuilt = document.createElement("lr-schema-form");
+    const rebuiltField = document.createElement("lr-schema-form-field");
+    rebuilt.append(rebuiltField);
+    document.body.append(rebuilt);
+    rebuiltField.receiveRenderData({ key: "good", kind: "string", label: "Good", required: false, restoreAllowed: true, localstorageKey: "draft.good", value: "restored", multiline: false });
+    rebuilt.receiveRenderData({ cancelable: false, fieldCount: 1, restorePending: false });
+    await Promise.all([rebuilt.updateComplete, rebuiltField.updateComplete]);
+    return {
+      events: events.map((event) => structuredClone(event)),
+      values: structuredClone(root.collectValues()),
+      transient,
+      rebuiltError: rebuiltField.shadowRoot.querySelector(".error")?.textContent ?? null,
+    };
+  });
+  assert.deepEqual(result.events, [{ name: "restore", data: { values: { good: "restored", failed: "fallback" } } }]);
+  assert.deepEqual(result.values, { good: "restored", failed: "fallback" });
+  assert.equal(result.transient, "Transient");
+  assert.equal(result.rebuiltError, null);
 });

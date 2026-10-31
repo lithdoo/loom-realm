@@ -12,6 +12,7 @@ interface SchemaFormFieldBaseV1 {
   readonly label: string;
   readonly description?: string;
   readonly required?: boolean;
+  readonly localstorageKey?: string;
 }
 
 export interface SchemaFormStringFieldV1 extends SchemaFormFieldBaseV1 {
@@ -60,6 +61,22 @@ export interface SchemaFormRequestV1 {
   readonly schema: SchemaFormV1;
   readonly initialValue?: SchemaFormDataV1;
   readonly cancelable?: boolean;
+  readonly onSubmit?: (
+    value: SchemaFormDataV1,
+    control: SchemaFormSubmitControlV1,
+  ) => void | Promise<void>;
+}
+
+export interface SchemaFormExternalValidationErrorV1 {
+  readonly field: string;
+  readonly errorMsg: string;
+}
+
+export interface SchemaFormSubmitControlV1 {
+  setLoading(): void;
+  cancelLoading(): void;
+  sendValidateError(errors: readonly SchemaFormExternalValidationErrorV1[]): void;
+  close(): void;
 }
 
 export type SchemaFormResultV1 =
@@ -74,6 +91,8 @@ export interface SchemaFormRenderDataV1 {
   readonly title?: string;
   readonly description?: string;
   readonly cancelable: boolean;
+  readonly fieldCount: number;
+  readonly restorePending: boolean;
 }
 
 interface SchemaFormFieldRenderBaseV1 {
@@ -82,6 +101,8 @@ interface SchemaFormFieldRenderBaseV1 {
   readonly description?: string;
   readonly required: boolean;
   readonly error?: string;
+  readonly restoreAllowed: boolean;
+  readonly localstorageKey?: string;
 }
 
 export type SchemaFormFieldRenderDataV1 =

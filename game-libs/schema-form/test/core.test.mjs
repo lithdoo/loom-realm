@@ -13,6 +13,8 @@ function harness(overrides = {}) {
   const domains = [];
   const listeners = [];
   const updates = [];
+  const emits = [];
+  const sequence = [];
   let handler;
   const frame = {
     id: "frame",
@@ -27,8 +29,16 @@ function harness(overrides = {}) {
         state,
         closed: 0,
         replace() {},
-        update(update) { updates.push(update); if (overrides.updateFailure) throw overrides.updateFailure; },
-        emit() {},
+        update(update) {
+          updates.push(update);
+          sequence.push({ type: "update", value: update });
+          if (overrides.updateFailure) throw overrides.updateFailure;
+        },
+        emit(event) {
+          emits.push(event);
+          sequence.push({ type: "emit", value: event });
+          if (overrides.emitFailure) throw overrides.emitFailure;
+        },
         close() { domain.closed += 1; if (overrides.closeDomainFailure) throw overrides.closeDomainFailure; },
       };
       domains.push(domain);
@@ -48,7 +58,7 @@ function harness(overrides = {}) {
     } },
   };
   return {
-    abort, domains, frame, listeners, scope, updates,
+    abort, domains, emits, frame, listeners, scope, sequence, updates,
     event(name, data = {}, targetKey = domains[0]?.state.roots[0].key) {
       handler?.({ channel: "x.loomrealm.web-presentation.event", type: name,
         payload: { domainId: "ignored", targetKey, data }, source: { subsystemKey: "form" } });
@@ -402,4 +412,344 @@ test("Submit is independent from Change and projection removes unset values", as
   assert.equal(Object.isFrozen(result.value), true);
   h.event("submit", { values: { text: "duplicate", n: null, b: false, s: null } });
   assert.equal(h.domains[0].closed, 1);
+});
+
+test("V1 accepts localstorageKey and onSubmit while rejecting invalid declarations", async () => {
+  for (const [field, path] of [
+    [stringField({ localstorageKey: "" }), "schema.fields[0].localstorageKey"],
+    [stringField({ localstorageKey: 1 }), "schema.fields[0].localstorageKey"],
+    [stringField({ localstorageKey: "x".repeat(257) }), "schema.fields[0].localstorageKey"],
+  ]) {
+    await assert.rejects(openSchemaForm(harness().scope, harness().frame, {
+      schema: baseSchema([field]),
+    }), { code: "SCHEMA_FORM_INVALID_SCHEMA", path });
+  }
+  await assert.rejects(openSchemaForm(harness().scope, harness().frame, {
+    schema: baseSchema([
+      stringField({ key: "a", localstorageKey: "shared" }),
+      stringField({ key: "b", localstorageKey: "shared" }),
+    ]),
+  }), { code: "SCHEMA_FORM_INVALID_SCHEMA", path: "schema.fields[1].localstorageKey" });
+  await assert.rejects(openSchemaForm(harness().scope, harness().frame, {
+    schema: baseSchema(), onSubmit: true,
+  }), TypeError);
+
+  const h = harness();
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([
+      stringField({ localstorageKey: "draft.text" }),
+      { key: "n", kind: "number", label: "N", localstorageKey: "draft.number" },
+      { key: "b", kind: "boolean", label: "B", localstorageKey: "draft.boolean" },
+      { key: "s", kind: "select", label: "S", localstorageKey: "draft.select", options: [] },
+    ]),
+    initialValue: { text: "", n: 0, b: false },
+    cancelable: true,
+    onSubmit() {},
+  });
+  const root = h.domains[0].state.roots[0];
+  assert.deepEqual(root.data, { cancelable: true, fieldCount: 4, restorePending: true });
+  assert.deepEqual(root.children.map((node) => ({
+    restoreAllowed: node.data.restoreAllowed,
+    localstorageKey: node.data.localstorageKey,
+  })), [
+    { restoreAllowed: false, localstorageKey: "draft.text" },
+    { restoreAllowed: false, localstorageKey: "draft.number" },
+    { restoreAllowed: false, localstorageKey: "draft.boolean" },
+    { restoreAllowed: true, localstorageKey: "draft.select" },
+  ]);
+  h.event("cancel");
+  await pending;
+});
+
+test("caller-controlled sync close is the only success settlement and freezes its snapshot", async () => {
+  const h = harness();
+  let observed;
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([stringField()]),
+    onSubmit(value, control) {
+      observed = value;
+      assert.equal(Object.isFrozen(value), true);
+      control.close();
+    },
+  });
+  h.event("submit", { values: { text: "submitted" } });
+  assert.deepEqual(await pending, { type: "submitted", value: { text: "submitted" } });
+  assert.equal(observed.text, "submitted");
+});
+
+test("normal callback return keeps the form open and releases the attempt", async () => {
+  const h = harness();
+  let calls = 0;
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([stringField()]),
+    onSubmit(_value, control) {
+      calls += 1;
+      if (calls === 2) control.close();
+    },
+  });
+  h.event("submit", { values: { text: "first" } });
+  assert.equal(calls, 1);
+  assert.equal(h.domains[0].closed, 0);
+  h.event("submit", { values: { text: "second" } });
+  assert.equal(calls, 2);
+  assert.deepEqual(await pending, { type: "submitted", value: { text: "second" } });
+});
+
+test("caller-controlled Submit projects its snapshot before transient business feedback without Change", async () => {
+  const h = harness();
+  let callbackCalls = 0;
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([stringField({ default: "old", required: true })]),
+    cancelable: true,
+    onSubmit(value, control) {
+      callbackCalls += 1;
+      assert.deepEqual(value, { text: "Alice" });
+      const retained = h.sequence.at(-1);
+      assert.equal(retained.type, "update", "retained projection must precede caller code");
+      assert.equal(retained.value.nodes[0].data.set.value, "Alice");
+      assert.equal(Object.hasOwn(retained.value.nodes[0].data.set, "error"), false);
+      assert.ok(retained.value.nodes[0].data.remove.includes("error"));
+      control.sendValidateError([{ field: "text", errorMsg: "Business error" }]);
+    },
+  });
+
+  assert.equal(h.domains[0].state.roots[0].children[0].data.value, "old");
+  h.event("submit", { values: { text: "" } });
+  assert.equal(h.updates.at(-1).nodes[0].data.set.error, "Required");
+
+  const sequenceStart = h.sequence.length;
+  h.event("submit", { values: { text: "Alice" } });
+  assert.equal(callbackCalls, 1);
+  assert.deepEqual(h.sequence.slice(sequenceStart).map((entry) => entry.type), ["update", "emit"]);
+  assert.deepEqual(h.emits.at(-1), {
+    targetKey: h.domains[0].state.roots[0].key,
+    name: "validate-error",
+    data: { errors: [{ field: "text", errorMsg: "Business error" }] },
+  });
+
+  h.event("cancel");
+  assert.deepEqual(await pending, { type: "cancelled" });
+});
+
+test("caller-controlled direct Submit coherently projects restorePending and accepted fields", async () => {
+  const h = harness();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([stringField({ default: "old", localstorageKey: "draft.text" })]),
+    cancelable: true,
+    onSubmit(value) {
+      assert.deepEqual(value, { text: "Alice" });
+      const update = h.updates.at(-1);
+      assert.equal(update.nodes[0].data.set.restorePending, false);
+      assert.equal(update.nodes[1].data.set.value, "Alice");
+      return gate;
+    },
+  });
+
+  assert.equal(h.domains[0].state.roots[0].data.restorePending, true);
+  h.event("submit", { values: { text: "Alice" } });
+  assert.equal(h.updates.length, 1, "root and fields should converge in one retained update");
+  h.event("cancel");
+  assert.deepEqual(await pending, { type: "cancelled" });
+  release();
+  await Promise.resolve();
+});
+
+test("loading gates input, cancelLoading preserves the lock, and close returns the immutable attempt snapshot", async () => {
+  const h = harness();
+  let calls = 0;
+  let firstControl;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([stringField()]),
+    cancelable: true,
+    onSubmit(_value, control) {
+      calls += 1;
+      if (calls === 1) {
+        firstControl = control;
+        control.setLoading();
+        return gate;
+      }
+      control.close();
+    },
+  });
+  h.event("submit", { values: { text: "snapshot" } });
+  assert.deepEqual(h.updates.at(-1), {
+    nodes: [{ key: h.domains[0].state.roots[0].key, attrs: { set: { loading: "true" } } }],
+  });
+  const updateCount = h.updates.length;
+  h.event("change", { values: { text: "blocked" } });
+  h.event("submit", { values: { text: "blocked" } });
+  h.event("cancel");
+  assert.equal(h.updates.length, updateCount);
+  assert.equal(calls, 1);
+
+  firstControl.cancelLoading();
+  assert.deepEqual(h.updates.at(-1).nodes[0].attrs, { remove: ["loading"] });
+  h.event("change", { values: { text: "new canonical" } });
+  h.event("submit", { values: { text: "duplicate" } });
+  assert.equal(calls, 1, "cancelLoading must not release the active attempt");
+  firstControl.close();
+  assert.deepEqual(await pending, { type: "submitted", value: { text: "snapshot" } });
+  release();
+  await Promise.resolve();
+});
+
+test("callback resolution auto-clears loading; rejection rejects unless close won first", async () => {
+  const auto = harness();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const autoPending = openSchemaForm(auto.scope, auto.frame, {
+    schema: baseSchema([stringField()]),
+    cancelable: true,
+    onSubmit(_value, control) { control.setLoading(); return gate; },
+  });
+  auto.event("submit", { values: { text: "x" } });
+  release();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(auto.updates.at(-1).nodes[0].attrs, { remove: ["loading"] });
+  auto.event("cancel");
+  assert.deepEqual(await autoPending, { type: "cancelled" });
+
+  const failure = new Error("submit failed");
+  const rejected = harness();
+  const rejectedPending = openSchemaForm(rejected.scope, rejected.frame, {
+    schema: baseSchema([stringField()]), onSubmit: () => Promise.reject(failure),
+  });
+  rejected.event("submit", { values: { text: "x" } });
+  await assert.rejects(rejectedPending, failure);
+
+  const won = harness();
+  const wonPending = openSchemaForm(won.scope, won.frame, {
+    schema: baseSchema([stringField()]),
+    onSubmit(_value, control) {
+      control.close();
+      return Promise.reject(new Error("late rejection"));
+    },
+  });
+  won.event("submit", { values: { text: "winner" } });
+  assert.deepEqual(await wonPending, { type: "submitted", value: { text: "winner" } });
+  await Promise.resolve();
+});
+
+test("Frame abort terminates immediately while loading and makes every control stale", async () => {
+  const h = harness();
+  let control;
+  const never = new Promise(() => {});
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([stringField()]),
+    onSubmit(_value, current) { control = current; current.setLoading(); return never; },
+  });
+  h.event("submit", { values: { text: "x" } });
+  h.abort.abort();
+  await assert.rejects(pending, { name: "AbortError" });
+  const updateCount = h.updates.length;
+  assert.doesNotThrow(() => control.sendValidateError([{ field: "unknown", errorMsg: 1 }]));
+  control.setLoading();
+  control.cancelLoading();
+  control.close();
+  assert.equal(h.updates.length, updateCount);
+  assert.equal(h.emits.length, 0);
+});
+
+test("non-loading user cancel settles immediately and invalidates an active callback control", async () => {
+  const h = harness();
+  let control;
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([stringField()]),
+    cancelable: true,
+    onSubmit(_value, current) {
+      control = current;
+      return new Promise(() => {});
+    },
+  });
+  h.event("submit", { values: { text: "x" } });
+  h.event("cancel");
+  assert.deepEqual(await pending, { type: "cancelled" });
+  assert.doesNotThrow(() => control.sendValidateError([{ field: "missing", errorMsg: 1 }]));
+  control.setLoading();
+  control.cancelLoading();
+  control.close();
+  assert.equal(h.emits.length, 0);
+});
+
+test("sendValidateError validates current calls atomically, emits partial errors, and stale calls are no-ops", async () => {
+  const h = harness();
+  let stale;
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([stringField(), stringField({ key: "other" })]),
+    cancelable: true,
+    onSubmit(_value, control) {
+      stale = control;
+      for (const errors of [
+        null,
+        [{ field: "missing", errorMsg: "bad" }],
+        [{ field: "text", errorMsg: "" }],
+        [{ field: "text", errorMsg: "a" }, { field: "text", errorMsg: "b" }],
+        [{ field: "text", errorMsg: "x".repeat(131_072) }],
+      ]) assert.throws(() => control.sendValidateError(errors), TypeError);
+      assert.equal(h.emits.length, 0);
+      control.sendValidateError([]);
+      assert.equal(h.emits.length, 0);
+      control.sendValidateError([{ field: "other", errorMsg: "Business error" }]);
+    },
+  });
+  h.event("submit", { values: { text: "x", other: "y" } });
+  assert.deepEqual(h.emits, [{
+    targetKey: h.domains[0].state.roots[0].key,
+    name: "validate-error",
+    data: { errors: [{ field: "other", errorMsg: "Business error" }] },
+  }]);
+  assert.doesNotThrow(() => stale.sendValidateError([{ field: "missing", errorMsg: 1 }]));
+  assert.equal(h.emits.length, 1);
+  h.event("cancel");
+  await pending;
+});
+
+test("restore is Session-owned, one-shot, validated, and projects pending=false", async () => {
+  const schema = {
+    ...baseSchema([stringField({ default: "valid-default", minLength: 9, localstorageKey: "draft.text" })]),
+    validateOnChange: `(data) => data.text === "restored" ? { text: "Restored error" } : null`,
+  };
+  const malformed = harness();
+  const malformedPending = openSchemaForm(malformed.scope, malformed.frame, { schema, cancelable: true });
+  malformed.event("restore", { values: { text: null } });
+  assert.equal(malformed.updates.length, 0);
+  malformed.event("restore", { values: { text: "valid-default" } });
+  assert.deepEqual(malformed.updates.at(-1), {
+    nodes: [{ key: malformed.domains[0].state.roots[0].key, data: { set: { restorePending: false } } }],
+  });
+  const afterConsume = malformed.updates.length;
+  malformed.event("restore", { values: { text: "ignored" } });
+  assert.equal(malformed.updates.length, afterConsume);
+  malformed.event("cancel");
+  await malformedPending;
+
+  const changed = harness();
+  const changedPending = openSchemaForm(changed.scope, changed.frame, { schema, cancelable: true });
+  changed.event("restore", { values: { text: "restored" } });
+  assert.equal(changed.updates.at(-1).nodes[0].data.set.restorePending, false);
+  assert.equal(changed.updates.at(-1).nodes[1].data.set.value, "restored");
+  assert.equal(changed.updates.at(-1).nodes[1].data.set.error, "Must be at least 9 characters");
+  changed.event("cancel");
+  await changedPending;
+});
+
+test("ordinary change and submit consume pending restore, with no useless update after terminal submit", async () => {
+  const schema = baseSchema([stringField({ localstorageKey: "draft.text" })]);
+  const change = harness();
+  const changePending = openSchemaForm(change.scope, change.frame, { schema, cancelable: true });
+  change.event("change", { values: { text: "user" } });
+  assert.equal(change.updates.at(-1).nodes[0].data.set.restorePending, false);
+  change.event("cancel");
+  await changePending;
+
+  const submit = harness();
+  const submitPending = openSchemaForm(submit.scope, submit.frame, { schema });
+  submit.event("submit", { values: { text: "submitted" } });
+  assert.deepEqual(await submitPending, { type: "submitted", value: { text: "submitted" } });
+  assert.equal(submit.updates.length, 0);
 });
