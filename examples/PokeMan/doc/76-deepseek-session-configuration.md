@@ -153,6 +153,18 @@ Base / deepseek-config helper
 
 当前阶段不新增 generic NetworkClient、CredentialService、Platform Secret Store 或 product service locator。Base 可以使用当前 PokeMan host 可用的 direct HTTPS/fetch realization。
 
+这是一个需要真实 host qualification 的实现前提，而不是默认假设：
+
+~~~text
+PWA Subsystem Worker
+→ direct cross-origin fetch is still subject to Browser network/CORS policy
+
+Hostra / other host
+→ must separately prove its direct HTTPS realization
+~~~
+
+实现 PR MUST 在当前受支持的 PokeMan launch profile 上证明 `https://api.deepseek.com/models` 能从 Base Runtime 的真实执行环境发起并得到可观察 HTTP response。若某个必须支持的 profile 因 CORS/host policy 无法 direct probe，implementation MUST NOT 偷偷引入 backend/proxy 或 Framework network API；应重新打开本文 network ownership design。
+
 这是一项有意识的 PokeMan 阶段性例外：
 
 ~~~text
@@ -634,7 +646,7 @@ Base 的核心启动 invariant：
 
 ~~~text
 before frame.call("map", ...)
-pokeman.SessionConfig/deepseek MUST be current valid-shaped record
+pokeman.SessionConfig/deepseek MUST match Section 5 exact schema
 ~~~
 
 因此完整启动拓扑变成：
@@ -948,8 +960,9 @@ Framework launch protocol
 17. CONFLICT read-back 为不同 credential 时不得静默 success。
 18. API Key 不出现在 Frame params、Session Events、Battle payload 或 Replay 测试快照中。
 19. Schema Form JS/CSS 确实进入 Presentation resources、`presentation.json` 与 prepared PWA content，并在真实 Browser 中完成 restore + async submit。
-20. future Save qualification 证明 SessionConfig 不进入 save document。
-21. same-live-Session Load 不修改/删除现有 SessionConfig；fresh Session 才重新运行 Gate。
+20. 当前受支持的 PokeMan launch profile 必须证明 Base Runtime 可 direct probe DeepSeek；尤其 PWA 必须用真实 Browser/Worker 路径证明没有被 CORS/host policy 阻断。
+21. future Save qualification 证明 SessionConfig 不进入 save document。
+22. same-live-Session Load 不修改/删除现有 SessionConfig；fresh Session 才重新运行 Gate。
 
 Browser qualification 应至少有一条真实 Schema Form + localStorage restore + async submit path，避免只用纯 unit test 模拟 caller-controlled submit。
 
@@ -966,6 +979,7 @@ pokeman.SessionConfig/deepseek
 
 Base
 = startup configuration gate
+= owns current PokeMan direct DeepSeek startup probe
 
 Map / later gameplay
 = cannot start before Gate success
