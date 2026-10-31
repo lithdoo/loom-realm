@@ -14,6 +14,7 @@ function harness(overrides = {}) {
   const listeners = [];
   const updates = [];
   const emits = [];
+  const sequence = [];
   let handler;
   const frame = {
     id: "frame",
@@ -28,8 +29,16 @@ function harness(overrides = {}) {
         state,
         closed: 0,
         replace() {},
-        update(update) { updates.push(update); if (overrides.updateFailure) throw overrides.updateFailure; },
-        emit(event) { emits.push(event); if (overrides.emitFailure) throw overrides.emitFailure; },
+        update(update) {
+          updates.push(update);
+          sequence.push({ type: "update", value: update });
+          if (overrides.updateFailure) throw overrides.updateFailure;
+        },
+        emit(event) {
+          emits.push(event);
+          sequence.push({ type: "emit", value: event });
+          if (overrides.emitFailure) throw overrides.emitFailure;
+        },
         close() { domain.closed += 1; if (overrides.closeDomainFailure) throw overrides.closeDomainFailure; },
       };
       domains.push(domain);
@@ -49,7 +58,7 @@ function harness(overrides = {}) {
     } },
   };
   return {
-    abort, domains, emits, frame, listeners, scope, updates,
+    abort, domains, emits, frame, listeners, scope, sequence, updates,
     event(name, data = {}, targetKey = domains[0]?.state.roots[0].key) {
       handler?.({ channel: "x.loomrealm.web-presentation.event", type: name,
         payload: { domainId: "ignored", targetKey, data }, source: { subsystemKey: "form" } });
@@ -484,6 +493,67 @@ test("normal callback return keeps the form open and releases the attempt", asyn
   h.event("submit", { values: { text: "second" } });
   assert.equal(calls, 2);
   assert.deepEqual(await pending, { type: "submitted", value: { text: "second" } });
+});
+
+test("caller-controlled Submit projects its snapshot before transient business feedback without Change", async () => {
+  const h = harness();
+  let callbackCalls = 0;
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([stringField({ default: "old", required: true })]),
+    cancelable: true,
+    onSubmit(value, control) {
+      callbackCalls += 1;
+      assert.deepEqual(value, { text: "Alice" });
+      const retained = h.sequence.at(-1);
+      assert.equal(retained.type, "update", "retained projection must precede caller code");
+      assert.equal(retained.value.nodes[0].data.set.value, "Alice");
+      assert.equal(Object.hasOwn(retained.value.nodes[0].data.set, "error"), false);
+      assert.ok(retained.value.nodes[0].data.remove.includes("error"));
+      control.sendValidateError([{ field: "text", errorMsg: "Business error" }]);
+    },
+  });
+
+  assert.equal(h.domains[0].state.roots[0].children[0].data.value, "old");
+  h.event("submit", { values: { text: "" } });
+  assert.equal(h.updates.at(-1).nodes[0].data.set.error, "Required");
+
+  const sequenceStart = h.sequence.length;
+  h.event("submit", { values: { text: "Alice" } });
+  assert.equal(callbackCalls, 1);
+  assert.deepEqual(h.sequence.slice(sequenceStart).map((entry) => entry.type), ["update", "emit"]);
+  assert.deepEqual(h.emits.at(-1), {
+    targetKey: h.domains[0].state.roots[0].key,
+    name: "validate-error",
+    data: { errors: [{ field: "text", errorMsg: "Business error" }] },
+  });
+
+  h.event("cancel");
+  assert.deepEqual(await pending, { type: "cancelled" });
+});
+
+test("caller-controlled direct Submit coherently projects restorePending and accepted fields", async () => {
+  const h = harness();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema: baseSchema([stringField({ default: "old", localstorageKey: "draft.text" })]),
+    cancelable: true,
+    onSubmit(value) {
+      assert.deepEqual(value, { text: "Alice" });
+      const update = h.updates.at(-1);
+      assert.equal(update.nodes[0].data.set.restorePending, false);
+      assert.equal(update.nodes[1].data.set.value, "Alice");
+      return gate;
+    },
+  });
+
+  assert.equal(h.domains[0].state.roots[0].data.restorePending, true);
+  h.event("submit", { values: { text: "Alice" } });
+  assert.equal(h.updates.length, 1, "root and fields should converge in one retained update");
+  h.event("cancel");
+  assert.deepEqual(await pending, { type: "cancelled" });
+  release();
+  await Promise.resolve();
 });
 
 test("loading gates input, cancelLoading preserves the lock, and close returns the immutable attempt snapshot", async () => {

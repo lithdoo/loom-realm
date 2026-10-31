@@ -411,6 +411,41 @@ test("real Chromium caller-controlled async success closes with its submit snaps
   });
 });
 
+test("real Chromium rebuild retains an accepted submit snapshot while its callback is active", { timeout: TIMEOUT }, async (t) => {
+  const server = await fixture(t);
+  const page = await browserPage(t);
+  await setup(page, server.origin, { cancelable: true, mode: "async" });
+  await page.evaluate(() => {
+    const control = document.querySelector("lr-schema-form-field")?.shadowRoot?.querySelector("wa-input");
+    if (control === null || control === undefined) throw new Error("Missing name control");
+    control.value = "Alice";
+  });
+  await page.waitForFunction(() =>
+    document.querySelector("lr-schema-form-field")?.shadowRoot?.querySelector("wa-input")?.value === "Alice");
+  await page.locator("lr-schema-form").locator('wa-button[variant="brand"] button').click();
+  await page.waitForFunction(() => document.querySelector("lr-schema-form")?.getAttribute("loading") === "true");
+  await page.evaluate(() => globalThis.schemaQualification.rebuildPresentation());
+  await page.waitForFunction(() => {
+    const root = document.querySelector("lr-schema-form");
+    const field = document.querySelector("lr-schema-form-field");
+    return root?.getAttribute("loading") === "true" &&
+      field?.shadowRoot?.querySelector("wa-input")?.value === "Alice" &&
+      field.shadowRoot.querySelector(".error") === null;
+  });
+  assert.deepEqual(await page.evaluate(() => ({
+    value: document.querySelector("lr-schema-form-field")?.shadowRoot?.querySelector("wa-input")?.value,
+    error: document.querySelector("lr-schema-form-field")?.shadowRoot?.querySelector(".error")?.textContent ?? null,
+    loading: document.querySelector("lr-schema-form")?.getAttribute("loading"),
+  })), { value: "Alice", error: null, loading: "true" });
+
+  await page.evaluate(() => globalThis.schemaQualification.completeSubmit("success"));
+  const result = await page.evaluate(() => globalThis.schemaQualification.finish());
+  assert.deepEqual(result.returned, { type: "completed", value: { observation: "resolved", result: {
+    type: "submitted", value: { name: "Alice", enabled: false },
+  } } });
+  assert.deepEqual(result.projectorFailures, []);
+});
+
 test("real Chromium Session restore survives projector rebuild and localStorage reopen", { timeout: TIMEOUT }, async (t) => {
   const server = await fixture(t);
   const page = await browserPage(t);

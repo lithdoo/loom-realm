@@ -964,8 +964,10 @@ validate exact snapshot
 → validateOnSubmit
 → errors: update RenderData, remain open
 → valid + onSubmit absent: resolve submitted snapshot, close resources
-→ valid + onSubmit present: freeze snapshot, create Submit Attempt, invoke callback
+→ valid + onSubmit present: project accepted candidate/submit-validation result, freeze snapshot, create Submit Attempt, invoke callback
 ```
+
+For caller-controlled valid Submit, Runtime must project the accepted submit candidate and submit-validation result before invoking `onSubmit`.
 
 WC never hides/removes itself on Submit; authoritative RenderDomain removal closes it.
 

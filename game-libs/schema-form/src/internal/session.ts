@@ -295,8 +295,8 @@ class Session {
       this.finishResolve({ type: "submitted", value: snapshot });
       return;
     }
+    this.refresh(true, consumedRestore);
     this.beginSubmitAttempt(snapshot);
-    if (!this.settled && consumedRestore) this.refresh(false, true);
   }
 
   private applyRestore(candidate: Record<string, SchemaFormValueV1>): void {
