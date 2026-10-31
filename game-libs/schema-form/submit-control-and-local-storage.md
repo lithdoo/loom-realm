@@ -454,6 +454,13 @@ sendValidateError(errors) 负责：
 
 无效参数在调用时同步抛出 TypeError。空数组 sendValidateError([]) 是合法 no-op：不清除任何已展示错误，也不产生 Render Event。sendValidateError() 的职责仅是发送新的业务校验错误。
 
+validate-error payload 是 **partial field error update**，不是完整 error snapshot：
+
+- payload 中列出的每个 field 都把自己的 current displayed error 替换为新的 errorMsg；
+- payload 中未列出的 field 保持当前 displayed error 不变；
+- 同一 payload 禁止重复 field，因此一个 event 内不存在同 field 的内部覆盖顺序；
+- 多个 validate-error events 之间继续按 Browser 实际接收顺序 last-delivery-wins。
+
 ### 9.2 Transient semantics
 
 该 async/business validation feedback 明确定义为 **transient Presentation feedback**：
@@ -635,6 +642,7 @@ Runtime 规则：
 
 - 只在 restorePending=true 时接受合法 restore event；
 - restore payload malformed / oversize → ignore，restorePending 保持 true，zero canonical/error mutation；
+- canonical 语义相同 = exact own-key set 相同且每个 string/number/boolean JSON primitive value 相等；finite number 使用 JSON number 语义比较，-0 与 0 视为相同；
 - 合法 restore candidate 与 current canonical 语义相同：
   - 只把 restorePending 设置为 false；
   - 不运行 built-in / validateOnChange；
@@ -905,7 +913,9 @@ LocalStorage restore 不绕过 Runtime validation，也不直接成为 canonical
 - 现有 field kind / value semantics 不变；
 - 现有 validateOnChange / validateOnSubmit 不变；
 - 不修改 Web Presentation API v1 或 Render Update v1 identity；
-- 只复用现有 Render Event capability；
+- 复用现有 Render Event capability 传递 validate-error；
+- 复用现有 WebPresentationContext.emitCustomEvent() 增加 Schema Form-private reverse event "restore"；
+- Schema Form V1 root outward custom event name set 因此从 change / submit / cancel 扩展为 change / submit / cancel / restore；restore 只服务 Browser-local draft handshake，不是 caller-facing submit result；
 - 旧请求对象和旧 field declaration 不传新字段时保持兼容。
 
 当前 DESIGN.md 仍描述当前已实现代码。实现 PR 必须在同一变更中更新 DESIGN.md，把本提案批准的 V1 API、Submit Attempt state machine、Loading、RenderEvent feedback、LocalStorage restore/save 和 failure semantics 合并为新的 V1 normative contract。
@@ -958,45 +968,46 @@ LocalStorage restore 不绕过 Runtime validation，也不直接成为 canonical
 23. 用户在非 Loading 状态取消时 control 失效，后续 control 调用符合 stale no-op；
 24. sendValidateError() 使用现有 Render Event path；
 25. unknown field / duplicate field / invalid errorMsg / oversize payload 被拒绝；sendValidateError([]) 是合法 no-op，不修改当前展示错误且不产生 Render Event；
-26. Browser 正确显示 transient external errors；field edit 时清空该 field 当前展示错误，Submit Attempt 开始本身不清错误；
-27. 同一 field 不按 Runtime / Subsystem 来源设固定优先级；只有 Browser 实际收到的新 field RenderData 或 validate-error Render Event 才算新的错误更新；
-28. Browser 收到带 error 的新 field RenderData 时，该 error 覆盖当前展示错误；收到不带 error 的新 field RenderData 时，清除当前展示错误；
-29. Browser 收到 validate-error Render Event 时，对应 field 的 business error 覆盖当前展示错误；
-30. field 本地 change 时立即清空该 field 当前展示错误，再发出普通 complete change snapshot；
-31. field change 后即使 Runtime 内部重新执行 validation，只要 Browser 没有收到新的该 field RenderData，就不得据此推测或恢复任何错误；
-32. field change 后如果 Runtime 实际下发新的 field RenderData，Browser 按该 RenderData 的 error presence 重新设置或保持清空；
-33. 已被 field change 清除或被后续 presentation input 覆盖的旧 Runtime / business error 不得自动恢复；
-34. 不引入 validationRevision / errorRevision；错误事件顺序完全由 Browser 实际接收顺序定义；
-35. Renderer reload 不 replay transient validation Render Event；reload 后展示由当前 retained RenderData 决定；
-36. root RenderData exact shape 要求 cancelable、fieldCount、restorePending，title/description optional；fieldCount == schema.fields.length 且范围 0..128；
-37. field RenderData base exact shape 要求 restoreAllowed boolean，localstorageKey optional；没有 localstorageKey 时 restoreAllowed 必须 false；
-38. restoreAllowed=true 当且仅当 field 有 localstorageKey 且 initialValue 没有 own field key；显式 "" / 0 / false 也会禁止 restore；
-39. restorePending 初始值等于是否存在任一 restoreAllowed field，并且 Session 内只能 true → false；
-40. restorePending=false 的 Presentation 不读取 localStorage、不执行 restore barrier；
-41. restorePending=true 时，root 等待 exactly fieldCount 个 field 首次 valid RenderData 后才执行 restore attempt，barrier 期间禁止用户输入/提交；
-42. restore candidate 在内存中完成 type/option/size preflight 后才写入 controls；
-43. oversized restored candidate 不应用任何 localStorage substitution；若原 RenderData-derived fallback snapshot 可编码且不超限，则用 fallback 发 restore；
-44. restored candidate 与 fallback snapshot 都超限时，Browser 不发 restore、解除本地 barrier并保持可用，restorePending 保持 true；否则每次 restore attempt 发一个 private "restore" complete snapshot且不等待 ACK；
-45. restore event payload 与 change/submit 使用相同 complete values grammar 和 131,072-byte limit；
-46. Runtime 只在 restorePending=true 时接受合法 restore；pending=false 的 restore 被忽略；
-47. 合法 restore candidate == canonical 时只 consume restorePending，不运行 validateOnChange、不新增 validation error；
-48. 合法 restore candidate != canonical 时走 built-in + validateOnChange，并与 consume restorePending 一起更新 current Session；
-49. malformed/oversize restore 被忽略且 restorePending 保持 true，zero canonical/error mutation；
-50. restorePending true→false 且表单仍 active 时，即使 field data 未变化也必须投影新的 root RenderData；直接 terminal close 时无需额外 root update；
-51. restorePending=true 时任意合法 ordinary change 或 submit 都会先 consume restorePending，再按原语义处理，从而防止 Renderer 重建后重新覆盖已接受用户状态；
-52. restore event 丢失不会锁死 UI；在 Runtime 尚未消费 restorePending 前新 Presentation 可以重试，一旦 pending=false 永不再 restore；
-53. Renderer/WebComponent 重建后 restorePending=false 时不会重新从 localStorage 覆盖 Runtime 当前 canonical state；
-54. malformed JSON、类型错误、失效 select option、storage API throw 不影响表单打开；
-55. 类型正确但违反 field validation rule 的 restored value 可进入 candidate，并由 Runtime 在 candidate 发生变化时显示 validation error；
-56. 同一表单内重复 localstorageKey 被拒绝；跨表单相同 key 按 origin 共享；
-57. string ""、number 0、boolean false、select value 与 number/select unset null round-trip 正确；
-58. oversized submit snapshot 不写 localStorage，也不发 submit event；
-59. submit attempt 在 submit event 前 best-effort 更新所有配置的 localStorage fields；
-60. failed async validation 后 localStorage 仍保留最近一次 submit-attempt draft；
-61. 单个 storage key 读写失败不阻止其他字段或表单正常工作；
-62. real Chromium qualification 覆盖 loading、async failure、async success、cancelability、Render Event error、Session-level restore、Renderer rebuild 和 localStorage reopen round-trip；
-63. 当前 Schema Form tests 和 repository affected CI 全部通过；
-64. 实现 PR 同步更新 DESIGN.md，且不修改 Framework Contract。
+26. validate-error 是 partial field update：只覆盖 payload 中列出的 fields，未列出 fields 的 current displayed error 保持不变；
+27. Browser 正确显示 transient external errors；field edit 时清空该 field 当前展示错误，Submit Attempt 开始本身不清错误；
+28. 同一 field 不按 Runtime / Subsystem 来源设固定优先级；只有 Browser 实际收到的新 field RenderData 或 validate-error Render Event 才算新的错误更新；
+29. Browser 收到带 error 的新 field RenderData 时，该 error 覆盖当前展示错误；收到不带 error 的新 field RenderData 时，清除当前展示错误；
+30. Browser 收到 validate-error Render Event 时，对应 field 的 business error 覆盖当前展示错误；
+31. field 本地 change 时立即清空该 field 当前展示错误，再发出普通 complete change snapshot；
+32. field change 后即使 Runtime 内部重新执行 validation，只要 Browser 没有收到新的该 field RenderData，就不得据此推测或恢复任何错误；
+33. field change 后如果 Runtime 实际下发新的 field RenderData，Browser 按该 RenderData 的 error presence 重新设置或保持清空；
+34. 已被 field change 清除或被后续 presentation input 覆盖的旧 Runtime / business error 不得自动恢复；
+35. 不引入 validationRevision / errorRevision；错误事件顺序完全由 Browser 实际接收顺序定义；
+36. Renderer reload 不 replay transient validation Render Event；reload 后展示由当前 retained RenderData 决定；
+37. root RenderData exact shape 要求 cancelable、fieldCount、restorePending，title/description optional；fieldCount == schema.fields.length 且范围 0..128；
+38. field RenderData base exact shape 要求 restoreAllowed boolean，localstorageKey optional；没有 localstorageKey 时 restoreAllowed 必须 false；
+39. restoreAllowed=true 当且仅当 field 有 localstorageKey 且 initialValue 没有 own field key；显式 "" / 0 / false 也会禁止 restore；
+40. restorePending 初始值等于是否存在任一 restoreAllowed field，并且 Session 内只能 true → false；
+41. restorePending=false 的 Presentation 不读取 localStorage、不执行 restore barrier；
+42. restorePending=true 时，root 等待 exactly fieldCount 个 field 首次 valid RenderData 后才执行 restore attempt，barrier 期间禁止用户输入/提交；
+43. restore candidate 在内存中完成 type/option/size preflight 后才写入 controls；
+44. oversized restored candidate 不应用任何 localStorage substitution；若原 RenderData-derived fallback snapshot 可编码且不超限，则用 fallback 发 restore；
+45. restored candidate 与 fallback snapshot 都超限时，Browser 不发 restore、解除本地 barrier并保持可用，restorePending 保持 true；否则每次 restore attempt 发一个 private "restore" complete snapshot且不等待 ACK；
+46. restore event payload 与 change/submit 使用相同 complete values grammar 和 131,072-byte limit；
+47. Runtime 只在 restorePending=true 时接受合法 restore；pending=false 的 restore 被忽略；
+48. 合法 restore candidate == canonical 时只 consume restorePending，不运行 validateOnChange、不新增 validation error；
+49. 合法 restore candidate != canonical 时走 built-in + validateOnChange，并与 consume restorePending 一起更新 current Session；
+50. malformed/oversize restore 被忽略且 restorePending 保持 true，zero canonical/error mutation；
+51. restorePending true→false 且表单仍 active 时，即使 field data 未变化也必须投影新的 root RenderData；直接 terminal close 时无需额外 root update；
+52. restorePending=true 时任意合法 ordinary change 或 submit 都会先 consume restorePending，再按原语义处理，从而防止 Renderer 重建后重新覆盖已接受用户状态；
+53. restore event 丢失不会锁死 UI；在 Runtime 尚未消费 restorePending 前新 Presentation 可以重试，一旦 pending=false 永不再 restore；
+54. Renderer/WebComponent 重建后 restorePending=false 时不会重新从 localStorage 覆盖 Runtime 当前 canonical state；
+55. malformed JSON、类型错误、失效 select option、storage API throw 不影响表单打开；
+56. 类型正确但违反 field validation rule 的 restored value 可进入 candidate，并由 Runtime 在 candidate 发生变化时显示 validation error；
+57. 同一表单内重复 localstorageKey 被拒绝；跨表单相同 key 按 origin 共享；
+58. string ""、number 0、boolean false、select value 与 number/select unset null round-trip 正确；
+59. oversized submit snapshot 不写 localStorage，也不发 submit event；
+60. submit attempt 在 submit event 前 best-effort 更新所有配置的 localStorage fields；
+61. failed async validation 后 localStorage 仍保留最近一次 submit-attempt draft；
+62. 单个 storage key 读写失败不阻止其他字段或表单正常工作；
+63. real Chromium qualification 覆盖 loading、async failure、async success、cancelability、Render Event error、Session-level restore、Renderer rebuild 和 localStorage reopen round-trip；
+64. 当前 Schema Form tests 和 repository affected CI 全部通过；
+65. 实现 PR 同步更新 DESIGN.md，且不修改 Framework Contract。
 
 ## 17. 实现建议顺序
 
