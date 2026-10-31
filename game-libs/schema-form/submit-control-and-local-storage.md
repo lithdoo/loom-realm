@@ -475,44 +475,47 @@ sendValidateError(errors) 负责：
 
 如果未来业务要求 async validation error 在 Renderer reload 后继续存在，应另行设计 retained error path，而不是改变 Render Event 的 no-history 语义。
 
-### 9.3 Browser clearing rule
+### 9.3 Error replacement and clearing rule
 
-Browser 收到 validate-error 后按 field 显示消息。
+Schema Form 不按错误来源设置固定优先级。每个 field 在 Browser 中只有一个 **current displayed error**，按实际发生顺序更新：
 
-对应 field 下一次发生本地 edit 时：
+    later error update
+    → replaces earlier displayed error
 
-    clear that field's transient external error
-    → emit ordinary change snapshot
+错误来源可以是：
 
-新一轮 Submit Attempt 被接受时，Browser 清除上一轮全部 transient external errors，避免旧业务错误污染新 attempt。
+- Runtime retained validation error（built-in / validateOnChange / validateOnSubmit）；
+- Subsystem 通过 sendValidateError() 发送的 transient business error。
 
-### 9.4 Error display precedence
+两者没有永久优先级；**后发生的错误更新覆盖前一个当前展示错误**。
 
-同一个 field 可能同时存在：
+field 发生本地 change 时：
 
-- Runtime retained validation error（来自 required、范围规则或 validateOnChange/Submit）；
-- Browser transient business error（来自 sendValidateError()）。
+    local field edit
+    → immediately clear current displayed error
+    → emit ordinary complete "change" snapshot
+    → Runtime may run built-in validation / validateOnChange
+    → if Runtime later returns a new error, display that new error
+    → if no new error arrives, field remains without displayed error
 
-显示优先级固定为：
+因此，field change 不会“清除业务错误后自动回退到之前保存的 Runtime 错误”。之前已经展示过的错误在该次用户编辑发生时全部视为 stale presentation feedback；只有 change 之后真正新产生 / 新下发的错误才重新显示。
 
-    transient Subsystem business error
-    → preferred for display
-
-    Runtime retained validation error
-    → fallback when no transient business error exists
-
-也就是说，Subsystem 通过 sendValidateError() 发送的当前业务错误优先显示。这样 caller 可以明确覆盖当前字段提示，例如服务器返回“名称已存在”时，不会被较泛化的 Runtime 提示遮住。
+### 9.4 Event-order semantics
 
 精确规则：
 
-- 收到某 field 的 transient business error 后，该 field 优先显示 business error；
-- Runtime retained error 仍然保留，不因 business error 到达而被删除或改写；
-- 用户下一次编辑该 field 时，先清除该 field 的 transient business error；若 Runtime retained error 仍存在，UI 自动回退显示 Runtime error；
-- sendValidateError([]) 清除所有 transient business errors；清除后每个 field 回退显示当前 retained Runtime error（若存在）；
-- 新一轮 Submit Attempt 被接受时，先清除上一轮全部 transient business errors；之后显示结果重新由当前 retained Runtime error / 新业务错误决定；
-- Renderer reload 不 replay transient business error，因此 reload 后只显示 retained Runtime error；
-- business error 只影响 Presentation error selection，不修改 canonical value、Runtime errors 或 validation result。
+- Runtime 新下发 field error → 覆盖该 field 当前展示错误；
+- sendValidateError() 新到达 field error → 覆盖该 field 当前展示错误；
+- 同一 field 多次收到错误更新 → 最后到达的有效错误覆盖之前的；
+- field 本地 change → 立即清空该 field 当前展示错误，然后发出普通 change snapshot；
+- 如果该 change 触发 built-in validation / validateOnChange，并且 Runtime 随后下发新 error，则显示该新 error；
+- 如果 Runtime 对该 change 返回“无错误”的新 RenderData，则保持无错误；
+- sendValidateError([]) 清空所有当前 transient business-error delivery 所产生的展示错误，但不得恢复任何更早、已经被后续事件覆盖或 field change 作废的旧错误；
+- 新一轮 Submit Attempt 被接受时，清除上一轮仍展示的 transient business errors；之后只显示本轮新发生的 error updates；
+- Renderer reload 不 replay transient business error；reload 后展示由当前 retained RenderData 决定；
+- error replacement 只影响 Presentation 当前展示，不改变 canonical value，也不重写 Runtime validation result/history。
 
+实现上不要求 Browser 同时长期保存“Runtime error slot + business error slot”再做优先级选择；更简单的模型是维护一个 current displayed error，并让 field change / 后续 error delivery 按事件顺序更新它。
 
 ## 10. localstorageKey 语义
 
@@ -840,26 +843,29 @@ LocalStorage restore 不绕过 Runtime validation；它只是把候选草稿通�
 23. sendValidateError() 使用现有 Render Event path；
 24. unknown field / duplicate field / invalid errorMsg / oversize payload 被拒绝；空数组清除所有 transient business errors；
 25. Browser 正确显示 transient external errors，并在 field edit / next accepted attempt 清理；
-26. Runtime retained error 与 transient business error 同时存在时，优先显示 Subsystem transient business error；清除 transient error 后自动回退显示仍存在的 Runtime retained error；
-27. field edit 只清除该 field 的 transient business error；如果对应 Runtime retained error 仍存在，UI 立即回退显示 Runtime error；
-28. sendValidateError([]) 清除全部 transient business errors，并正确回退到各字段当前 retained Runtime error；
-29. 新一轮 Submit Attempt 接受时清除上一轮全部 transient business errors；
-30. Renderer reload 不 replay transient validation Render Event，reload 后只展示 retained Runtime error；
-31. root fieldCount 与每个 Field ready handshake 正确完成 one-shot restore barrier；
-32. restore barrier 完成前不允许用户输入或提交；
-33. explicit initialValue 高于 localStorage，其他字段仍可独立恢复；
-34. valid localStorage draft 可恢复并通过一个完整 ordinary change snapshot 回流 Runtime canonical state；
-35. malformed JSON、类型错误、失效 select option、storage API throw 不影响表单打开；
-36. 类型正确但违反 field validation rule 的草稿仍恢复，并由 Runtime 显示验证错误；
-37. 同一表单内重复 localstorageKey 被拒绝；跨表单相同 key 按 origin 共享；
-38. string ""、number 0、boolean false、select value 与 number/select unset null round-trip 正确；
-39. oversized submit snapshot 不写 localStorage，也不发 submit event；
-40. submit attempt 在 submit event 前 best-effort 更新所有配置的 localStorage fields；
-41. failed async validation 后 localStorage 仍保留最近一次 submit-attempt draft；
-42. 单个 storage key 读写失败不阻止其他字段或表单正常工作；
-43. real Chromium qualification 覆盖 loading、async failure、async success、cancelability、Render Event error、restore barrier 和 localStorage reopen round-trip；
-44. 当前 Schema Form tests 和 repository affected CI 全部通过；
-45. 实现 PR 同步更新 DESIGN.md，且不修改 Framework Contract。
+26. 同一 field 不按 Runtime / Subsystem 来源设固定优先级；后到达的有效 error update 覆盖先前当前展示错误；
+27. field 本地 change 时立即清空该 field 当前展示错误，再发出普通 complete change snapshot；
+28. field change 后如果 built-in validation / validateOnChange 产生并由 Runtime 下发新错误，Browser 显示该新错误；
+29. field change 后如果 Runtime 返回无错误状态且没有新的 business error 到达，该 field 保持无错误展示；
+30. 已被 field change 清除或被后续错误覆盖的旧 Runtime / business error 不得自动恢复；
+31. sendValidateError([]) 清除当前 transient business-error delivery 所产生的展示错误，不恢复任何已过时旧错误；
+32. 新一轮 Submit Attempt 接受时清除上一轮仍展示的 transient business errors，之后按本轮事件顺序重新建立展示错误；
+33. Renderer reload 不 replay transient validation Render Event；reload 后展示由当前 retained RenderData 决定；
+34. root fieldCount 与每个 Field ready handshake 正确完成 one-shot restore barrier；
+35. restore barrier 完成前不允许用户输入或提交；
+36. explicit initialValue 高于 localStorage，其他字段仍可独立恢复；
+37. valid localStorage draft 可恢复并通过一个完整 ordinary change snapshot 回流 Runtime canonical state；
+38. malformed JSON、类型错误、失效 select option、storage API throw 不影响表单打开；
+39. 类型正确但违反 field validation rule 的草稿仍恢复，并由 Runtime 显示验证错误；
+40. 同一表单内重复 localstorageKey 被拒绝；跨表单相同 key 按 origin 共享；
+41. string ""、number 0、boolean false、select value 与 number/select unset null round-trip 正确；
+42. oversized submit snapshot 不写 localStorage，也不发 submit event；
+43. submit attempt 在 submit event 前 best-effort 更新所有配置的 localStorage fields；
+44. failed async validation 后 localStorage 仍保留最近一次 submit-attempt draft；
+45. 单个 storage key 读写失败不阻止其他字段或表单正常工作；
+46. real Chromium qualification 覆盖 loading、async failure、async success、cancelability、Render Event error、restore barrier 和 localStorage reopen round-trip；
+47. 当前 Schema Form tests 和 repository affected CI 全部通过；
+48. 实现 PR 同步更新 DESIGN.md，且不修改 Framework Contract。
 
 
 ## 17. 实现建议顺序
