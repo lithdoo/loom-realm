@@ -48,15 +48,17 @@ async function collectTestFiles(relativeDir) {
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const child = `${relativeDir}/${entry.name}`;
     if (entry.isDirectory()) files.push(...await collectTestFiles(child));
-    else if (entry.isFile() && /\\.test\\.mjs$/.test(entry.name)) files.push(child);
+    else if (entry.isFile() && /\.test\.mjs$/.test(entry.name)) files.push(child);
   }
   return files;
 }
 
 async function runTestTrees(...relativeDirs) {
-  const files = (await Promise.all(relativeDirs.map(collectTestFiles))).flat();
-  if (files.length === 0) throw new Error(`no test files found under: ${relativeDirs.join(", ")}`);
-  node("--test", ...files);
+  for (const relativeDir of relativeDirs) {
+    const files = await collectTestFiles(relativeDir);
+    if (files.length === 0) throw new Error(`no test files found under: ${relativeDir}`);
+    node("--test", ...files);
+  }
 }
 
 const REGRESSION_TEST_DIRS = [
