@@ -1,438 +1,539 @@
-# game-controls-input CustomEvent input source proposal
+# game-controls-input 组件内 CustomEvent 输入源提案
 
-> Status: **Proposed / Design / Not Implemented**
-> Location: `game-libs/game-common-controls/game-controls-input-custom-source.md`
-> Package: `@loomrealm-game/common-controls`
-> Related implementation: [Unified Controls Input Web Component](./game-controls-input.md), [Controls Input v1 qualification](../../doc/30-implementation/game-controls-input-qualification.md)
-> Related contract: [Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)
+> 状态：**Proposed / Design / Not Implemented**
+> 位置：`game-libs/game-common-controls/game-controls-input-custom-source.md`
+> 所属包：`@loomrealm-game/common-controls`
+> 相邻实现：[统一操控输入 Web Component](./game-controls-input.md)
+> 现行契约：[Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)
+> 现行资格证据：[Unified Controls Input Qualification](../../doc/30-implementation/game-controls-input-qualification.md)
 
-This proposal adds a development-only synthetic input source to the existing `<game-controls-input>` component. The component listens for a DOM `CustomEvent` on its own element, converts the event into the same internal keyboard/gamepad input model used by physical devices, and lets the existing Controls Machine produce the existing `controls.state` and `controls.event` publications.
+本文提议给现有 `<game-controls-input>` 增加第三种、**仅存在于组件内部的 Controls 输入源**：测试驱动通过 DOM `CustomEvent` 把一份完整的 14 键按下快照交给组件，组件把它与现有 Keyboard / Gamepad 状态一起送入同一个 Controls Machine，最后仍然只产生现有的 `controls.state` / `controls.event`。
 
-The CustomEvent is an implementation detail of the browser component. It is **not** a Subsystem event, Session Event, Presentation channel, or new Controls ABI. No Subsystem process receives the CustomEvent or needs to know whether an input came from a physical device or the test driver.
+这不是新的 Subsystem 输入协议。CustomEvent 不进入 Session Events，不经过 `WebPresentationContext.emitCustomEvent`，不增加 Presentation channel，也不要求 Map、Dialogue、Battle 或其他 Subsystem 知道输入来自测试驱动。
 
-This document defines a proposed design only. It does not claim that the listener, reducer changes, build flag, or tests already exist.
+本文是待落地设计；不宣称监听器、状态机入口、测试或设备自动化已经实现。
 
-## 1. Background and motivation
+## 1. 冻结决策
 
-`game-controls-input` currently combines two physical sources:
+后续实现 Agent 不需要重新做架构选择，按下面六项直接落地：
 
-- Keyboard: trusted DOM `keydown` / `keyup` events, subject to the component's existing focus-capture rules.
-- Gamepad: `navigator.getGamepads()` polling, subject to the existing canonical Gamepad support gate.
+1. **只增加一个第三输入源**，名称为本文中的 Custom / Automation source；不伪装成 Keyboard，也不伪装成浏览器 Gamepad。
+2. **组件内只有一份 Custom held 状态**；不支持 `sourceId`、多虚拟设备、多玩家或多个并发注入源。
+3. DOM 入口固定为元素自身的 `loomrealm:debug-input` CustomEvent，detail 固定为 `{ version: 1, down: ControlsButtonV1[] }`。
+4. Custom source 与 Keyboard、Gamepad 按 OR 合并；它的显式快照变化按正常用户边沿处理，产生现有 State-before-Event publication。
+5. 不增加构建 profile、第二份 browser bundle、运行时 debug flag、HTML attribute 或 Subsystem 配置。监听器随 `game-controls-input` 一起存在，但只有主动向该元素 dispatch 精确事件才生效。
+6. 不改冻结的 Controls v1 ABI、两条 Controls channel、14 键集合、raw device channel、PokeMan consumer 或 Framework。
 
-Both sources are normalized to the same 14 `ControlsButtonV1` buttons and enter one private Controls Machine. The component publishes only:
+如果后续需要多注入源、模拟 raw Gamepad axes、生产环境移除测试钩子或安全隔离，另开设计；第一版不预留半成品机制。
 
-- `controls.state` — the current effective set of held buttons.
-- `controls.event` — normalized down/up edges.
+## 2. 背景
 
-A real Android handheld can expose an additional automation problem before this component receives any input: after navigation or reload, Chrome may return an empty `navigator.getGamepads()` list until a physical controller button wakes the device. ADB and CDP can inspect and control the page, but they do not manufacture a trusted physical Gamepad wake-up.
-
-The proposed CustomEvent source allows CDP, Playwright, or another page-level test driver to exercise the **LoomRealm controls pipeline** without first waking Chrome's physical Gamepad API.
-
-It does not replace a small number of real-hardware tests for Android input drivers, Chrome Gamepad enumeration, device mapping, or physical wake-up behavior.
-
-### Goals
-
-- Allow a test driver to inject normalized button state through the existing `game-controls-input` element.
-- Keep the injection listener and all source bookkeeping inside the component/browser input implementation.
-- Feed injected input into the same Controls Machine as physical Keyboard and Gamepad input.
-- Preserve the existing keyboard/gamepad OR semantics, edge generation, State-before-Event ordering, and Top Active Frame publication.
-- Keep the current `controls.state` / `controls.event` channels and payloads unchanged.
-- Make the feature available in local, staging, and qualification builds while excluding it from production builds.
-
-### Non-goals
-
-- Do not create a virtual OS device, Android input event, trusted DOM KeyboardEvent, or browser Gamepad object.
-- Do not wake, populate, or modify `navigator.getGamepads()`.
-- Do not emulate raw Keyboard codes, Gamepad IDs, axes, analog pressure, or vendor-specific button layouts.
-- Do not publish the CustomEvent to Session Events or forward it to a Subsystem.
-- Do not add a debug input channel, public Subsystem API, Framework service, or new Controls ABI.
-- Do not change the existing physical Keyboard, Gamepad, Pointer, or Controls v1 contract semantics.
-- Do not modify the frozen `game-controls-input.md` normative specification as part of this proposal.
-
-## 2. Proposed architecture
-
-The new source is a third **private component input source**, not a third public input protocol.
+当前统一控制链路是：
 
 ```text
-Physical Keyboard ──> Keyboard adapter ──────┐
-                                             │
-Physical Gamepad ───> Gamepad adapter ───────┤
-                                             ▼
-CDP / Playwright                            Controls Machine
-       │                                     ▲
-       ▼                                     │
-CustomEvent dispatched                      │
-on <game-controls-input>                    │
-       │                                     │
-       ▼                                     │
-Component-local CustomEvent adapter ────────┘
-                                             │
-                                             ▼
-                                  Existing publication adapter
-                                             │
-                                  ┌──────────┴──────────┐
-                                  ▼                     ▼
-                           controls.state       controls.event
-                                  │                     │
-                                  └──────────┬──────────┘
-                                             ▼
-                                       Top Active Frame
-                                             │
-                                             ▼
-                                         Subsystem
+Physical Keyboard
+      │
+      ▼
+Keyboard adapter ───┐
+                    │
+Physical Gamepad    │
+      │             │
+      ▼             │
+Gamepad adapter ────┼──> Controls Machine
+                    │          │
+                    │          ▼
+                    │   controls.state/event
+                    │          │
+                    │          ▼
+                    │    Top Active Frame
+                    │          │
+                    │          ▼
+                    │      Subsystem
 ```
 
-The CustomEvent listener belongs to the `game-controls-input` element instance. It must not be installed on `window`, `document`, or a global event bus. The element-local target makes it possible for CDP to select the component explicitly and avoids creating a page-wide input API.
+Android 掌机存在一个自动化空洞：页面 navigate / reload 后，Chrome 可能在真实手柄发生一次物理按键前不把设备暴露给 `navigator.getGamepads()`。ADB / CDP 可以控制页面，但不能替代该硬件唤醒。
 
-The event is consumed synchronously by the component-local adapter. It is never passed to `WebPresentationContext.emitCustomEvent`. Only the Controls Machine's ordinary publications use the existing Frame-targeted Presentation path.
+本提案只补 LoomRealm 组件入口：
 
-## 3. DOM event contract
+```text
+CDP / Playwright
+      │
+      ▼
+CustomEvent on <game-controls-input>
+      │
+      ▼
+Custom adapter ─────┐
+                    │
+Keyboard adapter ───┼──> same Controls Machine
+                    │
+Gamepad adapter ────┘
+```
 
-### 3.1 Event name and target
+因此它可以自动验证“组件 → Controls Machine → Top Active Frame → Map / Dialogue”等 LoomRealm 链路，但**不能**证明 Android input driver、Chrome Gamepad enumeration、AYANEO mapping 或实体按键本身正确；这些仍由独立的真实硬件 smoke test 负责。
 
-Proposed event name:
+## 3. DOM 输入契约
+
+### 3.1 事件名与目标
+
+事件名固定：
 
 `loomrealm:debug-input`
 
-The test driver dispatches the event directly on the active component element:
+事件必须直接 dispatch 到当前活动的 `game-controls-input` 元素：
 
 ```js
 const controls = document.querySelector("game-controls-input");
+if (!controls) throw new Error("game-controls-input is not mounted");
 
 controls.dispatchEvent(new CustomEvent("loomrealm:debug-input", {
-  detail: {
-    version: 1,
-    sourceId: "cdp-gamepad",
-    device: "gamepad",
-    down: ["up"]
-  },
+  detail: { version: 1, down: ["up"] },
   bubbles: false,
   composed: false,
   cancelable: false
 }));
 ```
 
-The event is intentionally non-bubbling and non-composed. The component listens on itself; no ancestor, sibling component, Subsystem host, or other process needs to observe it.
+监听器只安装在该元素实例上，不安装到 `window`、`document` 或全局 event bus。收到匹配事件后，组件监听器先调用 `event.stopPropagation()`，避免该测试事件继续向祖先传播；组件不会把原始 CustomEvent 转发到任何 LoomRealm publication。
 
-If multiple `game-controls-input` instances exist transiently, the existing duplicate-instance rule remains authoritative: only the active instance accepts input. Dispatching to a disabled duplicate must have no effect.
+现有 duplicate ownership 继续生效：只有成功取得 `"controls"` ownership 的 `game-controls-input` 会启动 source，也只有它会安装监听器。带 `data-input-disabled="duplicate"` 的重复实例没有监听器。
 
-### 3.2 Detail shape
+### 3.2 detail 形状
 
-Proposed closed v1 detail:
+v1 detail 是封闭形状：
 
 ```ts
 interface DebugControlsInputDetailV1 {
   readonly version: 1;
-  readonly sourceId: string;
-  readonly device: "keyboard" | "gamepad";
   readonly down: readonly ControlsButtonV1[];
 }
 ```
 
-Field semantics:
+校验规则固定：
 
-| Field | Meaning |
-| --- | --- |
-| `version` | Detail schema version. The initial supported value is `1`. |
-| `sourceId` | Stable identity for one injected source, e.g. `cdp-keyboard` or `cdp-gamepad`. |
-| `device` | Which existing input bucket the source emulates: `keyboard` or `gamepad`. |
-| `down` | Complete current held-button snapshot for this source. An empty array releases/removes this source. |
+- `detail` 必须是非 null、非 Array 的 object。
+- 自有 enumerable key 必须恰好为 `version`、`down`，不接受额外字段。
+- `version === 1`。
+- `down` 必须是 Array。
+- 每个成员必须属于现有 `CONTROLS_BUTTONS_V1`。
+- 不允许重复按钮。
+- 最多 14 个按钮。
+- 接受后按 `CONTROLS_BUTTONS_V1` 的规范顺序 canonicalize，再交给 Controls Machine。
+- 非法 detail **静默忽略**：不修改状态、不发布 State/Event，也不抛出依赖 DOM listener 异常传播的错误。
 
-Validation requirements:
+不加入 ACK。自动化测试通过后续可观察游戏状态或现有 Controls publication 判断动作是否生效；不要发明第二条回执协议。
 
-- `detail` must be a plain object with exactly the documented fields.
-- `version` must equal `1`.
-- `sourceId` must be a non-empty, bounded identifier (proposed maximum: 64 ASCII characters, matching `[A-Za-z0-9._:-]+`).
-- `device` must be exactly `keyboard` or `gamepad`.
-- `down` must be an array containing only members of `CONTROLS_BUTTONS_V1`, with no duplicates and no more than 14 entries.
-- The component canonicalizes the accepted button list to `CONTROLS_BUTTONS_V1` order before applying it.
-- A `sourceId` is bound to one `device` while active. Changing its device without first releasing it is rejected.
-- The component bounds the number of simultaneous injected sources (proposed maximum: 16).
-- Invalid details are rejected atomically. They must not partially change held state or emit a partial publication.
+### 3.3 快照语义
 
-The detail deliberately contains no raw `KeyboardEvent.code`, Gamepad index, browser Gamepad ID, axis, pressure, vendor identity, Frame ID, Activation ID, or destination channel.
-
-### 3.3 Snapshot semantics
-
-Each event carries the complete current state of one source, not a single down/up edge. The component compares the new snapshot with that source's previous snapshot and derives the edges.
-
-Examples:
+每个事件携带 **Custom source 当前完整 held 快照**，不是一条 `keydown` / `keyup` 命令：
 
 ```js
-const controls = document.querySelector("game-controls-input");
-
-function sendGamepadState(down) {
-  controls.dispatchEvent(new CustomEvent("loomrealm:debug-input", {
-    detail: {
-      version: 1,
-      sourceId: "cdp-gamepad",
-      device: "gamepad",
-      down
-    },
-    bubbles: false,
-    composed: false
-  }));
-}
-
-sendGamepadState([]);                 // neutral
-sendGamepadState(["up"]);             // press Up
-sendGamepadState(["up", "south"]);    // hold Up and press South
-sendGamepadState(["south"]);          // release Up, keep South held
-sendGamepadState([]);                 // release all buttons
+send([]);                  // neutral
+send(["up"]);              // Custom: press up
+send(["up", "south"]);     // keep up, press south
+send(["south"]);           // release up, keep south
+send([]);                  // release all
 ```
 
-Rules:
+固定规则：
 
-- The first non-empty snapshot for a previously unknown `sourceId` starts from neutral and creates the corresponding down edges.
-- An empty snapshot releases and removes that source. Sending an empty snapshot for an unknown source is a no-op.
-- Repeating an identical snapshot is idempotent: it does not create another down edge or a keyboard repeat event.
-- A source may be registered again after it has been removed with an empty snapshot.
-- The automation helper must send an empty snapshot in its cleanup/finally path. Component teardown also clears its local injected-source table.
-- The initial proposal does not synthesize DOM auto-repeat. All injected edge events use `repeat: false`. If deterministic repeat testing becomes necessary, it should be specified as a separate, explicit extension rather than inferred from repeated snapshots.
+- Custom source 初始永远是空集合。
+- 第一份非空快照从 neutral 计算正常 down edge。
+- 相同快照重复发送是 no-op。
+- 空快照释放 Custom source 当前全部按钮，并产生真正导致 effective 变化的 up edge。
+- 不模拟 Keyboard DOM repeat；Custom source 产生的 event 始终 `repeat: false`。
+- 不维护 source identity、设备 id、轴值、压力或 vendor mapping。
 
-Snapshot input is preferred over independent `keydown` / `keyup` commands because each accepted message repairs the complete state of that source. It reduces the chance that an interrupted test sequence leaves one source with a partially updated button set.
+完整快照比独立 down/up 指令更适合自动化：每次接受都能修复 Custom source 的完整状态，测试 finally 只需发送一次 `[]` 即可回到 neutral。
 
-## 4. Keyboard and Gamepad source semantics
+## 4. Controls Machine 的精确改造
 
-The `device` field determines which existing input bucket receives the injected snapshot. It does not create a new public input category.
+### 4.1 私有接口
 
-### 4.1 `device: "keyboard"`
+在现有内部 `ControlsMachine` 增加一个方法；它仍然不从 package root 导出：
 
-An injected Keyboard source follows the existing `keyboardCapture` availability rules:
+```ts
+applyCustomState(
+  pressed: readonly ControlsButtonV1[],
+): ControlsPublication;
+```
 
-- It is accepted only while the component's Keyboard capture is available.
-- It is blocked by the same browser-interactive focus targets as physical Keyboard input.
-- When Keyboard capture transitions from available to unavailable, all injected Keyboard sources are cleared.
-- Clearing due to focus/capture reconciliation updates `controls.state` as required by the existing machine, but does not synthesize `controls.event` up edges.
-- Regaining Keyboard capture does not restore the old injected state. The test driver must dispatch a fresh snapshot to press again.
-- Injected Keyboard input does not create a DOM `KeyboardEvent` and is not subject to `event.isTrusted`. That check remains mandatory for the physical DOM Keyboard adapter; it must not be weakened.
+内部新增且只新增一份：
 
-This makes a test that targets Keyboard semantics behave like the component's current Keyboard path without fabricating trusted browser events.
+```ts
+let custom = new Set<ControlsButtonV1>();
+```
 
-### 4.2 `device: "gamepad"`
+### 4.2 effective 状态
 
-An injected Gamepad source follows the existing Gamepad availability rules:
-
-- It is accepted while the component's Window is usable.
-- It is not blocked merely because focus is inside an HTML input, button, or other Keyboard-capture-blocked element, matching physical Gamepad behavior.
-- When the Window becomes unusable, all injected sources are cleared as part of the existing Window reconciliation.
-- When the Window becomes usable again, previous injected state is not restored. A fresh CustomEvent snapshot is required.
-- It represents only the 14 normalized digital buttons. It does not create a browser Gamepad object and does not affect physical Gamepad enumeration or polling.
-
-### 4.3 Unified effective state
-
-The Controls Machine must calculate one effective button set across all physical and injected sources:
+现有 effective 计算扩成：
 
 ```text
-effectiveDown =
-    physicalKeyboardDown
- OR injectedKeyboardDown
- OR physicalGamepadDown
- OR injectedGamepadDown
+effective(button)
+  = keyboard.has(button)
+ || anyPhysicalGamepadHas(button)
+ || custom.has(button)
 ```
 
-For each button, the effective value is true while **any** eligible source holds that button.
+保持现有规范顺序：
 
-Consequences:
+```ts
+CONTROLS_BUTTONS_V1.filter((button) => effective(button))
+```
 
-- Releasing an injected source cannot release a button that is still held by a physical Keyboard or Gamepad.
-- Releasing a physical source cannot release a button that is still held by an injected source.
-- Two injected sources holding the same button still produce one effective held button.
-- Different buttons from different sources combine into one canonical State.
-- Opposing directions remain independent; this proposal does not add directional cancellation.
+必须同步修正现有 Keyboard edge 判断：
 
-The implementation must not encode an injected source as a fabricated numeric Gamepad index or insert it into the browser's `navigator.getGamepads()` result. Keep injected-source identity separate from physical Gamepad identity and merge at the existing Controls Machine boundary.
+- `keydown` 时，如果 Gamepad **或 Custom** 已经让该 button effective=true，Keyboard 加入 held 不能再发第二个 down。
+- `keyup` 时，如果 Gamepad **或 Custom** 仍持有该 button，Keyboard 释放不能发 up。
 
-## 5. Publication semantics
+现有 Gamepad 多设备 OR 规则保持不变；Gamepad snapshot 更新时，`effectiveDown()` 自然包含 Custom held，所以物理 Gamepad 释放也不能错误释放仍由 Custom 持有的按键。
 
-The CustomEvent adapter feeds the existing private Controls Machine. It does not publish directly.
+### 4.3 applyCustomState
 
-For each accepted snapshot:
+行为固定为：
 
-1. Capture the previous effective button set.
-2. Replace that source's held-button snapshot.
-3. Recompute the effective set across physical Keyboard, physical Gamepads, and all injected sources.
-4. If the effective set changed, publish one complete `controls.state` snapshot first.
-5. Then publish one `controls.event` edge for each effective transition, in `CONTROLS_BUTTONS_V1` order.
+1. 如果 `windowUsable !== true`，返回现有 `NONE`，不保存该快照。
+2. 记录变更前的 effective button 集合。
+3. 用 canonicalized `pressed` 替换整份 `custom`。
+4. 计算变更后的 effective 集合。
+5. effective 集合变化时只发布一份完整 State。
+6. 对真正发生 false→true / true→false 的 effective transition，按 `CONTROLS_BUTTONS_V1` 顺序生成 down/up Event，全部 `repeat: false`。
+7. 没有 effective 变化则不发 State/Event。
 
-For a source snapshot that changes multiple buttons, State is published once, followed by the changed button edges in canonical order.
+例如：
 
-A CustomEvent state change that changes the effective value from false to true produces `{ action: "down", button, repeat: false }`. A transition from true to false produces `{ action: "up", button, repeat: false }`. If another physical or injected source still holds the button, no effective edge is produced.
+```text
+Custom up down
+  -> state [up]
+  -> event down up false
 
-The resulting publication is indistinguishable from an equivalent normalized physical button transition to the Subsystem consumer. It retains the existing:
+Physical Keyboard ArrowUp down
+  -> effective 已经是 up
+  -> no publication
 
-- `controls.state` and `controls.event` channel names.
-- Payloads defined by `Controls Input v1`.
-- State-before-Event ordering.
-- Top Active Frame routing.
-- Frame / Activation isolation and non-replay behavior.
-- Fresh State refresh and stale-state fallback.
+Custom []
+  -> Keyboard 仍持有 up
+  -> no publication
 
-No `controls.debug`, `keyboard.debug`, `gamepad.debug`, or other new channel is introduced.
+Keyboard ArrowUp up
+  -> state []
+  -> event up up false
+```
 
-## 6. Lifecycle and fail-safe behavior
+Custom snapshot 同时改变多个按钮时：
 
-The injected source must not outlive the component's active input lifecycle.
+```text
+custom [up, south]
+  -> custom [left, east]
 
-| Condition | Required behavior |
+先：
+  state [left, east]
+
+再按 CONTROLS_BUTTONS_V1 顺序：
+  up up false
+  down left false
+  up south false
+  down east false
+```
+
+Event 顺序只看现有 button canonical order，不按输入数组顺序。
+
+### 4.4 reconciliation / lifecycle
+
+Custom source 是第三个 Controls source，不属于 Keyboard capture。因此：
+
+| 转换 | Custom source |
 | --- | --- |
-| Window becomes unusable | Clear all injected Keyboard and Gamepad source state through the existing Window reconciliation; publish only the current State according to existing rules. |
-| Keyboard capture becomes unavailable | Clear injected Keyboard sources; keep eligible injected Gamepad sources; publish State only if effective state changes. |
-| Keyboard capture becomes available again | Do not restore cleared Keyboard source state. A new CustomEvent snapshot is required. |
-| Window becomes usable again | Do not restore any injected source state. A new CustomEvent snapshot is required. |
-| Component disconnects / stops | Remove its CustomEvent listener, cancel source timers, clear local injected-source state, and stop publishing, matching the existing component stop semantics. |
-| Duplicate component instance is disabled | It must not accept or publish injected input. |
-| Debug feature is disabled by build profile | No listener is installed and CustomEvent dispatch has no effect. |
+| `Keyboard capture available -> unavailable` | **不清除 Custom** |
+| `Keyboard capture unavailable -> available` | **不恢复、不修改 Custom** |
+| `Window usable -> unusable` | **清空 Custom**，与现有 Window reconciliation 一起只发布 State，不合成 up Event |
+| `Window unusable -> usable` | Custom 从 empty 开始，不恢复旧状态 |
+| component stop / disconnect | 停止 listener 后清空内存，不补 State/Event，沿用现有 stop 语义 |
 
-The initial proposal uses explicit neutral snapshots rather than a time-based lease. Test helpers must release each active `sourceId` in a `finally` block. A later watchdog/lease can be considered if device testing shows that CDP disconnections leave the page alive with stale input; it is not part of this first design.
+这项选择是刻意的：Custom source 是自动化 Controls 输入，不是在伪造可信 KeyboardEvent；把焦点放到 button/input 上不应该让 CDP 失去控制。Window 是否 visible + focused 仍然是统一的总可用性门。
 
-## 7. Build and exposure boundary
+## 5. Browser adapter 的精确改造
 
-The listener is enabled by a build-time capability, proposed name:
+当前签名：
 
-`ENABLE_DEBUG_CONTROLS_INPUT_SOURCE`
-
-Enable it only in:
-
-- Local development builds.
-- Staging builds used for device automation.
-- Dedicated qualification/test builds.
-
-Production builds must omit or hard-disable the listener and its source bookkeeping. The feature must not be enabled by an HTML attribute, query parameter, local storage value, or other page-controlled runtime toggle.
-
-The build-time capability is a test-surface boundary, not an authorization mechanism against arbitrary JavaScript executing in a debug-enabled page. Staging pages should still use the repository's normal access controls.
-
-No debug input method is added to `WebPresentationContext`, Subsystem scope, Session Events, or any package root export. The only entry point is the component-local DOM CustomEvent.
-
-## 8. Implementation boundaries
-
-A future implementation should remain inside `@loomrealm-game/common-controls` and reuse the existing component and machine.
-
-Proposed change locations:
-
-```text
-browser/device-input.browser.ts
-    Pass the active game-controls-input element to the input source.
-    Keep the listener lifecycle attached to that element.
-
-browser/controls-source.ts
-    Install/remove the element-local CustomEvent listener.
-    Validate DebugControlsInputDetailV1.
-    Apply accepted snapshots to the same Controls Machine.
-    Enforce build-time enablement and source lifecycle.
-
-src/controls-machine.ts
-    Keep injected Keyboard and Gamepad source maps separately.
-    Include their states in effectiveDown().
-    Derive the same State and edge publications as physical inputs.
-    Clear injected states on the existing Window / Keyboard-capture transitions.
-
-test/controls-machine.test.mjs
-    Cover reducer merging and edge ordering for injected sources.
-
-test/controls-browser.test.mjs
-    Cover CustomEvent dispatch, validation, element scoping, and lifecycle.
-
-test/browser.test.mjs
-    Cover the production-disabled and debug-enabled component build behavior.
+```ts
+createControlsInputSource(target: Window)
 ```
 
-Exact helper names and private method signatures may be chosen during implementation. They must not become public package exports.
+改成：
 
-The implementation must not:
+```ts
+createControlsInputSource(
+  target: Window,
+  eventTarget: HTMLElement,
+)
+```
 
-- Change `src/model.ts`, `CONTROLS_BUTTONS_V1`, `CONTROLS_INPUT_CHANNELS`, or the public Controls payload types.
-- Change `game-controls-input.md` or the frozen `Game Common Controls Input v1` contract.
-- Add a Session Event or Presentation channel.
-- Send the CustomEvent through `emitCustomEvent`.
-- Modify `game-keyboard-input`, `game-gamepad-input`, or `game-pointer-input` behavior.
-- Add an OS input injector, virtual HID device, Android service, or Hostra bridge.
-- Modify PokeMan's Subsystem input consumer.
+`GameControlsInputElement.startIfReady()` 在取得 `"controls"` ownership 后调用：
 
-## 9. Qualification and acceptance criteria
+```ts
+createControlsInputSource(target, this)
+```
 
-The implementation is complete only after all of the following are covered:
+`controls-source.ts` 新增：
 
-### Controls Machine
+- 常量 `DEBUG_CONTROLS_EVENT = "loomrealm:debug-input"`，只在该模块内部使用。
+- 私有 detail validator / canonicalizer。
+- `eventTarget.addEventListener(DEBUG_CONTROLS_EVENT, handler)`。
+- stop 时对应 `removeEventListener`。
 
-1. A first non-empty snapshot from an unknown source produces the expected down edge from neutral.
-2. An empty snapshot releases and removes only the named source.
-3. Repeating the same snapshot produces no duplicate edge.
-4. Multiple injected sources combine by OR.
-5. Physical Keyboard, physical Gamepad, injected Keyboard, and injected Gamepad holding the same button produce one effective button.
-6. Releasing any one source does not produce up while another eligible source still holds the button.
-7. A multi-button snapshot produces one State followed by edge events in canonical button order.
-8. Injected Keyboard edges use the existing keyboard capture gate; injected Gamepad edges do not use that gate.
-9. Window unusable and Keyboard capture loss clear the correct injected source sets without synthesizing reconciliation up Events.
-10. No injected source state is restored after the relevant availability transition.
+handler 顺序固定：
 
-### Browser component
+```text
+收到 loomrealm:debug-input
+  -> stopPropagation()
+  -> validate + canonicalize detail
+  -> invalid: return
+  -> send(machine.applyCustomState(down))
+```
 
-11. The listener is attached to the active `game-controls-input` element only; dispatching on `window`, `document`, or another element has no effect.
-12. The event does not bubble or cross a shadow boundary.
-13. Invalid versions, devices, source IDs, duplicate/unknown buttons, oversized source counts, and device changes for an active source are rejected atomically.
-14. The component does not create or modify `navigator.getGamepads()` results.
-15. Component stop/disconnect removes the listener and prevents later CustomEvents from publishing.
-16. A disabled duplicate component cannot accept injected input.
-17. A production build has no active listener; local/staging/qualification builds can enable it through the build-time capability.
+不要：
 
-### End-to-end device automation
+- 构造或 dispatch `KeyboardEvent`。
+- 修改或 monkey-patch `navigator.getGamepads()`。
+- 调用 raw `game-keyboard-input` / `game-gamepad-input`。
+- 直接调用 `this.context.emitCustomEvent(...)` 绕过 Controls Machine。
+- 暴露 package root helper。
+- 新增另一个 Custom Element。
 
-18. After PWA navigation/reload on the Android handheld, CDP can dispatch a CustomEvent to the mounted component and move the PokeMan player without a physical Gamepad wake-up.
-19. CDP can press/release Confirm and exercise Map ↔ Dialogue Frame transitions using the existing consumer.
-20. The test can hold multiple buttons, change a held snapshot, and release all buttons deterministically.
-21. The test helper always sends a neutral snapshot in cleanup.
-22. A separate real-hardware smoke test still verifies Android device enumeration, Chrome Gamepad wake-up, the AYANEO mapping exception, and physical button delivery. The CustomEvent test must not be reported as evidence for those hardware behaviors.
+现有 Keyboard `event.isTrusted === true` 校验必须原样保留；Custom source 不得通过放宽该条件实现。
 
-Run the existing common-controls unit/browser tests and the existing Controls Input v1 qualification unchanged. Add a dedicated qualification for this optional source; do not redefine or silently expand the frozen v1 qualification subject.
+## 6. 暴露边界
 
-## 10. Suggested CDP helper
+第一版**不做 build-time debug gating**。
 
-The following is the intended test-driver experience once the proposal is implemented. It is illustrative only and will not work until a debug-enabled build contains the listener.
+原因不是把它当成产品 API，而是避免为一个 DOM 测试 seam 引入新的构建 profile、第二 bundle、PokeMan 专属开关或 Subsystem 配置。当前目标只是让页面级 CDP / Playwright 能把 normalized Controls 状态送入已经存在的组件。
+
+边界仍然清晰：
+
+- 入口只存在于浏览器页面里的活动 `game-controls-input` 元素。
+- 不进入 Subsystem process。
+- 不进入 Session Events。
+- 不新增 Controls / Framework channel。
+- 不增加网络端口或宿主 RPC。
+- 不自动采集；没有精确 `CustomEvent` 就没有行为。
+
+同一页面 Realm 中已经执行的 JavaScript 本来就不是 LoomRealm 的安全隔离边界；如果未来需要把 Presentation script 视为不可信代码，必须整体设计浏览器 Realm / capability 隔离，不能把本输入 seam 的 build flag 当成安全边界。
+
+如果产品未来明确要求 production bundle 不含该测试 seam，再单独设计构建变体；不把该复杂度塞进第一版。
+
+## 7. 需要修改的文件
+
+实现 Agent 的范围固定如下：
+
+```text
+game-libs/game-common-controls/src/controls-machine.ts
+    增加 custom held + applyCustomState
+    effective OR 纳入 custom
+    Keyboard edge 判断纳入 custom
+
+game-libs/game-common-controls/browser/controls-source.ts
+    createControlsInputSource(target, eventTarget)
+    监听/移除 loomrealm:debug-input
+    detail validation + canonicalization
+    调 machine.applyCustomState
+
+game-libs/game-common-controls/browser/device-input.browser.ts
+    仅把 this 作为 eventTarget 传给 createControlsInputSource
+
+game-libs/game-common-controls/test/controls-machine.test.mjs
+    reducer 纯状态机覆盖
+
+game-libs/game-common-controls/test/controls-browser.test.mjs
+    真实 Custom Element + CustomEvent 覆盖
+
+apps/pwa/test/pokeman-staging.e2e.test.mjs
+    至少增加一段通过 CustomEvent 完成的 Map 动作
+    以及一段 Dialogue active 时的 action，证明 Top Active Frame 路由
+
+examples/PokeMan/[FSDB]PokeMan/[resource]Presentation/controls/device-input.browser.js.js
+examples/essentials-v21.1/[FSDB]essentials-v21.1/[resource]Presentation/controls/device-input.browser.js.js
+    用新 build 的 dist/browser/device-input.browser.js 字节级同步
+```
+
+不修改：
+
+- `src/model.ts`
+- `CONTROLS_BUTTONS_V1`
+- `CONTROLS_INPUT_CHANNELS`
+- `game-controls-input.md`
+- `doc/15-contracts/game-common-controls-input-v1.md`
+- raw `keyboard-source.ts` / `gamepad-source.ts` / `pointer-source.ts`
+- Map / Dialogue / PokeMan Subsystem consumer
+- Framework / Main / Renderer / Session Events
+- PWA launcher protocol
+
+如果实现过程中发现必须修改上述“不修改”范围，停止扩 scope，先回到设计评审，不自行扩大 PR。
+
+## 8. 必须覆盖的测试
+
+### 8.1 Controls Machine
+
+至少新增这些断言：
+
+1. `applyCustomState(["up"])` 从 neutral 产生 State + down。
+2. 相同 snapshot 重复是 no-op。
+3. `applyCustomState([])` 产生 State + up。
+4. 多按钮一次变化只发一份 State，Event 按 canonical order。
+5. Keyboard 与 Custom 同按一键只产生一个 effective down；任一侧先释放不产生 up。
+6. Physical Gamepad 与 Custom 同按一键只产生一个 effective down；任一侧先释放不产生 up。
+7. Custom 与 Keyboard / Gamepad 按不同按钮时 State 正确合并。
+8. `setKeyboardCapture(false)` 不清 Custom。
+9. `setWindowUsable(false)` 清 Custom，只发 reconciliation State，不合成 up。
+10. Window regain 后 Custom 仍为空，必须收到新 CustomEvent 才再次按下。
+
+### 8.2 Browser component
+
+至少新增这些断言：
+
+1. 活动 `game-controls-input` 接受合法 `loomrealm:debug-input`。
+2. `window`、`document`、其他元素 dispatch 同名事件没有输入效果。
+3. duplicate-disabled controls element 不接受事件。
+4. 事件被 `stopPropagation()`，祖先 listener 不观察到该事件。
+5. 非法 detail（null、额外字段、错误 version、未知按钮、重复按钮、非数组）全部原子忽略。
+6. blocked Keyboard focus 下 Custom source 仍可工作。
+7. Window blur / hidden 后 Custom held 被清，且不合成 up Event。
+8. disconnect 后 listener 被移除，后续 dispatch 无 publication。
+9. 现有 trusted Keyboard、standard Gamepad、Pocket Block mapping、Select overlay 回归保持通过。
+10. Custom 按住 `select` 时沿现有 effective State 正常触发现有长按逻辑；不要给 Custom source 建第二套 Select 行为。
+
+### 8.3 PokeMan staging E2E
+
+不要把现有 Keyboard E2E 全部替换掉。保留 Keyboard 回归，再增加最小 Custom seam 纵向验证：
+
+1. Staging PokeMan boot 后找到唯一活动 `game-controls-input`。
+2. 用页面内 helper dispatch `["direction"]`，等待一次真实 Map movement，随后 dispatch `[]`。
+3. 路由到 Professor 后，在 Dialogue 成为 Top Active Frame 时用 `["south"]` / `[]` 完成至少一次 Dialogue action。
+4. 断言 Map 不同时消费这次 Dialogue action，证明仍走现有 Top Active Frame publication。
+5. reload 后不需要物理 Gamepad wake-up，Custom seam 仍能再次完成一次 Map action。
+
+这组 E2E 才是“Android CDP 可以复用同一个入口”的浏览器侧证据。
+
+## 9. Bundle 与安装快照
+
+`device-input.browser.ts` 或其依赖发生变化后，bundle 字节必然改变。
+
+实现时必须：
+
+1. 执行 `npm run build -w @loomrealm-game/common-controls`。
+2. 将生成的
+   `game-libs/game-common-controls/dist/browser/device-input.browser.js`
+   **字节级复制**到：
+   - `examples/PokeMan/[FSDB]PokeMan/[resource]Presentation/controls/device-input.browser.js.js`
+   - `examples/essentials-v21.1/[FSDB]essentials-v21.1/[resource]Presentation/controls/device-input.browser.js.js`
+3. 不手工编辑两份 bundle copy。
+4. 现有 `apps/pwa/test/presentation-controls-identity.test.mjs` 必须继续证明两份安装资源与 built bundle SHA-256 相同。
+
+这一步是落地闭环的一部分，不是“最后有空再同步”的文档工作。漏掉会让 PWA 重复执行不同 hash 的 Custom Element bundle，并触发现有 collision guard。
+
+## 10. 实现完成后的验证命令
+
+实现 Agent 在同一个 PR 中至少执行：
+
+```text
+npm run build -w @loomrealm-game/common-controls
+npm test -w @loomrealm-game/common-controls
+
+npm run build:staging -w @loomrealm/pwa
+npm run test:unit -w @loomrealm/pwa
+node apps/pwa/scripts/run-e2e.mjs staging
+
+npm run test:game-controls-input:qualification
+npm run test:game-common-controls-input:qualification
+
+npm run docs:check-links
+npm run docs:build
+git diff --check
+```
+
+其中 staging E2E 必须实际走新增 Custom seam；不能只证明旧 Keyboard 路径仍能工作。
+
+真实 Android Pocket Block 的 CDP 测试是后续设备 smoke，不阻塞纯代码实现完成，但它必须明确标记为：
+
+```text
+证明：页面级 Custom controls seam 在目标 Android Chrome 上可用
+不证明：实体 Gamepad wake / enumeration / kernel input
+```
+
+## 11. 实现 PR 的收尾规则
+
+为了符合仓库现有 `Frozen != Implemented != Qualified` 的做法：
+
+1. 先完成源码、测试、staging E2E 和两份 bundle copy。
+2. 跑第 10 节全部门禁。
+3. 在本提案中把状态改为 `Implemented`，并记录实际实现 commit / qualification 结果；不要改写冻结的 Controls v1 语义。
+4. 若要为本 seam 单独保存资格证据，可以新增 `doc/30-implementation/game-controls-custom-input-qualification.md`；不要把旧 `2333fea8` 的历史 PASS 冒充新代码证据。
+5. 不把“CDP CustomEvent 自动化通过”描述成“真实 Android 手柄通过”。
+
+## 12. CDP / Playwright helper 形状
+
+实现完成后，自动化端统一使用这一种 helper：
 
 ```js
-const controls = document.querySelector("game-controls-input");
-
-function sendControls(down, device = "gamepad", sourceId = "cdp-gamepad") {
-  if (!controls) throw new Error("game-controls-input is not mounted");
-
-  controls.dispatchEvent(new CustomEvent("loomrealm:debug-input", {
-    detail: { version: 1, sourceId, device, down },
+function sendControls(down) {
+  const element = document.querySelector("game-controls-input");
+  if (!element || element.hasAttribute("data-input-disabled")) {
+    throw new Error("active game-controls-input not found");
+  }
+  element.dispatchEvent(new CustomEvent("loomrealm:debug-input", {
+    detail: { version: 1, down },
     bubbles: false,
     composed: false,
     cancelable: false
   }));
 }
+```
 
+典型动作：
+
+```js
 try {
-  sendControls([]);                    // establish neutral
-  sendControls(["up"]);                // hold Up
-  sendControls(["up", "south"]);       // press Confirm while holding Up
-  sendControls(["south"]);             // release Up
-  sendControls([]);                    // release all
+  sendControls(["up"]);
+  // wait for game-observable movement / state
+  sendControls([]);
+
+  sendControls(["south"]);
+  // wait for dialogue / confirm result
+  sendControls([]);
 } finally {
-  sendControls([]);                    // best-effort cleanup
+  sendControls([]);
 }
 ```
 
-For a Keyboard-path test, pass `"keyboard"` as the device. For a Gamepad-path test, use `"gamepad"`. The same helper drives both paths, while the component applies the corresponding availability rules.
+测试驱动负责在动作结束和异常清理时发送 `[]`。Window blur / page hide / component teardown 仍有组件侧清理作为第二层 fail-safe。
 
-## 11. Version and compatibility
+## 13. 非目标
 
-This is an optional implementation capability layered below the existing Controls v1 publication contract.
+第一版明确不做：
 
-- Controls v1 remains exactly 14 digital buttons and two publication channels.
-- The CustomEvent detail is a private, debug-only DOM interface and is not part of the package root ABI.
-- No migration is required for PokeMan or any other Subsystem.
-- Existing physical Keyboard and Gamepad behavior must remain byte-for-byte compatible at the Controls publication boundary.
-- If the event name or detail changes before implementation, update this proposal before code is written. Once implemented, version the private detail explicitly rather than silently changing its shape.
+- 多 Custom source / `sourceId`。
+- `device: "keyboard" | "gamepad"` 模式。
+- raw Keyboard code、Gamepad id、axes、trigger pressure。
+- repeat 注入。
+- 指针注入。
+- build-time debug variant 或第二 bundle。
+- query parameter / localStorage / HTML attribute 开关。
+- Subsystem debug API。
+- Session Event debug channel。
+- Android `sendevent`、UHID、Accessibility/InputManager 注入。
+- 修改 `navigator.getGamepads()`。
 
-The proposal may move to Implemented only after the implementation and dedicated tests land. Qualification status must be recorded separately from implementation status.
+这些需求出现时分别设计，不在本 proposal 中预埋未使用的抽象。
 
-## 12. References
+## 14. 结论
 
-- [Unified Controls Input Web Component](./game-controls-input.md)
-- [Device Input Web Components](./device-input-components.md)
-- [Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)
-- [Game Controls Input qualification evidence](../../doc/30-implementation/game-controls-input-qualification.md)
+落地后的权威链路只有一条：
 
+```text
+Keyboard ─┐
+Gamepad ──┼─> Controls Machine ─> existing controls.state/event ─> Top Active Frame
+Custom ───┘
+```
+
+CustomEvent 只负责把第三份 held 快照送进组件；从 Controls Machine 往后的所有行为继续复用现有实现。Subsystem 无法区分输入来源，也不需要区分。
+
+这就是第一版的完整边界。实现 Agent 不应再增加额外协议、来源 identity、构建 profile 或业务侧适配。
