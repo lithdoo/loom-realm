@@ -450,7 +450,7 @@ sendValidateError(errors) 负责：
 5. payload compact JSON UTF-8 size 不得超过 131,072 bytes；
 6. 将 payload 通过当前 RenderDomain emit 到 root key。
 
-无效参数在调用时同步抛出 TypeError。空数组 sendValidateError([]) 是合法操作，表示清除全部 transient business validation errors。
+无效参数在调用时同步抛出 TypeError。空数组 sendValidateError([]) 是合法 no-op：不清除任何已展示错误，也不产生 Render Event。sendValidateError() 的职责仅是发送新的业务校验错误。
 
 ### 9.2 Transient semantics
 
@@ -510,7 +510,7 @@ field 发生本地 change 时：
 - field 本地 change → 立即清空该 field 当前展示错误，然后发出普通 change snapshot；
 - 如果该 change 触发 built-in validation / validateOnChange，并且 Runtime 随后下发新 error，则显示该新 error；
 - 如果 Runtime 对该 change 返回“无错误”的新 RenderData，则保持无错误；
-- sendValidateError([]) 清空所有当前 transient business-error delivery 所产生的展示错误，但不得恢复任何更早、已经被后续事件覆盖或 field change 作废的旧错误；
+- sendValidateError([]) 不修改任何当前展示错误，也不产生 Render Event；
 - 新一轮 Submit Attempt 被接受时，清除上一轮仍展示的 transient business errors；之后只显示本轮新发生的 error updates；
 - Renderer reload 不 replay transient business error；reload 后展示由当前 retained RenderData 决定；
 - error replacement 只影响 Presentation 当前展示，不改变 canonical value，也不重写 Runtime validation result/history。
@@ -841,31 +841,30 @@ LocalStorage restore 不绕过 Runtime validation；它只是把候选草稿通�
 21. stale submit control 不能关闭或修改后续 attempt；
 22. 用户在非 Loading 状态取消时 control 失效，后续异步控制调用 no-op；
 23. sendValidateError() 使用现有 Render Event path；
-24. unknown field / duplicate field / invalid errorMsg / oversize payload 被拒绝；空数组清除所有 transient business errors；
+24. unknown field / duplicate field / invalid errorMsg / oversize payload 被拒绝；sendValidateError([]) 是合法 no-op，不修改当前展示错误且不产生 Render Event；
 25. Browser 正确显示 transient external errors，并在 field edit / next accepted attempt 清理；
 26. 同一 field 不按 Runtime / Subsystem 来源设固定优先级；后到达的有效 error update 覆盖先前当前展示错误；
 27. field 本地 change 时立即清空该 field 当前展示错误，再发出普通 complete change snapshot；
 28. field change 后如果 built-in validation / validateOnChange 产生并由 Runtime 下发新错误，Browser 显示该新错误；
 29. field change 后如果 Runtime 返回无错误状态且没有新的 business error 到达，该 field 保持无错误展示；
 30. 已被 field change 清除或被后续错误覆盖的旧 Runtime / business error 不得自动恢复；
-31. sendValidateError([]) 清除当前 transient business-error delivery 所产生的展示错误，不恢复任何已过时旧错误；
-32. 新一轮 Submit Attempt 接受时清除上一轮仍展示的 transient business errors，之后按本轮事件顺序重新建立展示错误；
-33. Renderer reload 不 replay transient validation Render Event；reload 后展示由当前 retained RenderData 决定；
-34. root fieldCount 与每个 Field ready handshake 正确完成 one-shot restore barrier；
-35. restore barrier 完成前不允许用户输入或提交；
-36. explicit initialValue 高于 localStorage，其他字段仍可独立恢复；
-37. valid localStorage draft 可恢复并通过一个完整 ordinary change snapshot 回流 Runtime canonical state；
-38. malformed JSON、类型错误、失效 select option、storage API throw 不影响表单打开；
-39. 类型正确但违反 field validation rule 的草稿仍恢复，并由 Runtime 显示验证错误；
-40. 同一表单内重复 localstorageKey 被拒绝；跨表单相同 key 按 origin 共享；
-41. string ""、number 0、boolean false、select value 与 number/select unset null round-trip 正确；
-42. oversized submit snapshot 不写 localStorage，也不发 submit event；
-43. submit attempt 在 submit event 前 best-effort 更新所有配置的 localStorage fields；
-44. failed async validation 后 localStorage 仍保留最近一次 submit-attempt draft；
-45. 单个 storage key 读写失败不阻止其他字段或表单正常工作；
-46. real Chromium qualification 覆盖 loading、async failure、async success、cancelability、Render Event error、restore barrier 和 localStorage reopen round-trip；
-47. 当前 Schema Form tests 和 repository affected CI 全部通过；
-48. 实现 PR 同步更新 DESIGN.md，且不修改 Framework Contract。
+31. 新一轮 Submit Attempt 接受时清除上一轮仍展示的 transient business errors，之后按本轮事件顺序重新建立展示错误；
+32. Renderer reload 不 replay transient validation Render Event；reload 后展示由当前 retained RenderData 决定；
+33. root fieldCount 与每个 Field ready handshake 正确完成 one-shot restore barrier；
+34. restore barrier 完成前不允许用户输入或提交；
+35. explicit initialValue 高于 localStorage，其他字段仍可独立恢复；
+36. valid localStorage draft 可恢复并通过一个完整 ordinary change snapshot 回流 Runtime canonical state；
+37. malformed JSON、类型错误、失效 select option、storage API throw 不影响表单打开；
+38. 类型正确但违反 field validation rule 的草稿仍恢复，并由 Runtime 显示验证错误；
+39. 同一表单内重复 localstorageKey 被拒绝；跨表单相同 key 按 origin 共享；
+40. string ""、number 0、boolean false、select value 与 number/select unset null round-trip 正确；
+41. oversized submit snapshot 不写 localStorage，也不发 submit event；
+42. submit attempt 在 submit event 前 best-effort 更新所有配置的 localStorage fields；
+43. failed async validation 后 localStorage 仍保留最近一次 submit-attempt draft；
+44. 单个 storage key 读写失败不阻止其他字段或表单正常工作；
+45. real Chromium qualification 覆盖 loading、async failure、async success、cancelability、Render Event error、restore barrier 和 localStorage reopen round-trip；
+46. 当前 Schema Form tests 和 repository affected CI 全部通过；
+47. 实现 PR 同步更新 DESIGN.md，且不修改 Framework Contract。
 
 
 ## 17. 实现建议顺序
