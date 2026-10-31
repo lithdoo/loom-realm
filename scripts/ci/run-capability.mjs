@@ -42,6 +42,43 @@ function runWithRetry(command, args, attempts = 2) {
 const npm = (...args) => run("npm", args);
 const node = (...args) => run(process.execPath, args);
 
+async function collectTestFiles(relativeDir) {
+  const entries = await readdir(new URL(`${relativeDir}/`, root), { withFileTypes: true });
+  const files = [];
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const child = `${relativeDir}/${entry.name}`;
+    if (entry.isDirectory()) files.push(...await collectTestFiles(child));
+    else if (entry.isFile() && /\\.test\\.mjs$/.test(entry.name)) files.push(child);
+  }
+  return files;
+}
+
+async function runTestTrees(...relativeDirs) {
+  const files = (await Promise.all(relativeDirs.map(collectTestFiles))).flat();
+  if (files.length === 0) throw new Error(`no test files found under: ${relativeDirs.join(", ")}`);
+  node("--test", ...files);
+}
+
+const REGRESSION_TEST_DIRS = [
+  "packages/fsdb/test",
+  "packages/foundation/test",
+  "packages/wire/test",
+  "packages/shared-state/test",
+  "packages/session-events/test",
+  "packages/game-package/test",
+  "packages/game-launcher-pwa/test",
+  "packages/platform-ports/test",
+  "packages/runtime-control/test",
+  "packages/renderer-control/test",
+  "packages/data/test",
+  "packages/subsystem/test",
+  "packages/renderer/test",
+  "packages/main/test",
+  "packages/game-launcher-hostra/test",
+  "packages/fsdb-http/test",
+  "apps/desktop/test",
+];
+
 function buildRegressionStack() {
   // npm run build --workspaces is not dependency-topological. Build the known
   // authority/product stack in its explicit dependency order before tests.
@@ -71,26 +108,6 @@ function buildMapStack() {
     "-w", "@loomrealm-game/common-controls",
     "-w", "@loomrealm-game/tile-presentation",
     "-w", "@loomrealm-game/map",
-  );
-}
-
-function buildPwaStack() {
-  npm(
-    "run", "build",
-    "-w", "@loomrealm/foundation",
-    "-w", "@loomrealm/wire",
-    "-w", "@loomrealm/shared-state",
-    "-w", "@loomrealm/session-events",
-    "-w", "@loomrealm/game-package",
-    "-w", "@loomrealm/platform-ports",
-    "-w", "@loomrealm/runtime-control",
-    "-w", "@loomrealm/renderer-control",
-    "-w", "@loomrealm/data",
-    "-w", "@loomrealm/subsystem",
-    "-w", "@loomrealm/renderer",
-    "-w", "@loomrealm/main",
-    "-w", "@loomrealm/game-launcher-pwa",
-    "-w", "@loomrealm/pwa",
   );
 }
 
@@ -125,18 +142,18 @@ function runDesktopTests() {
 }
 
 const capabilities = {
-  core() {
+  async core() {
     buildRegressionStack();
-    npm("run", "test:regression");
+    await runTestTrees(...REGRESSION_TEST_DIRS);
     npm("run", "build", "-w", "@loomrealm-game/common-controls");
     node("--test", "test/game-common-controls-input-v1/qualification.test.mjs");
     node("--test", "test/render-update-v1/qualification.test.mjs");
     node("--test", "test/m11-boundary.test.mjs");
   },
 
-  compat() {
+  async compat() {
     buildRegressionStack();
-    npm("run", "test:regression");
+    await runTestTrees(...REGRESSION_TEST_DIRS);
   },
 
   content() {
@@ -163,12 +180,11 @@ const capabilities = {
     buildMapStack();
   },
 
-  map() {
+  async map() {
     buildMapStack();
     node("--test", "test/m14-boundary.test.mjs");
     node("--test", "tools/fixtures/essentials-v21.1/m14-consumer.test.mjs");
-    npm("test", "-w", "@loomrealm-game/tile-presentation");
-    npm("test", "-w", "@loomrealm-game/map");
+    await runTestTrees("game-libs/tile-presentation/test", "game-libs/map/test");
     npm("test", "-w", "@loomrealm-example/essentials-v21.1");
     npm("run", "build", "-w", "@loomrealm/game-launcher-pwa");
     npm("test", "-w", "@loomrealm-example/pokeman");
@@ -191,16 +207,17 @@ const capabilities = {
     node("--test", "test/map-depth-boundary-browser.test.mjs");
   },
 
-  "schema-form"() {
+  async "schema-form"() {
     npm("run", "test:schema-form:qualification");
-    npm("test", "-w", "@loomrealm-game/schema-form");
+    await runTestTrees("game-libs/schema-form/test");
     npm("pack", "-w", "@loomrealm-game/schema-form", "--dry-run");
   },
 
-  pwa() {
-    buildPwaStack();
-    npm("test", "-w", "@loomrealm/game-launcher-pwa");
-    npm("test", "-w", "@loomrealm/pwa");
+  async pwa() {
+    npm("run", "build:qualification", "-w", "@loomrealm/pwa");
+    await runTestTrees("packages/game-launcher-pwa/test");
+    npm("run", "test:unit", "-w", "@loomrealm/pwa");
+    node("apps/pwa/scripts/run-e2e.mjs", "all");
     // Qualification alone does not exercise the real /pwa/pokeman/
     // startup path; stage the product and boot it in Chromium as well.
     npm("run", "build:staging", "-w", "@loomrealm/pwa");
@@ -224,8 +241,10 @@ const capabilities = {
     npm("pack", "-w", "@loomrealm-game/battle", "--dry-run");
   },
 
-  "rpg-dialogue"() {
-    npm("run", "test:rpg-dialogue");
+  async "rpg-dialogue"() {
+    npm("run", "build:rpg-dialogue");
+    await runTestTrees("game-libs/rpg-dialogue/test");
+    npm("run", "test:rpg-dialogue-v1:qualification:run");
     npm("pack", "-w", "@loomrealm-game/rpg-dialogue", "--dry-run");
   },
 
@@ -257,14 +276,14 @@ const capabilities = {
   },
 
   async "full-linux"() {
-    capabilities.core();
-    capabilities.content();
-    capabilities.presentation();
-    capabilities.map();
-    capabilities["schema-form"]();
-    capabilities.pwa();
-    capabilities.battle();
-    capabilities["rpg-dialogue"]();
+    await capabilities.core();
+    await capabilities.content();
+    await capabilities.presentation();
+    await capabilities.map();
+    await capabilities["schema-form"]();
+    await capabilities.pwa();
+    await capabilities.battle();
+    await capabilities["rpg-dialogue"]();
     await capabilities.pack();
   },
 

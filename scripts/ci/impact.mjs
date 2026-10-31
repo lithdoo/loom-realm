@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 
 const ALL = {
   code: true,
+  core: true,
   content: true,
   presentation: true,
   map: true,
@@ -19,7 +20,7 @@ const ALL = {
 const FALSE = Object.fromEntries(Object.keys(ALL).map((key) => [key, false]));
 
 const setAllCode = (impact) => {
-  for (const key of ["code", "content", "presentation", "map", "schema", "pwa", "battle", "dialogue", "desktop", "windows"]) {
+  for (const key of ["code", "core", "content", "presentation", "map", "schema", "pwa", "battle", "dialogue", "desktop", "windows"]) {
     impact[key] = true;
   }
 };
@@ -79,6 +80,7 @@ export function classifyPaths(paths) {
       path.startsWith("packages/game-package/")
     ) {
       impact.code = true;
+      impact.core = true;
       impact.presentation = true;
       impact.map = true;
       impact.pwa = true;
@@ -97,6 +99,7 @@ export function classifyPaths(paths) {
       path.startsWith("packages/main/")
     ) {
       impact.code = true;
+      impact.core = true;
       impact.presentation = true;
       impact.map = true;
       impact.schema = true;
@@ -110,6 +113,7 @@ export function classifyPaths(paths) {
 
     if (path.startsWith("packages/fsdb/") || path.startsWith("packages/fsdb-http/")) {
       impact.code = true;
+      impact.core = true;
       impact.content = true;
       impact.map = true;
       continue;
@@ -117,6 +121,7 @@ export function classifyPaths(paths) {
 
     if (path.startsWith("packages/game-launcher-hostra/")) {
       impact.code = true;
+      impact.core = true;
       impact.desktop = true;
       impact.windows = true;
       continue;
@@ -124,12 +129,14 @@ export function classifyPaths(paths) {
 
     if (path.startsWith("packages/game-launcher-pwa/")) {
       impact.code = true;
+      impact.core = true;
       impact.pwa = true;
       continue;
     }
 
     if (path.startsWith("apps/desktop/")) {
       impact.code = true;
+      impact.core = true;
       impact.desktop = true;
       impact.windows = true;
       continue;
@@ -192,6 +199,7 @@ export function classifyPaths(paths) {
 
     if (path.startsWith("test/game-common-controls-input-v1/") || path.startsWith("test/render-update-v1/")) {
       impact.code = true;
+      impact.core = true;
       continue;
     }
 

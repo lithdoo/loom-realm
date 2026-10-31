@@ -49,7 +49,8 @@ test("PokeMan staging deploy only follows successful trusted main PokeMan qualif
 
 test("PokeMan staging qualification is hosted-only and runs the real browser vertical", async () => {
   const workflow = await read(".github/workflows/pokeman-staging-qualification.yml");
-  assert.match(workflow, /^on:\n  pull_request:\n  push:\n    branches: \[main\]/m);
+  assert.match(workflow, /^on:\n  push:\n    branches: \[main\]/m);
+  assert.doesNotMatch(workflow, /^\s+pull_request:/m);
   assert.match(workflow, /permissions:\n  contents: read/);
   assert.match(workflow, /runs-on: ubuntu-latest/);
   assert.doesNotMatch(workflow, /self-hosted|pull_request_target|secrets\./);
@@ -57,14 +58,15 @@ test("PokeMan staging qualification is hosted-only and runs the real browser ver
   assert.match(workflow, /npm run build:staging -w @loomrealm\/pwa/);
   assert.match(workflow, /npm run build:qualification -w @loomrealm\/pwa/);
   assert.match(workflow, /npm run test:unit -w @loomrealm\/pwa/);
-  assert.match(workflow, /npm test -w @loomrealm-game\/map/);
-  assert.match(workflow, /npm test -w @loomrealm-example\/pokeman/);
+  assert.match(workflow, /node --test game-libs\/map\/test\/\*\.test\.mjs/);
+  assert.match(workflow, /node --test examples\/PokeMan\/test\/\*\.test\.mjs/);
   assert.match(workflow, /run-e2e\.mjs staging/);
 });
 
 test("impact routing is selective for docs, routes Battle to Browser, and fails closed for unknown code", () => {
   assert.deepEqual(classifyPaths(["doc/20-modules/main-system/README.md"]), {
     code: false,
+    core: false,
     content: false,
     presentation: false,
     map: false,
@@ -78,22 +80,25 @@ test("impact routing is selective for docs, routes Battle to Browser, and fails 
   });
 
   const foundation = classifyPaths(["packages/foundation/src/index.ts"]);
-  for (const key of ["code", "content", "presentation", "map", "schema", "pwa", "battle", "dialogue", "desktop", "windows"]) {
+  for (const key of ["code", "core", "content", "presentation", "map", "schema", "pwa", "battle", "dialogue", "desktop", "windows"]) {
     assert.equal(foundation[key], true, `foundation must affect ${key}`);
   }
 
   const battle = classifyPaths(["game-libs/battle/src/index.ts"]);
   assert.equal(battle.battle, true);
+  assert.equal(battle.core, false);
   assert.equal(requiresBrowser(battle), true);
 
   const dialogue = classifyPaths(["game-libs/rpg-dialogue/src/index.ts"]);
   assert.equal(dialogue.dialogue, true);
+  assert.equal(dialogue.core, false);
   assert.equal(dialogue.presentation, true);
   assert.equal(requiresBrowser(dialogue), true);
 
   const dialogueQualification = classifyPaths(["test/rpg-dialogue-v1/qualification.test.mjs"]);
   assert.deepEqual(dialogueQualification, {
     code: true,
+    core: false,
     content: false,
     presentation: true,
     map: false,
@@ -109,6 +114,7 @@ test("impact routing is selective for docs, routes Battle to Browser, and fails 
   const controlPortsQualification = classifyPaths(["test/game-control-ports-v1/composition.test.mjs"]);
   assert.deepEqual(controlPortsQualification, {
     code: true,
+    core: false,
     content: false,
     presentation: true,
     map: true,
@@ -124,9 +130,11 @@ test("impact routing is selective for docs, routes Battle to Browser, and fails 
 
   const commonControlsQualification = classifyPaths(["test/game-common-controls-input-v1/qualification.test.mjs"]);
   assert.equal(commonControlsQualification.code, true);
+  assert.equal(commonControlsQualification.core, true);
 
   const unknown = classifyPaths(["new-runtime-surface.bin"]);
   assert.equal(unknown.code, true);
+  assert.equal(unknown.core, true);
   assert.equal(unknown.desktop, true);
   assert.equal(unknown.windows, true);
 
@@ -137,6 +145,7 @@ test("impact routing is selective for docs, routes Battle to Browser, and fails 
 
   const pokeMan = classifyPaths(["examples/PokeMan/subsystems/map.mjs"]);
   assert.equal(pokeMan.map, true);
+  assert.equal(pokeMan.core, false);
   assert.equal(pokeMan.pwa, true);
   assert.equal(requiresBrowser(pokeMan), true);
 });
@@ -145,13 +154,12 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   const ci = await read(".github/workflows/ci.yml");
   const runner = await read("scripts/ci/run-capability.mjs");
   assert.match(ci, /name: CI \/ summary/);
-  // A fresh deploy Runner cannot rely on artifacts built by earlier CI steps.
-  const coldBuild = ci.indexOf("- name: Clean PokeMan staging build");
-  const canonical = ci.indexOf("- name: Canonical package and contract regression");
-  assert.ok(coldBuild > 0 && coldBuild < canonical, "clean staging build must run before canonical workspace regression");
-  assert.match(ci, /name: Clean PokeMan staging build[\s\S]*?needs\.impact\.outputs\.pwa == 'true'[\s\S]*?npm run build:staging -w @loomrealm\/pwa/);
-
-  assert.match(ci, /require_success "\$CODE" "\$LINUX_RESULT"/);
+  assert.match(ci, /linux:[\s\S]*?if: needs\.impact\.outputs\.core == 'true' \|\| needs\.impact\.outputs\.content == 'true'/);
+  assert.match(ci, /name: Canonical package and contract regression\n        if: needs\.impact\.outputs\.core == 'true'/);
+  assert.match(ci, /node20:[\s\S]*?if: needs\.impact\.outputs\.core == 'true'/);
+  assert.doesNotMatch(ci, /name: Clean PokeMan staging build/);
+  assert.match(ci, /require_success "\$LINUX_REQUIRED" "\$LINUX_RESULT"/);
+  assert.match(ci, /require_success "\$NODE20_REQUIRED" "\$NODE20_RESULT"/);
   assert.match(ci, /require_success "\$BROWSER_REQUIRED" "\$BROWSER_RESULT"/);
   assert.match(ci, /if: needs\.impact\.outputs\.browser == 'true'/);
   assert.match(ci, /LOOMREALM_CHROMIUM_PATH/);
@@ -160,6 +168,9 @@ test("daily CI has one fail-closed summary and Browser owns Battle browser quali
   assert.match(ci, /name: Session Events v1 qualification[\s\S]*run-capability\.mjs session-events/);
   assert.doesNotMatch(ci.match(/  linux:[\s\S]*?\n  node20:/)?.[0] ?? "", /run-capability\.mjs battle/);
   assert.match(runner, /runWithRetry\(process\.execPath, \["--test", "game-libs\/battle\/test\/browser-e2e\.test\.mjs"\]\)/);
+  assert.match(runner, /await runTestTrees\(\.\.\.REGRESSION_TEST_DIRS\)/);
+  assert.doesNotMatch(runner, /npm\("run", "test:regression"\)/);
+  assert.doesNotMatch(runner, /npm\("test", "-w", "@loomrealm-game\/map"\)/);
   assert.doesNotMatch(ci, /npm run (?:test|build):m\d+/);
   assert.doesNotMatch(runner, /npm\("run", "(?:test|build):m\d+/);
   assert.doesNotMatch(ci, /--no-sandbox|ELECTRON_DISABLE_SANDBOX/);
