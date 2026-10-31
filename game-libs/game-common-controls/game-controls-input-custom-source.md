@@ -159,7 +159,7 @@ interface DebugControlsInputDetailV1 {
 
 校验规则固定：
 
-- `detail` 必须是非 null、非 Array 的 object。
+- `detail` 必须是当前页面 Realm 的 plain object（prototype 为 `Object.prototype` 或 `null`），且非 null、非 Array。
 - 自有 enumerable key 必须恰好为 `version`、`down`，不接受额外字段。
 - `version === 1`。
 - `down` 必须是 Array。
@@ -569,17 +569,18 @@ git diff --check
 
 1. 完成源码、unit/browser tests、staging E2E 和两份 bundle copy。
 2. 跑第 10 节全部门禁。
-3. 新增 `doc/30-implementation/game-controls-custom-input-qualification.md`，记录：
-   - 实际 implementation subject SHA；
+3. 在源码、测试、E2E 与两份 bundle copy 都已提交后，固定该 commit SHA 为 **executable implementation subject**；第 10 节运行时门禁必须针对这份代码状态执行。随后新增 `doc/30-implementation/game-controls-custom-input-qualification.md`，记录：
+   - 该 executable implementation subject SHA；
    - 本文作为 additive normative extension 的关系；
    - 实际执行的命令和 PASS 结果；
    - Custom seam 能证明与不能证明的边界；
    - 旧 `2333fea8` 只作为 Controls v1 历史 qualification，不是本实现 subject。
 4. 将本文状态从 `Proposed / Design / Not Implemented` 改为 `Active / Normative Extension / Implemented`，并写入实际 implementation subject 与 qualification evidence 链接。
 5. 更新 `landing.md`，把该项从 Proposed 改为已实现，并链接新的 qualification evidence。
-6. 不把“CDP CustomEvent 自动化通过”描述成“真实 Android 手柄通过”。
+6. evidence / proposal / landing 属于 executable subject 之后的文档提交，不改变已经验证的运行时代码 subject。完成这些文档后再次执行 `npm run docs:check-links`、`npm run docs:build` 与 `git diff --check`，并把这次文档复核结果写进 evidence。
+7. 不把“CDP CustomEvent 自动化通过”描述成“真实 Android 手柄通过”。
 
-专属 qualification evidence 是**必做**，不是“如有需要”。不用为了它新增公开协议或修改旧 Controls v1 qualification subject。
+专属 qualification evidence 是**必做**，不是“如有需要”。不用为了它新增公开协议或修改旧 Controls v1 qualification subject。最终 PR 可以包含 executable implementation commit 之后的 evidence/documentation commit；qualification 文档必须清楚区分两者。
 
 ## 12. CDP / Playwright helper 形状
 
