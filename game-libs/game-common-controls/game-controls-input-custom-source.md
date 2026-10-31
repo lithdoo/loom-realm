@@ -6,7 +6,7 @@
 > 相邻实现：[统一操控输入 Web Component](./game-controls-input.md)
 > 现行契约：[Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)
 > 现行资格证据：[Unified Controls Input Qualification](../../doc/30-implementation/game-controls-input-qualification.md)
-> executable implementation subject：[`ee2b27bb4bb2174cf72cbcbef2afa53f81211610`](https://github.com/lithdoo/loom-realm/commit/ee2b27bb4bb2174cf72cbcbef2afa53f81211610)
+> executable implementation subject：[`37940e76c811ddc7052e6592e9aa3d9419f1ed07`](https://github.com/lithdoo/loom-realm/commit/37940e76c811ddc7052e6592e9aa3d9419f1ed07)
 > 本扩展资格证据：[Custom Controls Input Qualification](../../doc/30-implementation/game-controls-custom-input-qualification.md)
 
 本文给现有 `<game-controls-input>` 增加第三种、**仅存在于组件内部的 Controls 输入源**：测试驱动通过 DOM `CustomEvent` 把一份完整的 14 键按下快照交给组件，组件把它与现有 Keyboard / Gamepad 状态一起送入同一个 Controls Machine，最后仍然只产生现有的 `controls.state` / `controls.event`。

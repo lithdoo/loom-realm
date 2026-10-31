@@ -3,10 +3,10 @@
 > 状态：Implementation qualification
 > additive normative extension：[game-controls-input 组件内 CustomEvent 输入源](../../game-libs/game-common-controls/game-controls-input-custom-source.md)
 > 基础规范：[统一操控输入 Web Component](../../game-libs/game-common-controls/game-controls-input.md)
-> executable implementation subject：[`ee2b27bb4bb2174cf72cbcbef2afa53f81211610`](https://github.com/lithdoo/loom-realm/commit/ee2b27bb4bb2174cf72cbcbef2afa53f81211610)
+> executable implementation subject：[`37940e76c811ddc7052e6592e9aa3d9419f1ed07`](https://github.com/lithdoo/loom-realm/commit/37940e76c811ddc7052e6592e9aa3d9419f1ed07)
 > 日期：2026-10-31
 
-`Frozen != Implemented != Qualified`。本文记录 executable subject `ee2b27bb4bb2174cf72cbcbef2afa53f81211610` 的可执行证据；其后的 evidence/status 文档 commit 不改变该 subject。旧 `2333fea8` 只属于原 Controls v1 的历史 qualification，不是本次 Custom source 的 implementation subject。
+`Frozen != Implemented != Qualified`。本文记录 executable subject `37940e76c811ddc7052e6592e9aa3d9419f1ed07` 的可执行证据；其后的 evidence/status 文档 commit 不改变该 subject。旧 `2333fea8` 只属于原 Controls v1 的历史 qualification，不是本次 Custom source 的 implementation subject。
 
 ## 1. Qualified topology
 
@@ -54,7 +54,7 @@ git diff --check
 | `@loomrealm-game/common-controls` | PASS，48/48；包含 Custom snapshot、OR、repeat、reconciliation、DOM validation、duplicate、blocked focus、disconnect、Select overlay 与既有 Keyboard/Gamepad/Pocket Block 回归 |
 | PWA staging build | PASS |
 | PWA unit | PASS，44/44；包含两份 installed bundle 与 built bundle SHA-256 identity |
-| PokeMan staging E2E | PASS，1/1；Custom direction 驱动真实 Map movement，Dialogue Top Active Frame 接受 Custom `south` 且 Map 状态不变，reload 后无需 Gamepad wake-up 再次完成 Custom Map action |
+| PokeMan staging E2E | PASS，1/1；Custom direction 驱动真实 Map movement；Professor Dialogue 的“你终于来了。”先自然 reveal 完成，Custom `south` 随后造成实际 conversation transition 到“准备好出发了吗？”，同时 still-mounted Map snapshot 完全不变；reload 后无需 Gamepad wake-up 再次完成 Custom Map action |
 | precise Controls qualification | PASS；Controls repository qualification 9/9，frame-targeted 核心 51/51，Hostra vertical 1/1，PWA vertical 1/1 |
 | product compatibility qualification | PASS；common-controls 48/48，Hub/Presentation 35/35，Map 115/115，Dialogue 32/32，Schema Form 22/22，Controls qualification 9/9，Desktop 30/30，PWA unit 44/44 + Chromium 17/17，frame-targeted 51/51 + Hostra 1/1 + PWA 1/1 |
 | pre-evidence docs check | PASS，812 个相对链接 / 175 个 Markdown 文件；VitePress build PASS |
@@ -68,6 +68,20 @@ Custom/CDP qualification 可以证明：
 - Controls Machine；
 - top-frame routing；
 - Map/Dialogue vertical behavior。
+
+其中 Dialogue 纵向证据明确证明：
+
+```text
+CustomEvent
+→ active game-controls-input
+→ Controls Machine
+→ controls publication
+→ Top Active Frame
+→ Dialogue action
+→ observable conversation transition
+```
+
+测试先等待“你终于来了。”自然 reveal 完成；发送 Custom `south` 后的成功条件不是 `_revealComplete`，而是不会自动发生的 conversation transition 到“准备好出发了吗？”。同一 action 前后的 still-mounted Map snapshot 完全一致，因此也证明该 Dialogue action 没有被 Map 同时消费。
 
 不能证明：
 
@@ -88,4 +102,4 @@ npm.cmd run docs:build
 git diff --check
 ```
 
-结果为 PASS：`docs:check-links` 检查 176 个 Markdown 文件中的 814 个相对链接，VitePress build 完成，`git diff --check` 无错误。这次复核只修改 evidence/status 文档，不改变 executable implementation subject `ee2b27bb4bb2174cf72cbcbef2afa53f81211610`。
+结果为 PASS：`docs:check-links` 检查 176 个 Markdown 文件中的 814 个相对链接，VitePress build 完成，`git diff --check` 无错误。这次复核只修改 evidence/status 文档，不改变 executable implementation subject `37940e76c811ddc7052e6592e9aa3d9419f1ed07`。
