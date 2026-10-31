@@ -1,9 +1,8 @@
 name: PokeMan Staging Qualification
 
-# Hosted-only verification. PRs may run here, never on the Docker-hosted
-# runner. Only a successful push-to-main run can authorize deployment.
+# Hosted-only deployment qualification. Run it only after changes land on main;
+# pull requests are covered by the capability-routed CI workflow.
 on:
-  pull_request:
   push:
     branches: [main]
 
@@ -11,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pokeman-staging-qualification-${{ github.event.pull_request.number || github.ref }}
+  group: pokeman-staging-qualification-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -48,8 +47,10 @@ jobs:
           # Map executable. Build that fixture explicitly; do not skip its tests.
           timeout --verbose --signal=TERM --kill-after=30s 4m npm run build:qualification -w @loomrealm/pwa
           timeout --verbose --signal=TERM --kill-after=30s 4m npm run test:unit -w @loomrealm/pwa
-          timeout --verbose --signal=TERM --kill-after=30s 3m npm test -w @loomrealm-game/map
-          timeout --verbose --signal=TERM --kill-after=30s 3m npm test -w @loomrealm-example/pokeman
+          # build:qualification already built Map and RPG Dialogue. Run the
+          # test files directly so package pretest/build hooks do not compile them again.
+          timeout --verbose --signal=TERM --kill-after=30s 3m node --test game-libs/map/test/*.test.mjs
+          timeout --verbose --signal=TERM --kill-after=30s 3m node --test examples/PokeMan/test/*.test.mjs
       - name: Launch real PokeMan staging in Chromium
         shell: bash
         run: |

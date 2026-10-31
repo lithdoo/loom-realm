@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.impact.outputs.code }}
+      core: ${{ steps.impact.outputs.core }}
       content: ${{ steps.impact.outputs.content }}
       presentation: ${{ steps.impact.outputs.presentation }}
       map: ${{ steps.impact.outputs.map }}
@@ -58,23 +59,15 @@ jobs:
   linux:
     name: Linux / Node 24
     needs: impact
-    if: needs.impact.outputs.code == 'true'
+    if: needs.impact.outputs.core == 'true' || needs.impact.outputs.content == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-workspace
         with:
           node-version: 24
-      # This runs before any other workspace build in the hosted Linux job.
-      # The Docker self-hosted deploy starts from the same clean npm ci state.
-      - name: Clean PokeMan staging build
-        if: needs.impact.outputs.pwa == 'true'
-        run: |
-          npm run build:staging -w @loomrealm/pwa
-          test -s apps/pwa/dist/staging/pwa/pokeman/index.html
-          test -s apps/pwa/dist/staging/pwa/pokeman/pokeman-bundle.json
-          test -s apps/pwa/dist/staging/pwa/pokeman/service-worker.js
       - name: Canonical package and contract regression
+        if: needs.impact.outputs.core == 'true'
         env:
           LOOMREALM_QUALIFICATION_REPORT: "1"
         run: node scripts/ci/run-capability.mjs core
@@ -82,6 +75,7 @@ jobs:
         if: needs.impact.outputs.content == 'true'
         run: node scripts/ci/run-capability.mjs content
       - name: Verify publishable package surfaces
+        if: needs.impact.outputs.core == 'true'
         run: node scripts/ci/run-capability.mjs pack
       - name: Verify CI architecture
         run: node --test test/ci-architecture.test.mjs
@@ -89,7 +83,7 @@ jobs:
   node20:
     name: Node 20 compatibility
     needs: impact
-    if: needs.impact.outputs.code == 'true'
+    if: needs.impact.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -130,8 +124,10 @@ jobs:
         if: needs.impact.outputs.pwa == 'true'
         run: node scripts/ci/run-capability.mjs pwa
       - name: Session Events v1 qualification
-        if: needs.impact.outputs.pwa == 'true'
-        run: node scripts/ci/run-capability.mjs session-events
+        # Core package regression covers the package/integration tests and the
+        # preceding PWA capability already ran the full m17 browser suite.
+        if: needs.impact.outputs.core == 'true' && needs.impact.outputs.pwa == 'true'
+        run: node scripts/ci/run-capability.mjs session-events-after-pwa
       - name: Battle browser qualification
         if: needs.impact.outputs.battle == 'true'
         run: node scripts/ci/run-capability.mjs battle
@@ -211,6 +207,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CODE: ${{ needs.impact.outputs.code }}
+      CORE: ${{ needs.impact.outputs.core }}
+      CONTENT: ${{ needs.impact.outputs.content }}
+      LINUX_REQUIRED: ${{ needs.impact.outputs.core == 'true' || needs.impact.outputs.content == 'true' }}
+      NODE20_REQUIRED: ${{ needs.impact.outputs.core }}
       BROWSER_REQUIRED: ${{ needs.impact.outputs.browser }}
       DESKTOP_REQUIRED: ${{ needs.impact.outputs.desktop }}
       WINDOWS_REQUIRED: ${{ needs.impact.outputs.windows }}
@@ -235,8 +235,8 @@ jobs:
             fi
           }
 
-          require_success "$CODE" "$LINUX_RESULT" linux
-          require_success "$CODE" "$NODE20_RESULT" node20
+          require_success "$LINUX_REQUIRED" "$LINUX_RESULT" linux
+          require_success "$NODE20_REQUIRED" "$NODE20_RESULT" node20
           require_success "$BROWSER_REQUIRED" "$BROWSER_RESULT" browser
           require_success "$DESKTOP_REQUIRED" "$DESKTOP_RESULT" desktop
           require_success "$WINDOWS_REQUIRED" "$WINDOWS_RESULT" windows
@@ -245,6 +245,10 @@ jobs:
           cat > ci-summary.json <<JSON
           {
             "code": "$CODE",
+            "core": "$CORE",
+            "content": "$CONTENT",
+            "linux_required": "$LINUX_REQUIRED",
+            "node20_required": "$NODE20_REQUIRED",
             "browser_required": "$BROWSER_REQUIRED",
             "desktop_required": "$DESKTOP_REQUIRED",
             "windows_required": "$WINDOWS_REQUIRED",
