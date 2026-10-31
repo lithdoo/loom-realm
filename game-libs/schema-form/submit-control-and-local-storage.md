@@ -617,12 +617,17 @@ restore attempt：
     6. compact-size preflight the complete { values } payload
     7. if restored candidate is oversized:
          discard all localStorage substitutions
-         use the original current RenderData-derived snapshot instead
-    8. apply the accepted restored substitutions to the controls
-    9. emit one Schema Form-private custom event:
-         name = "restore"
-         data = { values: completeSnapshot }
-    10. end the local initialization barrier; do not wait for ACK
+         fall back to the original current RenderData-derived snapshot
+    8. size-preflight the fallback snapshot too
+    9. if fallback is also oversized:
+         apply no localStorage substitutions
+         emit no restore event
+         end the local barrier and remain usable
+    10. otherwise apply the accepted restored substitutions to the controls
+    11. emit one Schema Form-private custom event:
+          name = "restore"
+          data = { values: completeSnapshot }
+    12. end the local initialization barrier; do not wait for ACK
 
 restore event 使用与 change/submit 完全相同的 complete values payload grammar 和 131,072-byte limit，但 event name 独立为 "restore"。这是 Schema Form 自己新增的 reverse custom event，不新增 Framework protocol。
 
@@ -639,11 +644,13 @@ Runtime 规则：
   - candidate 走与 ordinary change 相同的 built-in + validateOnChange；
   - canonical/errors 按该 validation pass 更新；
 - restorePending=false 后收到任何 restore event → ignore；
-- restorePending=false 必须通过 retained root RenderData 投影，因此任何后续 Renderer/WebComponent instance 都能看到 restore 已经消费，不再读取 localStorage。
+- restorePending=false 必须通过 retained root RenderData 投影，因此任何后续 Renderer/WebComponent instance 都能看到 restore 已经消费，不再读取 localStorage；
+- 每次 restorePending true→false 且表单仍 active 时，即使 canonical/errors/field RenderData 没有变化，也必须产生 root RenderData update 使 restorePending=false presentation-observable；若同一步直接 terminal 并关闭 RenderDomain，则无需额外发送不可观察的 root update。
 
 为了处理 reverse input 可能丢失的情况：
 
 - Browser 发出 restore 后不等待 ACK，避免 UI 永久锁住；
+- 如果 candidate 与 fallback snapshot 都超过 131,072 bytes，Browser 不发 restore；restorePending 保持 true，用户可继续编辑直到后续合法 change/submit 消费它；
 - 如果 restore event 丢失，restorePending 仍可能保持 true；
 - Runtime 在 restorePending=true 时收到任意 **合法 ordinary change 或 submit**，必须先把 restorePending 消费为 false，再按原 change/submit 语义处理完整 snapshot；
 - 因此一旦用户编辑/提交已经到达 Runtime，后续 Renderer 重建就绝不会再用旧 localStorage 覆盖该已接受的 canonical state；
@@ -968,27 +975,28 @@ LocalStorage restore 不绕过 Runtime validation，也不直接成为 canonical
 40. restorePending=false 的 Presentation 不读取 localStorage、不执行 restore barrier；
 41. restorePending=true 时，root 等待 exactly fieldCount 个 field 首次 valid RenderData 后才执行 restore attempt，barrier 期间禁止用户输入/提交；
 42. restore candidate 在内存中完成 type/option/size preflight 后才写入 controls；
-43. oversized restored candidate 不应用任何 localStorage substitution，而使用原 RenderData-derived snapshot 发 restore；
-44. Browser 每次 restore attempt 发一个 private "restore" complete snapshot，随后解除本地 barrier且不等待 ACK；
+43. oversized restored candidate 不应用任何 localStorage substitution；若原 RenderData-derived fallback snapshot 可编码且不超限，则用 fallback 发 restore；
+44. restored candidate 与 fallback snapshot 都超限时，Browser 不发 restore、解除本地 barrier并保持可用，restorePending 保持 true；否则每次 restore attempt 发一个 private "restore" complete snapshot且不等待 ACK；
 45. restore event payload 与 change/submit 使用相同 complete values grammar 和 131,072-byte limit；
 46. Runtime 只在 restorePending=true 时接受合法 restore；pending=false 的 restore 被忽略；
 47. 合法 restore candidate == canonical 时只 consume restorePending，不运行 validateOnChange、不新增 validation error；
 48. 合法 restore candidate != canonical 时走 built-in + validateOnChange，并与 consume restorePending 一起更新 current Session；
 49. malformed/oversize restore 被忽略且 restorePending 保持 true，zero canonical/error mutation；
-50. restorePending=true 时任意合法 ordinary change 或 submit 都会先 consume restorePending，再按原语义处理，从而防止 Renderer 重建后重新覆盖已接受用户状态；
-51. restore event 丢失不会锁死 UI；在 Runtime 尚未消费 restorePending 前新 Presentation 可以重试，一旦 pending=false 永不再 restore；
-52. Renderer/WebComponent 重建后 restorePending=false 时不会重新从 localStorage 覆盖 Runtime 当前 canonical state；
-53. malformed JSON、类型错误、失效 select option、storage API throw 不影响表单打开；
-54. 类型正确但违反 field validation rule 的 restored value 可进入 candidate，并由 Runtime 在 candidate 发生变化时显示 validation error；
-55. 同一表单内重复 localstorageKey 被拒绝；跨表单相同 key 按 origin 共享；
-56. string ""、number 0、boolean false、select value 与 number/select unset null round-trip 正确；
-57. oversized submit snapshot 不写 localStorage，也不发 submit event；
-58. submit attempt 在 submit event 前 best-effort 更新所有配置的 localStorage fields；
-59. failed async validation 后 localStorage 仍保留最近一次 submit-attempt draft；
-60. 单个 storage key 读写失败不阻止其他字段或表单正常工作；
-61. real Chromium qualification 覆盖 loading、async failure、async success、cancelability、Render Event error、Session-level restore、Renderer rebuild 和 localStorage reopen round-trip；
-62. 当前 Schema Form tests 和 repository affected CI 全部通过；
-63. 实现 PR 同步更新 DESIGN.md，且不修改 Framework Contract。
+50. restorePending true→false 且表单仍 active 时，即使 field data 未变化也必须投影新的 root RenderData；直接 terminal close 时无需额外 root update；
+51. restorePending=true 时任意合法 ordinary change 或 submit 都会先 consume restorePending，再按原语义处理，从而防止 Renderer 重建后重新覆盖已接受用户状态；
+52. restore event 丢失不会锁死 UI；在 Runtime 尚未消费 restorePending 前新 Presentation 可以重试，一旦 pending=false 永不再 restore；
+53. Renderer/WebComponent 重建后 restorePending=false 时不会重新从 localStorage 覆盖 Runtime 当前 canonical state；
+54. malformed JSON、类型错误、失效 select option、storage API throw 不影响表单打开；
+55. 类型正确但违反 field validation rule 的 restored value 可进入 candidate，并由 Runtime 在 candidate 发生变化时显示 validation error；
+56. 同一表单内重复 localstorageKey 被拒绝；跨表单相同 key 按 origin 共享；
+57. string ""、number 0、boolean false、select value 与 number/select unset null round-trip 正确；
+58. oversized submit snapshot 不写 localStorage，也不发 submit event；
+59. submit attempt 在 submit event 前 best-effort 更新所有配置的 localStorage fields；
+60. failed async validation 后 localStorage 仍保留最近一次 submit-attempt draft；
+61. 单个 storage key 读写失败不阻止其他字段或表单正常工作；
+62. real Chromium qualification 覆盖 loading、async failure、async success、cancelability、Render Event error、Session-level restore、Renderer rebuild 和 localStorage reopen round-trip；
+63. 当前 Schema Form tests 和 repository affected CI 全部通过；
+64. 实现 PR 同步更新 DESIGN.md，且不修改 Framework Contract。
 
 ## 17. 实现建议顺序
 
