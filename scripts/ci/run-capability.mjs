@@ -230,6 +230,13 @@ const capabilities = {
     npm("run", "test:session-events:qualification");
   },
 
+  "session-events-after-pwa"() {
+    // The Browser CI job runs this only after the PWA capability. That prior
+    // step already built the qualification bundle and ran the same m17 E2E
+    // suite, while Linux core regression covers the package integration tests.
+    node("--test", "test/session-events-v1/qualification.test.mjs");
+  },
+
   battle() {
     npm("run", "build:battle");
     node(
