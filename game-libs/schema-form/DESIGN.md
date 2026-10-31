@@ -1129,7 +1129,7 @@ later Browser-delivered presentation input replaces earlier display
 
 ## 22. Browser-local draft storage and Session one-shot restore
 
-`localstorageKey` 是 Browser origin-local 最近 submit-attempt draft key，不是 gameplay persistence、save slot、account/Shared State authority 或成功提交标记。不得用于 password、token、credential、payment 等敏感值。不同表单复用同 key 表示有意共享；同一 schema 内重复 key preflight reject。
+`localstorageKey` 是 Browser origin-local 最近 submit-attempt draft key，不是 gameplay persistence、save slot、account/Shared State authority 或成功提交标记。当前 v1 按现有 localStorage encoding 保存该 draft；后续将为 `localstorage` 字段增加加密存储能力。加密属于 storage implementation hardening，不改变 submit-attempt draft / restore semantics，也不阻塞当前使用。不同表单复用同 key 表示有意共享；同一 schema 内重复 key preflight reject。
 
 每 field 存一个 JSON primitive：string → JSON string，finite number → JSON number，boolean → JSON boolean，number/select unset → JSON null。Read missing、parse failure、wrong type、non-finite、invalid select option 或 Storage API throw 都按 field ignore。类型正确但违反 min/max/minLength/integer/script rule 的值可进入 candidate，由 Runtime validation 产生 error。
 
