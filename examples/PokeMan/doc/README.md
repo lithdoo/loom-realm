@@ -32,11 +32,15 @@
 当前 physical data canonical sources：
 
 ```text
-Shared State
+Gameplay-core Shared State
 → 67-shared-state-records.md
+
+Session-only DeepSeek configuration
+→ 76-deepseek-session-configuration.md
+→ pokeman.SessionConfig/deepseek exact Record
 
 Content / FSDB
 → 68-content-fsdb.md
 ```
 
-如果 `60`–`66` 中仍出现早期的 Record / namespace / key / Content identity 表述，以 `67` / `68` 的最新结论为准。Runtime / gameplay policy 仍由对应模块文档定义，不因为 physical schema 已冻结就自动转成数据问题。
+如果 `60`–`66` 中仍出现早期的 Record / namespace / key / Content identity 表述，gameplay-core Shared State 以 `67`、Session-only DeepSeek configuration 以 `76`、Content/FSDB 以 `68` 的最新结论为准。Runtime / gameplay policy 仍由对应模块文档定义，不因为 physical schema 已冻结就自动转成数据问题。
