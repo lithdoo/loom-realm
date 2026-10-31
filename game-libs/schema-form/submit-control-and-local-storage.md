@@ -131,7 +131,7 @@ Schema Form 仍不是独立 Subsystem，也不通过 `frame.call("schema-form")`
       readonly onSubmit?: (
         value: SchemaFormDataV1,
         control: SchemaFormSubmitControlV1,
-      ) => void | `Promise<void>`;
+      ) => void | Promise<void>;
     }
 
 `Promise<void>` 只描述 callback 的异步 lifetime 和异常传播；**Promise resolve 不表示 submit success**。成功只能由 control.close() 表达。
@@ -841,7 +841,7 @@ LocalStorage restore 不绕过 Runtime validation；它只是把候选草稿通�
 22. 用户在非 Loading 状态取消时 control 失效，后续异步控制调用 no-op；
 23. sendValidateError() 使用现有 Render Event path；
 24. unknown field / duplicate field / invalid errorMsg / oversize payload 被拒绝；sendValidateError([]) 是合法 no-op，不修改当前展示错误且不产生 Render Event；
-25. Browser 正确显示 transient external errors，并在 field edit / next accepted attempt 清理；
+25. Browser 正确显示 transient external errors；field edit 时清空该 field 当前展示错误，Submit Attempt 开始本身不清错误；
 26. 同一 field 不按 Runtime / Subsystem 来源设固定优先级；后到达的有效 error update 覆盖先前当前展示错误；
 27. field 本地 change 时立即清空该 field 当前展示错误，再发出普通 complete change snapshot；
 28. field change 后如果 built-in validation / validateOnChange 产生并由 Runtime 下发新错误，Browser 显示该新错误；
