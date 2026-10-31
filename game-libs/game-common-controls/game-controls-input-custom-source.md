@@ -13,7 +13,39 @@
 
 本文是待落地设计；不宣称监听器、状态机入口、测试或设备自动化已经实现。
 
-## 1. 冻结决策
+## 1. 规范关系与冻结决策
+
+### 1.1 与现行 Frozen 文档的关系
+
+[统一操控输入 Web Component](./game-controls-input.md) 继续拥有现行 Controls v1 的公开 ABI、14 键词汇、`controls.state` / `controls.event`、State-before-Event、Top Active Frame routing、refresh / stale fallback、Keyboard capture 与物理 Gamepad 行为。
+
+**本文在实现后成为它的 additive normative extension**，只扩展下面三类内部语义：
+
+1. input source enumeration：从 Keyboard + Gamepad 增加为 Keyboard + Gamepad + Custom；
+2. effective held calculation：从 `keyboard || gamepad` 增加为 `keyboard || gamepad || custom`；
+3. edge-producing source mutation：除既有 Keyboard / Gamepad physical edge 外，接受的 Custom snapshot delta 也可以产生正常的 `controls.event` edge。
+
+因此实现后遇到以下旧文档句子时，以本文为增量补充：
+
+```text
+组件内部自己监听键盘、自己轮询手柄
+effective = keyboardDown || gamepadDown
+physical edge = accepted Keyboard / tracked Gamepad edge
+```
+
+解释为：
+
+```text
+组件内部监听 Keyboard、轮询 Gamepad，并监听本文定义的 element-local CustomEvent
+effective = keyboardDown || gamepadDown || customDown
+edge-producing source mutation = existing physical edge + accepted Custom snapshot delta
+```
+
+除此之外，旧文档继续生效。本文**不修改** `ControlsButtonV1`、两条 Controls channel、公开 payload、Frame routing 或任何 Subsystem contract，也不把旧文档的历史 implementation / qualification subject 改写成新代码证据。
+
+设计 PR 阶段本文只是 Proposed；只有实现 PR 完成源码、测试、纵向 E2E 与专属 qualification evidence 后，本文才改为 `Active / Normative Extension / Implemented`。
+
+### 1.2 第一版冻结决策
 
 后续实现 Agent 不需要重新做架构选择，按下面六项直接落地：
 
@@ -21,8 +53,8 @@
 2. **组件内只有一份 Custom held 状态**；不支持 `sourceId`、多虚拟设备、多玩家或多个并发注入源。
 3. DOM 入口固定为元素自身的 `loomrealm:debug-input` CustomEvent，detail 固定为 `{ version: 1, down: ControlsButtonV1[] }`。
 4. Custom source 与 Keyboard、Gamepad 按 OR 合并；它的显式快照变化按正常用户边沿处理，产生现有 State-before-Event publication。
-5. 不增加构建 profile、第二份 browser bundle、运行时 debug flag、HTML attribute 或 Subsystem 配置。监听器随 `game-controls-input` 一起存在，但只有主动向该元素 dispatch 精确事件才生效。
-6. 不改冻结的 Controls v1 ABI、两条 Controls channel、14 键集合、raw device channel、PokeMan consumer 或 Framework。
+5. 不增加构建 profile、第二份 browser bundle、运行时 debug flag、HTML attribute 或 Subsystem 配置。监听器随 `game-controls-input` 一起存在，但只有主动向该元素 direct-dispatch 精确事件才生效。
+6. 不改冻结的 Controls v1 公开 ABI、两条 Controls channel、14 键集合、raw device channel、PokeMan consumer 或 Framework。
 
 如果后续需要多注入源、模拟 raw Gamepad axes、生产环境移除测试钩子或安全隔离，另开设计；第一版不预留半成品机制。
 
@@ -73,13 +105,13 @@ Gamepad adapter ────┘
 
 ## 3. DOM 输入契约
 
-### 3.1 事件名与目标
+### 3.1 事件名、目标与传播边界
 
 事件名固定：
 
 `loomrealm:debug-input`
 
-事件必须直接 dispatch 到当前活动的 `game-controls-input` 元素：
+事件必须 direct-dispatch 到当前活动的 `game-controls-input` 元素：
 
 ```js
 const controls = document.querySelector("game-controls-input");
@@ -93,7 +125,24 @@ controls.dispatchEvent(new CustomEvent("loomrealm:debug-input", {
 }));
 ```
 
-监听器只安装在该元素实例上，不安装到 `window`、`document` 或全局 event bus。收到匹配事件后，组件监听器先调用 `event.stopPropagation()`，避免该测试事件继续向祖先传播；组件不会把原始 CustomEvent 转发到任何 LoomRealm publication。
+监听器只安装在该元素实例上，不安装到 `window`、`document` 或全局 event bus。handler 必须首先要求：
+
+```ts
+event instanceof CustomEvent
+&& event.target === eventTarget
+&& event.bubbles === false
+&& event.composed === false
+&& event.cancelable === false
+```
+
+任一条件不满足就静默忽略。
+
+这里的边界是 **direct target + non-bubbling + non-composed**，不是“DOM 私有事件”。DOM capture phase 会先经过祖先，因此本文**不承诺**祖先 capture listener 看不到事件，也不要求用 `stopPropagation()` 伪造这种保证。组件只保证：
+
+- 它自己只接受直接发给自己的精确事件；
+- 默认 helper 产生 non-bubbling / non-composed event；
+- 它绝不把原始 CustomEvent 转成 LoomRealm Session Event、Presentation Event 或 Subsystem API；
+- 事件没有任何 Framework destination 字段。
 
 现有 duplicate ownership 继续生效：只有成功取得 `"controls"` ownership 的 `game-controls-input` 会启动 source，也只有它会安装监听器。带 `data-input-disabled="duplicate"` 的重复实例没有监听器。
 
@@ -118,7 +167,7 @@ interface DebugControlsInputDetailV1 {
 - 不允许重复按钮。
 - 最多 14 个按钮。
 - 接受后按 `CONTROLS_BUTTONS_V1` 的规范顺序 canonicalize，再交给 Controls Machine。
-- 非法 detail **静默忽略**：不修改状态、不发布 State/Event，也不抛出依赖 DOM listener 异常传播的错误。
+- 非法 detail **静默忽略**：不修改状态、不发布 State/Event，也不依赖 DOM listener 异常传播。
 
 不加入 ACK。自动化测试通过后续可观察游戏状态或现有 Controls publication 判断动作是否生效；不要发明第二条回执协议。
 
@@ -140,7 +189,7 @@ send([]);                  // release all
 - 第一份非空快照从 neutral 计算正常 down edge。
 - 相同快照重复发送是 no-op。
 - 空快照释放 Custom source 当前全部按钮，并产生真正导致 effective 变化的 up edge。
-- 不模拟 Keyboard DOM repeat；Custom source 产生的 event 始终 `repeat: false`。
+- 不模拟 Keyboard DOM repeat；Custom source 自己产生的 event 始终 `repeat: false`。
 - 不维护 source identity、设备 id、轴值、压力或 vendor mapping。
 
 完整快照比独立 down/up 指令更适合自动化：每次接受都能修复 Custom source 的完整状态，测试 finally 只需发送一次 `[]` 即可回到 neutral。
@@ -163,7 +212,7 @@ applyCustomState(
 let custom = new Set<ControlsButtonV1>();
 ```
 
-### 4.2 effective 状态
+### 4.2 effective 状态与 backward-compatibility invariant
 
 现有 effective 计算扩成：
 
@@ -180,10 +229,46 @@ effective(button)
 CONTROLS_BUTTONS_V1.filter((button) => effective(button))
 ```
 
-必须同步修正现有 Keyboard edge 判断：
+为了避免三个 Keyboard 分支各自漂移，内部固定一条辅助语义：
 
-- `keydown` 时，如果 Gamepad **或 Custom** 已经让该 button effective=true，Keyboard 加入 held 不能再发第二个 down。
-- `keyup` 时，如果 Gamepad **或 Custom** 仍持有该 button，Keyboard 释放不能发 up。
+```ts
+otherSourceDown(button)
+  = gamepadDown(button) || custom.has(button)
+```
+
+Keyboard 的首次 down、repeat、up 三处统一使用它：
+
+- 首次 `keydown`：如果 `otherSourceDown(button)` 已经为 true，Keyboard 加入 held 但不能再发第二个 down。
+- held Keyboard 的 `domRepeat === true`：**只有** `otherSourceDown(button) === false` 才允许现有 `repeat:true` down Event。
+- `keyup`：如果 `otherSourceDown(button)` 仍为 true，Keyboard 释放不能发 up。
+
+这不是修改既有 Keyboard + Gamepad 行为，而是把已有“Gamepad 同键占用时抑制 Keyboard 重复/边沿”的规则推广到第三个 source。
+
+实现必须维持下面的兼容性不变式：
+
+```text
+对任意只包含现有 Keyboard / Gamepad 操作的输入序列 S：
+
+当 Custom 始终为空时，
+newMachine(S) 的所有 ControlsPublication
+必须与 oldMachine(S) 完全相同。
+```
+
+尤其：
+
+```text
+Keyboard held + Gamepad not down + Custom empty
+    -> 原有 repeat:true 仍然产生
+
+Keyboard held + Gamepad down + Custom empty
+    -> 原有 repeat suppression 仍然成立
+
+Keyboard held + Gamepad not down + Custom down
+    -> 新增场景：repeat 被同样抑制
+
+Custom release while Keyboard still held
+    -> 不产生 up；之后新的 DOM repeat 可恢复 repeat:true
+```
 
 现有 Gamepad 多设备 OR 规则保持不变；Gamepad snapshot 更新时，`effectiveDown()` 自然包含 Custom held，所以物理 Gamepad 释放也不能错误释放仍由 Custom 持有的按键。
 
@@ -277,7 +362,7 @@ createControlsInputSource(target, this)
 `controls-source.ts` 新增：
 
 - 常量 `DEBUG_CONTROLS_EVENT = "loomrealm:debug-input"`，只在该模块内部使用。
-- 私有 detail validator / canonicalizer。
+- 私有 event/detail validator + canonicalizer。
 - `eventTarget.addEventListener(DEBUG_CONTROLS_EVENT, handler)`。
 - stop 时对应 `removeEventListener`。
 
@@ -285,7 +370,8 @@ handler 顺序固定：
 
 ```text
 收到 loomrealm:debug-input
-  -> stopPropagation()
+  -> validate CustomEvent + direct target + flags
+  -> invalid: return
   -> validate + canonicalize detail
   -> invalid: return
   -> send(machine.applyCustomState(down))
@@ -299,6 +385,7 @@ handler 顺序固定：
 - 直接调用 `this.context.emitCustomEvent(...)` 绕过 Controls Machine。
 - 暴露 package root helper。
 - 新增另一个 Custom Element。
+- 依赖 `stopPropagation()` 建立不可实现的 capture 隐私保证。
 
 现有 Keyboard `event.isTrusted === true` 校验必须原样保留；Custom source 不得通过放宽该条件实现。
 
@@ -315,59 +402,70 @@ handler 顺序固定：
 - 不进入 Session Events。
 - 不新增 Controls / Framework channel。
 - 不增加网络端口或宿主 RPC。
-- 不自动采集；没有精确 `CustomEvent` 就没有行为。
+- 不自动采集；没有精确 direct CustomEvent 就没有行为。
 
 同一页面 Realm 中已经执行的 JavaScript 本来就不是 LoomRealm 的安全隔离边界；如果未来需要把 Presentation script 视为不可信代码，必须整体设计浏览器 Realm / capability 隔离，不能把本输入 seam 的 build flag 当成安全边界。
 
 如果产品未来明确要求 production bundle 不含该测试 seam，再单独设计构建变体；不把该复杂度塞进第一版。
 
-## 7. 需要修改的文件
+## 7. 实现 PR 的固定文件范围
 
-实现 Agent 的范围固定如下：
+实现 Agent 的允许范围固定如下；其中最后三项是**必须的文档收尾**，不是可选项：
 
 ```text
-game-libs/game-common-controls/src/controls-machine.ts
-    增加 custom held + applyCustomState
-    effective OR 纳入 custom
-    Keyboard edge 判断纳入 custom
+Runtime
+    game-libs/game-common-controls/src/controls-machine.ts
+    game-libs/game-common-controls/browser/controls-source.ts
+    game-libs/game-common-controls/browser/device-input.browser.ts
 
-game-libs/game-common-controls/browser/controls-source.ts
-    createControlsInputSource(target, eventTarget)
-    监听/移除 loomrealm:debug-input
-    detail validation + canonicalization
-    调 machine.applyCustomState
+Tests
+    game-libs/game-common-controls/test/controls-machine.test.mjs
+    game-libs/game-common-controls/test/controls-browser.test.mjs
+    apps/pwa/test/pokeman-staging.e2e.test.mjs
 
-game-libs/game-common-controls/browser/device-input.browser.ts
-    仅把 this 作为 eventTarget 传给 createControlsInputSource
+Generated installed resources
+    examples/PokeMan/[FSDB]PokeMan/[resource]Presentation/controls/device-input.browser.js.js
+    examples/essentials-v21.1/[FSDB]essentials-v21.1/[resource]Presentation/controls/device-input.browser.js.js
 
-game-libs/game-common-controls/test/controls-machine.test.mjs
-    reducer 纯状态机覆盖
-
-game-libs/game-common-controls/test/controls-browser.test.mjs
-    真实 Custom Element + CustomEvent 覆盖
-
-apps/pwa/test/pokeman-staging.e2e.test.mjs
-    至少增加一段通过 CustomEvent 完成的 Map 动作
-    以及一段 Dialogue active 时的 action，证明 Top Active Frame 路由
-
-examples/PokeMan/[FSDB]PokeMan/[resource]Presentation/controls/device-input.browser.js.js
-examples/essentials-v21.1/[FSDB]essentials-v21.1/[resource]Presentation/controls/device-input.browser.js.js
-    用新 build 的 dist/browser/device-input.browser.js 字节级同步
+Documentation closure
+    game-libs/game-common-controls/game-controls-input-custom-source.md
+    game-libs/game-common-controls/landing.md
+    doc/30-implementation/game-controls-custom-input-qualification.md
 ```
 
-不修改：
+运行时代码职责：
+
+```text
+controls-machine.ts
+    增加 custom held + applyCustomState
+    effective OR 纳入 custom
+    Keyboard first-down / repeat / up 统一使用 otherSourceDown
+
+controls-source.ts
+    createControlsInputSource(target, eventTarget)
+    监听/移除 loomrealm:debug-input
+    event/direct-target/flags/detail validation + canonicalization
+    调 machine.applyCustomState
+
+device-input.browser.ts
+    仅把 this 作为 eventTarget 传给 createControlsInputSource
+```
+
+仍然禁止修改：
 
 - `src/model.ts`
 - `CONTROLS_BUTTONS_V1`
 - `CONTROLS_INPUT_CHANNELS`
-- `game-controls-input.md`
+- `game-controls-input.md` 正文
 - `doc/15-contracts/game-common-controls-input-v1.md`
 - raw `keyboard-source.ts` / `gamepad-source.ts` / `pointer-source.ts`
 - Map / Dialogue / PokeMan Subsystem consumer
 - Framework / Main / Renderer / Session Events
 - PWA launcher protocol
 
-如果实现过程中发现必须修改上述“不修改”范围，停止扩 scope，先回到设计评审，不自行扩大 PR。
+本文本身负责声明 additive normative extension，因此不需要改写旧 Frozen 正文。
+
+如果实现过程中发现必须修改上述禁止范围，停止扩 scope，先回到设计评审，不自行扩大 PR。
 
 ## 8. 必须覆盖的测试
 
@@ -385,21 +483,25 @@ examples/essentials-v21.1/[FSDB]essentials-v21.1/[resource]Presentation/controls
 8. `setKeyboardCapture(false)` 不清 Custom。
 9. `setWindowUsable(false)` 清 Custom，只发 reconciliation State，不合成 up。
 10. Window regain 后 Custom 仍为空，必须收到新 CustomEvent 才再次按下。
+11. Keyboard held + Custom 同键 held 时，DOM `repeat:true` 被抑制。
+12. Custom 释放、Keyboard 仍 held 后，下一次 DOM `repeat:true` 恢复现有 repeat event。
+13. **Backward compatibility invariant**：至少用一组覆盖 first-down / repeat / up / Gamepad overlap / disconnect / reconciliation 的既有 Keyboard+Gamepad 序列证明 Custom 从未使用时 publication 与改造前既有断言完全一致。
 
 ### 8.2 Browser component
 
 至少新增这些断言：
 
-1. 活动 `game-controls-input` 接受合法 `loomrealm:debug-input`。
+1. 活动 `game-controls-input` 接受合法 direct `loomrealm:debug-input`。
 2. `window`、`document`、其他元素 dispatch 同名事件没有输入效果。
-3. duplicate-disabled controls element 不接受事件。
-4. 事件被 `stopPropagation()`，祖先 listener 不观察到该事件。
-5. 非法 detail（null、额外字段、错误 version、未知按钮、重复按钮、非数组）全部原子忽略。
-6. blocked Keyboard focus 下 Custom source 仍可工作。
-7. Window blur / hidden 后 Custom held 被清，且不合成 up Event。
-8. disconnect 后 listener 被移除，后续 dispatch 无 publication。
-9. 现有 trusted Keyboard、standard Gamepad、Pocket Block mapping、Select overlay 回归保持通过。
-10. Custom 按住 `select` 时沿现有 effective State 正常触发现有长按逻辑；不要给 Custom source 建第二套 Select 行为。
+3. target 不是活动 component、或者 `bubbles/composed/cancelable` flags 不符合契约时原子忽略。
+4. duplicate-disabled controls element 不接受事件。
+5. 默认 non-bubbling event 不会到达 ancestor bubble listener；**不测试/不承诺 ancestor capture listener 不观察到事件**。
+6. 非法 detail（null、额外字段、错误 version、未知按钮、重复按钮、非数组）全部原子忽略。
+7. blocked Keyboard focus 下 Custom source 仍可工作。
+8. Window blur / hidden 后 Custom held 被清，且不合成 up Event。
+9. disconnect 后 listener 被移除，后续 dispatch 无 publication。
+10. 现有 trusted Keyboard、standard Gamepad、Pocket Block mapping、Select overlay 回归保持通过。
+11. Custom 按住 `select` 时沿现有 effective State 正常触发现有长按逻辑；不要给 Custom source 建第二套 Select 行为。
 
 ### 8.3 PokeMan staging E2E
 
@@ -452,6 +554,8 @@ git diff --check
 
 其中 staging E2E 必须实际走新增 Custom seam；不能只证明旧 Keyboard 路径仍能工作。
 
+如果仓库现有测试因为实现改动暴露真实回归，必须修到通过；不得通过删测试、放宽既有断言、跳过测试或把失败标成 expected 来收尾。
+
 真实 Android Pocket Block 的 CDP 测试是后续设备 smoke，不阻塞纯代码实现完成，但它必须明确标记为：
 
 ```text
@@ -459,15 +563,23 @@ git diff --check
 不证明：实体 Gamepad wake / enumeration / kernel input
 ```
 
-## 11. 实现 PR 的收尾规则
+## 11. 实现 PR 的强制收尾
 
-为了符合仓库现有 `Frozen != Implemented != Qualified` 的做法：
+为了符合仓库现有 `Frozen != Implemented != Qualified` 的做法，以下步骤全部必做：
 
-1. 先完成源码、测试、staging E2E 和两份 bundle copy。
+1. 完成源码、unit/browser tests、staging E2E 和两份 bundle copy。
 2. 跑第 10 节全部门禁。
-3. 在本提案中把状态改为 `Implemented`，并记录实际实现 commit / qualification 结果；不要改写冻结的 Controls v1 语义。
-4. 若要为本 seam 单独保存资格证据，可以新增 `doc/30-implementation/game-controls-custom-input-qualification.md`；不要把旧 `2333fea8` 的历史 PASS 冒充新代码证据。
-5. 不把“CDP CustomEvent 自动化通过”描述成“真实 Android 手柄通过”。
+3. 新增 `doc/30-implementation/game-controls-custom-input-qualification.md`，记录：
+   - 实际 implementation subject SHA；
+   - 本文作为 additive normative extension 的关系；
+   - 实际执行的命令和 PASS 结果；
+   - Custom seam 能证明与不能证明的边界；
+   - 旧 `2333fea8` 只作为 Controls v1 历史 qualification，不是本实现 subject。
+4. 将本文状态从 `Proposed / Design / Not Implemented` 改为 `Active / Normative Extension / Implemented`，并写入实际 implementation subject 与 qualification evidence 链接。
+5. 更新 `landing.md`，把该项从 Proposed 改为已实现，并链接新的 qualification evidence。
+6. 不把“CDP CustomEvent 自动化通过”描述成“真实 Android 手柄通过”。
+
+专属 qualification evidence 是**必做**，不是“如有需要”。不用为了它新增公开协议或修改旧 Controls v1 qualification subject。
 
 ## 12. CDP / Playwright helper 形状
 
@@ -535,5 +647,7 @@ Custom ───┘
 ```
 
 CustomEvent 只负责把第三份 held 快照送进组件；从 Controls Machine 往后的所有行为继续复用现有实现。Subsystem 无法区分输入来源，也不需要区分。
+
+本文作为 additive normative extension 只扩展 source enumeration、effective OR 和 edge-producing source mutation；所有现有公开 Controls v1 语义继续保持。Custom 未使用时，既有 Keyboard / Gamepad 行为必须完全不变。
 
 这就是第一版的完整边界。实现 Agent 不应再增加额外协议、来源 identity、构建 profile 或业务侧适配。
