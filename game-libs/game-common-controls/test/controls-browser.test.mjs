@@ -25,6 +25,19 @@ async function mount(page, tag = "game-controls-input", owner = "controls") {
   }, { tag, owner });
 }
 
+async function sendCustom(page, down, selector = "game-controls-input") {
+  await page.evaluate(({ down, selector }) => {
+    const element = document.querySelector(selector);
+    if (!element) throw new Error(`Missing ${selector}`);
+    element.dispatchEvent(new CustomEvent("loomrealm:debug-input", {
+      detail: { version: 1, down },
+      bubbles: false,
+      composed: false,
+      cancelable: false,
+    }));
+  }, { down, selector });
+}
+
 function controls(events, owner = "controls") {
   return events.filter((event) => event.owner === owner);
 }
@@ -420,6 +433,166 @@ test("controls element publishes top-frame keyboard edges and prevents mapped de
     ["controls.event", "input.event", "down", "select", false, undefined],
   ]);
   assert.equal(published.every((event) => event.options.broadcast === "top-frame"), true);
+});
+
+test("direct Custom snapshots work with blocked Keyboard focus and retain canonical State-before-Event", async (t) => {
+  const page = await openPage(t, "<!doctype html><body><section id='ancestor'><input id='field'></section></body>");
+  await mount(page);
+  await page.evaluate(() => {
+    deviceEvents.length = 0;
+    globalThis.ancestorBubbles = 0;
+    document.querySelector("#ancestor").addEventListener("loomrealm:debug-input", () => { ancestorBubbles += 1; });
+    document.querySelector("#field").focus();
+  });
+  await sendCustom(page, ["select", "up"]);
+  await sendCustom(page, ["up", "select"]);
+  await page.evaluate(() => {
+    const detail = Object.create(null);
+    detail.version = 1;
+    detail.down = ["east"];
+    document.querySelector("game-controls-input").dispatchEvent(new CustomEvent("loomrealm:debug-input", { detail }));
+  });
+  const result = await page.evaluate(() => ({ events: deviceEvents, ancestorBubbles }));
+  assert.equal(result.ancestorBubbles, 0);
+  assert.deepEqual(result.events.map((event) => [event.options.channel, event.data.down, event.data.action, event.data.button, event.data.repeat]), [
+    ["controls.state", ["up", "select"], undefined, undefined, undefined],
+    ["controls.event", undefined, "down", "up", false],
+    ["controls.event", undefined, "down", "select", false],
+    ["controls.state", ["east"], undefined, undefined, undefined],
+    ["controls.event", undefined, "up", "up", false],
+    ["controls.event", undefined, "down", "east", false],
+    ["controls.event", undefined, "up", "select", false],
+  ]);
+  assert.equal(result.events.every((event) => event.options.broadcast === "top-frame"), true);
+});
+
+test("Custom event target, flags, duplicate ownership, and closed detail validation fail atomically", async (t) => {
+  const page = await openPage(t, "<!doctype html><body><div id='other'></div></body>");
+  await mount(page);
+  await page.evaluate(() => {
+    const duplicate = document.createElement("game-controls-input");
+    duplicate.id = "duplicate";
+    duplicate.receiveRenderContext({ emitCustomEvent(name, data, options) { deviceEvents.push({ owner: "duplicate", name, data, options }); } });
+    document.body.append(duplicate);
+    deviceEvents.length = 0;
+  });
+  await sendCustom(page, ["up"]);
+  const accepted = await page.evaluate(() => deviceEvents.length);
+  await page.evaluate(() => {
+    const eventName = "loomrealm:debug-input";
+    const active = document.querySelector("game-controls-input:not([data-input-disabled])");
+    const duplicate = document.querySelector("#duplicate");
+    const valid = { version: 1, down: ["left"] };
+    for (const target of [window, document, document.querySelector("#other"), duplicate]) {
+      target.dispatchEvent(new CustomEvent(eventName, { detail: valid }));
+    }
+    active.dispatchEvent(new Event(eventName));
+    for (const flags of [{ bubbles: true }, { composed: true }, { cancelable: true }]) {
+      active.dispatchEvent(new CustomEvent(eventName, { detail: valid, ...flags }));
+    }
+    class Detail { constructor() { this.version = 1; this.down = ["left"]; } }
+    const tooMany = Array.from({ length: 15 }, () => "up");
+    const invalid = [
+      null,
+      [],
+      { version: 2, down: ["left"] },
+      { version: 1, down: ["left"], extra: true },
+      { version: 1, down: "left" },
+      { version: 1, down: ["unknown"] },
+      { version: 1, down: ["left", "left"] },
+      { version: 1, down: tooMany },
+      new Detail(),
+    ];
+    const throwing = {};
+    Object.defineProperties(throwing, {
+      version: { enumerable: true, get() { throw new Error("invalid detail"); } },
+      down: { enumerable: true, value: ["left"] },
+    });
+    invalid.push(throwing);
+    for (const detail of invalid) active.dispatchEvent(new CustomEvent(eventName, { detail }));
+  });
+  assert.equal(await page.evaluate(() => deviceEvents.length), accepted);
+  await sendCustom(page, []);
+  const released = await page.evaluate((from) => deviceEvents.slice(from), accepted);
+  assert.deepEqual(released.map((event) => [event.options.channel, event.data.down, event.data.action, event.data.button]), [
+    ["controls.state", [], undefined, undefined],
+    ["controls.event", undefined, "up", "up"],
+  ]);
+  assert.equal(await page.evaluate(() => document.querySelector("#duplicate").getAttribute("data-input-disabled")), "duplicate");
+  assert.equal(await page.evaluate(() => deviceEvents.some((event) => event.owner === "duplicate")), false);
+});
+
+test("Custom held state clears on blur and hidden reconciliation without up edges or restoration", async (t) => {
+  const page = await openPage(t);
+  await page.evaluate(() => {
+    globalThis.visibleState = "visible";
+    globalThis.focused = true;
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibleState });
+    document.hasFocus = () => focused;
+  });
+  await mount(page);
+  await page.evaluate(() => { deviceEvents.length = 0; });
+  await sendCustom(page, ["up"]);
+  const beforeBlur = await page.evaluate(() => deviceEvents.length);
+  await page.evaluate(() => { focused = false; window.dispatchEvent(new Event("blur")); });
+  assert.deepEqual(await page.evaluate((from) => deviceEvents.slice(from).map((event) => [event.options.channel, event.data.down, event.data.action]), beforeBlur), [
+    ["controls.state", [], undefined],
+  ]);
+  await page.evaluate(() => { focused = true; window.dispatchEvent(new Event("focus")); deviceEvents.length = 0; });
+  await sendCustom(page, []);
+  assert.equal(await page.evaluate(() => deviceEvents.length), 0, "blurred Custom snapshot must not restore");
+  await sendCustom(page, ["east"]);
+  const beforeHidden = await page.evaluate(() => deviceEvents.length);
+  await page.evaluate(() => { visibleState = "hidden"; document.dispatchEvent(new Event("visibilitychange")); });
+  assert.deepEqual(await page.evaluate((from) => deviceEvents.slice(from).map((event) => [event.options.channel, event.data.down, event.data.action]), beforeHidden), [
+    ["controls.state", [], undefined],
+  ]);
+  const hiddenCount = await page.evaluate(() => deviceEvents.length);
+  await sendCustom(page, ["left"]);
+  assert.equal(await page.evaluate(() => deviceEvents.length), hiddenCount, "hidden Window must reject and not save Custom state");
+});
+
+test("disconnect removes the Custom listener and reclaimed ownership installs a fresh one", async (t) => {
+  const page = await openPage(t);
+  await mount(page);
+  const stoppedAt = await page.evaluate(() => {
+    deviceEvents.length = 0;
+    const element = document.querySelector("game-controls-input");
+    window.detachedControls = element;
+    element.remove();
+    return deviceEvents.length;
+  });
+  await page.evaluate(() => {
+    detachedControls.dispatchEvent(new CustomEvent("loomrealm:debug-input", { detail: { version: 1, down: ["up"] } }));
+  });
+  assert.equal(await page.evaluate(() => deviceEvents.length), stoppedAt);
+  await page.evaluate(() => {
+    const element = document.createElement("game-controls-input");
+    element.id = "reclaimed-custom";
+    element.receiveRenderContext({ emitCustomEvent(name, data, options) { deviceEvents.push({ owner: "reclaimed", name, data, options }); } });
+    document.body.append(element);
+    deviceEvents.length = 0;
+  });
+  await sendCustom(page, ["right"], "#reclaimed-custom");
+  assert.deepEqual(await page.evaluate(() => deviceEvents.map((event) => [event.owner, event.options.channel, event.data.down, event.data.action])), [
+    ["reclaimed", "controls.state", ["right"], undefined],
+    ["reclaimed", "controls.event", undefined, "down"],
+  ]);
+});
+
+test("Custom Select hold reuses the existing overlay lifecycle", async (t) => {
+  const page = await openPage(t);
+  await installFullscreenMock(page);
+  await mount(page);
+  await sendCustom(page, ["select"]);
+  await page.waitForSelector(`${fullscreenOverlay}[open]`, { timeout: 2_000 });
+  await sendCustom(page, []);
+  await page.keyboard.press("Escape");
+  await sendCustom(page, ["select"]);
+  await page.waitForSelector(`${fullscreenOverlay}[open]`, { timeout: 2_000 });
+  await sendCustom(page, []);
+  assert.equal(await page.locator(fullscreenOverlay).count(), 1);
+  assert.deepEqual(await page.evaluate(() => [fullscreenMock.enterCalls, fullscreenMock.exitCalls]), [0, 0]);
 });
 
 test("blocked focus targets follow the closed set and open shadow ancestry", async (t) => {

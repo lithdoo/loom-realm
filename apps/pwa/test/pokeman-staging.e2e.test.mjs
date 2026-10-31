@@ -6,10 +6,10 @@ import { createPokeManRoutePlanner } from "./helpers/pokeman.mjs";
 
 const initial = Object.freeze({ mapId: 3, x: 3, y: 8, direction: 2 });
 const movements = Object.freeze([
-  Object.freeze({ direction: 2, code: "ArrowDown", dx: 0, dy: 1 }),
-  Object.freeze({ direction: 4, code: "ArrowLeft", dx: -1, dy: 0 }),
-  Object.freeze({ direction: 6, code: "ArrowRight", dx: 1, dy: 0 }),
-  Object.freeze({ direction: 8, code: "ArrowUp", dx: 0, dy: -1 }),
+  Object.freeze({ direction: 2, code: "ArrowDown", button: "down", dx: 0, dy: 1 }),
+  Object.freeze({ direction: 4, code: "ArrowLeft", button: "left", dx: -1, dy: 0 }),
+  Object.freeze({ direction: 6, code: "ArrowRight", button: "right", dx: 1, dy: 0 }),
+  Object.freeze({ direction: 8, code: "ArrowUp", button: "up", dx: 0, dy: -1 }),
 ]);
 
 async function waitForMap(page, target) {
@@ -33,6 +33,34 @@ async function act(page, steps) {
     await waitForMap(page, step.expected);
   }
   return steps.at(-1)?.expected;
+}
+
+async function sendCustomControls(page, down) {
+  await page.evaluate((snapshot) => {
+    const elements = [...document.querySelectorAll("game-controls-input:not([data-input-disabled])")];
+    if (elements.length !== 1) throw new Error(`Expected one active game-controls-input, received ${elements.length}`);
+    elements[0].dispatchEvent(new CustomEvent("loomrealm:debug-input", {
+      detail: { version: 1, down: snapshot },
+      bubbles: false,
+      composed: false,
+      cancelable: false,
+    }));
+  }, down);
+}
+
+async function actCustomMapStep(page, step) {
+  await sendCustomControls(page, [step.button]);
+  try {
+    await page.waitForFunction((target) => {
+      const player = document.querySelector("lr-map-sprite")?._latestData;
+      return player?.motion !== null
+        || (player?.x === target.x && player?.y === target.y && player?.direction === target.direction);
+    }, step.expected, { timeout: 25_000 });
+  } finally {
+    await sendCustomControls(page, []);
+  }
+  await waitForMap(page, step.expected);
+  return step.expected;
 }
 
 function responsiveFacingPlan(planner, state) {
@@ -237,6 +265,10 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
 
     await installAtomicPromoteProbe(page);
     let state = await qualifyResponsiveFacing(page, planner, initial);
+    const customMove = movements.map((candidate) => ({ candidate, expected: planner.transition(state, candidate) }))
+      .find(({ expected }) => expected.mapId === state.mapId && (expected.x !== state.x || expected.y !== state.y));
+    assert.ok(customMove, "staging Map must expose a real movement for the Custom controls seam");
+    state = await actCustomMapStep(page, { ...customMove.candidate, expected: customMove.expected });
     const map2 = planner.planToMap(state, 2);
     assert.ok(map2.length > 0);
     state = await act(page, map2);
@@ -306,9 +338,23 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     await verifyDialogueObserverDetectsFlash(page);
     await observeDialogueShell(page);
 
+    // Let Conversation A reveal naturally first. The Custom action is qualified
+    // only by the non-automatic A -> B transition, not by _revealComplete.
+    await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 25_000 });
+    const mapBeforeCustomDialogue = await page.evaluate(() => structuredClone(document.querySelector("lr-map-sprite")._latestData));
+    await sendCustomControls(page, ["south"]);
+    try {
+      await waitForDialogue(page, "准备好出发了吗？");
+    } finally {
+      await sendCustomControls(page, []);
+    }
+    assert.deepEqual(
+      await page.evaluate(() => structuredClone(document.querySelector("lr-map-sprite")._latestData)),
+      mapBeforeCustomDialogue,
+      "the Custom Dialogue action must not leak through Top Active Frame routing into Map",
+    );
+
     // A → READY → B must keep one continuous visible shell.
-    await revealAndConfirm(page);
-    await waitForDialogue(page, "准备好出发了吗？");
     await assertDialogueNeverHidden(page, "Conversation A → READY → B");
 
     // History stays interactive and full-width while the Conversation pauses.
@@ -378,6 +424,10 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     assert.equal(await page.locator("game-controls-input").count(), 1);
     assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
     assert.equal(await page.evaluate(() => window.__loomrealmPwa.installationId), installationId, "Refresh must reuse installed content");
+    const reloadedMove = movements.map((candidate) => ({ candidate, expected: planner.transition(initial, candidate) }))
+      .find(({ expected }) => expected.mapId === initial.mapId && (expected.x !== initial.x || expected.y !== initial.y));
+    assert.ok(reloadedMove, "reloaded staging Map must expose a movement for Custom controls");
+    await actCustomMapStep(page, { ...reloadedMove.candidate, expected: reloadedMove.expected });
     assert.equal(await page.evaluate(() => window.__loomrealmPwa.failure), null);
     const forbidden = await context.request.get(new URL("/service-worker.js", page.url()).href);
     assert.equal(forbidden.status(), 404, "Staging Service Worker must not be exposed at origin root");

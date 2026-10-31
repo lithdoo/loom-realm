@@ -178,3 +178,96 @@ test("held keyboard repeat is event-only and is suppressed while the gamepad hol
     events: [["up", "east", false]],
   });
 });
+
+test("custom snapshots press, release, deduplicate, and publish canonical multi-button edges", () => {
+  const machine = ready();
+  assert.deepEqual(names(machine.applyCustomState(["south", "up"])), {
+    state: ["up", "south"],
+    events: [["down", "up", false], ["down", "south", false]],
+  });
+  assert.deepEqual(names(machine.applyCustomState(["up", "south"])), { state: null, events: [] });
+  assert.deepEqual(names(machine.applyCustomState(["east", "left"])), {
+    state: ["left", "east"],
+    events: [
+      ["up", "up", false], ["down", "left", false],
+      ["up", "south", false], ["down", "east", false],
+    ],
+  });
+  assert.deepEqual(names(machine.applyCustomState([])), {
+    state: [],
+    events: [["up", "left", false], ["up", "east", false]],
+  });
+});
+
+test("keyboard and Custom OR suppresses repeat until Custom releases", () => {
+  const machine = ready();
+  assert.deepEqual(names(machine.keydown("south", false)), { state: ["south"], events: [["down", "south", false]] });
+  assert.deepEqual(names(machine.applyCustomState(["south"])), { state: null, events: [] });
+  assert.deepEqual(names(machine.keydown("south", true)), { state: null, events: [] });
+  assert.deepEqual(names(machine.applyCustomState([])), { state: null, events: [] });
+  assert.deepEqual(names(machine.keydown("south", true)), { state: null, events: [["down", "south", true]] });
+  assert.deepEqual(names(machine.keyup("south")), { state: [], events: [["up", "south", false]] });
+
+  assert.deepEqual(names(machine.applyCustomState(["south"])), { state: ["south"], events: [["down", "south", false]] });
+  assert.deepEqual(names(machine.keydown("south", false)), { state: null, events: [] });
+  assert.deepEqual(names(machine.keyup("south")), { state: null, events: [] });
+  assert.deepEqual(names(machine.applyCustomState([])), { state: [], events: [["up", "south", false]] });
+});
+
+test("gamepad and Custom OR while different sources merge different buttons", () => {
+  const machine = ready();
+  assert.deepEqual(names(machine.applyGamepadFrame([{ index: 3, pressed: ["up"] }])), { state: ["up"], events: [] });
+  assert.deepEqual(names(machine.applyCustomState(["up", "east"])), {
+    state: ["up", "east"], events: [["down", "east", false]],
+  });
+  assert.deepEqual(names(machine.applyGamepadFrame([{ index: 3, pressed: [] }])), { state: null, events: [] });
+  assert.deepEqual(names(machine.applyCustomState(["up"])), {
+    state: ["up"], events: [["up", "east", false]],
+  });
+  assert.deepEqual(names(machine.applyCustomState([])), { state: [], events: [["up", "up", false]] });
+});
+
+test("Custom survives keyboard capture loss but clears without edges across Window reconciliation", () => {
+  const machine = ready();
+  machine.keydown("south", false);
+  machine.applyCustomState(["up"]);
+  assert.deepEqual(names(machine.setKeyboardCapture(false)), { state: ["up"], events: [] });
+  assert.deepEqual(names(machine.applyCustomState(["up", "east"])), {
+    state: ["up", "east"], events: [["down", "east", false]],
+  });
+  assert.deepEqual(names(machine.setWindowUsable(false)), { state: [], events: [] });
+  assert.deepEqual(names(machine.applyCustomState(["left"])), { state: null, events: [] });
+  assert.deepEqual(names(machine.setWindowUsable(true)), { state: [], events: [] });
+  assert.deepEqual(names(machine.setKeyboardCapture(true)), { state: null, events: [] });
+  assert.deepEqual(names(machine.keydown("left", false)), { state: ["left"], events: [["down", "left", false]] });
+});
+
+test("Custom-empty keeps the established Keyboard and Gamepad publication sequence unchanged", () => {
+  const machine = ready();
+  const actual = [
+    machine.keydown("east", false),
+    machine.keydown("east", true),
+    machine.applyGamepadFrame([{ index: 1, pressed: ["east", "start"] }]),
+    machine.keydown("east", true),
+    machine.keyup("east"),
+    machine.applyGamepadFrame([]),
+    machine.setWindowUsable(false),
+    machine.setWindowUsable(true, [{ index: 1, pressed: ["up"] }]),
+    machine.setKeyboardCapture(true),
+    machine.keydown("south", false),
+    machine.setKeyboardCapture(false),
+  ].map(names);
+  assert.deepEqual(actual, [
+    { state: ["east"], events: [["down", "east", false]] },
+    { state: null, events: [["down", "east", true]] },
+    { state: ["east", "start"], events: [] },
+    { state: null, events: [] },
+    { state: null, events: [] },
+    { state: [], events: [["up", "east", false], ["up", "start", false]] },
+    { state: [], events: [] },
+    { state: ["up"], events: [] },
+    { state: null, events: [] },
+    { state: ["up", "south"], events: [["down", "south", false]] },
+    { state: ["up"], events: [] },
+  ]);
+});

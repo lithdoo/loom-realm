@@ -60,6 +60,7 @@ export interface ControlsMachine {
   keydown(button: ControlsButtonV1, domRepeat: boolean): ControlsPublication;
   keyup(button: ControlsButtonV1): ControlsPublication;
   applyGamepadFrame(samples: readonly ControlsPadSample[]): ControlsPublication;
+  applyCustomState(pressed: readonly ControlsButtonV1[]): ControlsPublication;
   setWindowUsable(usable: boolean, baseline?: readonly ControlsPadSample[]): ControlsPublication;
   setKeyboardCapture(available: boolean): ControlsPublication;
 }
@@ -95,12 +96,14 @@ export function createControlsMachine(): ControlsMachine {
   let keyboardCapture = false;
   const keyboard = new Set<ControlsButtonV1>();
   let pads = new Map<number, Set<ControlsButtonV1>>();
+  let custom = new Set<ControlsButtonV1>();
 
   const gamepadDown = (button: ControlsButtonV1) => {
     for (const pressed of pads.values()) if (pressed.has(button)) return true;
     return false;
   };
-  const effectiveDown = () => CONTROLS_BUTTONS_V1.filter((button) => keyboard.has(button) || gamepadDown(button));
+  const otherSourceDown = (button: ControlsButtonV1) => gamepadDown(button) || custom.has(button);
+  const effectiveDown = () => CONTROLS_BUTTONS_V1.filter((button) => keyboard.has(button) || otherSourceDown(button));
   const changedState = (prev: readonly ControlsButtonV1[]) => {
     const next = effectiveDown();
     return sameDown(prev, next) ? null : statePayload(next);
@@ -112,17 +115,17 @@ export function createControlsMachine(): ControlsMachine {
     keydown(button: ControlsButtonV1, domRepeat: boolean): ControlsPublication {
       if (!keyboardCapture || !CONTROLS_BUTTONS_V1.includes(button)) return NONE;
       if (!keyboard.has(button)) {
-        const wasEffective = gamepadDown(button);
+        const wasEffective = otherSourceDown(button);
         keyboard.add(button);
         if (wasEffective) return NONE;
         return publish(statePayload(effectiveDown()), [edge("down", button, false)]);
       }
-      if (domRepeat === true && !gamepadDown(button)) return publish(null, [edge("down", button, true)]);
+      if (domRepeat === true && !otherSourceDown(button)) return publish(null, [edge("down", button, true)]);
       return NONE;
     },
     keyup(button: ControlsButtonV1): ControlsPublication {
       if (!keyboardCapture || !keyboard.delete(button)) return NONE;
-      if (gamepadDown(button)) return NONE;
+      if (otherSourceDown(button)) return NONE;
       return publish(statePayload(effectiveDown()), [edge("up", button, false)]);
     },
     applyGamepadFrame(samples: readonly ControlsPadSample[]): ControlsPublication {
@@ -162,12 +165,28 @@ export function createControlsMachine(): ControlsMachine {
       }
       return publish(sameDown(prev, next) ? null : statePayload(next), events);
     },
+    applyCustomState(pressed: readonly ControlsButtonV1[]): ControlsPublication {
+      if (!windowUsable) return NONE;
+      const prev = effectiveDown();
+      custom = pressedSet(pressed);
+      const next = effectiveDown();
+      if (sameDown(prev, next)) return NONE;
+      const events: ControlsEventPayloadV1[] = [];
+      for (const button of CONTROLS_BUTTONS_V1) {
+        const was = prev.includes(button);
+        const now = next.includes(button);
+        if (!was && now) events.push(edge("down", button, false));
+        else if (was && !now) events.push(edge("up", button, false));
+      }
+      return publish(statePayload(next), events);
+    },
     setWindowUsable(usable: boolean, baseline: readonly ControlsPadSample[] = []): ControlsPublication {
       if (usable === windowUsable) return NONE;
       windowUsable = usable;
       keyboardCapture = false;
       keyboard.clear();
       pads = new Map();
+      custom = new Set();
       if (usable) {
         for (const sample of baseline) {
           if (!Number.isInteger(sample.index) || sample.index < 0) continue;

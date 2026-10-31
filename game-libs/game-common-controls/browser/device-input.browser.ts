@@ -177,7 +177,7 @@ class GameControlsInputElement extends HTMLElement {
     this.removeAttribute("data-input-disabled");
     registry.set("controls", this);
     this.claimed = true;
-    this.stopSource = createControlsInputSource(target).start((publication) => this.emit(publication));
+    this.stopSource = createControlsInputSource(target, this).start((publication) => this.emit(publication));
   }
 
   private emit(publication: ControlsPublication): void {

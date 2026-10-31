@@ -1,17 +1,19 @@
-# game-controls-input 组件内 CustomEvent 输入源提案
+# game-controls-input 组件内 CustomEvent 输入源
 
-> 状态：**Proposed / Design / Not Implemented**
+> 状态：**Active / Normative Extension / Implemented**
 > 位置：`game-libs/game-common-controls/game-controls-input-custom-source.md`
 > 所属包：`@loomrealm-game/common-controls`
 > 相邻实现：[统一操控输入 Web Component](./game-controls-input.md)
 > 现行契约：[Game Common Controls Input v1](../../doc/15-contracts/game-common-controls-input-v1.md)
 > 现行资格证据：[Unified Controls Input Qualification](../../doc/30-implementation/game-controls-input-qualification.md)
+> executable implementation subject：[`37940e76c811ddc7052e6592e9aa3d9419f1ed07`](https://github.com/lithdoo/loom-realm/commit/37940e76c811ddc7052e6592e9aa3d9419f1ed07)
+> 本扩展资格证据：[Custom Controls Input Qualification](../../doc/30-implementation/game-controls-custom-input-qualification.md)
 
-本文提议给现有 `<game-controls-input>` 增加第三种、**仅存在于组件内部的 Controls 输入源**：测试驱动通过 DOM `CustomEvent` 把一份完整的 14 键按下快照交给组件，组件把它与现有 Keyboard / Gamepad 状态一起送入同一个 Controls Machine，最后仍然只产生现有的 `controls.state` / `controls.event`。
+本文给现有 `<game-controls-input>` 增加第三种、**仅存在于组件内部的 Controls 输入源**：测试驱动通过 DOM `CustomEvent` 把一份完整的 14 键按下快照交给组件，组件把它与现有 Keyboard / Gamepad 状态一起送入同一个 Controls Machine，最后仍然只产生现有的 `controls.state` / `controls.event`。
 
 这不是新的 Subsystem 输入协议。CustomEvent 不进入 Session Events，不经过 `WebPresentationContext.emitCustomEvent`，不增加 Presentation channel，也不要求 Map、Dialogue、Battle 或其他 Subsystem 知道输入来自测试驱动。
 
-本文是待落地设计；不宣称监听器、状态机入口、测试或设备自动化已经实现。
+本文作为现行 [统一操控输入 Web Component](./game-controls-input.md) 的 additive normative extension 已实现；实现与 qualification subject 只由上方记录及专属资格证据声明，不改写原 Controls v1 的历史 subject。
 
 ## 1. 规范关系与冻结决策
 
@@ -43,7 +45,7 @@ edge-producing source mutation = existing physical edge + accepted Custom snapsh
 
 除此之外，旧文档继续生效。本文**不修改** `ControlsButtonV1`、两条 Controls channel、公开 payload、Frame routing 或任何 Subsystem contract，也不把旧文档的历史 implementation / qualification subject 改写成新代码证据。
 
-设计 PR 阶段本文只是 Proposed；只有实现 PR 完成源码、测试、纵向 E2E 与专属 qualification evidence 后，本文才改为 `Active / Normative Extension / Implemented`。
+实现 PR 已完成源码、测试、纵向 E2E 与专属 qualification evidence，本文状态因此为 `Active / Normative Extension / Implemented`。
 
 ### 1.2 第一版冻结决策
 
