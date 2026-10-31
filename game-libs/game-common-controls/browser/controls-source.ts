@@ -3,12 +3,44 @@ import {
   gamepadControlPressed,
   type ControlsMachine, type ControlsPadSample, type ControlsPublication,
 } from "../src/controls-machine.js";
-import type { ControlsButtonV1 } from "../src/model.js";
+import { CONTROLS_BUTTONS_V1, type ControlsButtonV1 } from "../src/model.js";
 import { supportsCanonicalGamepadButtons } from "./gamepad-layout.js";
 import { windowUsable } from "./source-types.js";
 
 export interface ControlsInputSource {
   start(emit: (publication: ControlsPublication) => void): () => void;
+}
+
+const DEBUG_CONTROLS_EVENT = "loomrealm:debug-input";
+
+function customControlsState(event: Event, eventTarget: HTMLElement): readonly ControlsButtonV1[] | null {
+  try {
+    if (
+      !(event instanceof CustomEvent)
+      || event.target !== eventTarget
+      || event.bubbles !== false
+      || event.composed !== false
+      || event.cancelable !== false
+    ) return null;
+    const detail: unknown = event.detail;
+    if (detail === null || typeof detail !== "object" || Array.isArray(detail)) return null;
+    const prototype = Object.getPrototypeOf(detail);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const keys = Object.keys(detail);
+    if (keys.length !== 2 || !keys.includes("version") || !keys.includes("down")) return null;
+    const candidate = detail as { readonly version?: unknown; readonly down?: unknown };
+    const version = candidate.version;
+    const pressed = candidate.down;
+    if (version !== 1 || !Array.isArray(pressed) || pressed.length > CONTROLS_BUTTONS_V1.length) return null;
+    const down = new Set<ControlsButtonV1>();
+    for (const button of pressed) {
+      if (typeof button !== "string" || !CONTROLS_BUTTONS_V1.includes(button as ControlsButtonV1) || down.has(button as ControlsButtonV1)) return null;
+      down.add(button as ControlsButtonV1);
+    }
+    return CONTROLS_BUTTONS_V1.filter((button) => down.has(button));
+  } catch {
+    return null;
+  }
 }
 
 export function deepestActiveElement(document: Document): Element | null {
@@ -78,7 +110,7 @@ function emitPublication(
   emit(publication);
 }
 
-export function createControlsInputSource(target: Window): ControlsInputSource {
+export function createControlsInputSource(target: Window, eventTarget: HTMLElement): ControlsInputSource {
   let subscribed = false;
   return Object.freeze({
     start(emit: (publication: ControlsPublication) => void): () => void {
@@ -125,6 +157,11 @@ export function createControlsInputSource(target: Window): ControlsInputSource {
         if (button === null || !machine.keyboardCapture) return;
         send(machine.keyup(button));
       };
+      const custom = (event: Event) => {
+        if (!active) return;
+        const down = customControlsState(event, eventTarget);
+        if (down !== null) send(machine.applyCustomState(down));
+      };
       const focusout = () => { queueMicrotask(reconcile); };
       target.addEventListener("keydown", keydown);
       target.addEventListener("keyup", keyup);
@@ -133,12 +170,14 @@ export function createControlsInputSource(target: Window): ControlsInputSource {
       target.document.addEventListener("focusin", reconcile);
       target.document.addEventListener("focusout", focusout);
       target.document.addEventListener("visibilitychange", reconcile);
+      eventTarget.addEventListener(DEBUG_CONTROLS_EVENT, custom);
       reconcile();
       return () => {
         if (!active) return;
         active = false;
         subscribed = false;
         stopPolling();
+        machine.setWindowUsable(false);
         target.removeEventListener("keydown", keydown);
         target.removeEventListener("keyup", keyup);
         target.removeEventListener("focus", reconcile);
@@ -146,6 +185,7 @@ export function createControlsInputSource(target: Window): ControlsInputSource {
         target.document.removeEventListener("focusin", reconcile);
         target.document.removeEventListener("focusout", focusout);
         target.document.removeEventListener("visibilitychange", reconcile);
+        eventTarget.removeEventListener(DEBUG_CONTROLS_EVENT, custom);
       };
     },
   });

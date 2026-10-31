@@ -225,11 +225,13 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
     let keyboardCapture = false;
     const keyboard = /* @__PURE__ */ new Set();
     let pads = /* @__PURE__ */ new Map();
+    let custom = /* @__PURE__ */ new Set();
     const gamepadDown = (button) => {
       for (const pressed of pads.values()) if (pressed.has(button)) return true;
       return false;
     };
-    const effectiveDown = () => CONTROLS_BUTTONS_V1.filter((button) => keyboard.has(button) || gamepadDown(button));
+    const otherSourceDown = (button) => gamepadDown(button) || custom.has(button);
+    const effectiveDown = () => CONTROLS_BUTTONS_V1.filter((button) => keyboard.has(button) || otherSourceDown(button));
     const changedState = (prev) => {
       const next = effectiveDown();
       return sameDown(prev, next) ? null : statePayload(next);
@@ -244,17 +246,17 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
       keydown(button, domRepeat) {
         if (!keyboardCapture || !CONTROLS_BUTTONS_V1.includes(button)) return NONE;
         if (!keyboard.has(button)) {
-          const wasEffective = gamepadDown(button);
+          const wasEffective = otherSourceDown(button);
           keyboard.add(button);
           if (wasEffective) return NONE;
           return publish(statePayload(effectiveDown()), [edge("down", button, false)]);
         }
-        if (domRepeat === true && !gamepadDown(button)) return publish(null, [edge("down", button, true)]);
+        if (domRepeat === true && !otherSourceDown(button)) return publish(null, [edge("down", button, true)]);
         return NONE;
       },
       keyup(button) {
         if (!keyboardCapture || !keyboard.delete(button)) return NONE;
-        if (gamepadDown(button)) return NONE;
+        if (otherSourceDown(button)) return NONE;
         return publish(statePayload(effectiveDown()), [edge("up", button, false)]);
       },
       applyGamepadFrame(samples) {
@@ -294,12 +296,28 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
         }
         return publish(sameDown(prev, next) ? null : statePayload(next), events);
       },
+      applyCustomState(pressed) {
+        if (!windowUsable2) return NONE;
+        const prev = effectiveDown();
+        custom = pressedSet(pressed);
+        const next = effectiveDown();
+        if (sameDown(prev, next)) return NONE;
+        const events = [];
+        for (const button of CONTROLS_BUTTONS_V1) {
+          const was = prev.includes(button);
+          const now = next.includes(button);
+          if (!was && now) events.push(edge("down", button, false));
+          else if (was && !now) events.push(edge("up", button, false));
+        }
+        return publish(statePayload(next), events);
+      },
       setWindowUsable(usable, baseline = []) {
         if (usable === windowUsable2) return NONE;
         windowUsable2 = usable;
         keyboardCapture = false;
         keyboard.clear();
         pads = /* @__PURE__ */ new Map();
+        custom = /* @__PURE__ */ new Set();
         if (usable) {
           for (const sample2 of baseline) {
             if (!Number.isInteger(sample2.index) || sample2.index < 0) continue;
@@ -333,6 +351,30 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
   }
 
   // browser/controls-source.ts
+  var DEBUG_CONTROLS_EVENT = "loomrealm:debug-input";
+  function customControlsState(event, eventTarget) {
+    try {
+      if (!(event instanceof CustomEvent) || event.target !== eventTarget || event.bubbles !== false || event.composed !== false || event.cancelable !== false) return null;
+      const detail = event.detail;
+      if (detail === null || typeof detail !== "object" || Array.isArray(detail)) return null;
+      const prototype = Object.getPrototypeOf(detail);
+      if (prototype !== Object.prototype && prototype !== null) return null;
+      const keys = Object.keys(detail);
+      if (keys.length !== 2 || !keys.includes("version") || !keys.includes("down")) return null;
+      const candidate = detail;
+      const version = candidate.version;
+      const pressed = candidate.down;
+      if (version !== 1 || !Array.isArray(pressed) || pressed.length > CONTROLS_BUTTONS_V1.length) return null;
+      const down = /* @__PURE__ */ new Set();
+      for (const button of pressed) {
+        if (typeof button !== "string" || !CONTROLS_BUTTONS_V1.includes(button) || down.has(button)) return null;
+        down.add(button);
+      }
+      return CONTROLS_BUTTONS_V1.filter((button) => down.has(button));
+    } catch {
+      return null;
+    }
+  }
   function deepestActiveElement(document) {
     let current = document.activeElement;
     const seen = /* @__PURE__ */ new Set();
@@ -385,7 +427,7 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
     if (!active() || publication.state === null && publication.events.length === 0) return;
     emit(publication);
   }
-  function createControlsInputSource(target) {
+  function createControlsInputSource(target, eventTarget) {
     let subscribed = false;
     return Object.freeze({
       start(emit) {
@@ -432,6 +474,11 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
           if (button === null || !machine.keyboardCapture) return;
           send(machine.keyup(button));
         };
+        const custom = (event) => {
+          if (!active) return;
+          const down = customControlsState(event, eventTarget);
+          if (down !== null) send(machine.applyCustomState(down));
+        };
         const focusout = () => {
           queueMicrotask(reconcile);
         };
@@ -442,12 +489,14 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
         target.document.addEventListener("focusin", reconcile);
         target.document.addEventListener("focusout", focusout);
         target.document.addEventListener("visibilitychange", reconcile);
+        eventTarget.addEventListener(DEBUG_CONTROLS_EVENT, custom);
         reconcile();
         return () => {
           if (!active) return;
           active = false;
           subscribed = false;
           stopPolling();
+          machine.setWindowUsable(false);
           target.removeEventListener("keydown", keydown);
           target.removeEventListener("keyup", keyup);
           target.removeEventListener("focus", reconcile);
@@ -455,6 +504,7 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
           target.document.removeEventListener("focusin", reconcile);
           target.document.removeEventListener("focusout", focusout);
           target.document.removeEventListener("visibilitychange", reconcile);
+          eventTarget.removeEventListener(DEBUG_CONTROLS_EVENT, custom);
         };
       }
     });
@@ -961,7 +1011,7 @@ for (const tag of ["game-keyboard-input", "game-pointer-input", "game-gamepad-in
       this.removeAttribute("data-input-disabled");
       registry.set("controls", this);
       this.claimed = true;
-      this.stopSource = createControlsInputSource(target).start((publication) => this.emit(publication));
+      this.stopSource = createControlsInputSource(target, this).start((publication) => this.emit(publication));
     }
     emit(publication) {
       if (publication.state !== null) {
