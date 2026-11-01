@@ -450,6 +450,31 @@ async function completeProfessorDialogue(page) {
   await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 20_000 });
 }
 
+async function waitForDeepSeekDraft(page, expected) {
+  await page.waitForFunction((value) => {
+    const field = document.querySelector("lr-schema-form-field");
+    return field?.shadowRoot?.querySelector("wa-input")?.value === value;
+  }, expected, { timeout: 20_000 });
+}
+
+async function editDeepSeekDraft(page, value) {
+  await page.evaluate((next) => {
+    const field = document.querySelector("lr-schema-form-field");
+    const input = field?.shadowRoot?.querySelector("wa-input");
+    if (input === null || input === undefined) throw new Error("DeepSeek Schema Form input is unavailable");
+    input.value = next;
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+  }, value);
+}
+
+async function submitDeepSeekForm(page) {
+  await page.evaluate(() => {
+    const form = document.querySelector("lr-schema-form");
+    if (form === null) throw new Error("DeepSeek Schema Form is unavailable");
+    form.submit();
+  });
+}
+
 test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real Chromium", { timeout: 180_000 }, async () => {
   const fixture = await createPokeManPwaFixture({ executablePaths });
   const planner = createPokeManRoutePlanner(fixture);
@@ -459,6 +484,37 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
   const history = [];
   try {
     const { page, context, diagnostics } = product;
+    const restoredDraft = "synthetic-restored-invalid-key";
+    const acceptedDraft = "synthetic-accepted-key";
+    await page.evaluate(() => localStorage.removeItem("pokeman.deepseek.api-key"));
+    let releaseFirstProbe;
+    const firstProbeRelease = new Promise((resolve) => { releaseFirstProbe = resolve; });
+    let observeFirstProbe;
+    const firstProbeObserved = new Promise((resolve) => { observeFirstProbe = resolve; });
+    const probeAuthorizations = [];
+    await context.route("https://api.deepseek.com/models", async (route) => {
+      probeAuthorizations.push(route.request().headers().authorization ?? null);
+      if (probeAuthorizations.length === 1) {
+        observeFirstProbe();
+        await firstProbeRelease;
+        await route.fulfill({
+          status: 401,
+          contentType: "application/json",
+          headers: { "access-control-allow-origin": "*" },
+          body: JSON.stringify({ error: { message: "synthetic unauthorized" } }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": "*" },
+        body: JSON.stringify({
+          object: "list",
+          data: [{ id: "deepseek-flash", object: "model", owned_by: "deepseek" }],
+        }),
+      });
+    });
     const installationId = await page.evaluate(async (value) => {
       const decode = (entry) => Uint8Array.from(atob(entry.body), (character) => character.charCodeAt(0));
       const installed = await window.__loomrealmPwaQualification.install({
@@ -478,9 +534,44 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
           body: new Blob([entry.source], { type: entry.mime }),
         })),
       });
-      await window.__loomrealmPwaQualification.launch(installed.installationId, value.presentation);
+      window.__pokemanLaunchPromise = window.__loomrealmPwaQualification.launch(installed.installationId, value.presentation);
       return installed.installationId;
     }, fixture);
+
+    await page.locator("lr-schema-form").waitFor({ state: "attached", timeout: 20_000 });
+    await waitForDeepSeekDraft(page, "");
+    await submitDeepSeekForm(page);
+    await page.waitForFunction(() => document.querySelector("lr-schema-form-field")?.shadowRoot?.querySelector(".error")?.textContent === "Required", null, { timeout: 20_000 });
+    assert.equal(probeAuthorizations.length, 0, "built-in required validation must block the provider probe");
+    const emptySessionEpoch = await page.evaluate((value) => {
+      localStorage.setItem("pokeman.deepseek.api-key", JSON.stringify(value));
+      window.__emptyDeepSeekForm = document.querySelector("lr-schema-form");
+      return window.__loomrealmPwa.sessionEpoch;
+    }, restoredDraft);
+    await page.evaluate(() => window.__loomrealmPwaQualification.restart());
+    await page.waitForFunction((epoch) => window.__loomrealmPwa.sessionEpoch !== epoch
+      && document.querySelector("lr-schema-form") !== window.__emptyDeepSeekForm, emptySessionEpoch, { timeout: 20_000 });
+    await waitForDeepSeekDraft(page, restoredDraft);
+    assert.equal(await page.locator("lr-map-view").count(), 0, "Map must not exist before SessionConfig is committed");
+    assert.equal(await page.locator("game-controls-input").count(), 0, "gameplay controls must remain behind the Gate");
+    await submitDeepSeekForm(page);
+    await firstProbeObserved;
+    await page.waitForFunction(() => document.querySelector("lr-schema-form")?.getAttribute("loading") === "true", null, { timeout: 20_000 });
+    await page.evaluate(() => {
+      const form = document.querySelector("lr-schema-form");
+      form.submit();
+      form.cancel();
+    });
+    await page.waitForTimeout(50);
+    assert.equal(probeAuthorizations.length, 1, "loading must block duplicate Submit and Cancel");
+    releaseFirstProbe();
+    await page.waitForFunction(() => document.querySelector("lr-schema-form-field")?.shadowRoot?.querySelector(".error")?.textContent?.includes("API Key 无效"), null, { timeout: 20_000 });
+    assert.equal(await page.locator("lr-map-view").count(), 0);
+    await editDeepSeekDraft(page, acceptedDraft);
+    await submitDeepSeekForm(page);
+    await page.locator("lr-schema-form").waitFor({ state: "detached", timeout: 20_000 });
+    assert.deepEqual(probeAuthorizations, [`Bearer ${restoredDraft}`, `Bearer ${acceptedDraft}`]);
+    assert.equal(await page.evaluate(() => localStorage.getItem("pokeman.deepseek.api-key")), JSON.stringify(acceptedDraft));
 
     const initial = Object.freeze({ mapId: 3, x: 3, y: 8, direction: 2 });
     await page.locator("lr-map-view").waitFor({ state: "attached", timeout: 20_000 });
@@ -676,6 +767,8 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
       const requests = {
         map: `/_lr/v1/games/${encodeURIComponent(id)}/records/struct.Map/3`,
         presentation: `/_lr/v1/games/${encodeURIComponent(id)}/resources/resource.Presentation/map/map.browser.js`,
+        schemaFormJs: `/_lr/v1/games/${encodeURIComponent(id)}/resources/resource.Presentation/schema-form/schema-form.browser.js`,
+        schemaFormCss: `/_lr/v1/games/${encodeURIComponent(id)}/resources/resource.Presentation/schema-form/schema-form.browser.css`,
         baseExecutable: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/base.mjs`,
         mapExecutable: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/map.mjs`,
         dialogueExecutable: `/_lr/internal/executables/${encodeURIComponent(id)}/subsystems/dialogue.mjs`,
@@ -699,6 +792,12 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     assert.equal(routes.presentation.status, 200);
     assert.match(routes.presentation.mime, /^text\/javascript/);
     assert.match(routes.presentation.version, /^sha256:[0-9a-f]{64}$/);
+    assert.equal(routes.schemaFormJs.status, 200);
+    assert.match(routes.schemaFormJs.mime, /^text\/javascript/);
+    assert.match(routes.schemaFormJs.body, /customElements\.define\("lr-schema-form"/);
+    assert.equal(routes.schemaFormCss.status, 200);
+    assert.match(routes.schemaFormCss.mime, /^text\/css/);
+    assert.match(routes.schemaFormCss.body, /lr-schema-form/);
     assert.equal(routes.baseExecutable.status, 200);
     assert.match(routes.baseExecutable.mime, /^text\/javascript/);
     assert.match(routes.baseExecutable.version, /^sha256:[0-9a-f]{64}$/);
@@ -738,6 +837,11 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     const previousEpoch = (await mapSnapshot(page)).sessionEpoch;
     await page.evaluate(() => window.__loomrealmPwaQualification.restart());
     await page.waitForFunction((epoch) => window.__loomrealmPwa.sessionEpoch !== epoch, previousEpoch, { timeout: 20_000 });
+    await page.locator("lr-schema-form").waitFor({ state: "attached", timeout: 20_000 });
+    await waitForDeepSeekDraft(page, acceptedDraft);
+    assert.equal(await page.locator("lr-map-view").count(), 0, "a fresh Session must run the Gate again");
+    await submitDeepSeekForm(page);
+    await page.locator("lr-schema-form").waitFor({ state: "detached", timeout: 20_000 });
     await page.locator("lr-map-view").waitFor({ state: "attached", timeout: 20_000 });
     await waitForState(page, initial);
     assert.equal(await page.locator("game-controls-input").count(), 1);

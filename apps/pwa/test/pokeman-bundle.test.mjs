@@ -35,6 +35,8 @@ test("PokeMan qualification bundle uses real Content and the Base, Map, and Dial
   const map = fixture.executables[1].source;
   const dialogue = fixture.executables[2].source;
   assert.match(base, /game-controls-input/);
+  assert.match(base, /api\.deepseek\.com\/models/);
+  assert.match(base, /pokeman\.SessionConfig/);
   assert.doesNotMatch(base, /RPGMapBuilder|createControlsConsumer/);
   assert.match(map, /RPGMapBuilder/);
   assert.match(map, /home-family/);
@@ -50,5 +52,7 @@ test("PokeMan qualification bundle uses real Content and the Base, Map, and Dial
   assert.equal(identities.size, fixture.content.length);
   assert.ok(identities.has(["record", "struct.Map", "3"].join("\0")));
   assert.ok(identities.has(["resource", "resource.Graphics", "Characters/Player"].join("\0")));
+  assert.ok(identities.has(["resource", "resource.Presentation", "schema-form/schema-form.browser.js"].join("\0")));
+  assert.ok(identities.has(["resource", "resource.Presentation", "schema-form/schema-form.browser.css"].join("\0")));
   assert.ok(identities.has(["resource", "resource.Presentation", "map/map.browser.js"].join("\0")));
 });

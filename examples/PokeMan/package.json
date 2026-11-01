@@ -7,6 +7,7 @@
     "@loomrealm-game/common-controls": "0.1.0-alpha.0",
     "@loomrealm-game/map": "0.1.0-alpha.0",
     "@loomrealm-game/rpg-dialogue": "0.1.0-alpha.0",
+    "@loomrealm-game/schema-form": "0.1.0-alpha.0",
     "@loomrealm/subsystem": "0.1.0-alpha.0"
   },
   "devDependencies": {
@@ -15,7 +16,7 @@
     "@loomrealm/game-package": "0.1.0-alpha.0"
   },
   "scripts": {
-    "pretest": "npm run build -w @loomrealm-game/rpg-dialogue",
-    "test": "node --test test/*.test.mjs"
+    "pretest": "npm run build -w @loomrealm-game/rpg-dialogue -w @loomrealm-game/schema-form",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
   }
 }

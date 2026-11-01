@@ -68,6 +68,8 @@ test("real PokeMan FSDB produces a deterministic map-only dependency closure", a
     "record/struct.Tileset/3",
     "record/struct.NPC/professor",
     "resource/resource.Graphics/Characters/Player",
+    "resource/resource.Presentation/schema-form/schema-form.browser.js",
+    "resource/resource.Presentation/schema-form/schema-form.browser.css",
     "resource/resource.Presentation/map/map.browser.js",
     "resource/resource.Presentation/map/map.css",
     "resource/resource.Presentation/dialogue/dialogue.browser.js",
