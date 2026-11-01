@@ -335,13 +335,13 @@ read() 不 materialize unknown Record。
 DEEPSEEK_API_KEY
 ~~~
 
-localStorage draft key 固定建议：
+localStorage draft key 固定为：
 
 ~~~text
 pokeman.deepseek.api-key
 ~~~
 
-如果实现阶段需要调整 exact localStorage key，应在同一个 PokeMan integration change 中保持稳定，不把它提升成 Framework ABI。
+这是 PokeMan product-private exact value，不是 Framework ABI。Implementation MUST NOT 自行改名；若未来产品需要迁移 key，必须单独设计 migration，而不是静默替换。
 
 ## 8. localStorage 的精确语义
 
@@ -555,14 +555,15 @@ pokeman.SessionConfig/deepseek
 
 写入必须使用 Shared State v1 的普通 OCC transaction。
 
-概念流程：
+每一个 submit attempt 在 DeepSeek probe 成功后都 MUST fresh-read 当前 Record；禁止复用 Base startup read 或前一次 submit attempt 的 version：
 
 ~~~text
-read current record
-→ obtain current version
+probe success for submittedCandidate
+→ fresh state.read(pokeman.SessionConfig/deepseek)
+→ validate current value / capture fresh current version
 → commit:
-     condition = current version
-     put { apiKey }
+     condition = that fresh current version
+     put { apiKey: submittedCandidate }
 ~~~
 
 State commit 成功后才允许 control.close()。
@@ -578,18 +579,35 @@ CONFLICT
 → re-read exact Record
 → if value exactly equals { apiKey: submittedCandidate }
      reconciled success
+  else if value is null
+     current attempt did not win the conflict
+     keep form active; a later user submit may retry from a fresh read
+  else if value is a different valid SessionConfig
+     invariant/unexpected concurrent writer
+     reject startup operation
   else
-     unexpected concurrent/invariant conflict
-     MUST NOT silently accept another credential
+     malformed authoritative value
+     reject startup operation
 
 OUTCOME_UNKNOWN
 → MUST NOT blind retry
 → re-read exact Record
 → if value exactly equals { apiKey: submittedCandidate }
      reconciled success
-  else
+  else if value is null
      current attempt is not proven committed
-     keep form active / report configuration-save uncertainty
+     keep form active; report configuration-save uncertainty
+  else if value is a different valid SessionConfig
+     invariant/unexpected concurrent writer
+     reject startup operation
+  else
+     malformed authoritative value
+     reject startup operation
+
+reconciliation read failure
+→ operation failure
+→ MUST NOT infer commit success
+→ MUST NOT blind retry
 
 BINDING_UNAVAILABLE with known no-commit
 → recoverable infrastructure failure
@@ -778,6 +796,8 @@ Shared State is a generic secret store
 ~~~text
 PokeMan key source
 +
+Base direct startup probe realization
++
 DeepSeekTransport construction
 ~~~
 
@@ -913,14 +933,14 @@ future battle integration
 → separate PR
 ~~~
 
-推荐 stable resource identities：
+stable Presentation resource identities 固定为：
 
 ~~~text
 Presentation / schema-form/schema-form.browser.js
 Presentation / schema-form/schema-form.browser.css
 ~~~
 
-如果 implementation 使用不同 exact resource key，应在同一个 integration PR 中同步修改 `presentation.json`、FSDB resource、sync/test evidence；不得依赖 Browser 全局或开发环境偶然加载 Schema Form。
+Implementation MUST 使用上述 exact resource keys，并同步修改 `presentation.json`、FSDB resource、sync/test evidence；不得自行改名，也不得依赖 Browser 全局或开发环境偶然加载 Schema Form。
 
 本设计不要求修改：
 
@@ -956,13 +976,14 @@ Framework launch protocol
 13. Gate 完成后 Map 只启动一次。
 14. BINDING_UNAVAILABLE known-no-commit 显示配置保存失败，不显示 credential invalid。
 15. INVALID_REQUEST / LIMIT_EXCEEDED / TERMINAL 不伪装成用户可修复的 API-key error。
-16. OUTCOME_UNKNOWN 不 blind retry；只有 read-back exact `{apiKey: submittedCandidate}` 才 reconciled success。
-17. CONFLICT read-back 为不同 credential 时不得静默 success。
-18. API Key 不出现在 Frame params、Session Events、Battle payload 或 Replay 测试快照中。
-19. Schema Form JS/CSS 确实进入 Presentation resources、`presentation.json` 与 prepared PWA content，并在真实 Browser 中完成 restore + async submit。
-20. 当前受支持的 PokeMan launch profile 必须证明 Base Runtime 可 direct probe DeepSeek；尤其 PWA 必须用真实 Browser/Worker 路径证明没有被 CORS/host policy 阻断。
-21. future Save qualification 证明 SessionConfig 不进入 save document。
-22. same-live-Session Load 不修改/删除现有 SessionConfig；fresh Session 才重新运行 Gate。
+16. 每一次 submit attempt 在 probe success 后都 fresh-read State version；不得复用 startup/previous-attempt version。
+17. OUTCOME_UNKNOWN 不 blind retry；只有 read-back exact `{apiKey: submittedCandidate}` 才 reconciled success；null 保持 form，不同 valid credential / malformed value / reconciliation read failure 均按 Section 11.1 终止或失败。
+18. CONFLICT read-back 为 null 时可保持 form 等待下一次 fresh submit；不同 valid credential 或 malformed value 必须作为 invariant failure，不能静默 success。
+19. API Key 不出现在 Frame params、Session Events、Battle payload 或 Replay 测试快照中。
+20. Schema Form JS/CSS 以 exact resource keys `schema-form/schema-form.browser.js` / `schema-form/schema-form.browser.css` 进入 Presentation resources、`presentation.json` 与 prepared PWA content，并在真实 Browser 中完成 restore + async submit。
+21. 当前受支持的 PokeMan launch profile 必须证明 Base Runtime 可 direct probe DeepSeek；尤其 PWA 必须用真实 Browser/Worker 路径证明没有被 CORS/host policy 阻断。
+22. future Save qualification 证明 SessionConfig 不进入 save document。
+23. same-live-Session Load 不修改/删除现有 SessionConfig；fresh Session 才重新运行 Gate。
 
 Browser qualification 应至少有一条真实 Schema Form + localStorage restore + async submit path，避免只用纯 unit test 模拟 caller-controlled submit。
 
