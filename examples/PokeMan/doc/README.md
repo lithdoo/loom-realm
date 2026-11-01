@@ -24,9 +24,10 @@
 - [73-dialogue-gameplay-vertical-slice.md](./73-dialogue-gameplay-vertical-slice.md) — Professor NPC 的独立 Dialogue Subsystem / child-Frame 垂直切片：Map call、Activation controls、RPGDialogue、History/Choice、人物资源解析与 Map fresh resume
 - [74-dialogue-presentation-v1.1.md](./74-dialogue-presentation-v1.1.md) — Issue #118 的 Dialogue Presentation v1.1 优化：连续 session shell、READY inert-retain、30/70 横向人物布局、窄屏 breakpoint、紧凑 spacing 与人物 sprite 连续性
 - [75-map-presentation-v1.1.md](./75-map-presentation-v1.1.md) — Issues #123/#124/#125 的 Map v1.1 统一设计：responsive facing、accepted/staging visual scene、persistent incremental projection 与 atomic map-transfer presentation
+- [76-map-projection-payload-optimization.md](./76-map-projection-payload-optimization.md) — Issue #133 的 Map 专项载荷优化：有界 Tile Band slots、增量 projection 更新、精确 byte accounting 与物理机验收
 - [90-scope-principles.md](./90-scope-principles.md) — MVP 非要求、设计原则与当前非目标
 
-`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`75` 是其后新增的技术设计，不回写 `DESIGN.md`。
+`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`76` 是其后新增的技术设计，不回写 `DESIGN.md`。
 
 当前 physical data canonical sources：
 
