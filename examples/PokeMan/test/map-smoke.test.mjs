@@ -55,17 +55,21 @@ test("Map and Dialogue presentation are resolved from PokeMan Content resources"
   assert.deepEqual(await json("presentation.json"), {
     formatVersion: 1,
     styles: [
+      { namespace: "Presentation", key: "schema-form/schema-form.browser.css" },
       { namespace: "Presentation", key: "map/map.css" },
       { namespace: "Presentation", key: "dialogue/dialogue.css" },
       { namespace: "Presentation", key: "page.css" },
     ],
     scripts: [
+      { namespace: "Presentation", key: "schema-form/schema-form.browser.js" },
       { namespace: "Presentation", key: "controls/device-input.browser.js" },
       { namespace: "Presentation", key: "map/map.browser.js" },
       { namespace: "Presentation", key: "dialogue/dialogue.browser.js" },
     ],
   });
 
+  await access(new URL("[resource]Presentation/schema-form/schema-form.browser.css.css", fsdbRoot));
+  await access(new URL("[resource]Presentation/schema-form/schema-form.browser.js.js", fsdbRoot));
   await access(new URL("[resource]Presentation/controls/device-input.browser.js.js", fsdbRoot));
   await access(new URL("[resource]Presentation/map/map.css.css", fsdbRoot));
   await access(new URL("[resource]Presentation/map/map.browser.js.js", fsdbRoot));

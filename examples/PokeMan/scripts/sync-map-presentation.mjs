@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const BACKUP_SUFFIX = ".loomrealm-sync.backup";
 const TARGET_RELATIVE = Object.freeze({
+  schemaFormJs: join("[resource]Presentation", "schema-form", "schema-form.browser.js.js"),
+  schemaFormCss: join("[resource]Presentation", "schema-form", "schema-form.browser.css.css"),
   controlsJs: join("[resource]Presentation", "controls", "device-input.browser.js.js"),
   js: join("[resource]Presentation", "map", "map.browser.js.js"),
   css: join("[resource]Presentation", "map", "map.css.css"),
@@ -16,11 +18,15 @@ const TARGET_RELATIVE = Object.freeze({
   pageCss: join("[resource]Presentation", "page.css.css"),
 });
 const DIST_RELATIVE = Object.freeze({
+  schemaFormJs: join("game-libs", "schema-form", "dist", "browser", "schema-form.browser.js"),
+  schemaFormCss: join("game-libs", "schema-form", "dist", "browser", "schema-form.browser.css"),
   controlsJs: join("game-libs", "game-common-controls", "dist", "browser", "device-input.browser.js"),
   js: join("game-libs", "map", "dist", "browser", "map.browser.js"),
   css: join("game-libs", "map", "dist", "browser", "map.css"),
 });
 const SOURCE_RELATIVE = Object.freeze({
+  schemaFormJs: join("game-libs", "schema-form", "dist", "browser", "schema-form.browser.js"),
+  schemaFormCss: join("game-libs", "schema-form", "dist", "browser", "schema-form.browser.css"),
   controlsJs: join("game-libs", "game-common-controls", "dist", "browser", "device-input.browser.js"),
   js: join("game-libs", "map", "browser", "map.browser.js"),
   css: join("game-libs", "map", "browser", "map.css"),
@@ -29,6 +35,8 @@ const SOURCE_RELATIVE = Object.freeze({
   pageCss: join("examples", "PokeMan", "presentation.css"),
 });
 const RESOURCE_LABELS = Object.freeze({
+  schemaFormJs: "Schema Form browser JS",
+  schemaFormCss: "Schema Form browser CSS",
   controlsJs: "device input browser JS",
   js: "map browser JS",
   css: "map CSS",
@@ -89,20 +97,31 @@ async function exists(fileOps, path) {
 }
 
 async function runNpmBuild(repoRoot) {
-  await new Promise((resolvePromise, reject) => {
-    const windows = process.platform === "win32";
-    const executable = windows ? process.env.ComSpec ?? "cmd.exe" : "npm";
-    const args = windows ? ["/d", "/s", "/c", "npm.cmd run build:m15"] : ["run", "build:m15"];
-    const child = spawn(executable, args, {
-      cwd: repoRoot,
-      stdio: "inherit",
+  const commands = Object.freeze([
+    Object.freeze({ args: Object.freeze(["run", "build:m15"]), label: "npm run build:m15" }),
+    Object.freeze({
+      args: Object.freeze(["run", "build", "-w", "@loomrealm-game/schema-form"]),
+      label: "Schema Form browser build",
+    }),
+  ]);
+  for (const command of commands) {
+    await new Promise((resolvePromise, reject) => {
+      const windows = process.platform === "win32";
+      const executable = windows ? process.env.ComSpec ?? "cmd.exe" : "npm";
+      const args = windows
+        ? ["/d", "/s", "/c", `npm.cmd ${command.args.join(" ")}`]
+        : command.args;
+      const child = spawn(executable, args, {
+        cwd: repoRoot,
+        stdio: "inherit",
+      });
+      child.once("error", reject);
+      child.once("exit", (code, signal) => {
+        if (code === 0) resolvePromise();
+        else reject(new Error(`${command.label} failed (${code ?? signal})`));
+      });
     });
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (code === 0) resolvePromise();
-      else reject(new Error(`npm run build:m15 failed (${code ?? signal})`));
-    });
-  });
+  }
 }
 
 async function discoverFsdb(exampleRoot, fileOps) {

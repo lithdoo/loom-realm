@@ -27,6 +27,15 @@ async function waitForMap(page, target) {
   }, target, { timeout: 25_000 });
 }
 
+async function completeDeepSeekGate(page, expectedDraft) {
+  await page.locator("lr-schema-form").waitFor({ state: "attached", timeout: 25_000 });
+  await page.waitForFunction((value) => document.querySelector("lr-schema-form-field")
+    ?.shadowRoot?.querySelector("wa-input")?.value === value, expectedDraft, { timeout: 25_000 });
+  assert.equal(await page.locator("lr-map-view").count(), 0, "staging Map must remain behind the DeepSeek Gate");
+  await page.evaluate(() => document.querySelector("lr-schema-form").submit());
+  await page.locator("lr-schema-form").waitFor({ state: "detached", timeout: 25_000 });
+}
+
 async function act(page, steps) {
   for (const step of steps) {
     await page.keyboard.press(step.code);
@@ -239,10 +248,34 @@ async function assertDialogueNeverHidden(page, stage) {
 test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, and reloads", { timeout: 180_000 }, async () => {
   const fixture = JSON.parse(await readFile(new URL("../dist/staging/pwa/pokeman/pokeman-bundle.json", import.meta.url), "utf8"));
   const planner = createPokeManRoutePlanner(fixture);
-  const product = await openProduct({ viewport: { width: 960, height: 720 } });
+  const draft = "synthetic-staging-key";
+  const probeAuthorizations = [];
+  const product = await openProduct({
+    viewport: { width: 960, height: 720 },
+    beforeGoto: async ({ context, page }) => {
+      await context.route("https://api.deepseek.com/models", async (route) => {
+        probeAuthorizations.push(route.request().headers().authorization ?? null);
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          headers: { "access-control-allow-origin": "*" },
+          body: JSON.stringify({
+            object: "list",
+            data: [{ id: "deepseek-flash", object: "model", owned_by: "deepseek" }],
+          }),
+        });
+      });
+      await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+        key: "pokeman.deepseek.api-key",
+        value: draft,
+      });
+    },
+  });
   try {
     const { page, context, diagnostics } = product;
+    await completeDeepSeekGate(page, draft);
     await waitForMap(page, initial);
+    assert.deepEqual(probeAuthorizations, [`Bearer ${draft}`]);
     assert.equal(await page.locator("game-controls-input").count(), 1);
     assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
     assert.equal(await page.evaluate(() => typeof window.__loomrealmPwaQualification), "undefined", "Staging must not expose qualification controls");
@@ -307,7 +340,12 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
         const response = await fetch(`/pwa/pokeman/_lr/v1/games/${encodeURIComponent(id)}/resources/resource.Presentation/${key}`);
         return { status: response.status, body: await response.text() };
       };
-      return { dialogue: await load("dialogue/dialogue.browser.js"), map: await load("map/map.browser.js") };
+      return {
+        dialogue: await load("dialogue/dialogue.browser.js"),
+        map: await load("map/map.browser.js"),
+        schemaFormJs: await load("schema-form/schema-form.browser.js"),
+        schemaFormCss: await load("schema-form/schema-form.browser.css"),
+      };
     }, installationId);
     assert.equal(stagedPresentation.dialogue.status, 200);
     assert.match(stagedPresentation.dialogue.body, /_shellPresented/, "staged Presentation must carry the v1.1 shell latch");
@@ -317,6 +355,10 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     assert.match(stagedPresentation.map.body, /_acceptedVisualScene/, "staged Map must own accepted visual scenes");
     assert.match(stagedPresentation.map.body, /projectionBounds/, "staged Map must carry exact projection bounds");
     assert.match(stagedPresentation.map.body, /browser-facing-paint/, "staged Map must carry responsive-facing qualification paint");
+    assert.equal(stagedPresentation.schemaFormJs.status, 200);
+    assert.match(stagedPresentation.schemaFormJs.body, /customElements\.define\("lr-schema-form"/);
+    assert.equal(stagedPresentation.schemaFormCss.status, 200);
+    assert.match(stagedPresentation.schemaFormCss.body, /lr-schema-form/);
 
     await page.evaluate(() => {
       window.__stagingMapBeforeDialogue = document.querySelector("lr-map-view");
@@ -420,7 +462,9 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     await waitForMap(page, state);
 
     await page.reload({ waitUntil: "domcontentloaded" });
+    await completeDeepSeekGate(page, draft);
     await waitForMap(page, initial);
+    assert.deepEqual(probeAuthorizations, [`Bearer ${draft}`, `Bearer ${draft}`]);
     assert.equal(await page.locator("game-controls-input").count(), 1);
     assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
     assert.equal(await page.evaluate(() => window.__loomrealmPwa.installationId), installationId, "Refresh must reuse installed content");

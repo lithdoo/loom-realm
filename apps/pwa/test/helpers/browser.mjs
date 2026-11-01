@@ -5,11 +5,13 @@ if (!productUrl) throw new Error("LOOMREALM_PWA_URL is required");
 
 export async function openProduct(options = {}) {
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ serviceWorkers: "allow", ...options });
+  const { beforeGoto, ...contextOptions } = options;
+  const context = await browser.newContext({ serviceWorkers: "allow", ...contextOptions });
   const page = await context.newPage();
   const diagnostics = [];
   page.on("console", (message) => diagnostics.push(`console:${message.type()}:${message.text()}`));
   page.on("pageerror", (error) => diagnostics.push(`pageerror:${error.stack ?? error.message}`));
+  if (beforeGoto !== undefined) await beforeGoto({ context, page });
   await page.goto(productUrl, { waitUntil: "domcontentloaded" });
   try {
     await page.waitForFunction(() => document.documentElement.dataset.loomrealmProduct === "ready" || document.documentElement.dataset.loomrealmProduct === "failed", null, { timeout: 30_000 });
