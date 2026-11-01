@@ -56,10 +56,10 @@ if not exist "%REPO%\node_modules\" (
   popd
 )
 
-echo 正在构建并同步 Map Presentation...
+echo 正在构建并同步 PokeMan Presentation（Schema Form / Controls / Map / Dialogue）...
 "%NODE%" "%EXAMPLE%\scripts\sync-map-presentation.mjs"
 if errorlevel 1 (
-  echo Map Presentation 同步失败。
+  echo PokeMan Presentation 同步失败。
   pause
   exit /b 1
 )
@@ -84,7 +84,7 @@ set "LOOMREALM_DESKTOP_INSTALLATION_ROOT=%EXAMPLE%"
 set "HOSTRA_APP_NAME=PokeMan"
 set ELECTRON_RUN_AS_NODE=
 
-echo 启动 PokeMan Map vertical slice...
+echo 启动 PokeMan（DeepSeek Session Gate + Map + Dialogue）...
 echo   游戏: %EXAMPLE%
 echo   Hostra: %HOSTRA_SOURCE_DIR%
 pushd "%REPO%"

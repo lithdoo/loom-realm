@@ -141,6 +141,15 @@ function runDesktopTests() {
     "test/m15-boundary.test.mjs",
   );
   node("--test", "--test-concurrency=1", "test/m15-hostra-product.test.mjs");
+  node("--test", "--test-concurrency=1", "test/pokeman-hostra-deepseek.test.mjs");
+}
+
+function buildPokeManHostraStack() {
+  npm(
+    "run", "build",
+    "-w", "@loomrealm-game/schema-form",
+    "-w", "@loomrealm-game/rpg-dialogue",
+  );
 }
 
 const capabilities = {
@@ -259,11 +268,13 @@ const capabilities = {
 
   desktop() {
     buildMapStack();
+    buildPokeManHostraStack();
     runDesktopTests();
   },
 
   "desktop-full"() {
     buildMapStack();
+    buildPokeManHostraStack();
     runDesktopTests();
   },
 
