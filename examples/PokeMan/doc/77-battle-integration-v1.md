@@ -676,23 +676,31 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 
 ### 12.1 Content Resolver
 
-- 正确解析 rival / road-bandit BattleActor。
+- 正确解析 ally = BattleActor/rival、enemy = BattleActor/player。
+- ally 必须绑定 Relationship(player → rival) 与玩家持有的 rival Card；enemy 必须绑定 Relationship(rival → player) 与劲敌持有的 player Card。
+- 任一方向的 Card / Relationship / Contract 缺失、Integrity 越界或 Contract skill 引用无效时拒绝启动。
+- 已有 Contract 使用各自 contract.skills[]；不得被 BattleActor.skills[] 覆盖。
 - BattleActor record key 与 value.id 不一致时拒绝。
 - Skill 引用缺失、effect 引用缺失、ResourceRef 不存在或 contentVersion 非法时拒绝。
 - BattleEffect exact schema 校验通过；旧的 graphics/name shape 被拒绝。
-- Map bounds、passability、初始 tile 重叠或不可通行时拒绝。
+- Map 4 bounds、passability、两个 Manifestation 初始 tile 重叠或不可通行时拒绝。
 - 输出为 detached immutable ResolvedBattleDefinition。
 
 ### 12.2 Battle Subsystem
 
 使用 FakeBattleClock、ScriptDecision / fake DecisionPort、RecordingPresentation：
 
+- 满 Integrity 的 rival / player 双 Manifestation 可以启动首场确定性 1v1。
 - 正常 ally_win / enemy_win / simultaneous_defeat。
+- final Snapshot 的双方 HP 映射到正确方向的 Relationship Contract。
+- 两份 Relationship 更新通过同一个 Shared State transaction 原子提交；验证任一 OCC condition 冲突时两边都零写入。
+- 验证 OUTCOME_UNKNOWN 的 operation-marker reconciliation，不自动重试 mutation。
 - Presentation initialize / render / failure / close 的生命周期。
 - Frame signal pre-abort 与 active abort。
 - Decision failure、circuit pause、显式 resume。
 - Battle Frame 每次创建新的 Builder / Handler / Runtime。
 - close / abort / failure 后不残留 scheduler、resource listener 或 controls consumer。
+- 在 initialHp amendment 前，后续 Battle 仅使用满 Integrity fixture 做 Runtime 生命周期 / 清理测试，不宣称 Contract Integrity 恢复已通过。
 
 ### 12.3 Map child-Frame integration：Map 4 序章链
 
@@ -716,12 +724,13 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 ### 12.4 Browser / Product qualification
 
 - Battle browser JS/CSS 通过统一 Presentation sync script 进入 FSDB。
-- Browser E2E 验证地图、两个 Actor、移动、技能效果、HP 与最终状态。
+- Browser E2E 验证 Map 4 研究所、rival / player 两个 Manifestation、移动、技能效果、双方 HP、BattleResult 和结果对应的战后 Dialogue。
 - PWA / Chromium 验证真实 Worker / Presentation 资源路径。
 - Desktop / Hostra 验证 launch manifest、Frame lifecycle、provider transport 和 Browser assets。
-- 至少重复进入两场 Battle，验证资源和 listener 正确释放。
+- 在同一宿主内重复启动 / 退出 Battle Runtime，验证资源和 listener 正确释放；在 initialHp amendment 前使用满 Integrity fixture，不把该测试描述成跨战斗 HP 恢复。
 - 在真实 DeepSeek qualification 中验证请求、合法 PlanSubmission、Decision failure 与 circuit pause / resume。
-- initialHp amendment 合并后，额外验证受损 Contract 进入下一场 Battle 时保留原始 maxHp 和正确的初始 HP，并验证 OCC settlement / conflict / outcome-unknown reconciliation。
+- initialHp amendment 合并后，额外验证双方受损 Contract 进入下一场 Manifestation Battle 时保留各自原始 maxHp 和正确的初始 HP，并验证 OCC settlement / conflict / outcome-unknown reconciliation。
+- Map 5 road-bandit 的 Browser / Product qualification 单独安排在 P7，不与 Map 4 教学链混合。
 
 未运行的真实 PWA、Desktop、Hostra 或 DeepSeek 测试不得用 unit / Mock 结果代替。
 
