@@ -327,7 +327,7 @@ moveTicks / protectionTicks 是本场配置参数，不得写入 BattleActor 或
 
 ### 5.3 ResolvedBattleDefinition 组合示意
 
-以下仅表示参数来源与组合方式；`rivalContractIntegrity` / `playerContractIntegrity` 分别是两份 Relationship Contract 的 `integrity`，skills 必须由两份 Contract 解析；passable 必须由实际 Map Content 派生，不能在 Map Handler 手写：
+以下仅表示参数来源与组合方式：`rivalContractIntegrity = Relationship(player → rival).contract.integrity`，`playerContractIntegrity = Relationship(rival → player).contract.integrity`；skills 必须由两份 Contract 解析；passable 必须由实际 Map Content 派生，不能在 Map Handler 手写：
 
 ~~~ts
 const definition: ResolvedBattleDefinition = {
