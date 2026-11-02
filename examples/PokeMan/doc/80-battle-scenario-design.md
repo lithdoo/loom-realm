@@ -464,17 +464,18 @@ Battle v0 的 Decision 是每个 Actor 独立请求 PlanSubmission。Simulation 
 - 任一方向的 OCC conflict 不允许只提交另一方向。
 - cancelled / failure 不提交部分 HP，不播放正常胜负对白。
 
-## 9. 当前实现缺口与禁止绕过项
+## 9. 当前实现状态与禁止绕过项
 
-| 缺口 | 当前事实 | 正确处理 |
+| 项目 | 当前事实 / 状态 | 处理规则 |
 | --- | --- | --- |
 | Core initialHp input | 当前 ResolvedBattleActor 只有 maxHp；目标增加可选 initialHp | 按 Core amendment 实现并验证；PokeMan 显式传 Contract Integrity，旧调用省略时仍默认 maxHp |
 | Minimum persisted Integrity | Simulation final HP 可能为 0 | BattleResult 先按原始 Snapshot 判定；正常退出结算写入 `max(1, finalSnapshot.hp)` |
 | Grab range | 当前是一维 [0, 1, 0]，缺少 ↑ | 按 SKILL-001 修成合法二维 range matrix |
 | BattleEffect schema | 当前仍是旧 graphics/name/id | 按 v0 exact shape 修订 schema、Record 和 Graphics |
 | Grab visual | 当前 grab.effect 指向 firebolt | 提供 Grab effect / Graphics，或在视觉资产未就绪前明确记录临时复用，不伪装成独立效果 |
-| Character personality | 不在 canonical Decision context | 未来 typed DecisionWorkflow extension |
-| PlayerGuidance | v0 尚未实现 | 不加入 Map callback 的临时控制通道 |
+| Character personality | 当前不进入 canonical Decision context；有意留到后续玩法阶段 | 未来通过 typed DecisionWorkflow extension 接入；不是本次集成缺口 |
+| PlayerGuidance | 当前有意采用 AI vs AI；玩家战术指导留到后续功能 | 本次不实现，不加入 Map callback 的临时控制通道 |
+| Battle duration / stalemate | 当前有意不设强制最大时长或自动平局 | 沿用 Core 现有规则；以后根据实战数据再决定 |
 | 多卡 / 多人战 | v0 只有 1v1 | 后续独立扩展，不提前改变 v0 cardinality |
 
 明确禁止：
