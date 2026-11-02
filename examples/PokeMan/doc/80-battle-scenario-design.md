@@ -2,9 +2,9 @@
 
 > 状态：**Proposed / Scenario-level design**
 >
-> 范围：冻结 Map 4 研究所首场双向角色卡教学 Battle 的参战身份、参数来源、技能数值、场景配置与当前实现缺口。
+> 范围：冻结 Map 4 研究所首场双向角色卡教学 Battle 的参战身份、参数来源、技能数值、场景配置与结算规则。
 >
-> 本文只组合现有 Battle v0 contract，不修改 Battle Core 的 gameplay ABI。所有标为“建议初值”的参数必须经过 ScriptDecision / FakeClock 确定性测试和产品试玩后，才能转为产品冻结值。
+> 本文沿用 Battle v0 gameplay rules，只提出一项窄范围 Core 输入契约扩展：`ResolvedBattleActor.initialHp`。它不改变战斗规则；目标契约见 Battle Core Spec / Simulation 文档。所有标为“建议初值”的参数必须经过 ScriptDecision / FakeClock 确定性测试和产品试玩后，才能转为产品冻结值。
 
 关联文档：
 
@@ -165,10 +165,11 @@ Relationship(holder → servant).contract.skills
 - 当前技能必须来自该 Relationship 的 contract.skills[]。
 - 不得在每次进入 Battle 时重新复制 BattleActor.skills[] 覆盖已有 Contract。
 - 不得把当前 Contract Integrity 反向写成 BattleActor.max_hp。
-- integrity 必须满足 0 <= integrity <= BattleActor.max_hp。
-- integrity = 0 表示该方向 Contract 当前不能形成 Manifestation；不得启动该 Actor。
+- Shared State 的结构范围是 `0 <= integrity <= BattleActor.max_hp`；但构造 Battle Manifestation 时必须满足 `1 <= integrity <= maxHp`。
+- `integrity = 0` 表示该方向 Contract 当前不能形成 Manifestation；不得启动该 Actor。正常 Battle 结算会把归零的最终 HP 按最低 1 Integrity 保存，因此新流程不会因正常战斗产生持久化 0。
+- `maxHp` 永远来自 BattleActor.max_hp；`initialHp` 来自对应 Relationship.contract.integrity。
 
-**当前 Battle v0 的限制：** ResolvedBattleActor 尚无 initialHp 字段，Simulation 固定以 maxHp 开战。因此首场两份满 Integrity Contract 可以运行；受损 Contract 的跨场恢复暂不能正确表达。initialHp amendment 合并前，不得用伪造 maxHp 的方式绕过，也不得宣称跨 Battle Integrity continuity 已验收。
+**Core 输入契约扩展（待实现）：** 为 ResolvedBattleActor 增加可选 `initialHp`。提供时要求 `1 <= initialHp <= maxHp`；省略时继续兼容旧调用，以 `maxHp` 开战。PokeMan 对 Contract-backed Manifestation 必须显式传入 Contract Integrity。不得通过伪造 maxHp 绕过。
 
 ## 4. 技能参数设计
 
@@ -289,8 +290,8 @@ Battle v0 当前没有 accuracy / critical / element / armor / MP / ammo / unive
 | battleSeed | battleId | Scenario recommendation | 将唯一 battleId 作为可回放 seed |
 | actors.length | 2 | Core frozen | 恰好一个 ally、一个 enemy |
 | map | Map 4 | Scenario fixed | 研究所地图 |
-| max battle duration | none | Core frozen | v0 不设强制最大时长 |
-| stalemate | none | Core frozen | v0 不自动判定平局 |
+| max battle duration | none | Core frozen / intentionally deferred | 当前验证范围有意不设强制最大时长 |
+| stalemate | none | Core frozen / intentionally deferred | 当前验证范围有意不自动判定平局 |
 
 建议初值的理由：
 
@@ -298,6 +299,8 @@ Battle v0 当前没有 accuracy / critical / element / armor / MP / ammo / unive
 - protectionTicks = 2：有效受击后仍有短暂保护，避免连续攻击造成无间隔受击锁；同时保护不是永久免疫。
 - maxPathSteps = 6：让 Decision 能提交有限短期路径，不等于每次必须移动 6 格，也不等于 6 Tick。
 - battleSeed = battleId：同一 Battle 的 contention 可以稳定复现，Replay 不依赖 Math.random()。
+
+当前不设计战斗时长上限或无进展自动结束；这是本阶段有意延后的产品规则，不是当前集成阻塞项。不得在 PokeMan 层另加超时计时器或强制胜负。
 
 protectionTicks = 2 的精确含义：若 Tick 10 受到有效伤害，则 Tick 10 剩余阶段、Tick 11 和 Tick 12 处于保护；Tick 13 恢复可受击。它不是“总共保护 2 Tick”。
 
@@ -348,6 +351,7 @@ const definition: ResolvedBattleDefinition = {
       tile: playerPose.tile,
       direction: playerPose.direction,
       maxHp: 18,
+      initialHp: rivalContractIntegrity,
       character: {
         namespace: "resource.Graphics",
         key: "Characters/RivalCasual",
@@ -360,6 +364,7 @@ const definition: ResolvedBattleDefinition = {
       tile: { x: 8, y: 5 },
       direction: 2,
       maxHp: 20,
+      initialHp: playerContractIntegrity,
       character: {
         namespace: "resource.Graphics",
         key: "Characters/Player",
@@ -370,7 +375,7 @@ const definition: ResolvedBattleDefinition = {
 }
 ~~~
 
-v0 ResolvedBattleActor 没有 initialHp 字段，因此上例只适用于两份满 Integrity Contract。不要自行添加字段并假设 Core 已支持。
+上例中的 `initialHp` 是待实现的 Core 输入契约扩展：PokeMan 从各自 Relationship Contract 解析当前值并显式传入。`maxHp` 仍保持 BattleActor 的基础上限；不得用当前 Integrity 覆盖 maxHp。Core 扩展落地前，上例是目标组合形态，不代表当前 Runtime 已支持。
 
 ## 6. BattleEffect：只定义视觉，不定义战斗规则
 
@@ -419,7 +424,8 @@ Battle v0 的 Decision 是每个 Actor 独立请求 PlanSubmission。Simulation 
 - Decision 可以提交 turn / path / skill intent。
 - Simulation 校验 path、skill、target、range、Action lifecycle。
 - Simulation 决定何时移动完成、技能何时 resolve、最终伤害和 BattleResult。
-- 两个 Actor 都可以由当前注入的 DeepSeekDecision 自动决策；v0 没有玩家手动提交战术 Plan 的 PlayerGuidance。
+- 两个 Actor 都由 DecisionPort 自主决策；真实 provider 集成时，Ally 与 Enemy 都可以使用 DeepSeekDecision。当前采用 AI vs AI 是有意的技术验证范围，用来先验证决策、Simulation、Presentation 和结果结算，不是当前设计缺口。
+- PlayerGuidance、玩家手动提交战术 Plan 和角色性格影响决策属于后续玩法阶段，不阻塞本次 Battle Integration。
 
 当前 canonical BattleDecisionContextV0 包含 actorId、team、HP、tile、direction、action、protection、skills、range、map window、recent events 和 constraints；不包含 Character.aiCharacterText、name、Relationship.affinity 或 relationshipText。
 
@@ -450,6 +456,10 @@ Battle v0 的 Decision 是每个 Actor 独立请求 PlanSubmission。Simulation 
 - Firebolt windup 中目标移动，resolve 使用目标新位置，不 tracking。
 - 受保护目标返回 immune，不扣 Integrity、不刷新保护。
 - 两边在同一 instant batch 归零时结果为 simultaneous_defeat。
+- BattleResult 必须依据结算前的 final Snapshot 判定；不得先把 0 HP 改成 1 再计算胜负。
+- 正常 Battle 退出结算时，每个 Contract-backed Actor 写入 `max(1, finalSnapshot.hp)`；HP > 0 原样保存，HP = 0 保存为 1。
+- simultaneous_defeat 时双方 final HP 都为 0，但两份 Contract Integrity 都保存为 1；结果仍然是平局。
+- 下一场 Battle 使用保存后的 Contract Integrity 作为 initialHp，同时保留原 maxHp。
 - Ally / enemy 的最终 HP 分别写回正确方向的 Contract。
 - 任一方向的 OCC conflict 不允许只提交另一方向。
 - cancelled / failure 不提交部分 HP，不播放正常胜负对白。
@@ -458,7 +468,8 @@ Battle v0 的 Decision 是每个 Actor 独立请求 PlanSubmission。Simulation 
 
 | 缺口 | 当前事实 | 正确处理 |
 | --- | --- | --- |
-| Contract initial HP | ResolvedBattleActor 只有 maxHp；v0 固定满血初始化 | 首战只用满 Integrity；后续受损 Contract 等 Core amendment |
+| Core initialHp input | 当前 ResolvedBattleActor 只有 maxHp；目标增加可选 initialHp | 按 Core amendment 实现并验证；PokeMan 显式传 Contract Integrity，旧调用省略时仍默认 maxHp |
+| Minimum persisted Integrity | Simulation final HP 可能为 0 | BattleResult 先按原始 Snapshot 判定；正常退出结算写入 `max(1, finalSnapshot.hp)` |
 | Grab range | 当前是一维 [0, 1, 0]，缺少 ↑ | 按 SKILL-001 修成合法二维 range matrix |
 | BattleEffect schema | 当前仍是旧 graphics/name/id | 按 v0 exact shape 修订 schema、Record 和 Graphics |
 | Grab visual | 当前 grab.effect 指向 firebolt | 提供 Grab effect / Graphics，或在视觉资产未就绪前明确记录临时复用，不伪装成独立效果 |
@@ -471,6 +482,7 @@ Battle v0 的 Decision 是每个 Actor 独立请求 PlanSubmission。Simulation 
 - 把 player / rival 两个 BattleActor 对调来“匹配”team；team 与 actor identity 是两个维度。
 - 把角色本体 HP、NPC 当前状态或 Map Runtime HP 作为 Contract Integrity。
 - 用 BattleActor.max_hp = 当前 integrity 伪造 initialHp。
+- 在 BattleResult 判定前将 Simulation HP 从 0 改成 1；1 HP 下限只属于正常 Battle 退出时的 Contract settlement。
 - 每场 Battle 用 BattleActor.skills 覆盖现有 Contract skills。
 - 在 Map Handler 中计算 damage、命中率、暴击、护甲或受击保护。
 - 将 BattleEffect 的动画时长用于推迟或提前 Simulation resolve。
@@ -479,15 +491,17 @@ Battle v0 的 Decision 是每个 Actor 独立请求 PlanSubmission。Simulation 
 
 ## 10. 首场 Battle 的结果与剧情映射
 
-| BattleResult | 胜方 | Integrity 归零的 Contract | 战后 Dialogue |
-| --- | --- | --- | --- |
-| ally_win | 玩家阵营的 rival Manifestation | rival → player（劲敌持有的主角卡） | lab-rival-after-ally-win |
-| enemy_win | 劲敌阵营的 player Manifestation | player → rival（玩家持有的宿敌卡） | lab-rival-after-enemy-win |
-| simultaneous_defeat | 无 | 两份 Contract | lab-rival-after-draw |
+| BattleResult（按原始 final Snapshot） | 胜方 | final HP = 0 的 Contract | 正常退出后持久化 Integrity | 战后 Dialogue |
+| --- | --- | --- | --- | --- |
+| ally_win | 玩家阵营的 rival Manifestation | rival → player（劲敌持有的主角卡） | rival → player 保存为 1；另一边保存实际剩余 HP | lab-rival-after-ally-win |
+| enemy_win | 劲敌阵营的 player Manifestation | player → rival（玩家持有的宿敌卡） | player → rival 保存为 1；另一边保存实际剩余 HP | lab-rival-after-enemy-win |
+| simultaneous_defeat | 无 | 两份 Contract | 两份 Contract 都保存为 1 | lab-rival-after-draw |
 
-Battle Subsystem 必须先读取 final Snapshot，并将双方 Contract Integrity 作为一个 Shared State transaction 原子提交。只有 settlement 已确认，Map Frame Handler 才调用对应战后 Dialogue。
+Battle Subsystem 必须先读取未经归一化的 final Snapshot，并据此保留原始 BattleResult。正常退出 Battle 时，对双方 Contract-backed Actor 分别计算 `persistedIntegrity = max(1, finalSnapshot.hp)`，再将两份 Relationship Contract Integrity 作为一个 Shared State transaction 原子提交。只有 settlement 已确认，Map Frame Handler 才调用对应战后 Dialogue。
 
-Contract Integrity 归零不会删除 Contract 或 CarriedCards；它表示该方向当前无法再次形成 Battle Manifestation，需要后续中心修复。角色本体仍然正常存在。
+1 HP 下限只影响持久化的 Contract Integrity，不修改本场 final Snapshot、BattleResult、Replay 或胜负对白。HP 大于 0 的一方保存实际剩余值；HP 归零的一方保存 1。Contract 和 CarriedCards 均保留，角色本体仍然正常存在。
 
-三种正常结果共用 prologue-battle-resolved，进入 after-battle。Battle cancelled / failure 不属于胜负结果，不调用上述战后 Dialogue，也不推进 Event。
+Battle cancelled / failure 不属于正常胜负结果，不提交本场部分 HP 损耗，不调用上述战后 Dialogue，也不推进 Event。Save / Load、进程中断后从“Battle 已结算但战后 Dialogue 未完成”状态恢复，明确留到未来存档设计阶段，本次不实现恢复凭证或额外状态机。
+
+三种正常结果共用 prologue-battle-resolved，进入 after-battle。
 
