@@ -125,6 +125,36 @@ BattleConfig / validator 必须拒绝 combat Actor 数量不是 2 的 v0 Battle�
 
 PokeMan 等 Contract-backed caller 应从各自 Relationship Contract 解析 `initialHp`；Battle Core 不读取任何上层业务数据。此规则在实现和 qualification 完成前保持 PROPOSED，不得描述为当前已实现能力。
 
+### BATTLE-004 — 独立 BattleArena Content — PROPOSED
+
+Battle v0 的战斗网格不再要求引用探索 `struct.Map`。目标 contract 引入：
+
+```ts
+type BattleArenaRef = {
+  arenaId: string
+}
+
+type BattleArenaContent = {
+  id: string
+  width: number
+  height: number
+  passable: readonly (readonly boolean[])[]
+  tileset_id: number
+  data: ProjectedTable
+}
+```
+
+规则：
+
+- `BattleArena` 是 Battle-owned authored Content；不继承 RPGMap movement / transfer / bridge / ledge / terrain / NPC semantics。
+- `passable[y][x]` 是 Simulation navigation authority，必须与 width / height 精确匹配。
+- `data` 只供 Presentation 绘制，沿用已有 3-layer tile-id ProjectedTable 编码；它不能反向决定 passable。
+- `tileset_id` 只用于读取已有 `struct.Tileset` 与 Tileset / Autotile Graphics。
+- Battle Presentation 不再要求 `struct.Map`；它从 `struct.BattleArena/<arenaId>` 加载视觉 tile data。
+- `ResolvedBattleDefinition.map.ref` 与 `BattleSceneInit.map` 的 target reference 改为 `BattleArenaRef`；字段名 `map` 可继续表示 Battle grid，不代表 RPGMap。
+- 该 amendment 不改变 movement、skill、damage、result、Decision 或 Replay gameplay semantics；只去掉 Battle 对探索 Map Content 的依赖。
+
+PokeMan 首场教学战固定使用 `struct.BattleArena/lab-tutorial`。本规则在实现、validator、Presentation loading 与 qualification 完成前保持 PROPOSED。不得通过读取 Map 4 passage/terrain 来替代该 Arena。
 ### PLAN-001 — 短期计划长度 — FROZEN
 
 `PlanConstraints.maxPathSteps` 必须存在。
@@ -984,6 +1014,6 @@ collisionRetryCount
 - `OPEN-CLOCK-001` → TIME-004：pause/background 冻结 Battle clock。
 - `OPEN-STALEMATE-001` → RESULT-002：v0 不设正式 stalemate / 最大战斗时长，只记录 diagnostics。
 
-**当前 Core gameplay 规则没有未冻结 OPEN 项。**另有一项明确的 Simulation input amendment：`BATTLE-003`（`ResolvedBattleActor.initialHp`）处于 PROPOSED，需完成实现、validator、Snapshot / Replay 覆盖和 deterministic qualification 后才能关闭。
+**当前 Core gameplay 规则没有未冻结 OPEN 项。**另有两项明确的输入 / Content amendment：`BATTLE-003`（`ResolvedBattleActor.initialHp`）与 `BATTLE-004`（独立 `BattleArena`）处于 PROPOSED，需完成实现、validator、Presentation loading、Replay / deterministic qualification 后才能关闭。
 
 Presentation v0 的 BattleEffect、Projection、Browser ABI、camera/viewport/effect lifecycle 已在 Contracts / Presentation 中冻结。仍保持 OPEN 的其他事项主要是非 Presentation Content 的统一 subject/version、真实 Decision provider metadata/cancel/defaults、Guidance/Host wiring 等外部集成项；这些不改变已经冻结的 Core gameplay 或 Presentation 语义。
