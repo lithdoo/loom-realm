@@ -1146,6 +1146,25 @@ initial source
 
 Content 不复制这些 mutable values。
 
+# MVP PWA packaging policy
+
+当前 Story / Dialogue / Battle vertical slice 不再适合 map-only content closure。MVP PWA preparation 固定采用简单、可验证的全量策略：
+
+```text
+[FSDB]PokeMan
+→ listFsdbEntries() 的全部 content entries
+→ 全部进入 prepared PWA content
+
+presentation.json
+→ 所有外部 Presentation resource refs
+→ 全部进入 prepared PWA content
+```
+
+因此 packager 不负责理解 StoryIndex / Event / Dialogue / Battle dependency graph，也不根据初始 Map 去裁剪 PokeMan FSDB。Content Builder / validator 负责引用正确性，packager 只负责 deterministic identity mapping、读取、去重和排序。
+
+当前 MVP 明确不做 Content tree-shaking。这样可以保证 Runtime 通过合法 key 动态解析到的 Character、Dialogue、Event、Mutation、BattleActor、BattleSkill、BattleEffect、BattleArena、Map/Tileset/Graphics 都实际存在于 PWA 包中。
+
+
 # 当前冻结结论
 
 经过最终数据闭环复核，PokeMan MVP 的核心 Content physical schema 与跨 record 引用已经收口。
