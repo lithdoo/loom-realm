@@ -17,11 +17,11 @@
 - Relationship / Contract 与 CarriedCards 分别保存关系契约和随身编队事实。
 - Battle Runtime 拥有本场 Battle 与结算结果。
 - Story Resolver 根据 StoryIndex、EventStateList 和 Character.defaultScenes 解析当前地图场景。
-- Map / Story Orchestrator 是 Dialogue、业务操作、Battle 与 Map 场景恢复的调用者。
+- Map Subsystem 中现有的 Map Frame Handler 负责等待 NPC interaction、调用 Dialogue / Battle child Frame、调用 PokeMan 业务 Service，并在 Event state 改变后刷新当前 Map scene。它是 Map Subsystem 的 Frame Handler，不是独立架构组件。
 
 因此：
 
-**Dialogue graph 不是剧情状态机；Event state 不是通用任务脚本；Map Orchestrator 不解释对白文本。**
+**Dialogue graph 不是剧情状态机；Event state 不是通用任务脚本；Map Frame Handler 不解释对白文本。**
 
 所有跨模块推进都通过明确的 terminal Dialogue key、BattleResult 或 EventStateMutation 完成。
 
@@ -39,7 +39,7 @@
 | PokeMan Business Runtime | 双向契约 / 卡片等 PokeMan 业务事务 | 解释 Dialogue 台词 |
 | Battle Subsystem | Battle Simulation、BattleResult、Contract Integrity 结算 | 直接调用战后 Dialogue |
 | Story Resolver | 从当前 Story state 解析场景 | 推进 Event state |
-| Map / Story Orchestrator | 调用 child Frames、执行业务 adapter、恢复 Map 场景 | 自己维护第二份剧情进度 |
+| Map Subsystem 的 Map Frame Handler | 调用 child Frames、调用业务 Service、消费业务结果、恢复 Map 场景 | 自己维护第二份剧情进度、解析对白文本、直接修改其他业务 authority |
 
 禁止建立平行 authority，例如 Dialogue 自己保存一份剧情进度、Event 再保存一份，或把 Contract / Card 写进 EventStateMutation。
 
@@ -314,61 +314,83 @@ prologue-to-route 要求 first-route Event Content 已经存在，且包含 acti
 
 first-route 在开局时没有 entry；不要保存 stateId 为 null 的 entry。
 
-## 7. Frame 调用与 Orchestration
+## 7. Frame 调用与 Map Frame Handler 的流程控制
 
-Map / Story Orchestrator 是所有 child Frame 的调用者。Dialogue 与 Battle 都不互相调用。
+### 7.1 不新增 Orchestrator 架构组件
+
+Map Subsystem 中已经存在的 Frame Handler 就是当前流程的调用方。这里所说的“流程编排”仅指该 Handler 在自己的主 async control flow 中等待 NPC interaction、调用 child Frame、消费结果并决定下一步；它不是 Loom-realm Framework 中的新概念。
+
+**本设计不新增以下任何东西：**
+
+- `Orchestrator` / `StoryOrchestrator` class；
+- `orchestrator.mjs` 或额外的流程管理模块；
+- `Orchestrator Subsystem` 或 `Story Subsystem`；
+- 通用 Workflow Engine / Story Graph；
+- 只为转发一次 `frame.call()` 而增加的 wrapper Frame。
+
+Loom-realm 已有的 Subsystem / Frame / `frame.call()` / FrameOutcome 协议足以承载这条流程。Map Frame Handler 直接使用该协议，不再在它上面叠加第二套调度抽象。
+
+### 7.2 调用关系
+
+Dialogue 与 Battle 是 Map 的兄弟 Child Frame，互相不调用。Base 只负责启动 Map；Map Frame Handler 是本序章中 Dialogue 与 Battle Child Frame 的调用者。
 
 ~~~text
-Map Frame
-  |
-  | NPC interaction + resolved dialogueKey
-  v
-Dialogue child Frame
-  |
-  | completed({ terminalDialogueId })
-  v
-Map / Story Orchestrator
-  |
-  +-- terminal = professor-tutorial-ready
-  |      Dialogue mutation 已提交
-  |      → refresh current Map scene
-  |
-  +-- terminal = lab-rival-exchange-accept
-  |      → atomic business transaction
-  |      → transaction success
-  |      → Battle child Frame
-  |      → confirmed BattleResult + Integrity settlement
-  |      → select result Dialogue
-  |      → Dialogue child Frame
-  |      → result mutation commits after-battle
-  |      → refresh current Map scene
-  |
-  +-- terminal = professor-first-journey-accept
-  |      Dialogue mutation 已提交
-  |      → refresh current Map scene
-  |
-  +-- no-mutation terminal / user defer
-         → resume Map without changing Event state
+Base Subsystem
+  └─ frame.call("map")
+       └─ Map Subsystem
+            └─ Map Frame Handler（现有 Frame Handler）
+                 ├─ 等待 Professor interaction
+                 │    └─ frame.call("dialogue", professor-vertical-slice)
+                 │         └─ terminal mutation commits rival-ready
+                 │
+                 ├─ 等待 Rival interaction
+                 │    ├─ frame.call("dialogue", lab-rival-intro)
+                 │    ├─ Business Runtime：双向 Contract / Card transaction
+                 │    ├─ frame.call("battle", lab-rival-tutorial)
+                 │    └─ frame.call("dialogue", result-specific key)
+                 │         └─ terminal mutation commits after-battle
+                 │
+                 └─ 等待 Professor interaction（after-battle）
+                      └─ frame.call("dialogue", professor-first-journey)
+                           └─ terminal mutation commits first-route
 ~~~
 
-Dialogue Frame 的生产输入至少需要包含入口 Dialogue key 和交互来源。Map 当前已能提供的 source identity 是 mapId、NPC instanceId 与 npcId；Dialogue graph 不需要把这些 Runtime identity 写回 Content。
+三个 NPC 交互发生在各自对应的 Event state 下，不是一次 Professor interaction 自动连续播放全部剧情。每次普通 Dialogue 结束后回到 Map interaction loop；只有 Rival 接受挑战后，Dialogue → Business Runtime → Battle → Result Dialogue 构成一个连续 child-call 序列。
 
-Dialogue Frame 的生产 completion result 使用 terminalDialogueId。73 的 professor-only vertical slice 使用的 dialogueKey / conclusion 结果是验证切片的专用结果，不是正式 Dialogue graph 的最终业务结果 contract。
+### 7.3 Map Frame Handler 的责任
 
-执行顺序：
+Map Frame Handler 负责：
 
-1. Map 解析当前 NPC interaction，取得 Dialogue key。
-2. Map 以 child Frame 调用 Dialogue。
-3. Dialogue Subsystem 读取并执行 Dialogue graph。
-4. 到达 terminal Dialogue 时，如存在 mutation，先读取 Mutation Content 和 EventStateList。
-5. 校验全部 from 条件，以 EventStateList version 为 OCC condition 原子 commit 新列表。
-6. 只有 mutation commit 成功后，Dialogue Frame 才以 completed 返回 terminalDialogueId。
-7. Map 根据 terminalDialogueId 执行必要的业务 adapter；不重复执行 Dialogue mutation。
-8. Map 根据当前 EventStateList 重新解析当前 Map 场景，再恢复普通 Map Controls。
+1. 从当前 Map NPC interaction 取得 `mapId / instanceId / npcId` 与已解析的 `dialogueKey`。
+2. 在发起 child call 前停止当前 Map Controls activation。
+3. 自己在主 async control flow 中 `await frame.call("dialogue", input)` 或 `await frame.call("battle", input)`。
+4. 验证 FrameOutcome 与业务 Result；根据 terminalDialogueId / BattleResult 选择下一项业务操作。
+5. 对劲敌接受分支调用 Business Runtime，只有双向交换 transaction 已确认成功才调用 Battle。
+6. 在 Dialogue Subsystem 已提交 EventStateMutation 后，重新读取 EventStateList 并调用 Story Resolver。
+7. 在完整 child-call 序列结束后恢复普通 Map gameplay。
 
-Mutation mismatch、OCC conflict、commit outcome unknown 或 Content 读取失败，都不能伪装成成功 terminal。Frame 必须返回可识别的失败结果，由 Map 按可恢复错误策略处理。
+NPC interaction callback 只向 Map Frame Handler 当前等待的 waiter / rendezvous 投递事件，不能直接调用 `frame.call()`。Frame Handler 必须自己等待 Child Frame 返回；不得把 child call 放进 detached async task。
 
-RPGDialogue 用户取消与外层 child Frame 被取消是不同结果。用户取消不得执行 Dialogue mutation 或业务 adapter；外层 FrameOutcome.cancelled 仍按 73 的 child-frame lifecycle 规则处理。
+Map Frame Handler 不执行 Dialogue graph、不创建 Contract / Card、不模拟 Battle、不提交 Battle Integrity，也不维护第二份剧情状态。它只通过各自 owner 的公开业务接口完成协作。
+
+### 7.4 Frame Activation 与 Controls
+
+Map Frame 在 child Frame 运行期间保持 suspended，Child Frame 成为当前 Active Frame。Child 正常返回后，Main 按 Loom-realm Frame Call Protocol 恢复 Map，并为 Map 安装 fresh Activation。
+
+- 旧 Map Activation 的 ControlsConsumer / DirectionalControlsTracker 不跨 Child Frame 复用。
+- 发起 child call 前清空 move intent、reset tracker 并关闭旧 consumer。
+- 普通 Dialogue 返回后，Map 用 fresh Activation 创建新的 ControlsConsumer / Tracker。
+- Rival 接受挑战后的 Dialogue → Battle → Result Dialogue 是连续流程；中间不得短暂重新开放普通 Map Controls。
+- Child failed / cancelled 时按 FrameOutcome 处理，不得伪装成正常 terminal，也不得推进后续剧情。
+- Map Frame Handler 在 child call pending 期间必须保持自身 async control flow pending；具体 rendezvous、resume、cleanup 约束以 [73-dialogue-gameplay-vertical-slice.md](./73-dialogue-gameplay-vertical-slice.md) 与 Loom-realm Frame Call Protocol 为准。
+
+### 7.5 Dialogue Mutation 与场景刷新边界
+
+Dialogue Subsystem 在 terminal Dialogue 有 mutation 时，必须先校验并成功提交 EventStateList，再以成功 terminal result 返回。Map Frame Handler 不重复执行 mutation。
+
+Map Frame Handler 只在 Dialogue child 正常完成后消费 terminalDialogueId 中明确约定的业务意图。只有 EventStateList 已成功改变时，才重新读取当前 EventStateList 并调用 Story Resolver 更新当前 Map scene；无 mutation 的普通 terminal 不需要伪造剧情状态变化。
+
+Battle Subsystem 只返回已结算的 BattleResult。Map Frame Handler 根据 BattleResult 选择战后 Dialogue；Battle 不直接调用 Dialogue。
 
 ## 8. 双向交换与 Battle 的业务边界
 
