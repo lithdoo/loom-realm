@@ -303,6 +303,18 @@ RelationshipValue
 
 `A → B` 与 `B → A` 是独立 Relationship，不要求对称。
 
+MVP 对“Relationship Record 不存在，但业务现在需要首次建立该方向关系”的初始化规则固定为：
+
+```json
+{
+  "affinity": 0,
+  "hostile": false,
+  "relationshipText": ""
+}
+```
+
+也就是：不存在的 Relationship 从中性关系开始；不得由调用者临时编造 affinity 或叙事文本。若同一业务动作同时建立 Contract，则在以上默认 value 上原子增加 `contract` 字段。已有 Relationship 则必须保留原有 `affinity / hostile / relationshipText`，只按业务规则增加或更新允许修改的字段。
+
 **Relationship Record 存在不表示 Contract 已成立。** Record 可以保存 affinity / hostile / relationshipText，而 `contract` 缺失。
 
 `affinity` 是有限整数。`hostile` 与 affinity 是独立事实。
