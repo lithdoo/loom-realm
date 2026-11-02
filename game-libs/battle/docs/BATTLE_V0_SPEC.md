@@ -929,6 +929,27 @@ v0 不因为战斗持续过久或长时间无伤害而自动结束，也不设�
 
 只记录 REPLAY-002 的无进展 diagnostics；未来如果模拟数据证明需要，再通过新规则加入 `stalemate`，不得在 v0 Runtime 中暗加超时胜负。
 
+### CTRL-002 — Pause reason 与显式玩家恢复 — PROPOSED
+
+Runtime target contract 公开两种 pause reason：
+
+```text
+host-background
+decision-circuit
+```
+
+规则：
+
+- 任意成功 RUNNING → PAUSED transition 必须同时形成唯一 pauseReason；
+- external `pause()` 的默认 / 唯一 v0 reason 是 `host-background`；
+- Decision availability circuit trip 的 reason 固定为 `decision-circuit`；
+- PAUSED 时 public Snapshot 必须带 pauseReason，非 PAUSED 时字段 absent；
+- Runtime 通过 operational `onPause()` 通知 product composition；该事件不进入 Replay；
+- 重复 pause no-op 不重复通知、不覆盖已有 reason；
+- `resume()` 成功进入 RUNNING 时清除 pauseReason；
+- Runtime 自己不自动 resume；Host foreground 也不得自动 resume，恢复必须由产品层在玩家显式确认后调用 `battle.resume()`。
+
+本规则只扩展 operational control contract，不改变 gameplay reducer / Tick / Decision authority。实现与 qualification 完成前保持 PROPOSED。
 ### CTRL-001 — abort/cancel 是即时控制平面 — FROZEN
 
 Frame abort、Battle cancel、Subsystem 退出不是普通 Tick Event。
@@ -1017,6 +1038,6 @@ collisionRetryCount
 - `OPEN-CLOCK-001` → TIME-004：pause/background 冻结 Battle clock。
 - `OPEN-STALEMATE-001` → RESULT-002：v0 不设正式 stalemate / 最大战斗时长，只记录 diagnostics。
 
-**当前 Core gameplay 规则没有未冻结 OPEN 项。**另有两项明确的输入 / Content amendment：`BATTLE-003`（`ResolvedBattleActor.initialHp`）与 `BATTLE-004`（独立 `BattleArena`）处于 PROPOSED，需完成实现、validator、Presentation loading、Replay / deterministic qualification 后才能关闭。
+**当前 Core gameplay 规则没有未冻结 OPEN 项。**另有三项明确的实现 amendment：`BATTLE-003`（`ResolvedBattleActor.initialHp`）、`BATTLE-004`（独立 `BattleArena`）与 `CTRL-002`（pauseReason / onPause / 显式玩家恢复）处于 PROPOSED，需完成实现与对应 qualification 后才能关闭。
 
 Presentation v0 的 BattleEffect、Projection、Browser ABI、camera/viewport/effect lifecycle 已在 Contracts / Presentation 中冻结。仍保持 OPEN 的其他事项主要是非 Presentation Content 的统一 subject/version、真实 Decision provider metadata/cancel/defaults、Guidance/Host wiring 等外部集成项；这些不改变已经冻结的 Core gameplay 或 Presentation 语义。
