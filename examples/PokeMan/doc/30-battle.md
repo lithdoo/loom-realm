@@ -273,9 +273,13 @@ Battle 中换卡
 
 ## 角色性格真实影响战斗
 
-同一句 Guidance，不同人物应产生不同理解和执行方式。角色性格、能力、关系和当前战局共同影响 Decision，避免所有从者最终表现为同一种通用 AI。
+产品目标：同一句 Guidance，不同人物应产生不同理解和执行方式。角色性格、能力、关系和当前战局共同影响 Decision，避免所有从者最终表现为同一种通用 AI。
 
 同一个 Character 被不同主公契约时，各自有向 Relationship 的 affinity、Contract Integrity、技能集以及未来 Guidance / 成长状态可以不同，因此同一人物的不同契约 Battle Manifestation 也可以形成不同表现。
+
+**当前 v0 实现边界：** 这仍是产品目标，不代表当前 Battle v0 已经接入人物性格。canonical BattleDecisionContextV0 只包含 actorId / team、实时战斗状态、技能、地图窗口、近期事件和 PlanConstraints；不包含 Character.aiCharacterText、Relationship.affinity 或 relationshipText。PlayerGuidance 也尚未实现。当前不能声称角色性格或主公战术指令已经影响首场 Battle 的决策。未来必须通过 typed、request-scoped DecisionWorkflow extension 实现，不得用全局 mutable prompt state 绕过 Battle contract。
+
+Map 4 首场互换角色卡的实际 roster 与参数见 [80-battle-scenario-design.md](./80-battle-scenario-design.md)。
 
 ## 长期养成方向
 
