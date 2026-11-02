@@ -447,7 +447,7 @@ Resolver 需要在两个时机执行：
 
 第二种情况不能只恢复 Controls。否则 EventStateList 已经变为 rival-ready，但 Map 仍保留 lab-tutorial 的旧 interaction，导致剧情状态与可交互场景分离。
 
-场景刷新必须保留当前 Map Frame、RenderDomain 和场景生命周期；不能为了刷新剧情而重启整张 Map 或创建第二个 Map Frame。具体 live NPC replacement API 应使用 Map package 已支持的接口；如果当前 API 不支持在 Map Enter 之后替换 NPC 集合，需要先补齐该运行时能力，再接入 Story Resolver。
+场景刷新必须保留当前 Map Frame、RenderDomain 和场景生命周期；不能为了刷新剧情而重启整张 Map 或创建第二个 Map Frame。当前 `RPGMapHandler.setNPC()` 已支持 live NPC replacement，Story Resolver 解析出完整 NPCPlacement[] 后直接调用该 public API；无需扩展 Map package。
 
 Story Resolver 成为 authority 后，map.mjs 中 Map 4 的 professor / rival-lab 硬编码 placement 必须退出生产场景来源，避免与 Event directive 重复生成 NPC。Map-only placement 仅能保留给明确不受 Story Content 管理的临时 fixture。
 
