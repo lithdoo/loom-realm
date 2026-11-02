@@ -555,7 +555,7 @@ Event A 对 X absent + Event B 对 X placement
 
 跨 source 合并后的同 Map `npcId` 冲突由 Story Resolver deterministic reject。
 
-# 当前未决
+# 当前冻结结论
 
 Character / Battle Content binding / Relationship / Contract / CarriedCards 的 MVP 物理结构已经分别由 `68` / `67` 冻结。
 
