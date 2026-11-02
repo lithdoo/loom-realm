@@ -43,6 +43,39 @@
 
 禁止建立平行 authority，例如 Dialogue 自己保存一份剧情进度、Event 再保存一份，或把 Contract / Card 写进 EventStateMutation。
 
+## 2.1 Base startup bootstrap — FROZEN
+
+当前 MVP 没有 Save / Load 恢复路径，因此 Base 是 New Game baseline materialization 的唯一 owner。启动顺序固定：
+
+~~~text
+ensureDeepSeekConfiguration
+→ ensurePokeManBaseline
+→ create input host
+→ frame.call("map", frame.params)
+~~~
+
+`ensurePokeManBaseline` 只处理两条 singleton Record：
+
+~~~text
+pokeman.PlayerWorld/current
+= { mapId: 3, x: 3, y: 8, direction: 2 }
+
+pokeman.EventStateList/current
+= [{ eventId: "prologue", stateId: "lab-tutorial" }]
+~~~
+
+规则：
+
+- Base fresh-read 两条 Record。
+- 两条都 absent：在同一个 Shared State transaction 中用两条 fresh-read version condition 原子 put 两个 baseline value。
+- 两条都存在且 shape / Content reference 合法：视为 baseline 已 materialize，不覆盖，不重置剧情。
+- 只有一条存在、另一条 absent：这是 invalid PokeMan State，禁止自动补一半。
+- CONFLICT / OUTCOME_UNKNOWN：fresh-read 两条 authoritative Record；两条都存在且合法则视为 reconciled success，否则失败；不 blind retry。
+- Base 不 materialize Relationship / CarriedCards；它们按业务需要产生。
+- 当前 Map Frame 仍使用 `game.json initial.input` 启动；PlayerWorld 是 durable checkpoint authority，为未来 Save / Load 保留。本轮不从它恢复 Map。
+
+因此 `PlayerWorld/current` 与 `EventStateList/current` 不再存在“谁创建”的实现歧义，也不需要新增 Bootstrap Subsystem。
+
 ## 3. 序章 canonical Event state
 
 出生地序章继续使用一个 Event：**prologue**。它表达研究所教学、劲敌挑战与教学 Battle 的阶段，不为每个 NPC 或每场 Battle 建立独立 Event。
@@ -401,16 +434,16 @@ Battle Subsystem 只返回已结算的 BattleResult。Map Frame Handler 根据 B
 - CarriedCards(player)；
 - CarriedCards(rival)。
 
-Contract Integrity 与 skills 分别来自被调用角色的基础 BattleActor；CarriedCards 只保存 slot 与 servantCharacterId。保留现有 Relationship 的 affinity、hostile 和 relationshipText。
+Contract Integrity 与 skills 分别来自被调用角色的基础 BattleActor；CarriedCards 只保存 slot 与 servantCharacterId。已有 Relationship 保留 affinity、hostile、relationshipText；Relationship Record 不存在时固定从 `{ affinity: 0, hostile: false, relationshipText: "" }` 初始化，并在同一原子事务中增加 Contract。
 
 必须满足：
 
 - 两个方向分别建立，不能只创建 player → rival。
 - 两份 Contract 和两份 CarriedCards 原子提交，不留下半交换。
 - 序章随身上限为 1；任一方 slot 0 已占用时不能静默覆盖。
-- transaction 未确认成功前不得启动 Battle。
-- commit outcome unknown 时先按 Shared State authority reconcile，再决定是否重试。
-- 已完整存在且内容一致的交换可作为幂等恢复；部分存在或内容冲突必须报告，不得 last-wins。
+- Business Runtime fresh-read 两份 Relationship 与两份 CarriedCards，并用四条 version condition 做一个原子 OCC transaction；transaction 未确认成功前不得启动 Battle。
+- CONFLICT / OUTCOME_UNKNOWN 都只 fresh-read 四条 authoritative Record；四条都精确等于 expected final values 才视为 reconciled success，否则失败，不 blind retry。
+- 已完整存在且内容一致的交换可作为幂等恢复；部分存在或内容冲突必须报告，不得 last-wins，也不新增 operation-marker Record。
 
 Battle 正常结束后，Battle Subsystem 负责把最终 Integrity 写回对应 Contract。只有 BattleResult 与 Integrity settlement 都已确认，Map 才能选择结果 Dialogue。
 
@@ -439,6 +472,8 @@ struct.StoryIndex/current
 - 没有 active Event directive 提到该 Character 时，使用 Character.defaultScenes。
 - 合并所有 source 后，同一 Map 的最终 npcId 必须唯一；冲突 deterministic reject，不做 last-wins。
 - StoryIndex 是 Builder 派生 Content，不是 Shared State authority。
+
+Runtime NPC identity 也已冻结：当前 MVP 每张 Map 的最终 `npcId` 唯一，因此 Story Resolver 输出 placement 时固定 `instanceId = npcId`；不得自行拼接 Event id、Map id 或随机后缀。
 
 Resolver 需要在两个时机执行：
 
@@ -487,7 +522,7 @@ Story Resolver 成为 authority 后，map.mjs 中 Map 4 的 professor / rival-la
 
 ### Runtime / E2E 验收
 
-1. 新游戏 baseline 为 prologue:lab-tutorial。
+1. Base 在首次启动 Map 前原子 materialize `PlayerWorld/current={mapId:3,x:3,y:8,direction:2}` 与 `EventStateList/current=[{prologue,lab-tutorial}]`；已存在合法 baseline 时不覆盖。
 2. 进入 Map 4，博士在 (10,6)，劲敌在 (8,5)；只有博士可交互。
 3. 博士选择重听可循环；选择暂缓不改变 EventStateList。
 4. 博士选择准备好后，Dialogue mutation 将 prologue 推进到 rival-ready。
