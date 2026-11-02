@@ -52,7 +52,7 @@ Map Frame Handler 是 Map Subsystem 中已经存在的 Frame Handler。它在自
 4. Battle Simulation 能作为独立 child Frame 运行，而不是由 Map 驱动 Tick。
 5. Decision 能替换为 Script / Fake 和真实 DeepSeekDecision。
 6. Battle Presentation 能在 PokeMan 的 Browser / PWA / Desktop Presentation topology 中加载。
-7. Battle 结束后，双方 Contract Integrity 能通过同一个 Shared State transaction 原子结算。
+7. Battle 正常退出时，双方 Contract Integrity 能通过同一个 Shared State transaction 原子结算；final HP = 0 的 Contract-backed 卡片保存为 1 HP。
 8. Map 能按 BattleResult 选择战后 Dialogue，并在整条 Rival 挑战序列结束后安全恢复输入。
 
 **第一条产品纵向切片仍是 Map 4 的双向卡片交换与教学 Battle。** Map 5 的 road-bandit 保留为后续普通 Encounter / 本体参战验证，不再作为第一次 Battle 的入口。
@@ -532,7 +532,7 @@ PokeMan Presentation 需要注册 Battle package 已发布的 browser artifacts�
 
 Battle package 已提供 browser JS/CSS exports；PokeMan 只消费 package exports，不复制或 fork Battle Browser implementation。
 
-## 8. 双向 Contract Integrity 与 Battle initial HP 缺口
+## 8. 双向 Contract Integrity、initialHp 与正常退出结算
 
 ### 8.1 双方 Manifestation 的 HP authority
 
@@ -558,10 +558,12 @@ Relationship(rival → player).contract.skills[]
   = enemy 本场实际可用 Skill ids
 
 BattleSnapshot ally.rival.hp
-  = Relationship(player → rival).contract.integrity 更新候选值
+  = player → rival Contract 的原始 final HP
+  → 正常退出 settlement 后写入 max(1, final HP)
 
 BattleSnapshot enemy.player.hp
-  = Relationship(rival → player).contract.integrity 更新候选值
+  = rival → player Contract 的原始 final HP
+  → 正常退出 settlement 后写入 max(1, final HP)
 ~~~
 
 BattleResult 本身只表示 ally_win / enemy_win / simultaneous_defeat / cancelled / failure；最终双方 HP 必须从 BattleRuntime.getSnapshot() 读取，不得从 BattleResult 推导。
