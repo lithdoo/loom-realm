@@ -415,12 +415,13 @@ CarriedCards(rival)
 - 两份 Relationship 是两个方向，不能只创建 player → rival。
 - 两份 Contract 的初始 Integrity / skills 分别来自被调用角色的基础 BattleActor。
 - 两份 CarriedCards 分别记录持有者当前的随身卡；卡片本身不是独立 Shared State Record。
-- 保留已有 Relationship 的 affinity、hostile、relationshipText；如果 Record 不存在，使用项目统一的 Relationship 初始化规则，不在 Dialogue Content 中伪造默认值。
+- 保留已有 Relationship 的 affinity、hostile、relationshipText；如果 Record 不存在，固定初始化为 `{ affinity: 0, hostile: false, relationshipText: "" }`，再在同一原子事务中增加 Contract。Dialogue Content 不拥有这些默认值，Business Runtime 按 61 / 67 的统一规则执行。
 - 序章随身上限为 1；若任一方的 slot 0 已被占用，不得静默覆盖。
-- 两份 Relationship 与两份 CarriedCards 应通过同一个 Shared State transaction 原子提交；不能只交换一张卡，也不能留下半成立的双向契约。
-- transaction 未确认成功时不得启动 Battle；冲突 / 失败应显示可恢复错误，不能把对白播放完成误当成业务提交成功。
-- commit outcome unknown 时必须先按 Shared State authority reconcile，再决定是否重试。
-- 如果交换已经完整存在且内容一致，允许按幂等恢复继续 Battle；部分存在或内容冲突必须报告，不得静默覆盖。
+- Business Runtime 必须 fresh-read 两份 Relationship 与两份 CarriedCards，并记录四条 Record 的 version；absence 是合法 pre-state。
+- 两份 Relationship 与两份 CarriedCards 通过同一个 Shared State transaction 原子提交，conditions 覆盖四条 fresh-read version；不能只交换一张卡，也不能留下半成立的双向契约。
+- 已有 Relationship 无 Contract时，保留关系字段并增加 Contract；已有完整且 exact-match 的 Contract / Card 允许幂等继续；已有冲突 Contract、slot 0 被其他 Card 占用或部分交换状态不得静默覆盖。
+- CONFLICT / OUTCOME_UNKNOWN 都不 blind retry：fresh-read 四条 authoritative Record，只有四条都精确等于本次 expected final values 才视为 reconciled success；否则返回可恢复业务失败，不启动 Battle。
+- 不新增 exchange operation-marker Record 或第二套交换状态机。
 - Battle cancelled / failed 不回滚已经成功提交的交换，但不得播放胜负对白或推进 after-battle；后续重试不得重复创建或覆盖 Contract / Card。
 
 Battle 双方的含义：
@@ -437,9 +438,9 @@ Battle 双方的含义：
 
 ## 7. 战后：确认胜负与契约状态
 
-战后对话不重复教学，也不替代 Battle Result UI。Battle Result / Snapshot 是数值权威；Dialogue 负责确认胜负、解释 Integrity 后果，并让人物对结果作出反应。
+战后 Dialogue 本身就是本阶段唯一的玩家结果确认界面，不再额外设计 Battle Result acknowledgement / confirm button。Battle final Snapshot 仍是数值权威；Battle Subsystem 完成 settlement 后关闭 Battle Presentation并返回结果，Map 随即调用对应 result Dialogue。
 
-对话中不插入动态 HP 占位符。Battle Result Presentation 显示未经归一化的本场 final HP（可能为 0）；正常退出 Battle 时，Contract settlement 才把归零者的持久化 Integrity 设为 1。静态对白解释这两个数值的区别，不硬编码动态数值。
+Dialogue 不接收动态 HP，也不硬编码剩余数值。它只确认胜负、说明归零者正常结算后最低保留 1 Integrity，并让人物对结果作出反应。未来若需要专门结果统计页，另开 Presentation 功能，不阻塞当前 vertical slice。
 
 ### 7.1 lab-rival-after-ally-win
 
@@ -459,7 +460,7 @@ Battle 双方的含义：
     },
     {
       "speaker": "professor",
-      "text": "劲敌持有的主角卡，本场 HP 已经归零；结果面板显示本场终局数值。正常退出结算时，这份契约会保留最低 1 点 Integrity，所以仍能再次显现，但状态非常脆弱。你持有的宿敌卡本场还剩多少 HP，请看结果面板。"
+      "text": "劲敌持有的主角卡，本场 HP 已经归零；正常退出结算后，这份契约会保留最低 1 点 Integrity，所以仍能再次显现，但状态非常脆弱。你持有的宿敌卡则保留本场实际剩余完整度。"
     },
     {
       "speaker": "professor",
@@ -495,7 +496,7 @@ Battle 双方的含义：
     },
     {
       "speaker": "professor",
-      "text": "劲敌持有的主角卡本场还剩多少 HP，请看结果面板。正常退出结算后，两份数值都已按规则写回各自的契约。"
+      "text": "劲敌持有的主角卡保留本场实际剩余完整度。正常退出结算后，两份数值都已按规则写回各自的契约。"
     },
     {
       "speaker": "professor",
@@ -531,7 +532,7 @@ Battle 双方的含义：
     },
     {
       "speaker": "professor",
-      "text": "两份契约的本场 HP 都已归零，结果面板会显示本场终局数值。正常退出结算后，两份契约都会各自保留最低 1 点 Integrity。"
+      "text": "两份契约的本场 HP 都已归零。正常退出结算后，两份契约都会各自保留最低 1 点 Integrity。"
     },
     {
       "speaker": "professor",
