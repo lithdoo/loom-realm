@@ -1,6 +1,6 @@
 # Battle v0 Simulation Implementation Spec
 
-> 状态：**既有 Simulation gameplay/runtime baseline 与 Decision availability circuit (§10/§16) 已 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 `BattleArena` 是新增 PROPOSED input/content amendments，尚待实现与 qualification**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。
+> 状态：**既有 Simulation gameplay/runtime baseline 与 Decision availability circuit (§10/§16) 已 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；BATTLE-003 `ResolvedBattleActor.initialHp`、BATTLE-004 独立 `BattleArena` 与 CTRL-002 pauseReason / onPause 是新增 PROPOSED amendments，尚待实现与 qualification**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。
 >
 > 目标：implementation agent 应能直接实现 headless/self-driven Simulation，而不需要自行选择 Clock、queue、Decision lifecycle、Plan handoff、Tick transaction、Projection cadence、terminal race 或 Replay 架构。
 
@@ -1827,9 +1827,9 @@ tests
   → T-DEC-023..036
 ~~~
 
-除上述既有 delta 外，不得重写已 qualification 的 reducer、Decision lifecycle 或 Replay gameplay semantics。新增获准的 amendments 只有 BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 `BattleArenaRef`：前者扩展 actor initial state；后者只把 resolved grid / Presentation static content source 从探索 Map 改为 BattleArena，不改变 reducer、Tick ordering 或 Decision lifecycle。
+除上述既有 delta 外，不得重写已 qualification 的 reducer、Decision lifecycle 或 Replay gameplay semantics。新增获准的 amendments 只有 BATTLE-003 `ResolvedBattleActor.initialHp`、BATTLE-004 `BattleArenaRef` 与 CTRL-002 pauseReason / onPause：前两者扩展输入 / Content；CTRL-002 只扩展 operational lifecycle observation，不改变 reducer、Tick ordering 或 Decision authority。
 
-在 BATTLE-003 / BATTLE-004 实现并 qualification 前，既有 baseline 的 qualification 仍然有效，但不得宣称受损 Contract continuity 或独立 BattleArena integration 已通过。
+在 BATTLE-003 / BATTLE-004 / CTRL-002 实现并 qualification 前，既有 baseline 的 qualification 仍然有效，但不得宣称受损 Contract continuity、独立 BattleArena integration 或两类 pauseReason 产品闭环已通过。
 
 仍可OPEN且不阻塞Simulation/Decision implementation的其他内容：
 
