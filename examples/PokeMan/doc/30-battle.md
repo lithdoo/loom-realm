@@ -95,6 +95,8 @@ slot = 0        // 当前随身
 长期 Integrity 在 Battle 结束后写回同一 Contract，因此即使随后把 Card 从随身队伍移除，损耗也不会消失：
 
 ```text
+正常受损的情况：
+
 Relationship(player → rival).contract.integrity = 100
 ↓
 Card(player, rival, slot=0) 进入 Battle
@@ -104,15 +106,6 @@ Battle hp 100 → 48
 Battle 正常结束并结算
 ↓
 Relationship(player → rival).contract.integrity = max(1, 48) = 48
-
-若本场 Battle HP 归零：
-Battle finalSnapshot.hp = 0
-↓
-BattleResult 先按原始 final Snapshot 判定胜负
-↓
-正常退出 Battle 时结算
-↓
-Relationship(player → rival).contract.integrity = max(1, 0) = 1
 ↓
 Card 可以继续随身，也可以从随身队伍移除
 ↓
@@ -121,6 +114,16 @@ Integrity 仍然是 48
 到达中心
 ↓
 修复 contract.integrity → BattleActor.max_hp
+
+本场被击败的情况：
+
+Battle finalSnapshot.hp = 0
+↓
+BattleResult 先按原始 final Snapshot 判定胜负
+↓
+正常退出 Battle 时结算
+↓
+Relationship(player → rival).contract.integrity = max(1, 0) = 1
 ```
 
 这样道路上的连续战斗会产生类似传统 Pokémon 的旅行资源压力，但设定上消耗的是契约关系的战斗显现能力，而不是远处角色本人的生命值。
