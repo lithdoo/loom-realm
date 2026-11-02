@@ -108,9 +108,22 @@ BattleConfig / validator 必须拒绝 combat Actor 数量不是 2 的 v0 Battle�
 
 实现内部仍遵循 `ARCH-006` 的 actorId-addressed collection；“集合可容纳 N Actor”只是降低未来版本迁移成本，不代表 v0 接受 N>2。
 
-### BATTLE-002 — 默认满血开战 — FROZEN
+### BATTLE-002 — 默认满血开战 — FROZEN（兼容默认值）
 
-v0 Actor 初始 HP 等于 `max_hp`，暂不需要独立 `initial_hp` Content 字段。
+当 `ResolvedBattleActor.initialHp` 未提供时，Actor 初始 HP 等于 `maxHp`。这保留既有 Battle caller 的满血启动语义。`initialHp` 是 Simulation resolved input，不是 `BattleActor` Content 字段。
+
+### BATTLE-003 — 显式初始 HP — PROPOSED
+
+`ResolvedBattleActor` 增加可选 `initialHp`，用于让调用方在保留 `maxHp` 上限的同时指定本场初始 HP：
+
+- 字段省略：`initialHp = maxHp`，兼容 BATTLE-002。
+- 字段提供：必须是 safe integer，且 `1 <= initialHp <= maxHp`。
+- Actor Runtime 初始 `hp = initialHp`；`maxHp` 始终保持最大值。
+- 初始 Snapshot / RenderProjection / Replay initial definition 必须反映该初始 HP。
+- validator 与 deterministic tests 必须覆盖字段省略、满血、受损值、0、超过 maxHp 和非整数等情况。
+- 该字段只扩展 Simulation 初始化输入，不改变 Tick reducer、Decision、Movement、Skill、Damage、BattleResult 或 Presentation gameplay semantics。
+
+PokeMan 等 Contract-backed caller 应从各自 Relationship Contract 解析 `initialHp`；Battle Core 不读取任何上层业务数据。此规则在实现和 qualification 完成前保持 PROPOSED，不得描述为当前已实现能力。
 
 ### PLAN-001 — 短期计划长度 — FROZEN
 
@@ -971,6 +984,6 @@ collisionRetryCount
 - `OPEN-CLOCK-001` → TIME-004：pause/background 冻结 Battle clock。
 - `OPEN-STALEMATE-001` → RESULT-002：v0 不设正式 stalemate / 最大战斗时长，只记录 diagnostics。
 
-**当前 Core gameplay 没有未冻结 OPEN 项。**
+**当前 Core gameplay 规则没有未冻结 OPEN 项。**另有一项明确的 Simulation input amendment：`BATTLE-003`（`ResolvedBattleActor.initialHp`）处于 PROPOSED，需完成实现、validator、Snapshot / Replay 覆盖和 deterministic qualification 后才能关闭。
 
-Presentation v0 的 BattleEffect、Projection、Browser ABI、camera/viewport/effect lifecycle 已在 Contracts / Presentation 中冻结。仍保持 OPEN 的主要是非 Presentation Content 的统一 subject/version、真实 Decision provider metadata/cancel/defaults、Guidance/Host wiring 等外部集成项；这些不改变已经冻结的 Core gameplay 或 Presentation 语义。
+Presentation v0 的 BattleEffect、Projection、Browser ABI、camera/viewport/effect lifecycle 已在 Contracts / Presentation 中冻结。仍保持 OPEN 的其他事项主要是非 Presentation Content 的统一 subject/version、真实 Decision provider metadata/cancel/defaults、Guidance/Host wiring 等外部集成项；这些不改变已经冻结的 Core gameplay 或 Presentation 语义。
