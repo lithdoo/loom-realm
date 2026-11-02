@@ -894,7 +894,7 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 | 阶段 | 内容 | 通过标准 |
 | --- | --- | --- |
 | P0 — Contract / lifecycle baseline | 冻结 `initialHp`、独立 `BattleArena`、Relationship 默认值、Base baseline bootstrap、1 HP 最低持久化、双向 OCC settlement、result Dialogue confirmation、两类 pauseReason 手动恢复与 PWA full-content packaging | 实现 agent 不需要再决定默认关系、bootstrap owner、结果确认 UI、pause UX、Map passability 或 PWA dependency closure |
-| P1 — Core input + Content | Battle Core 实现可选 `ResolvedBattleActor.initialHp` 与 `BattleArenaRef` / Presentation loading；PokeMan 新增 `struct.BattleArena/lab-tutorial`，修正 Grab range、BattleEffect schema / Record / Graphics 与 Browser artifact sync | Core / Content validator 通过；Arena 不依赖 struct.Map；旧 initialHp caller 省略字段仍默认 maxHp |
+| P1 — Core input + Content | Battle Core 实现 `ResolvedBattleActor.initialHp`、`BattleArenaRef` / Presentation loading 与 CTRL-002 `pauseReason / onPause`；PokeMan 新增 `struct.BattleArena/lab-tutorial`，修正 Grab range、BattleEffect schema / Record / Graphics 与 Browser artifact sync | Core / Content validator 通过；两类 pause reason 可观察且不会自动 resume；Arena 不依赖 struct.Map；旧 initialHp caller 省略字段仍默认 maxHp |
 | P2 — Headless composition | 新建 Battle Subsystem、双向 Contract Resolver、FakeClock、ScriptDecision composition | 不启动 Browser 即可运行确定性 1v1；验证 initialHp、1 HP floor 与双向原子结算 |
 | P3 — Map 4 prologue vertical slice | Map 4 Professor → rival Dialogue → Battle → result-specific post-battle Dialogue；Map controls 整链暂停与最终 fresh resume | 三种 BattleResult 分支正确；settlement 后才触发 Dialogue；取消 / failure 不误触发剧情 |
 | P4 — DeepSeek transport | 从 SessionConfig 构造 PokeMan-private transport，接入双方 DeepSeekDecision | PWA / Hostra 的真实 provider request 可观察且可取消；AI vs AI 正常运行 |
