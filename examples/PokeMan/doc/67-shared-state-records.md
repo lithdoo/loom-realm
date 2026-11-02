@@ -1,6 +1,6 @@
 # Shared State Record 设计
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文冻结 PokeMan MVP 核心 Shared State 的物理 Record 粒度、namespace/key 编码、value shape 与数据约束。Content FSDB 物理结构见 [Content FSDB 物理模型](./68-content-fsdb.md)。本文只讨论数据结构，不讨论谁提交、何时提交、事务、冲突或失败处理。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文冻结 PokeMan MVP 核心 Shared State 的物理 Record 粒度、namespace/key 编码、value shape 与数据约束。Content FSDB 物理结构见 [Content FSDB 物理模型](./68-content-fsdb.md)。本文只讨论数据结构，不讨论谁提交、何时提交、事务、冲突或失败处理。Map 4 首场互换角色卡的具体 roster 与参数见 [80-battle-scenario-design.md](./80-battle-scenario-design.md)。
 
 # Authority 前提
 
@@ -604,7 +604,7 @@ pokeman.Relationship / player:rival
   "hostile": false,
   "relationshipText": "与宿敌建立了正式契约。",
   "contract": {
-    "integrity": 8,
+    "integrity": 18,
     "skills": [
       "firebolt",
       "grab"
@@ -625,9 +625,9 @@ pokeman.Relationship / rival:player
   "hostile": false,
   "relationshipText": "认可对方作为自己的对手与伙伴。",
   "contract": {
-    "integrity": 10,
+    "integrity": 20,
     "skills": [
-      "strike"
+      "firebolt"
     ]
   }
 }
@@ -647,6 +647,23 @@ pokeman.CarriedCards / player
   }
 ]
 ```
+
+## rival carried cards
+
+```text
+pokeman.CarriedCards / rival
+```
+
+```json
+[
+  {
+    "slot": 0,
+    "servantCharacterId": "player"
+  }
+]
+```
+
+以上双向示例对应 Map 4 首场互换角色卡：player 持有 rival，rival 持有 player。Integrity / skills 分别属于两条有向 Relationship，不属于 CarriedCards。
 
 # 当前冻结结论
 
