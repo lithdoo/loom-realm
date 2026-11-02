@@ -1,6 +1,8 @@
 # MVP 序章
 
 > 从 `../DESIGN.md` 拆分；原文档保持不变。
+>
+> 序章 Event / Dialogue 的状态机与 Runtime 集成见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)，具体对白见 [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)。
 
 ## 序章目标
 
