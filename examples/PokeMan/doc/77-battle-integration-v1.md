@@ -10,48 +10,52 @@
 
 ## 1. 目标
 
-PokeMan 当前已经有 Base、Map、Dialogue 三个实际运行的 Subsystem。第一条 Battle 纵向集成不再从道路路霸遭遇开始，而是采用序章中更有代表性的 **Map 4 研究所：博士 → 劲敌 → Battle → 战后 Dialogue** 流程。
+PokeMan 当前已经有 Base、Map、Dialogue 三个实际运行的 Subsystem。第一条 Battle 纵向集成仍然选择 Map 4 研究所，但正式流程以 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md) 的 Event state 为准：博士教学、劲敌挑战、博士发布外出任务是三个独立的 NPC interaction，不是一次 Professor interaction 自动串起全部剧情。
 
-~~~text
-Map 4 / 研究所
-玩家与博士交互
-        ↓
-Map 暂停当前 controls activation
-        ↓
-Dialogue child Frame：博士
-        ↓ completed(ready)
-Dialogue child Frame：劲敌
-        ↓ completed(accepted-challenge)
-Battle child Frame
-  ally  = 玩家调用的「宿敌 Battle Manifestation」
-  enemy = 劲敌调用的「主角 Battle Manifestation」
-        ↓
-Battle Simulation 自己驱动 200 ms Tick 并权威结算
-        ↓
-Battle Subsystem 原子结算双方 Contract Integrity
-        ↓
-Battle Frame 返回结构化 BattleOutcome
-        ↓
-Map 根据 ally_win / enemy_win / simultaneous_defeat
-选择并调用对应的战后 Dialogue child Frame
-        ↓
-战后 Dialogue 完成
-        ↓
-Map 创建新的 controls activation，继续研究所地图
 ~~~
+Base Subsystem
+  └─ frame.call("map")
+       └─ Map Subsystem / Map Frame Handler
+            ├─ prologue = lab-tutorial
+            │    Professor interaction
+            │      → frame.call("dialogue", professor-vertical-slice)
+            │      → Dialogue mutation commits rival-ready
+            │      → Story Resolver refreshes Map scene
+            │      → return to Map interaction loop
+            │
+            ├─ prologue = rival-ready
+            │    Rival interaction
+            │      → frame.call("dialogue", lab-rival-intro)
+            │      → accepted only: Business Runtime commits bilateral Contract / Card
+            │      → frame.call("battle", lab-rival-tutorial)
+            │      → confirmed BattleResult + Integrity settlement
+            │      → frame.call("dialogue", result-specific key)
+            │      → Dialogue mutation commits after-battle
+            │      → Story Resolver refreshes Map scene
+            │      → return to Map interaction loop
+            │
+            └─ prologue = after-battle
+                 Professor interaction
+                   → frame.call("dialogue", professor-first-journey)
+                   → Dialogue mutation commits prologue-to-route
+                   → Story Resolver refreshes Map scene
+                   → first-route = active
+~~~
+
+Map Frame Handler 是 Map Subsystem 中已经存在的 Frame Handler。它在自己的主 async control flow 中等待 NPC interaction、直接 await child Frame、调用业务 Service 并处理结果。这里的“流程编排”不是新建一个 Orchestrator 类、Subsystem、Frame 或 Workflow Engine。
 
 这次集成至少要证明：
 
-1. 博士、劲敌和战后 Dialogue 能作为独立 child Frame 顺序运行。
-2. Map 是这条固定序章流程的临时编排者；Dialogue 不直接调用 Battle，Battle 不直接调用 Dialogue。
+1. 博士教学、劲敌挑战、战后确认和博士任务交接能通过独立 NPC interaction 按 Event state 正确触发。
+2. Map Frame Handler 能使用 Loom-realm 现有 `frame.call()` 顺序调用 Dialogue / Battle child Frame；Dialogue 不直接调用 Battle，Battle 不直接调用 Dialogue。
 3. Battle Content 能从 PokeMan FSDB / Shared State 正确解析为双方 Battle Manifestation。
 4. Battle Simulation 能作为独立 child Frame 运行，而不是由 Map 驱动 Tick。
 5. Decision 能替换为 Script / Fake 和真实 DeepSeekDecision。
 6. Battle Presentation 能在 PokeMan 的 Browser / PWA / Desktop Presentation topology 中加载。
 7. Battle 结束后，双方 Contract Integrity 能通过同一个 Shared State transaction 原子结算。
-8. Map 能按 BattleResult 选择战后 Dialogue，并在整条流程结束后安全恢复输入。
+8. Map 能按 BattleResult 选择战后 Dialogue，并在整条 Rival 挑战序列结束后安全恢复输入。
 
-**第一条产品纵向切片是 Map 4 的博士—劲敌—Battle—战后对话。** Map 5 的 road-bandit 保留为后续普通 Encounter / 本体参战验证，不再作为第一次 Battle 的入口。
+**第一条产品纵向切片仍是 Map 4 的双向卡片交换与教学 Battle。** Map 5 的 road-bandit 保留为后续普通 Encounter / 本体参战验证，不再作为第一次 Battle 的入口。
 
 当前 Battle v0 的 Resolved Actor input 仍存在 initialHp 字段缺口，见第 8 节。它不阻止两份全新、满 Integrity Contract 进行第一次教学战斗，但会阻止后续 Battle 正确恢复已经受损的 Integrity；不能把一次满血首战误报成完整的跨战斗连续性验证。
 
@@ -91,61 +95,92 @@ Map 创建新的 controls activation，继续研究所地图
 
 ## 3. 第一条集成验证场景
 
-### 3.1 Map 4：博士 → 劲敌 → Battle → 战后 Dialogue
+### 3.1 Map 4：由 prologue Event state 驱动的独立 NPC interaction
 
-第一条技术与产品验证固定在研究所 Map 4：
+第一条技术与产品验证固定在研究所 Map 4。三段剧情按 Event state 依次开放，但由玩家分别与对应 NPC 交互：
 
-~~~text
-玩家在 Map 4 与 Professor 交互
-  ↓
+~~~
+prologue = lab-tutorial
+  ↓ Professor interaction
 Dialogue / professor-vertical-slice
-  ├─ ready      → 继续序章链
-  ├─ not-yet    → 返回 Map，等待以后再次交互
-  └─ cancelled  → 返回 Map，不启动后续阶段
-  ↓ ready
+  ├─ professor-tutorial-ready
+  │    → Dialogue mutation commits rival-ready
+  │    → Story Resolver refreshes current Map scene
+  │    → return to Map interaction loop
+  ├─ professor-tutorial-not-yet
+  │    → no mutation，保持 lab-tutorial
+  │    → return to Map interaction loop
+  └─ child failed / lifecycle cancelled
+       → 不推进后续阶段
+
+prologue = rival-ready
+  ↓ Rival interaction
 Dialogue / lab-rival-intro
-  ├─ accepted-challenge → 进入 Battle
-  ├─ deferred           → 返回 Map，不进入 Battle
-  └─ cancelled          → 返回 Map，不进入 Battle
-  ↓ accepted-challenge
-Battle / lab-rival-tutorial
-  ↓ normal BattleResult
-Dialogue / lab-rival-after-ally-win
-或 lab-rival-after-enemy-win
-或 lab-rival-after-draw
-  ↓ completed
-恢复 Map controls
+  ├─ lab-rival-exchange-accept
+  │    → Business Runtime 原子交换双向 Contract / Card
+  │    → transaction confirmed
+  │    → Battle / lab-rival-tutorial
+  │    → normal BattleResult + Integrity settlement
+  │    → result-specific Dialogue
+  │    → prologue-battle-resolved commits after-battle
+  │    → Story Resolver refreshes current Map scene
+  │    → return to Map interaction loop
+  ├─ lab-rival-defer
+  │    → no transaction / no Battle / no mutation
+  │    → return to Map interaction loop
+  └─ child failed / lifecycle cancelled
+       → 不进入 Battle
+
+prologue = after-battle
+  ↓ Professor interaction
+Dialogue / professor-first-journey
+  ├─ professor-first-journey-accept
+  │    → prologue-to-route commits
+  │    → prologue removed，first-route = active
+  │    → Story Resolver refreshes current Map scene
+  └─ professor-first-journey-not-yet
+       → no mutation，保持 after-battle
+       → return to Map interaction loop
 ~~~
 
-这是一个固定的序章流程，不是通用 Story Graph。v1 由 Map Frame 顺序调用 child Frame；Map 只负责流程推进和分支选择，不承载对话内容、战斗规则或 Contract mutation。
+博士教学完成后，玩家回到 Map 自由交互；劲敌不会由博士对白自动触发。劲敌接受挑战后，双向交换、Battle 与结果确认对白才组成一段连续的 child-call 序列。Battle 结束并确认结果后，玩家再与博士交互领取第一条道路任务。
 
-用户明确接受挑战后才进入 Battle。若本轮产品希望无选择地自动开战，也应由 Dialogue 的明确 completed outcome 表达，不允许 Map 根据对白文本或 choice label 猜测玩家意图。
+这是由固定 Event state 驱动的序章流程，不是通用 Story Graph。Map Frame Handler 只负责调用顺序和分支选择，不承载对话内容、战斗规则或 Contract mutation。
 
 ### 3.2 Dialogue 的职责与返回值
 
-博士 Dialogue 使用 professor-vertical-slice 作为入口。固定内容、重听 / 暂缓分支和 terminal id 见 [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)。
+Dialogue Content 的物理结构、固定台词和 Choice target 见 [64-dialogue.md](./64-dialogue.md)；序章具体内容见 [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)。
 
-Map 消费的业务结论：
+正式 Dialogue Graph Runner 的 Frame 输入只携带业务 key 和来源身份，不携带台词、Choice 数组、Sprite、Presentation 或 Controls 对象：
 
-- professor-tutorial-ready → ready：Map 继续调用劲敌 Dialogue。
-- professor-tutorial-not-yet → not-yet：结束本次序章链，返回 Map。
-- child Frame failed / lifecycle cancelled：不推进下一阶段。
+~~~ts
+type PokeManDialogueFrameInputV1 = {
+  dialogueKey: string;
+  source: {
+    mapId: number;
+    npc: {
+      instanceId: string;
+      npcId: string;
+    };
+  };
+};
+~~~
 
-劲敌 Dialogue 使用 lab-rival-intro 作为入口，Choice 只跳转到固定 terminal Dialogue：
+正式 Dialogue graph 正常到达 terminal 时，Dialogue Subsystem 返回 terminalDialogueId。Map Frame Handler 根据固定 terminal id 映射业务含义：
 
-- lab-rival-exchange-accept → accepted-challenge：business Runtime 原子交换双向 Contract / Card；提交成功后才能进入 Battle。
-- lab-rival-defer → deferred：不建立 Contract、不写入 CarriedCards、不进入 Battle。
-- child Frame failed / lifecycle cancelled：不推进 Battle。
+| terminalDialogueId | Map 侧业务含义 | 后续动作 |
+| --- | --- | --- |
+| professor-tutorial-ready | 博士教学完成 | Dialogue mutation 已提交 rival-ready；刷新 Map scene |
+| professor-tutorial-not-yet | 玩家暂缓 | 不改变 Event state；回到 Map |
+| lab-rival-exchange-accept | 劲敌接受挑战 | Business Runtime 原子交换；成功后调用 Battle |
+| lab-rival-defer | 劲敌暂缓 | 不交换、不 Battle；回到 Map |
+| lab-rival-after-ally-win / enemy-win / draw | 战斗结果确认 | 对应 Dialogue mutation 已提交 after-battle；刷新 Map scene |
+| professor-first-journey-accept | 接受外出任务 | Dialogue mutation 已提交 prologue-to-route；刷新 Map scene |
+| professor-first-journey-not-yet | 暂缓外出任务 | 不改变 Event state；回到 Map |
 
-Dialogue Content 不创建 Relationship / Contract / Card，也不调用 Battle。terminal Dialogue id 由 PokeMan Dialogue / Map orchestration adapter 映射为上述业务结论；不扩展 Choice schema。
+terminalDialogueId 是 Dialogue graph 的 terminal identity，不是 Event state，也不是通用业务 action。Dialogue Subsystem 在 terminal Dialogue 声明 mutation 时，必须先成功提交 EventStateList，再以成功 terminal result 返回；Map 不重复提交 mutation。
 
-战后 Dialogue 使用以下三个固定 Content key，完整文案同样见文档 78：
-
-- lab-rival-after-ally-win
-- lab-rival-after-enemy-win
-- lab-rival-after-draw
-
-它们分别承接主角胜出、劲敌胜出和平局。只有 Battle 正常 terminal 且双方 Contract Integrity 成功结算后，Map 才能调用对应结果 Dialogue。
+73 中的 `dialogueKey / conclusion` 是 professor-only hard-coded validation slice 的专用返回值，不是正式 Dialogue Graph Runner 的生产 contract。真实 child Frame failed 或 lifecycle cancelled 不能映射成任何正常剧情结论。
 
 ### 3.3 第一场 Battle：双方互相调用对方的 Battle Manifestation
 
@@ -211,116 +246,124 @@ Map 5 的 road-bandit 仍然是很好的第二条 Battle 验证路径，但它�
 
 ## 4. 目标组合结构
 
-~~~text
+~~~
 Game Entry
 └─ Base Subsystem
    ├─ DeepSeek Session Configuration Gate
    ├─ game-controls-input producer
    └─ frame.call("map")
-      └─ Map Subsystem / Map 4 prologue sequence
-         ├─ RPGMapBuilder / Map Runtime
-         ├─ Map controls activation
-         ├─ Professor NPC interaction rendezvous
-         │
-         ├─ frame.call("dialogue", professor-vertical-slice)
-         │
-         ├─ frame.call("dialogue", lab-rival-intro)
-         │
-         ├─ frame.call("battle", lab-rival-tutorial)
-         │  └─ Battle Subsystem
-         │     ├─ Bilateral Contract / Card Resolver
-         │     ├─ Battle Content Resolver
-         │     ├─ PokeMan DeepSeekTransport
-         │     ├─ DeepSeekDecision
-         │     ├─ BattlePresentationBuilder
-         │     ├─ PokeMan BattleClock
-         │     └─ BattleSimulationBuilder
-         │        └─ BattleRuntime
-         │
-         ├─ frame.call("dialogue", result-specific post-battle key)
-         │
-         └─ Map creates a fresh controls activation
+      └─ Map Subsystem
+         └─ Map Frame Handler（现有 Frame Handler）
+            ├─ RPGMapBuilder / Map Runtime
+            ├─ NPC interaction rendezvous
+            ├─ Story Resolver（普通 Service）
+            ├─ frame.call("dialogue", ...)
+            ├─ PokeMan Business Runtime（普通 Service）
+            ├─ frame.call("battle", ...)
+            └─ frame.call("dialogue", result-specific key)
+
+Battle Subsystem
+  ├─ Bilateral Contract / Card Resolver
+  ├─ Battle Content Resolver
+  ├─ PokeMan DeepSeekTransport
+  ├─ DeepSeekDecision
+  ├─ BattlePresentationBuilder
+  ├─ PokeMan BattleClock
+  └─ BattleSimulationBuilder
+     └─ BattleRuntime
 ~~~
 
 依赖方向：
 
-~~~text
-PokeMan Map
-  → Dialogue child Frame contract
-  → Battle child Frame contract
-      → PokeMan Dialogue / Battle Subsystems
+~~~
+Base Frame
+  → frame.call("map")
+
+Map Frame Handler
+  → frame.call("dialogue")
+  → PokeMan Business Runtime functions
+  → frame.call("battle")
+  → frame.call("dialogue")
+
+Dialogue Subsystem
+  → Dialogue Content / EventStateMutation / EventStateList
+  → 不调用 Battle，不创建 Contract / Card
 
 Battle Subsystem
   → Content / Shared State / Frame / SubsystemScope
   → Battle Decision / Simulation / Presentation public APIs
+  → 不调用 Dialogue，不推进 Event
 
-Battle Simulation
-  → BattleClock + AbortSignal + DecisionPort + PresentationPort
-  → 不依赖 SubsystemScope / Frame / DOM / RPGMap Runtime
+Story Resolver
+  → 纯场景解析 Service；不拥有 Frame，不修改 Shared State
 ~~~
+
+这里不增加 Orchestrator class、Subsystem、Frame 或通用 Workflow Engine。Map Frame Handler 是现有 Map Subsystem 的 Frame Handler；Story Resolver、Business Runtime 和 Content Resolver 是由各自 owner 调用的普通 Service，不拥有 Frame 生命周期。
 
 职责固定：
 
 | 组件 | 职责 | 不负责 |
 | --- | --- | --- |
-| Map Subsystem | Professor interaction、序章 child Frame 顺序、BattleResult → post-battle Dialogue 选择、恢复 Map controls | 对话内容、战斗规则、Contract HP 写入 |
-| Dialogue Subsystem | 当前对话 session、choice / conclusion、返回结构化业务结果 | 直接调用 Battle 或修改 Battle Runtime |
+| Base Subsystem | Session 初始化、全局 Controls ownership、启动 Map Frame | 序章剧情编排 |
+| Map Subsystem / Map Frame Handler | 等待 NPC interaction、顺序 await child Frames、调用业务 Service、根据 BattleResult 选择结果 Dialogue、刷新 Map scene、恢复 Map controls | 对话内容、战斗规则、Contract HP 写入 |
+| Dialogue Subsystem | 当前对话 session、Choice / graph、terminalDialogueId、可选 EventStateMutation commit | 直接调用 Battle 或修改 Battle Runtime |
 | Battle Subsystem | 双向 Card / Contract 解析、Content 解析、构造三层、Battle 生命周期、双方 Integrity 结算 | 自己决定剧情台词或调用 Dialogue |
-| Content Resolver | 将 FSDB Content / Resource / Contract facts 转成合法 ResolvedBattleDefinition | 创建第二套 Battle schema |
+| Story Resolver | 根据 StoryIndex / EventStateList / Character scene 解析当前 Map NPC scene | 推进 Event state、拥有 Frame |
+| PokeMan Business Runtime | 双向 Relationship / Contract 与 CarriedCards 业务事务 | 解释 Dialogue 台词、拥有 Frame |
+| Content Resolver | 将 FSDB Content / Resource / Shared State facts 转成各业务 Runtime 的合法输入 | 创建第二套 Content schema |
 | DeepSeekTransport | 封装当前 Session credential 与 HTTP transport | 读取或改变 Battle State |
 | DeepSeekDecision | 消费 DecisionRequest 并返回 DecisionCompletion | 执行移动、伤害、胜负判定 |
 | Simulation | Tick、Plan validation、movement、skill、damage、BattleResult、Replay | 读取 FSDB、DOM、Host lifecycle |
 | Presentation | Map / Actor / Effect 的视觉呈现、插值、camera、viewport、资源释放 | 决定任何 Battle Rule |
 
-Map 在本阶段只是固定序章流程的临时编排者。不因为这条链就新增通用 Story Subsystem / Story Graph；未来出现多地图、多条件、多次回访和可存档剧情状态时，再单独抽取 Story / Event Orchestrator。
-
 ## 5. Map → Dialogue → Battle → Dialogue child Frame
 
-### 5.1 Map 侧顺序编排
+### 5.1 Map Frame Handler 的交互循环与顺序调用
 
-Map 4 的 Professor interaction 是整条序章链的唯一入口：
+Map Frame Handler 持有 Map Frame 的主 async control flow。NPC interaction callback 只向当前 waiter / rendezvous 投递事件；真正的 child Frame 调用由 Map Frame Handler 自己执行并 await。
 
-1. Map interaction callback 只向当前等待中的 Professor waiter 投递事件。
-2. Map 先停止当前 controls activation：清空 move intent、reset directional tracker、close consumer。
-3. Map Frame handler 自己依次 await frame.call：
-   - professor-vertical-slice
-   - 若结论为 ready，调用 lab-rival-intro
-   - 若结论为 accepted-challenge，调用 battle / lab-rival-tutorial
-   - Battle 正常结算后，按 BattleResult 调用对应的战后 Dialogue
-4. Map controls 在整个连续序列期间保持关闭；每个 Dialogue / Battle child Frame 拥有自己的 controls activation。
-5. 战后 Dialogue 正常完成后，Map 才创建新的 controls tracker / consumer，继续当前 Map，不重建 RPGMap Handler。
-6. 如果博士结果为 not-yet / cancelled，劲敌结果为 deferred / cancelled，或 Battle 被取消，则不继续后续阶段，Map 返回正常交互循环。
-7. Map Frame finally 中仍需 disarm waiter 并幂等关闭当前 activation。
+三个 NPC interaction 分别由 prologue Event state 开放：
 
-不要在连续 child Frame 之间短暂重开 Map controls，否则玩家输入可能泄漏到下一段 Dialogue / Battle。Map Frame handler 必须在每个 child call pending 期间保持自身 async control flow pending；不得让 detached async task 拥有 frame.call()。
+1. `lab-tutorial`：等待 Professor interaction，调用 `professor-vertical-slice`。Dialogue mutation 成功提交 `rival-ready` 后，Map Frame Handler 重新读取 EventStateList、调用 Story Resolver、更新当前 Map NPC scene，再回到普通 Map interaction loop。
+2. `rival-ready`：等待 Rival interaction，调用 `lab-rival-intro`。defer 时不产生业务副作用并回到 Map；accept 时调用 Business Runtime 原子交换双向 Contract / Card，确认成功后连续调用 Battle，再按 BattleResult 调用战后 Dialogue。战后 mutation 成功提交 `after-battle` 后刷新 Map scene，再回到普通 Map interaction loop。
+3. `after-battle`：等待 Professor interaction，调用 `professor-first-journey`。接受任务的 Dialogue mutation 提交 `prologue-to-route` 后刷新 Map scene；暂缓则保持当前状态。
+
+因此，博士教学、劲敌挑战和博士任务交接是三个独立的 NPC interaction，不是一次 Professor interaction 自动触发的完整长链。
+
+Controls / Frame 生命周期约束：
+
+- 在调用 child Frame 前，Map 先清空 move intent、reset directional tracker 并关闭当前 ControlsConsumer。
+- Map Frame Handler 自己依次 `await frame.call(...)`；NPC callback 不直接调用 `frame.call()`，也不允许 detached async task 持有 child call。
+- Map controls 在 Rival 接受挑战后的 Dialogue → Battle → Result Dialogue 连续序列期间始终关闭；中间不短暂开放输入。
+- Child 返回后，Main 恢复 Map 的 fresh Activation；旧 Activation 的 Consumer / Tracker 不得复用。
+- 普通 Dialogue 返回后可以恢复新的 Map Controls activation；Event mutation 已提交时必须先刷新当前 Map scene。
+- Child failed / lifecycle cancelled 不得被解释为正常剧情结论；按 73 与 Loom-realm Frame Call Protocol 的失败、取消和 cleanup 规则处理。
+- Map Frame Handler 的 finally 仍需 disarm waiter 并幂等关闭当前 activation。
 
 ### 5.2 Dialogue Frame 输入 / 输出
 
-Map 只传业务 key 和来源身份，不传 RPGDialogue request、台词、choice、sprite、Presentation data 或 controls object。
+Map 只传业务 key 和交互来源身份，不传 RPGDialogue request、台词、Choice 数组、Sprite、Presentation data 或 Controls object。
+
+生产输入：
+
+~~~ts
+type PokeManDialogueFrameInputV1 = {
+  dialogueKey: string;
+  source: {
+    mapId: number;
+    npc: {
+      instanceId: string;
+      npcId: string;
+    };
+  };
+};
+~~~
 
 Dialogue Content 的物理结构保持 [64-dialogue.md](./64-dialogue.md) 冻结的 lines / speaker / choices / target。具体台词与分支见 [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)。
 
-博士 Dialogue 沿用当前业务结果：
+正式 Dialogue Graph Runner 正常完成时返回 terminalDialogueId。Map Frame Handler 在自身控制流中消费 terminalDialogueId，并按本文件 §3.2 的固定映射决定是否调用 Business Runtime、Battle 或刷新 Map scene。
 
-~~~ts
-type ProfessorDialogueResult = {
-  dialogueKey: "professor-vertical-slice";
-  conclusion: "ready" | "not-yet" | "cancelled";
-};
-~~~
-
-劲敌 Dialogue 的业务结果：
-
-~~~ts
-type RivalIntroResult = {
-  dialogueKey: "lab-rival-intro";
-  conclusion: "accepted-challenge" | "deferred" | "cancelled";
-};
-~~~
-
-上述 conclusion 是 PokeMan Dialogue / Map orchestration adapter 根据 terminal Dialogue id 得出的业务语义，不是 Dialogue Choice 上的新字段。Dialogue Runtime 仍按现有 contract 返回 terminalDialogueId。
-
-战后 Dialogue 的正常完成只表示该段结果确认对白已经结束，不反向驱动 Battle。真实 child Frame failed 或 lifecycle cancelled 不得被解释为正常剧情结论。
+73 的 professor-only hard-coded vertical slice 使用 `dialogueKey / conclusion` 结果，是验证切片的专用 contract；它不是正式 Dialogue graph runner 的最终业务结果 contract。真实 child Frame failed 或 lifecycle cancelled 不得被解释为正常剧情结论。
 
 ### 5.3 Battle Frame 输入
 
