@@ -35,7 +35,7 @@
 3. 契约有方向；玩家持有宿敌卡与宿敌持有主角卡，是两份独立关系。
 4. Battle 中行动的是显现体；人物本体仍留在现实世界。
 5. 显现体会依据自身能力和战局自主行动，玩家不是逐帧操纵每个动作。
-6. Battle HP 在产品上表现为这份契约的显现完整度；归零后暂时不能再次显现。
+6. Battle HP 在产品上表现为这份契约的显现完整度；本场 HP 归零代表显现体被击败，正常退出 Battle 结算后会保留最低 1 点 Integrity，因此仍可再次显现，但非常脆弱。
 7. Integrity 是长期 Contract 状态，不会在下一场 Battle 自动恢复；城镇中心可以修复。
 8. 交换卡片必须双方同意；接受挑战后才建立双向契约并开始 Battle。
 
@@ -119,7 +119,7 @@ Map 只根据 terminalDialogueId 选择必要的业务操作，不读取对白�
     },
     {
       "speaker": "professor",
-      "text": "完整度归零，这份契约就暂时无法再次形成显现。契约和你们之间的关系仍然存在。"
+      "text": "本场完整度归零代表显现体被击败；正常退出 Battle 结算后，这份契约会保留最低 1 点完整度，因此仍能再次显现，只是非常脆弱。契约和你们之间的关系始终存在。"
     },
     {
       "speaker": "professor",
@@ -168,7 +168,7 @@ Map 只根据 terminalDialogueId 选择必要的业务操作，不读取对白�
     },
     {
       "speaker": "professor",
-      "text": "第二，战斗中受损的是契约显现完整度；归零后暂时不能再次显现。"
+      "text": "第二，战斗中受损的是契约显现完整度；本场归零后，正常退出时会保留最低 1 点，所以仍能再次显现，但非常脆弱。"
     },
     {
       "speaker": "professor",
@@ -459,19 +459,19 @@ Battle 双方的含义：
     },
     {
       "speaker": "professor",
-      "text": "劲敌持有的主角卡，本次显现完整度已经归零。你持有的宿敌卡还剩多少完整度，请看结果面板。"
+      "text": "劲敌持有的主角卡，本次显现完整度已经归零；正常退出结算后会保留最低 1 点，所以仍能再次显现，但状态非常脆弱。你持有的宿敌卡还剩多少完整度，请看结果面板。"
     },
     {
       "speaker": "professor",
-      "text": "这些数值已经分别写回各自的契约。完整度归零不会伤害人物本体，只代表那份契约暂时无法再次显现。"
+      "text": "这些数值已经分别写回各自的契约。本场完整度归零不会伤害人物本体；退出结算后会保存为 1 点，仍可再次显现，但需要修复才能恢复稳定。"
     },
     {
       "speaker": "professor",
-      "text": "之后到城镇中心修复完整度，就可以重新调用。"
+      "text": "之后到城镇中心修复完整度，可以让显现恢复稳定，更好地应对下一场战斗。"
     },
     {
       "speaker": "rival",
-      "text": "别得意太早。等我把自己的契约修复好，我们再来一场。"
+      "text": "别得意太早。我会先把自己的契约修复得更稳定，再来一场。"
     }
   ]
 }
@@ -491,7 +491,7 @@ Battle 双方的含义：
     },
     {
       "speaker": "professor",
-      "text": "结果确认：劲敌一方胜出。主公持有的宿敌卡，本次显现完整度已经归零。"
+      "text": "结果确认：劲敌一方胜出。主公持有的宿敌卡，本次显现完整度已经归零；正常退出结算后会保留最低 1 点，因此仍能再次显现，但非常脆弱。"
     },
     {
       "speaker": "professor",
@@ -499,11 +499,11 @@ Battle 双方的含义：
     },
     {
       "speaker": "professor",
-      "text": "完整度归零只代表这份契约暂时无法再次显现，不代表宿敌本人受伤。"
+      "text": "本场完整度归零不会伤害宿敌本人；正常退出结算后，这份契约会保留 1 点完整度，仍能再次显现，只是非常脆弱。"
     },
     {
       "speaker": "professor",
-      "text": "之后到城镇中心修复完整度，就可以再次调用。"
+      "text": "之后到城镇中心修复完整度，可以让显现恢复稳定，更好地应对下一场战斗。"
     },
     {
       "speaker": "rival",
@@ -531,11 +531,11 @@ Battle 双方的含义：
     },
     {
       "speaker": "professor",
-      "text": "两份契约的本次显现完整度都已归零。具体记录请看结果面板。"
+      "text": "两份契约的本次显现完整度都已归零。正常退出结算后，两份契约都会各自保留最低 1 点完整度；具体记录请看结果面板。"
     },
     {
       "speaker": "professor",
-      "text": "契约和人物关系仍然存在，只是暂时无法再次显现。到城镇中心修复后，你们就能继续调用。"
+      "text": "契约和人物关系仍然存在。两张卡现在都保留 1 点完整度，仍可再次显现，但极其脆弱；到城镇中心修复后，才能以更稳定的状态继续战斗。"
     },
     {
       "speaker": "rival",
@@ -549,9 +549,9 @@ Battle 双方的含义：
 
 | BattleResult | 产品胜负 | Dialogue key | 必须确认的结果 | 共同 Mutation |
 | --- | --- | --- | --- | --- |
-| ally_win | 主角胜出 | lab-rival-after-ally-win | rival Card 的 Manifestation 获胜；劲敌持有的 player Card 显现 Integrity 归零 | prologue-battle-resolved |
-| enemy_win | 劲敌胜出 | lab-rival-after-enemy-win | player Card 的 Manifestation 获胜；主角持有的 rival Card 显现 Integrity 归零 | prologue-battle-resolved |
-| simultaneous_defeat | 平局 | lab-rival-after-draw | 两份 Manifestation Integrity 同时归零 | prologue-battle-resolved |
+| ally_win | 主角胜出 | lab-rival-after-ally-win | rival Card 的 Manifestation 获胜；劲敌持有的 player Card 本场 HP 归零，正常退出后保存为 1 Integrity | prologue-battle-resolved |
+| enemy_win | 劲敌胜出 | lab-rival-after-enemy-win | player Card 的 Manifestation 获胜；主角持有的 rival Card 本场 HP 归零，正常退出后保存为 1 Integrity | prologue-battle-resolved |
+| simultaneous_defeat | 平局 | lab-rival-after-draw | 两份 Manifestation 本场 HP 同时归零，正常退出后两份 Contract 都保存为 1 Integrity | prologue-battle-resolved |
 
 三段战后 Dialogue 的文本不同，但都表示当前教学 Battle 已结束，因此统一把 prologue 从 rival-ready 推进到 after-battle。不要为了保留暂时不影响后续场景的胜负差异而提前拆分 Event state。
 
@@ -602,7 +602,7 @@ Battle 双方的含义：
 - 只有交换事务成功后才进入 Battle。
 - Battle cancelled / failed 不播放胜负对白、不推进 after-battle；已提交的双向 Contract / Card 保留，并支持安全重试。
 - 三种 BattleResult 各自进入正确的战后 Dialogue，且共用 prologue-battle-resolved。
-- 战后对白明确说明本体没有受伤、Integrity 已持久结算、归零后需要修复。
+- 战后对白明确说明本体没有受伤、Integrity 已持久结算；本场 HP 归零的卡片退出 Battle 后保留 1 点完整度，仍可再次显现但非常脆弱，城镇中心用于修复恢复稳定。
 - 战后 Dialogue mutation 将 prologue 推进到 after-battle；博士获得 professor-first-journey 交互入口，劲敌仍留在研究所但不再可交互。
 - 外出任务暂缓不推进 Event；接受后 prologue-to-route 原子结束 prologue 并激活 first-route。
 - 对话不显示虚构 HP 数字，不把动态 Battle state 写入固定 Dialogue Content。
