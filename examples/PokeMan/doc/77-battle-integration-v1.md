@@ -10,38 +10,50 @@
 
 ## 1. 目标
 
-PokeMan 当前已经有 Base、Map、Dialogue 三个实际运行的 Subsystem。下一步增加 Battle Subsystem，验证一个真实游戏流程：
+PokeMan 当前已经有 Base、Map、Dialogue 三个实际运行的 Subsystem。第一条 Battle 纵向集成不再从道路路霸遭遇开始，而是采用序章中更有代表性的 **Map 4 研究所：博士 → 劲敌 → Battle → 战后 Dialogue** 流程。
 
 ~~~text
-Map 上看见并接近敌对人物
+Map 4 / 研究所
+玩家与博士交互
         ↓
-Map 停止当前 controls activation
+Map 暂停当前 controls activation
         ↓
-Map 通过 child Frame 调用 Battle
+Dialogue child Frame：博士
+        ↓ completed(ready)
+Dialogue child Frame：劲敌
+        ↓ completed(accepted-challenge)
+Battle child Frame
+  ally  = 玩家调用的「宿敌 Battle Manifestation」
+  enemy = 劲敌调用的「主角 Battle Manifestation」
         ↓
-Battle 解析 Content / Shared State
+Battle Simulation 自己驱动 200 ms Tick 并权威结算
         ↓
-Decision 提交 PlanSubmission
+Battle Subsystem 原子结算双方 Contract Integrity
         ↓
-Simulation 自己驱动 200 ms Tick 并权威结算
+Battle Frame 返回结构化 BattleOutcome
         ↓
-Presentation 显示战斗场景与最终状态
+Map 根据 ally_win / enemy_win / simultaneous_defeat
+选择并调用对应的战后 Dialogue child Frame
         ↓
-Battle Frame 结束
+战后 Dialogue 完成
         ↓
-Map 创建新的 controls activation 并继续运行
+Map 创建新的 controls activation，继续研究所地图
 ~~~
 
 这次集成至少要证明：
 
-1. Battle Content 能从 PokeMan FSDB 正确解析为 Simulation input。
-2. Battle Simulation 能作为独立 child Frame 运行，而不是由 Map 驱动 Tick。
-3. Decision 能替换为 Script / Fake 和真实 DeepSeekDecision。
-4. Battle Presentation 能在 PokeMan 的 Browser / PWA / Desktop Presentation topology 中加载。
-5. Frame abort、Battle cancel、normal result、Presentation failure 能正确收敛。
-6. Battle 结束后，Map 能以全新的 controls activation 恢复，不留下重复输入消费者或失效 listener。
+1. 博士、劲敌和战后 Dialogue 能作为独立 child Frame 顺序运行。
+2. Map 是这条固定序章流程的临时编排者；Dialogue 不直接调用 Battle，Battle 不直接调用 Dialogue。
+3. Battle Content 能从 PokeMan FSDB / Shared State 正确解析为双方 Battle Manifestation。
+4. Battle Simulation 能作为独立 child Frame 运行，而不是由 Map 驱动 Tick。
+5. Decision 能替换为 Script / Fake 和真实 DeepSeekDecision。
+6. Battle Presentation 能在 PokeMan 的 Browser / PWA / Desktop Presentation topology 中加载。
+7. Battle 结束后，双方 Contract Integrity 能通过同一个 Shared State transaction 原子结算。
+8. Map 能按 BattleResult 选择战后 Dialogue，并在整条流程结束后安全恢复输入。
 
-**本设计把 Map → Battle → Map 作为第一条必须通过的纵向集成链。** Contract Integrity 的跨战斗连续性也是产品目标，但当前 Battle v0 的 Resolved Actor input 存在一个必须先解决的字段缺口，见第 8 节。没有解决之前，不得宣称完整的 Contract Integrity 持久化闭环已经实现。
+**第一条产品纵向切片是 Map 4 的博士—劲敌—Battle—战后对话。** Map 5 的 road-bandit 保留为后续普通 Encounter / 本体参战验证，不再作为第一次 Battle 的入口。
+
+当前 Battle v0 的 Resolved Actor input 仍存在 initialHp 字段缺口，见第 8 节。它不阻止两份全新、满 Integrity Contract 进行第一次教学战斗，但会阻止后续 Battle 正确恢复已经受损的 Integrity；不能把一次满血首战误报成完整的跨战斗连续性验证。
 
 ## 2. 当前仓库基线
 
@@ -53,76 +65,150 @@ Map 创建新的 controls activation 并继续运行
 | launch.hostra.json | 当前显式绑定 base / map / dialogue | 需要加入 battle module |
 | package.json | 当前没有 Battle package dependency | 需要添加 workspace dependency 并更新 lockfile |
 | presentation.json | 当前只有 Schema Form / controls / Map / Dialogue assets | 需要加入 Battle browser JS/CSS |
-| map.mjs | 当前 Map 5 有静态 road-bandit placement | 可作为第一条技术验证触发点，但不是正式 Encounter authority |
-| map.mjs | 目前只有 Professor placement 标记 interactable | road-bandit 还不能触发 child Frame |
-| FSDB Encounter | 当前有 Encounter/2，没有 Encounter/5 | 不应把 Map 5 静态 placement 描述成已完成的 Encounter generation |
-| BattleActor | 已有 rival、road-bandit、player | 可复用现有 actor Content |
+| map.mjs / Map 4 | 已有 professor 与 rival-lab 两个静态 placement；Professor 可交互，rival-lab 目前不可交互 | 可直接以 Professor interaction 启动序章链；rival-lab 作为劲敌对话 / 战斗场景定位 |
+| map.mjs | 当前只等待 Professor interaction 并调用 professor-vertical-slice Dialogue | 需要扩展为多个 child Frame 的顺序编排 |
+| Dialogue/lab-rival-intro.json | 已有劲敌开场对白与「接受挑战 / 再等等」选项，但两个 choice 当前都指向自身 | 需要把 choice 结果接入 accepted-challenge / deferred 分支 |
+| BattleActor/player | 已有主角本体基础定义：max_hp 20、firebolt | 作为劲敌调用的主角 Battle Manifestation 基础定义 |
+| BattleActor/rival | 已有宿敌本体基础定义：max_hp 18、firebolt / grab | 作为玩家调用的宿敌 Battle Manifestation 基础定义 |
+| BattleActor/road-bandit | 已有路霸基础定义 | 后续 Map 5 Encounter 验证再使用 |
 | BattleSkill | 已有 firebolt、grab | 可复用现有 skill Content |
 | BattleEffect | 当前 PokeMan Record 与 Battle v0 contract 不一致 | Presentation 初始化前必须修复 |
 | DeepSeek Gate | Base 已把验证后的 key 写入 Session-only Shared State | Battle 可以在同一 Session 中读取并构造 PokeMan-private Transport |
+| PokeMan prologue design | 已定义玩家与宿敌建立双向 Contract，双方互持对方 Card，教学 Battle 为双方 Battle Manifestation 对战 | 本集成必须按双向 Relationship / Contract 解析，不得再把 road-bandit 当成第一场对手 |
 
 当前已有的关键内容：
 
+- Map 4 的 Professor placement：instanceId = professor，位置 (10, 6)，当前可交互。
+- Map 4 的 rival-lab placement：instanceId = rival-lab，位置 (8, 5)，当前尚未接入 Dialogue / Battle 流程。
+- Dialogue/lab-rival-intro 已存在，但当前 choice target 还没有表达 Battle 接受 / 延后语义。
+- BattleActor/player：max_hp 20，skills 为 firebolt，角色资源 Characters/Player。
 - BattleActor/rival：max_hp 18，skills 为 firebolt / grab，角色资源 Characters/RivalCasual。
-- BattleActor/road-bandit：max_hp 12，skill 为 grab，角色资源 Characters/RoadBandit。
 - BattleSkill/firebolt：damage 7，windup 3 ticks，recovery 2 ticks，effect firebolt。
 - BattleSkill/grab：damage 4，windup 1 tick，recovery 1 tick，effect firebolt。
-- NPC/road-bandit：名称和角色图片已存在。
-- Map 5 的 road-bandit 当前来自 map.mjs 静态 placement；它不是 Encounter/5 Content 解析出来的实例。
+- BattleActor/road-bandit 与 Map 5 的静态 road-bandit placement 仍然存在，但属于后续道路 Encounter 场景。
 
 当前 PokeMan 的真实启动拓扑仍然是 base → map，Map 可以通过 child Frame 调用 dialogue。新增 Battle 不应改变 Base 的 controls producer ownership，也不应让 Map 直接依赖 Battle Simulation / Presentation concrete classes。
 
 ## 3. 第一条集成验证场景
 
-### 3.1 选择 Map 5 的 road-bandit
+### 3.1 Map 4：博士 → 劲敌 → Battle → 战后 Dialogue
 
-第一条技术验证使用：
+第一条技术与产品验证固定在研究所 Map 4：
 
 ~~~text
-Map 5 / 第一条道路
-
-玩家当前随身 Card：
-  Relationship(player → rival).contract
-  CarriedCards(player) contains rival
-
-Battle：
-  ally  = rival Battle Manifestation
-  enemy = road-bandit 本体
+玩家在 Map 4 与 Professor 交互
+  ↓
+Dialogue / professor-vertical-slice
+  ├─ ready      → 继续序章链
+  ├─ not-yet    → 返回 Map，等待以后再次交互
+  └─ cancelled  → 返回 Map，不启动后续阶段
+  ↓ ready
+Dialogue / lab-rival-intro
+  ├─ accepted-challenge → 进入 Battle
+  ├─ deferred           → 返回 Map，不进入 Battle
+  └─ cancelled          → 返回 Map，不进入 Battle
+  ↓ accepted-challenge
+Battle / lab-rival-tutorial
+  ↓ normal BattleResult
+Dialogue / lab-rival-after-ally-win
+或 lab-rival-after-enemy-win
+或 lab-rival-after-draw
+  ↓ completed
+恢复 Map controls
 ~~~
 
-这符合 PokeMan 的产品模型：玩家主要以主公身份探索，当前随身从者是主要 Battle 调用对象；敌对普通人物本体也可以直接成为 Battle Actor。
+这是一个固定的序章流程，不是通用 Story Graph。v1 由 Map Frame 顺序调用 child Frame；Map 只负责流程推进和分支选择，不承载对话内容、战斗规则或 Contract mutation。
 
-这是一条**技术资格验证场景**，不修改序章的叙事顺序，也不声称已经完成道路 Encounter 系统。当前 Map 5 的静态 placement 只用于尽快验证 child Frame / Battle Runtime / Browser Presentation 的组合。
+用户明确接受挑战后才进入 Battle。若本轮产品希望无选择地自动开战，也应由 Dialogue 的明确 completed outcome 表达，不允许 Map 根据对白文本或 choice label 猜测玩家意图。
 
-### 3.2 临时触发边界
+### 3.2 Dialogue 的职责与返回值
 
-第一阶段允许对当前 road-bandit 静态 placement 增加 interactable，并在 Map Subsystem 中识别这个具体 interaction。该触发只服务于集成验证：
+博士 Dialogue 使用当前已有的 professor-vertical-slice 业务结果：
 
-- 不新增通用 Encounter Runtime。
-- 不新增 EncounterState / defeatedIds 等 Shared State。
-- 不把 BattleActor id 的硬编码映射提升为永久 Map 业务规则。
-- 不把静态 MAP_ONLY_NPC_PLACEMENTS 变成正式世界数据 authority。
+- ready：博士阶段完成，Map 继续调用劲敌 Dialogue。
+- not-yet / cancelled：结束本次序章链，返回 Map。
+- child Frame failed / lifecycle cancelled：不推进下一阶段。
 
-后续 Encounter Content / Story Resolver 落地后，Battle 的来源应来自已解析的 Encounter / Story source；Map 仍只负责把明确的 battle request 交给 Battle Subsystem。
+劲敌 Dialogue 使用现有 lab-rival-intro Content 作为起点，但当前两个 choices 都指向自身，尚未形成可供 Map 消费的挑战结果。实现时需要让 Dialogue child 返回明确的业务结论，例如：
 
-### 3.3 测试状态前置条件
+~~~ts
+type RivalIntroConclusion =
+  | "accepted-challenge"
+  | "deferred"
+  | "cancelled";
+~~~
 
-第一条测试场景需要一个有效的当前随身契约：
+只有 accepted-challenge 才能调用 Battle。Dialogue 本身不调用 Battle，也不负责创建 Battle Runtime。
+
+战后 Dialogue 是独立的 Dialogue child Frame。建议先定义三个明确的 Content key：
+
+- lab-rival-after-ally-win
+- lab-rival-after-enemy-win
+- lab-rival-after-draw
+
+它们分别承接 ally 胜利、enemy 胜利和平局 / simultaneous defeat。第一轮文案可以很短，但必须让结果有可观察的剧情反馈。
+
+### 3.3 第一场 Battle：双方互相调用对方的 Battle Manifestation
+
+这场教学 Battle 不是宿敌本体对路霸，而是序章既定的双向角色卡对战：
 
 ~~~text
-CarriedCards / player
+玩家持有宿敌 Card
+  → Relationship(player → rival).contract
+  → BattleActor/rival
+  → ally / 玩家一方的 Battle Manifestation
+
+宿敌持有玩家 Card
+  → Relationship(rival → player).contract
+  → BattleActor/player
+  → enemy / 劲敌一方的 Battle Manifestation
+~~~
+
+因此本场固定：
+
+- ally Actor identity：rival，使用玩家持有的宿敌 Card 对应 Contract。
+- enemy Actor identity：player，使用宿敌持有的主角 Card 对应 Contract。
+- 两边都是 Battle Manifestation；战斗 HP 表示各自方向 Contract 的 Integrity，不是两个人物本体受到物理伤害。
+- BattleActor/rival 与 BattleActor/player 只提供基础 max HP / baseline skills / character resource；已有 Contract 的实际 Integrity 和 skills 来自各自 Relationship。
+
+### 3.4 Battle 前置业务状态
+
+进入 Battle 前必须验证双向关系与随身事实：
+
+~~~text
+CarriedCards(player)
   contains servantCharacterId = rival
 
-Relationship / player:rival
+Relationship(player → rival)
   exists
   contract exists
   contract.integrity is valid
-  contract.skills contains existing BattleSkill ids
+  contract.skills[] references valid BattleSkill ids
+
+CarriedCards(rival)
+  contains servantCharacterId = player
+
+Relationship(rival → player)
+  exists
+  contract exists
+  contract.integrity is valid
+  contract.skills[] references valid BattleSkill ids
 ~~~
 
-目前这些业务流程尚未由当前 Map-only / Dialogue vertical slice 完整建立。第一阶段测试可以通过 Shared State fixture 预置这些记录；不得为了 Battle 集成临时建立第二套 Relationship / Card schema。
+博士 / 劲敌阶段的序章状态推进必须建立这两份 Relationship Contract 和双方 Card。该业务 mutation 不属于 Battle，也不应隐藏在 Map 的 NPC callback 中；应由 PokeMan 当前正式的 Dialogue outcome / Event / Shared State business owner 完成。若现有 Dialogue slice 尚未具备该 mutation 能力，应将其作为本 vertical slice 的显式前置工作，不得通过 Battle Frame params 伪造已成立的 Contract。
 
-若测试只验证 Map → Battle → Map，而尚未完成第 8 节的 initialHp 合同修订，fixture 必须令 contract.integrity = BattleActor/rival.max_hp，并且不得把该次测试描述成验证了跨战斗受损状态恢复。
+第一场教学 Battle 使用刚建立的满 Integrity Contract，因此当前 Battle v0 默认 initialHp = maxHp 的行为可以正确启动首战。首战后的 Integrity 写回和后续 Battle 恢复规则见第 8 节。
+
+### 3.5 后续场景：Map 5 road-bandit
+
+Map 5 的 road-bandit 仍然是很好的第二条 Battle 验证路径，但它验证的是不同语义：
+
+- enemy 是 road-bandit 本体，不是 Contract Battle Manifestation。
+- 本体 HP 是本场战斗状态，不写入 rival / player Contract。
+- 需要 Encounter / Story source 提供合法的 NPC instance 与 BattleActor identity。
+- 当前 Map 5 只有静态 placement，尚没有 Encounter/5 Content。
+
+因此 road-bandit 不再作为第一次 Battle 的入口；等 Map 4 教学链通过后，再用它验证普通 NPC 本体参战。
 
 ## 4. 目标组合结构
 
@@ -132,31 +218,38 @@ Game Entry
    ├─ DeepSeek Session Configuration Gate
    ├─ game-controls-input producer
    └─ frame.call("map")
-      └─ Map Subsystem
+      └─ Map Subsystem / Map 4 prologue sequence
          ├─ RPGMapBuilder / Map Runtime
          ├─ Map controls activation
-         ├─ NPC interaction rendezvous
+         ├─ Professor NPC interaction rendezvous
          │
-         ├─ frame.call("dialogue")
+         ├─ frame.call("dialogue", professor-vertical-slice)
          │
-         └─ frame.call("battle")
-            └─ Battle Subsystem
-               ├─ Battle Content Resolver
-               ├─ PokeMan DeepSeekTransport
-               ├─ DeepSeekDecision
-               ├─ BattlePresentationBuilder
-               ├─ PokeMan BattleClock
-               └─ BattleSimulationBuilder
-                  └─ BattleRuntime
+         ├─ frame.call("dialogue", lab-rival-intro)
+         │
+         ├─ frame.call("battle", lab-rival-tutorial)
+         │  └─ Battle Subsystem
+         │     ├─ Bilateral Contract / Card Resolver
+         │     ├─ Battle Content Resolver
+         │     ├─ PokeMan DeepSeekTransport
+         │     ├─ DeepSeekDecision
+         │     ├─ BattlePresentationBuilder
+         │     ├─ PokeMan BattleClock
+         │     └─ BattleSimulationBuilder
+         │        └─ BattleRuntime
+         │
+         ├─ frame.call("dialogue", result-specific post-battle key)
+         │
+         └─ Map creates a fresh controls activation
 ~~~
 
 依赖方向：
 
 ~~~text
 PokeMan Map
+  → Dialogue child Frame contract
   → Battle child Frame contract
-      → PokeMan Battle Subsystem
-          → Battle public package exports
+      → PokeMan Dialogue / Battle Subsystems
 
 Battle Subsystem
   → Content / Shared State / Frame / SubsystemScope
@@ -171,107 +264,124 @@ Battle Simulation
 
 | 组件 | 职责 | 不负责 |
 | --- | --- | --- |
-| Map Subsystem | 地图交互、暂停当前 Map controls activation、发起 Battle child Frame、恢复 Map | 解析 BattleSkill、驱动 Battle Tick、写 Battle HP |
-| Battle Subsystem | Content / State 解析、构造三层、管理 Battle Frame 生命周期、结算业务结果 | 自己实现战斗规则或 scheduler |
-| Content Resolver | 将 FSDB Content / Resource 转成合法的 ResolvedBattleDefinition | 创建第二套 Battle schema |
+| Map Subsystem | Professor interaction、序章 child Frame 顺序、BattleResult → post-battle Dialogue 选择、恢复 Map controls | 对话内容、战斗规则、Contract HP 写入 |
+| Dialogue Subsystem | 当前对话 session、choice / conclusion、返回结构化业务结果 | 直接调用 Battle 或修改 Battle Runtime |
+| Battle Subsystem | 双向 Card / Contract 解析、Content 解析、构造三层、Battle 生命周期、双方 Integrity 结算 | 自己决定剧情台词或调用 Dialogue |
+| Content Resolver | 将 FSDB Content / Resource / Contract facts 转成合法 ResolvedBattleDefinition | 创建第二套 Battle schema |
 | DeepSeekTransport | 封装当前 Session credential 与 HTTP transport | 读取或改变 Battle State |
 | DeepSeekDecision | 消费 DecisionRequest 并返回 DecisionCompletion | 执行移动、伤害、胜负判定 |
 | Simulation | Tick、Plan validation、movement、skill、damage、BattleResult、Replay | 读取 FSDB、DOM、Host lifecycle |
 | Presentation | Map / Actor / Effect 的视觉呈现、插值、camera、viewport、资源释放 | 决定任何 Battle Rule |
 
-## 5. Map → Battle child Frame
+Map 在本阶段只是固定序章流程的临时编排者。不因为这条链就新增通用 Story Subsystem / Story Graph；未来出现多地图、多条件、多次回访和可存档剧情状态时，再单独抽取 Story / Event Orchestrator。
 
-### 5.1 Map 侧流程
+## 5. Map → Dialogue → Battle → Dialogue child Frame
 
-Map 当前已经有可复用的 Dialogue child-Frame 模式。Battle 沿用同一模式：
+### 5.1 Map 侧顺序编排
 
-1. Map 的 NPC interaction callback 只向当前等待中的 interaction waiter 投递事件。
+Map 4 的 Professor interaction 是整条序章链的唯一入口：
+
+1. Map interaction callback 只向当前等待中的 Professor waiter 投递事件。
 2. Map 先停止当前 controls activation：清空 move intent、reset directional tracker、close consumer。
-3. Map 检查 Map Runtime 是否已经 terminal；若仍有效，调用 battle child Frame。
-4. 等待 child Frame outcome。
-5. 对正常完成的 Battle，Map 不重建 RPGMap Handler；只创建新的 controls tracker / consumer，继续当前地图。
-6. Map Frame finally 中仍需 disarm waiter 并幂等关闭当前 activation。
+3. Map Frame handler 自己依次 await frame.call：
+   - professor-vertical-slice
+   - 若结论为 ready，调用 lab-rival-intro
+   - 若结论为 accepted-challenge，调用 battle / lab-rival-tutorial
+   - Battle 正常结算后，按 BattleResult 调用对应的战后 Dialogue
+4. Map controls 在整个连续序列期间保持关闭；每个 Dialogue / Battle child Frame 拥有自己的 controls activation。
+5. 战后 Dialogue 正常完成后，Map 才创建新的 controls tracker / consumer，继续当前 Map，不重建 RPGMap Handler。
+6. 如果博士结果为 not-yet / cancelled，劲敌结果为 deferred / cancelled，或 Battle 被取消，则不继续后续阶段，Map 返回正常交互循环。
+7. Map Frame finally 中仍需 disarm waiter 并幂等关闭当前 activation。
 
-Battle child Frame 期间不能保留 Map controls Consumer，否则同一份 south/start 输入可能同时作用于 Map 和 Battle / Result acknowledgement。
+不要在连续 child Frame 之间短暂重开 Map controls，否则玩家输入可能泄漏到下一段 Dialogue / Battle。Map Frame handler 必须在每个 child call pending 期间保持自身 async control flow pending；不得让 detached async task 拥有 frame.call()。
 
-每次恢复都必须创建新的 activation；不得复用已 close 的 Consumer 或已 reset 的 Directional Tracker。
+### 5.2 Dialogue Frame 输入 / 输出
 
-### 5.2 Battle Frame 输入
+Map 只传业务 key 和来源身份，不传 RPGDialogue request、台词、choice、sprite、Presentation data 或 controls object。
 
-建议的最小输入只携带来源身份和本次交互时的 Map Runtime 事实，不传递已解析的 Battle 定义：
+博士 Dialogue 沿用当前：
+
+~~~ts
+type ProfessorDialogueResult = {
+  dialogueKey: "professor-vertical-slice";
+  conclusion: "ready" | "not-yet" | "cancelled";
+};
+~~~
+
+劲敌 Dialogue 建议返回：
+
+~~~ts
+type RivalIntroResult = {
+  dialogueKey: "lab-rival-intro";
+  conclusion: "accepted-challenge" | "deferred" | "cancelled";
+};
+~~~
+
+战后 Dialogue 的结果只需要表达正常结束 / 用户取消，不反向驱动 Battle。真实 child Frame failed 或 lifecycle cancelled 不得被解释为正常剧情结论。
+
+### 5.3 Battle Frame 输入
+
+Battle Frame 输入表达场景请求，而不是让 Map 任意指定 actor / skill / resolved definition：
 
 ~~~ts
 type PokeManBattleFrameInput = {
+  scenarioId: "lab-rival-tutorial";
   source: {
-    mapId: number
-    npc: {
-      instanceId: string
-      npcId: string
-      x: number
-      y: number
-    }
+    mapId: 4;
+    rival: {
+      instanceId: "rival-lab";
+      npcId: "rival-lab";
+      x: number;
+      y: number;
+      direction: 2 | 4 | 6 | 8;
+    };
     player: {
-      x: number
-      y: number
-      direction: 2 | 4 | 6 | 8
-    }
-  }
-
-  // 仅供当前 Map 5 静态 placement qualification bridge 使用。
-  // Encounter / Story source 正式落地后，由其 ContentRef 替代此临时来源。
-  enemyBattleActor: {
-    namespace: "struct.BattleActor"
-    key: string
-  }
-}
+      x: number;
+      y: number;
+      direction: 2 | 4 | 6 | 8;
+    };
+  };
+};
 ~~~
 
 输入约束：
 
-- mapId 必须是正 safe integer。
-- instanceId / npcId 必须是非空字符串。
-- 坐标必须是 safe integer。
-- enemyBattleActor 必须是合法的 struct.BattleActor ContentRef。
+- scenarioId 必须是受支持的 PokeMan Battle scenario key。
+- 本场 mapId 必须为 4。
+- rival 必须对应 Map 4 的 rival-lab placement。
+- 坐标必须是 safe integer，两个 tile 必须不同且可通行。
 - 不接受调用方直接传入 BattleActor / Skill / Effect 的可变对象。
 - 不接受 apiKey、transport、DecisionRequest、ResolvedBattleDefinition 或 BattleRuntime。
-- Battle Subsystem 必须重新读取和验证 Content / Shared State；不能把 Map caller 当作数据权威。
+- Battle Subsystem 根据固定 scenario mapping 和 Shared State 解析 ally=rival、enemy=player；Map caller 不是 Content / Contract authority。
 
-第一阶段的临时来源映射为：
+未来 Encounter Battle 可以由 Encounter / Story source 提供受验证的 source identity；不把 lab-rival-tutorial 的固定映射提升为通用 Map 规则。
 
-~~~text
-mapId = 5
-npc.instanceId = road-bandit
-npc.npcId = road-bandit
-enemyBattleActor = struct.BattleActor / road-bandit
-~~~
+### 5.4 Actor 初始位置
 
-Battle 的 ally 不由 Map 任意指定；Battle Subsystem 从 CarriedCards/player 解析当前随身 Card，再读取对应 Relationship / Contract。第一阶段序章随身上限为 1，因此必须恰好解析到 rival。未来多个随身位解锁后，Battle 开始前的出战卡选择是独立产品功能，不在本设计范围内。
-
-### 5.3 Actor 初始位置
-
-第一阶段使用 Map interaction event 提供的玩家位置和 NPC 位置作为两个 Actor 的初始 tile：
+第一场 Battle 的两个 Manifestation 在 Map 4 的可见场景中落位：
 
 - ally rival manifestation：玩家当前 tile / direction。
-- enemy road-bandit body：road-bandit 当前 tile；方向从当前 placement/source facts 解析。
+- enemy player manifestation：rival-lab placement tile / direction。
 - 两个 tile 必须不同、位于 Map bounds 内，且在 Battle passability grid 中可通行。
 - 不合法时在初始化 Presentation / 启动 Simulation 前返回明确的 Battle input/content failure；不得悄悄把 Actor 放到任意 tile。
 
-Map interaction event 的现有字段应优先复用；如果未来 Map public event contract 不提供 Battle 所需的来源事实，应先评估 Map public API，而不是读取 RPGMap Runtime internal state。
+优先使用 Map public event / placement facts。如果现有 Map public event contract 不提供所需玩家位置，应评估并扩展 public contract；不得读取 RPGMap Runtime internal state。
 
 ## 6. Battle Subsystem 组合
 
-### 6.1 Content Resolver
+### 6.1 Content / Contract Resolver
 
-Battle Subsystem 负责把 FSDB Content 转成 Battle v0 的纯数据输入：
+Battle Subsystem 负责把 FSDB Content 和 Shared State 转成 Battle v0 的纯数据输入：
 
-1. 读取来源 Map、Tileset、Autotile 与 Battle Presentation 所需资源。
+1. 读取 Map 4、Tileset、Autotile 与 Battle Presentation 所需资源。
 2. 将 Map / Tileset authored movement facts 转成 Battle Simulation 要求的 width / height / passable[y][x]。
-3. 读取 ally 的基础 BattleActor，验证 Relationship Contract 的 integrity 与 skills。
-4. 读取 enemy BattleActor。
-5. 读取双方实际使用的 BattleSkill。
-6. 对每个 Skill.effect 读取对应 BattleEffect。
-7. 验证所有 record key 与 definition id 一致，所有 ContentRef / ResourceRef 存在，资源 contentVersion 合法。
-8. 生成 detached、immutable 的 ResolvedBattleDefinition。
+3. 读取 CarriedCards(player)，确认宿敌 Card 在随身位。
+4. 读取 Relationship(player → rival)，验证 Contract Integrity / skills；解析为 ally BattleActor/rival。
+5. 读取 CarriedCards(rival)，确认主角 Card 在劲敌随身位。
+6. 读取 Relationship(rival → player)，验证 Contract Integrity / skills；解析为 enemy BattleActor/player。
+7. 读取双方 Contract 实际使用的 BattleSkill；对每个 Skill.effect 读取对应 BattleEffect。
+8. 验证 Record key 与 definition id 一致、所有 ContentRef / ResourceRef 存在、资源 contentVersion 合法。
+9. 生成 detached、immutable 的 ResolvedBattleDefinition。
 
 PokeMan 直接复用 Battle v0 的 BattleActor / BattleSkill / BattleEffect contracts，不建立 PokeMan 私有的 BattleProfile、Skill 或 Effect schema。
 
@@ -322,18 +432,24 @@ interface BattleClock {
 
 ## 7. Content 与 Presentation 资源
 
-### 7.1 已有 BattleActor / Skill
+### 7.1 首场 BattleActor / Skill
 
 当前可复用：
 
 | Content | 已有定义 | 本场用途 |
 | --- | --- | --- |
-| BattleActor/rival | 18 HP、firebolt / grab、Characters/RivalCasual | Ally 基础 Actor |
-| BattleActor/road-bandit | 12 HP、grab、Characters/RoadBandit | Enemy 本体 Actor |
-| BattleSkill/firebolt | 7 damage、3 windup / 2 recovery、effect firebolt | Rival skill |
-| BattleSkill/grab | 4 damage、1 windup / 1 recovery、effect firebolt | 双方近身 skill |
+| BattleActor/rival | 18 HP、firebolt / grab、Characters/RivalCasual | Ally：玩家调用的宿敌 Manifestation |
+| BattleActor/player | 20 HP、firebolt、Characters/Player | Enemy：劲敌调用的主角 Manifestation |
+| BattleActor/road-bandit | 12 HP、grab、Characters/RoadBandit | 后续 Map 5 本体 Encounter，不用于首场教学战 |
+| BattleSkill/firebolt | 7 damage、3 windup / 2 recovery、effect firebolt | 双方可用技能 |
+| BattleSkill/grab | 4 damage、1 windup / 1 recovery、effect firebolt | 宿敌额外可用技能 |
 
-Ally 的实际技能来源遵循 PokeMan Contract 语义：已有 Contract 使用 contract.skills[]；BattleActor.skills[] 是基础 baseline / 新 Contract 初始化来源。不得每场 Battle 都用 BattleActor.skills[] 覆盖已经成立 Contract 的技能集。
+双方的实际技能来源遵循各自 Contract 语义：
+
+- 玩家持有的宿敌 Contract：Relationship(player → rival).contract.skills[]。
+- 劲敌持有的主角 Contract：Relationship(rival → player).contract.skills[]。
+
+BattleActor.skills[] 是基础 baseline / 新 Contract 初始化来源；不得每场 Battle 都用基础 Actor skills 覆盖已经成立 Contract 的技能集。
 
 ### 7.2 BattleEffect 当前不符合 v0 contract
 
@@ -368,29 +484,41 @@ PokeMan Presentation 需要注册 Battle package 已发布的 browser artifacts�
 
 Battle package 已提供 browser JS/CSS exports；PokeMan 只消费 package exports，不复制或 fork Battle Browser implementation。
 
-## 8. Contract Integrity 与 Battle initial HP 缺口
+## 8. 双向 Contract Integrity 与 Battle initial HP 缺口
 
-### 8.1 PokeMan 的目标语义
+### 8.1 双方 Manifestation 的 HP authority
 
-对 rival Battle Manifestation：
+首场 Battle 两个 Actor 分别来自相反方向的 Relationship Contract：
 
 ~~~text
 BattleActor/rival.max_hp
-  = Contract Integrity 上限
+  = Relationship(player → rival).contract Integrity 上限
 
-Relationship/player:rival.contract.integrity
-  = 本场 Battle 初始 HP
+Relationship(player → rival).contract.integrity
+  = ally rival manifestation 本场初始 HP
 
-Relationship/player:rival.contract.skills[]
-  = 本场实际可用 Skill ids
+Relationship(player → rival).contract.skills[]
+  = ally 本场实际可用 Skill ids
 
-BattleSnapshot ally actor.hp
-  = 本场结束后的 Contract Integrity 候选值
+BattleActor/player.max_hp
+  = Relationship(rival → player).contract Integrity 上限
+
+Relationship(rival → player).contract.integrity
+  = enemy player manifestation 本场初始 HP
+
+Relationship(rival → player).contract.skills[]
+  = enemy 本场实际可用 Skill ids
+
+BattleSnapshot ally.rival.hp
+  = Relationship(player → rival).contract.integrity 更新候选值
+
+BattleSnapshot enemy.player.hp
+  = Relationship(rival → player).contract.integrity 更新候选值
 ~~~
 
-BattleResult 本身只表示 ally_win / enemy_win / simultaneous_defeat / cancelled / failure；最终 HP 必须从 BattleRuntime.getSnapshot() 读取，不得从 BattleResult 推导。
+BattleResult 本身只表示 ally_win / enemy_win / simultaneous_defeat / cancelled / failure；最终双方 HP 必须从 BattleRuntime.getSnapshot() 读取，不得从 BattleResult 推导。
 
-Enemy road-bandit 是本体参战，其本场 HP 不写入 rival Contract，也不创建临时 Relationship。
+这里的 HP 是两份有向 Contract 各自的 Battle Manifestation Integrity，不是主角或宿敌本体的生命值。
 
 ### 8.2 当前 Battle v0 无法表达受损 Contract 的初始 HP
 
@@ -404,42 +532,43 @@ ActorRuntimeState.maxHp = ResolvedBattleActor.maxHp
 因此当前 public contract 无法同时表达：
 
 ~~~text
-maxHp     = BattleActor/rival.max_hp
-initialHp = Relationship/player:rival.contract.integrity
+maxHp     = BattleActor.<actor>.max_hp
+initialHp = Relationship(<holder> → <servant>).contract.integrity
 ~~~
 
-如果把 maxHp 直接设置成 contract.integrity，Battle HUD 的最大值也会变成当前完整度，受损卡片在每场 Battle 开始时又会显示为满血；这不是正确的产品语义，不能作为 workaround。
+**对本次第一次教学 Battle：** 两份 Contract 刚建立时都应以各自基础 BattleActor.max_hp 初始化 Integrity，因此默认 initialHp = maxHp 正好符合首战要求。该缺口不阻止满 Integrity 的第一次 Map 4 Battle。
 
-**设计结论：完整 Contract Integrity 闭环需要一个独立的 Battle Core contract amendment。** 建议由单独的 Battle Core 变更审议一个明确的 initialHp 输入（或等价的初始 Actor HP 字段），其约束为：
+**对后续 Battle：** 首战结束后，两份 Contract Integrity 会因战斗损耗而下降；下一场 Battle 必须把当前 integrity 作为 initialHp，同时保留 BattleActor.max_hp 作为 maxHp。当前 v0 做不到这一点。如果把 maxHp 直接设置成 contract.integrity，HUD 最大值会错误地变成当前 HP，不能作为 workaround。
+
+完整的跨 Battle Contract Integrity 闭环需要一个独立的 Battle Core contract amendment，审议明确的 initialHp 输入（或等价的初始 Actor HP 字段），约束为：
 
 - maxHp 仍来自 BattleActor.max_hp。
-- initialHp 来自 Contract.integrity。
-- 0 <= initialHp <= maxHp；如果 initialHp 为 0，PokeMan 不应启动该 Contract 的 Battle Manifestation。
+- initialHp 来自对应方向的 Relationship.contract.integrity。
+- 0 <= initialHp <= maxHp；initialHp 为 0 时，PokeMan 不应启动该 Contract 的 Battle Manifestation。
 - 未提供 initialHp 的既有 Battle callers 保持以 maxHp 初始化的兼容语义。
 - Simulation validator、initial snapshot、RenderProjection、Replay definition / validation 和 deterministic tests 同步覆盖该字段。
 - Battle Core 不读取 Relationship、Contract 或 PokeMan Content；它只接收已解析的数值。
 
 该字段不在本设计 PR 中修改 Battle Core，也不允许 PokeMan 通过伪造 maxHp 绕过它。
 
-### 8.3 分阶段状态结算
+### 8.3 双向结算与 Shared State transaction
 
-在 initialHp contract amendment 完成前：
+正常 Battle terminal 后，Battle Subsystem 从 final Snapshot 读取双方最终 HP，并把两份 Relationship Contract Integrity 作为一个业务事务提交：
 
-- 可以先用 integrity = max_hp 的 fixture 验证 Map → Battle → Map。
-- 不宣称已经验证受损 Contract 的跨战斗恢复。
-- 不把当前 Snapshot HP 写回长期 Contract，避免下一场 Battle 丢失正确的最大值语义。
-
-initialHp contract amendment 完成后，PokeMan Battle Subsystem 才启用完整结算：
-
-1. Battle 开始前读取 Relationship Record 和 version，验证 Contract / Card / BattleActor invariant。
-2. 将当前 integrity 作为 initialHp，将 BattleActor.max_hp 作为 maxHp。
-3. Battle 正常结束后读取 final Snapshot。
-4. 只把 ally rival 的最终 hp 作为该 Contract 的 integrity 更新候选值。
-5. 用 Shared State version condition 提交 Relationship Record 更新；保留 affinity、hostile、relationshipText、skills 等其他字段。
-6. 对 CONFLICT / OUTCOME_UNKNOWN 做读取与结果 reconciliation；不得盲目覆盖或无条件重试。
-7. cancelled / failure 不提交本场部分 HP 损耗；Frame abort 也不得留下半提交 Contract。
+1. Battle 开始前读取 Relationship(player → rival) 与 Relationship(rival → player)，记录两者 version，并验证 Card / Contract / BattleActor invariant。
+2. Battle 正常结束后，读取 ally rival 与 enemy player 的 final Snapshot HP。
+3. 使用同一个 Shared State transaction：
+   - conditions 同时包含两份 Relationship 的读取 version；
+   - writes 同时替换两份 Relationship Record，保留各自 affinity、hostile、relationshipText、skills 等其他字段，只更新对应 contract.integrity；
+   - 若需要处理 OUTCOME_UNKNOWN 的 exactly-once reconciliation，在同一事务写入普通业务 operation-marker Record。
+4. 两份 Relationship 必须原子提交；不允许先写一边、再单独写另一边，避免双向契约出现半结算。
+5. CONFLICT 表示零写入；重新读取并按业务规则 reconciliation，不做无条件覆盖或盲目重试。
+6. OUTCOME_UNKNOWN 必须通过 operation marker 与相关 Records fresh-read reconciliation；Shared State 不自动重试。
+7. cancelled / failure 不提交本场部分 HP 损耗；Frame abort 不得留下半提交 Contract。
 
 Shared State 写入只发生在 Battle 正常 terminal 之后，不按 Tick 写入。不得新增 BattleRuntime HP Record，也不得把 live BattleSnapshot 变成 Shared State 的第二份 authority。
+
+在 initialHp amendment 合并前，第一场满 Integrity 教学 Battle 可以使用 maxHp 启动，并将 final Snapshot 原子写回双方 Contract；但不能声称下一场 Battle 已能从受损 Integrity 恢复。Map 5 road-bandit 或任何需要再次调用这两份 Manifestation 的后续战斗，必须等 initialHp amendment 落地后再验收连续性。
 
 ## 9. DeepSeek Decision 与 credential 边界
 
@@ -514,23 +643,34 @@ Battle v0 已冻结 Decision availability circuit：达到阈值后 Runtime 进�
 
 这是进入真实 Host qualification 前的明确 OPEN，不因 Frame abort 已经接通而自动解决。
 
-## 11. Battle Frame 返回值
+## 11. Battle Frame 返回值与 Map 的剧情分支
 
-Map 只需要知道 child Frame 是否正常完成、Battle 的业务结果类别，以及是否完成必要的持久化结算。Map 不需要 Snapshot、Replay、Content 或 provider data。
-
-建议 Battle Frame 的正常业务结果保持为小型 detached value：
+Battle Subsystem 只返回战斗业务结果和结算证据，不直接选择或调用 Dialogue：
 
 ~~~ts
 type PokeManBattleOutcome = {
-  battleId: string
-  result: "ally_win" | "enemy_win" | "simultaneous_defeat"
-  settlement: "not-applicable" | "committed"
-}
+  battleId: string;
+  result: "ally_win" | "enemy_win" | "simultaneous_defeat";
+  settlement: "committed" | "not-applicable";
+};
 ~~~
 
-第一阶段没有 initialHp / Contract Integrity 写回时，settlement 使用 not-applicable；完成 Core amendment 后才允许 committed。
+对 Map 4 的 lab-rival-tutorial，正常结果必须在双方 Relationship transaction 成功提交后才返回 settlement = committed。若 settlement conflict / outcome unknown 尚未完成 reconciliation，不得把 Battle 当作已完成并启动战后剧情。
 
-cancelled / failure 通过 Subsystem 的标准 Frame outcome 表达。Battle Result、Snapshot、Replay 不能被 Map 当作新的长期状态源。
+Map 收到正常 BattleOutcome 后按固定映射选择 Dialogue key：
+
+~~~text
+ally_win
+  → lab-rival-after-ally-win
+
+enemy_win
+  → lab-rival-after-enemy-win
+
+simultaneous_defeat
+  → lab-rival-after-draw
+~~~
+
+Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider data。Battle 的 cancelled / failure 不属于正常胜负分支，不得打开胜利、失败或平局剧情；按标准 Frame outcome 返回 / 展示可恢复错误。
 
 ## 12. 测试与验收
 
@@ -554,16 +694,24 @@ cancelled / failure 通过 Subsystem 的标准 Frame outcome 表达。Battle Res
 - Battle Frame 每次创建新的 Builder / Handler / Runtime。
 - close / abort / failure 后不残留 scheduler、resource listener 或 controls consumer。
 
-### 12.3 Map child-Frame integration
+### 12.3 Map child-Frame integration：Map 4 序章链
 
 沿用 dialogue-gameplay-vertical-slice 的测试风格：
 
-- road-bandit 是当前唯一新增的 Map 5 interaction target。
-- south / start 的重复输入不会重复发起 Battle。
-- 调用 battle 前 Map move intent 被清空，旧 controls Consumer 已 close。
-- child Frame 正常返回后创建新的 controls Consumer / Directional Tracker。
-- Battle 运行期间 Map terminal、Frame abort 和 child failure 不会产生双重恢复或重复 child call。
-- Battle 返回后 Map Handler 仍是原来的 session，不重建地图或重置玩家位置。
+- Professor interaction 是 Map 4 序章链的唯一入口。
+- Map 先关闭自己的 controls activation，再依次调用 professor Dialogue、rival Dialogue、Battle、result-specific post-battle Dialogue。
+- Professor Dialogue ready 才进入 rival Dialogue；not-yet / cancelled 不得启动 Battle。
+- Rival Dialogue accepted-challenge 才进入 Battle；deferred / cancelled 不得启动 Battle。
+- Battle ally_win / enemy_win / simultaneous_defeat 分别只调用对应的 post-battle Dialogue key。
+- Battle cancelled / failure 不得调用任何正常 post-battle branch。
+- Map controls 在整个连续 child Frame 链期间保持关闭；Dialogue / Battle 各自拥有自己的 controls activation。
+- 只有 post-battle Dialogue 正常完成后，Map 才创建新的 controls Consumer / Directional Tracker。
+- 两份 Relationship Contract Integrity 通过同一个 Shared State transaction 原子提交；conflict / outcome unknown 不得造成单边更新或提前播放战后 Dialogue。
+- south / start 的重复输入不会重复发起整条序章链或重复创建 child Frame。
+- Map terminal、Frame abort 和任一 child failure 不会产生双重恢复、重复 child call 或残留 controls Consumer。
+- Map Handler 仍是原来的 session，不重建地图或重置玩家位置。
+
+后续 Map 5 road-bandit 另建 Encounter / 本体参战测试，不混入本条首要 vertical slice。
 
 ### 12.4 Browser / Product qualification
 
@@ -583,15 +731,16 @@ cancelled / failure 通过 Subsystem 的标准 Frame outcome 表达。Battle Res
 
 | 阶段 | 内容 | 通过标准 |
 | --- | --- | --- |
-| P0 — Contract / baseline | 先审议 initialHp 缺口、Host pause reason / lifecycle OPEN；记录 PokeMan 当前基线 | 不在实现中临时发明 Core API |
-| P1 — Content / package | 添加 Battle dependency、BattleEffect 修正、Battle graphics、Browser artifact sync | Content validator / package / sync check 通过 |
-| P2 — Headless composition | 新建 Battle Subsystem、Resolver、FakeClock、ScriptDecision composition | 不启动 Browser 也能完成确定性 1v1 |
-| P3 — Map vertical slice | Map 5 road-bandit 临时交互、child Frame、Map controls fresh resume | Map → Battle → Map 可重复运行 |
+| P0 — Contract / lifecycle baseline | 审议 Battle initialHp 缺口、Host pause reason / lifecycle OPEN；确认双向 Contract 建立与 Dialogue outcome mutation 的业务 owner | 不在实现中临时发明 Core API 或把 Contract 写入 Map callback |
+| P1 — Content / package | 添加 Battle dependency、BattleEffect 修正、Battle graphics、Browser artifact sync；校验 player / rival BattleActor 与双方 skills | Content validator / package / sync check 通过 |
+| P2 — Headless composition | 新建 Battle Subsystem、双向 Contract Resolver、FakeClock、ScriptDecision composition | 不启动 Browser 也能完成确定性 rival-manifestation vs player-manifestation 1v1，并原子结算两份 Contract |
+| P3 — Map 4 prologue vertical slice | Map 4 Professor → rival Dialogue → Battle → result-specific post-battle Dialogue；Map controls 整链暂停与最终 fresh resume | 四段 child Frame 顺序正确，三个 BattleResult 分支正确，取消 / failure 不误触发剧情 |
 | P4 — DeepSeek transport | 从 SessionConfig 构造 PokeMan-private transport，接入 DeepSeekDecision | PWA / Hostra 的真实 provider request 可观察且可取消 |
-| P5 — Contract continuity | Battle Core initialHp contract amendment + OCC settlement | 受损 Contract 可正确跨多场 Battle 持续 |
+| P5 — Contract continuity | Battle Core initialHp contract amendment + bilateral OCC settlement / reconciliation | 第二场及后续 Battle 从双方各自的 Contract Integrity 正确初始化，maxHp 保持不变 |
 | P6 — Product qualification | Browser / PWA / Desktop / Host lifecycle / failure / replay | 真实宿主的端到端证据完整 |
+| P7 — Map 5 Encounter follow-up | road-bandit visible Encounter / 本体参战 / Encounter source | 与 Map 4 教学链分离，证明普通 NPC 本体可进入同一 Battle Runtime |
 
-P0 中的 Battle Core contract amendment 应由独立变更审议和落地；本设计 PR 不修改 Battle Core。P2–P4 可以先用满 Integrity fixture 验证 Battle flow，但不能把该阶段标记为 Contract Integrity closed-loop complete。
+P2–P4 可以先用两份满 Integrity Contract 验证第一次教学 Battle。首战 final Snapshot 可以原子写回双方 Contract；但在 initialHp amendment 合并前，不得把第二场 Manifestation Battle 标记为通过，也不得把 Contract Integrity 的跨战斗闭环标记为完成。
 
 ## 14. 明确非目标
 
@@ -599,13 +748,16 @@ P0 中的 Battle Core contract amendment 应由独立变更审议和落地；本
 
 - PlayerGuidance、手动提交战术 Plan 或 Battle 内玩家操控。
 - 多 Actor / 2v2 / 多张随身卡选择。
-- 通用 Encounter generation、Map 5 Encounter Content、随机 spawn / defeated persistence。
-- Story Graph、完整 Relationship / Contract 建立剧情或 Card 管理 UI。
+- Map 5 通用 Encounter generation、随机 spawn / defeated persistence；road-bandit 是后续单独阶段。
+- 通用 Story Graph / Story Subsystem；当前只由 Map 编排固定序章链。
+- 完整 Relationship / Contract 建立剧情以外的 Card 管理 UI。
 - Save / Load 与跨 Session credential persistence。
 - 通用 Framework credential / network capability。
 - 修改 Battle movement / skill / damage / LOS / stalemate 等 Core gameplay rules。
 - 为 PokeMan 复制 Battle Simulation、Decision 或 Browser Renderer。
 - 把 Map Runtime timer / movement / Browser completion 复用为 Battle authority。
+- 让 Dialogue 直接调用 Battle，或让 Battle 直接调用战后 Dialogue。
+- 让 Map 自己写入单边 Contract Integrity，或按 Tick 持久化 HP。
 
 ## 15. 参考文档
 
