@@ -1861,7 +1861,7 @@ Controls Activation lifecycle
 
 - [64-dialogue.md](./64-dialogue.md)：固定 Dialogue graph、Choice.target、terminalDialogueId 与 mutation commit 语义；
 - [62-event.md](./62-event.md)：Event state、EventStateMutation、StoryIndex 与 scene takeover；
-- [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)：Map / Story Orchestration、场景刷新、序章状态机、业务事务与 Battle 协作；
+- [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)：Map Frame Handler 的 child Frame 调用、场景刷新、序章状态机、业务事务与 Battle 协作；
 - [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)：序章具体对白与 Dialogue key。
 
 后续实现工作是把当前 professor-only hard-coded validation slice 演进为上述生产 contract：
