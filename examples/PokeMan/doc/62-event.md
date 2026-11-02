@@ -518,7 +518,7 @@ StoryIndex 是 derived Content，不进入 Shared State / Save；其精确派生
 
 # Map scene refresh after Event mutation
 
-Story Resolver 不只在 Map Enter 时运行。Map / Story Orchestrator 还必须在 Dialogue child 正常完成、且 Dialogue Subsystem 已成功提交 EventStateMutation 后，重新读取 EventStateList 并解析当前 Map 的 NPC scene。
+Story Resolver 不只在 Map Enter 时运行。Map Subsystem 的 Map Frame Handler 还必须在 Dialogue child 正常完成、且 Dialogue Subsystem 已成功提交 EventStateMutation 后，重新读取 EventStateList 并解析当前 Map 的 NPC scene。
 
 固定顺序：
 
@@ -526,7 +526,7 @@ Story Resolver 不只在 Map Enter 时运行。Map / Story Orchestrator 还必�
 Dialogue terminal
 → Dialogue Subsystem commits EventStateList
 → Dialogue Frame returns completed(terminalDialogueId)
-→ Map / Story Orchestrator reads current EventStateList
+→ Map Frame Handler reads current EventStateList
 → Story Resolver resolves current Map scene
 → Map updates live NPC scene
 → Map resumes ordinary controls
