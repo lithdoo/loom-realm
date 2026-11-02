@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**既有 Simulation baseline（含 Decision availability circuit）、DeepSeek Decision implementation/replaceable DecisionWorkflow boundary 与 Presentation integration 已完成 closed-loop qualification；新增 BATTLE-003 `ResolvedBattleActor.initialHp` amendment 仍为 PROPOSED，待实现与 qualification；PlayerGuidance concrete feature 明确延期；configured DeepSeekTransport 的 product/platform wiring、pause-reason/retry UI 与 Host lifecycle composition 仍含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
+> 状态：**既有 Simulation baseline（含 Decision availability circuit）、DeepSeek Decision implementation/replaceable DecisionWorkflow boundary 与 Presentation integration 已完成 closed-loop qualification；BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 `BattleArena` amendments 仍为 PROPOSED，待实现与 qualification；PlayerGuidance concrete feature 明确延期；configured DeepSeekTransport 的 product/platform wiring、pause-reason/retry UI 与 Host lifecycle composition 仍含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
@@ -148,73 +148,60 @@ BattleConfig / resolved Battle content
 
 它不知道 RenderDomain、Viewport、DOM、InputListener 或 `frame.call()`。测试环境可直接注入 FakeClock + ScriptDecision + RecordingPresentation，不需要模拟整个 LoomRealm Subsystem。
 
-## 2. RPGMap Resource 兼容
+## 2. BattleArena 与 Map 视觉资源复用
 
-Battle 复用的是**素材/Content 形式**，不是 RPGMap Runtime 行为。
+Battle v0 的战斗网格是独立 BattleArena，不再读取探索 `struct.Map`。
 
-### 2.1 复用的 Content / Resource 概念
+### 2.1 Battle-owned Arena
 
-Battle 可以读取现有：
+BattleArena 提供：
 
 ```text
-struct.Map
-struct.Tileset
+width / height
+passable[y][x]          # Simulation navigation authority
+tileset_id
+3-layer tile data       # Presentation-only visual facts
+```
 
+BattleArena 不包含：
+
+```text
+Map behaviors
+passages / terrain_tags gameplay derivation
+bridge / ledge
+MapTransfer
+NPC collision
+RPGMap Runtime state
+```
+
+因此无需 Map → Battle passability projection。探索 Map 当前 tile、NPC placement 或 movement rules 的变化，不得改变已经 author 的 BattleArena。
+
+### 2.2 只复用视觉素材
+
+Battle Presentation 可以继续读取：
+
+```text
+struct.Tileset
 resource.Graphics/Tilesets/...
 resource.Graphics/Autotiles/...
 resource.Graphics/Characters/...
 ```
 
-当前已确认的兼容约定：
+tile size 继续为 32×32；Character 继续使用现有 4×4 atlas；BattleArena.data 沿用 3-layer tile-id 编码。这里复用的是视觉资源与 tile 编码，不是 RPGMap navigation semantics。
 
-- Map 概念字段包括 `tileset_id`、`width`、`height`、ProjectedTable 风格的 tile `data` 和 `behaviors`；
-- Tileset 概念字段包括 `id`、`tileset_name`、`autotile_names`、`passages`、`priorities`、`terrain_tags`；
-- tile size = 32×32；
-- direction 继续使用 `2 / 4 / 6 / 8`；
-- Character pattern 使用 `0 / 1 / 2 / 3`；
-- Graphics 资源身份沿用 `namespace + key + contentVersion`；
-- 常用 namespace 为 `resource.Graphics`；
-- Tileset key：`Tilesets/<tilesetName>`；
-- Autotile key：`Autotiles/<name>`；
-- Character key：`Characters/<characterName>`。
-
-真正实现时，应优先复用仓库已有 shared type / reader，而不是平行复制一套结构。
-
-### 2.2 Character atlas
-
-Character 图片继续按 4×4 atlas 使用，图片宽高必须可被 4 整除：
-
-```text
-frameWidth  = image.width  / 4
-frameHeight = image.height / 4
-
-sourceX = pattern * frameWidth
-sourceY = ((direction - 2) / 2) * frameHeight
-```
-
-Character frame 可以大于 32×32，Presentation 应以 Actor tile 为基准做底部居中显示。
-
-### 2.3 Tileset / Autotile
-
-普通 Tileset 沿用现有 32×32 tile 布局，当前格式每行 8 个 tile。
-
-Autotile 继续使用现有 block/cell 形式。
-
-这些只是资源/渲染格式，不能反向定义 Battle movement/timing。
-
-### 2.4 明确不复用的 Runtime
+### 2.3 明确不复用的 Runtime
 
 Battle 不得把以下模块当作 Battle 权威：
 
-- `RPGMapBuilder`；
-- `RPGMapHandler`；
+- `struct.Map`；
+- `RPGMapBuilder` / `RPGMapHandler`；
 - RPGMap movement/timer；
-- RPGMap Transfer / Bridge / exploration Runtime；
+- Map passage / terrain / bridge / transfer；
 - RPGMap Browser movement completion。
 
-`lr-map-view` / `lr-map-sprite` 属于 RPGMap Browser/Runtime 细节，不进入 Battle Core。
+`lr-map-view` / `lr-map-sprite` 仍属于 RPGMap Browser/Runtime 细节，不进入 Battle Core。Battle Presentation 继续使用自己的 `lr-battle-view`。
 
-如果未来 Battle 需要探索语义，必须明确加入 Simulation，而不是从 RPGMap Runtime 隐式继承。
+如果未来 Battle 需要复杂 terrain gameplay，应明确扩展 BattleArena / Simulation contract，而不是重新从 RPGMap 隐式继承。
 
 ## 3. Presentation 集成
 
@@ -654,7 +641,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-既有 Battle v0 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 均已完成 closed-loop qualification。新增 BATTLE-003 `ResolvedBattleActor.initialHp` 是明确的 Simulation input amendment，尚待实现与 qualification；它不改变 gameplay rules。PlayerGuidance 明确延期；configured DeepSeekTransport 的 credential/network/product capability handoff、产品级 pause-reason/retry UI 与 Host lifecycle composition 仍属于外部集成工作。
+既有 Battle v0 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 均已完成 closed-loop qualification。BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 BattleArena 是明确 amendments，尚待实现与 qualification；它们不改变已冻结 gameplay reducer rules。PlayerGuidance 明确延期；configured DeepSeekTransport 的 credential/network/product capability handoff、产品级 pause-reason/retry UI 与 Host lifecycle composition 仍属于外部集成工作。
 
 已验证工程状态：
 
@@ -666,7 +653,7 @@ collisionRetryCount
 ## 13. 推荐实施顺序
 
 ```text
-1. 按 BATTLE_V0_SPEC.md 的 BATTLE-003 amendment 扩展 ResolvedBattleDefinition / Simulation-facing validator（可选 initialHp；省略时默认 maxHp）
+1. 按 BATTLE_V0_SPEC.md 的 BATTLE-003 / BATTLE-004 amendments 扩展 ResolvedBattleDefinition / validator（可选 initialHp；BattleArenaRef + authored passable），并让 Presentation 从 struct.BattleArena 加载 visual tile data
 2. 按 BATTLE_V0_SIMULATION.md 实现自驱动 headless Simulation Runtime，并新增 package `./simulation` export
 3. 实现 frozen DecisionPort + Mock/Script/Deferred Decision
 4. 跑 frozen-rule deterministic Test Matrix
@@ -689,6 +676,6 @@ Presentation blocking integration OPEN 已清零。仍未冻结的集成项只�
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Decision circuit 的 automatic pause / explicit resume Runtime semantics 已冻结，产品层如何展示其 pause reason/重试 UI 仍属 integration wiring；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
-`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle 既有 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 已完成 qualification；BATTLE-003 initialHp amendment 尚待实现与 qualification；configured DeepSeekTransport 与 product/Host composition 尚待外部集成。
+`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle 既有 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 已完成 qualification；BATTLE-003 initialHp 与 BATTLE-004 BattleArena amendments 尚待实现与 qualification；configured DeepSeekTransport 与 product/Host composition 尚待外部集成。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。
