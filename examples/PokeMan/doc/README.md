@@ -29,7 +29,7 @@
 - [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md) — Map 4 序章博士玩法科普、劲敌互换双向卡片、三种 Battle 结果确认对白与业务边界
 - [90-scope-principles.md](./90-scope-principles.md) — MVP 非要求、设计原则与当前非目标
 
-`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`78` 是其后新增的技术设计，不回写 `DESIGN.md`。
+`00`–`50` 与 `90` 是从 `DESIGN.md` 拆出的产品规则。`60`–`77` 是其后新增的技术设计；`78` 是序章固定 Dialogue 的内容设计。它们都不回写 `DESIGN.md`。
 
 当前 physical data canonical sources：
 
