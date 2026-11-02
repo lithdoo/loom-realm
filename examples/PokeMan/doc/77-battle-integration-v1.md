@@ -829,7 +829,7 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 - 验证 CONFLICT / OUTCOME_UNKNOWN 均只做 fresh-read reconciliation：两份 Relationship 同时等于 expected values 才成功，否则不自动重试、不启动胜负 Dialogue。
 - Presentation initialize / render / failure / close 的生命周期。
 - Frame signal pre-abort 与 active abort。
-- Decision failure、circuit pause、显式 resume。
+- Decision failure、`decision-circuit` pauseReason、onPause 单次通知、Message“重试决策”后显式 resume；Host background 使用 `host-background` reason，foreground 不自动 resume。
 - Battle Frame 每次创建新的 Builder / Handler / Runtime。
 - close / abort / failure 后不残留 scheduler、resource listener 或 controls consumer。
 - 验证 `initialHp` 省略时仍默认 `maxHp`，显式传入时保留受损初值且不改变 maxHp。
@@ -847,6 +847,9 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 - Rival accepted 后，Map 先确认双向 Contract / Card transaction，再连续调用 Battle；Battle 期间 Map controls 保持关闭。
 - Battle ally_win / enemy_win / simultaneous_defeat 分别只调用对应 post-battle Dialogue key。
 - Battle cancelled / failure 不得调用任何正常 post-battle branch。
+- Battle `host-background` pause：foreground 后只弹出一次“继续战斗 / 退出战斗” Message；继续才 resume，退出走 cancelled。
+- Battle `decision-circuit` pause：弹出一次“重试决策 / 退出战斗” Message；重试才 resume，退出走 cancelled。
+- 已经 paused/decision-circuit 时再发生 background 不覆盖 reason、不叠第二个 Message；任何 foreground 事件都不得自动 resume。
 - 只有 Battle normal result 与双向 Integrity settlement 都确认后，才允许启动战后 Dialogue。
 - 战后 Dialogue 正常完成并提交 after-battle 后刷新 Map scene，再恢复 fresh Controls activation，回到普通 NPC interaction loop。
 - prologue=after-battle 时，玩家再次与 Professor interaction，调用 professor-first-journey；accept 才提交 prologue-to-route，not-yet 不推进。
@@ -865,7 +868,7 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 - PWA / Chromium 验证真实 Worker / Presentation 资源路径，并证明 prepared content 包含完整 PokeMan FSDB 与 battle browser assets；不得继续使用 map-only closure。
 - Desktop / Hostra 验证 launch manifest、Frame lifecycle、provider transport 和 Browser assets。
 - 在同一宿主内重复启动 / 退出 Battle Runtime，验证资源和 listener 正确释放。
-- 在真实 DeepSeek qualification 中验证双方 Decision 请求、合法 PlanSubmission、Decision failure 与 circuit pause / resume；玩家手动指导不属于本阶段验收。
+- 在真实 DeepSeek qualification 中验证双方 Decision 请求、合法 PlanSubmission、Decision failure 与 circuit pause；circuit 与 Host background 都必须通过 Message 由玩家手动恢复，foreground 不得自动 resume；玩家手动指导不属于本阶段验收。
 - 验证进程中断后的 Battle / Dialogue 恢复不在本阶段；它留到 Save / Load 设计阶段。
 - Map 5 road-bandit 的 Browser / Product qualification 单独安排在 P6，不与 Map 4 教学链混合。
 
@@ -878,7 +881,7 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 1. `listFsdbEntries()` 返回的 `[FSDB]PokeMan` 全部 content entries 都进入 prepared PWA content；不再根据 initial Map / MapTransfer / MAP_ONLY_NPC_PLACEMENTS 选择子集。
 2. 保持 `mapFsdbEntryToPwaIdentity()` 的 identity 映射、唯一性检查和 deterministic sort。
 3. `presentation.json` 中声明的外部 `Presentation` resource refs 仍全部加入，包括 schema-form、controls、map、dialogue、battle 与 page browser assets。
-4. PWA executable modules 必须包含 `base / map / dialogue / battle`；`game.json` 与 `launch.pwa.json` 同步声明 battle subsystem。
+4. PWA executable modules 必须包含 `base / map / dialogue / battle / message`；`game.json` 与 `launch.pwa.json` 同步声明 battle 与 message subsystem。Battle pause prompt 使用统一 Message Frame，不在 Battle Presentation 内私造第二套模态 UI。
 5. Content / Builder validator 在 packaging 前负责发现坏引用或坏 schema；packager 不通过“没有选中该 record”来隐藏无效 Content。
 6. MVP 阶段不做 tree-shaking / dependency closure optimization。等 Content 体量真正成为问题后再独立设计，不阻塞当前闭环。
 
