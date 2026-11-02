@@ -285,12 +285,14 @@ while lastProcessedTick < targetTick:
 
 ### TIME-004 — Pause / Background 冻结 Battle Clock — FROZEN
 
-当 Host 明确暂停 Battle，或 App/Host 进入 background 状态时：
+当 App/Host 进入 background 状态时，产品 composition 必须映射为 `battle.pause("host-background")`：
 
 - Battle monotonic clock 冻结；
 - `currentTick` 不推进；
 - move、windup、recovery、protection 等 gameplay Tick 生命周期不推进；
 - Decision/LLM 可以在现实时间继续完成并把 completion 放进 Decision Inbox，但 pause 期间不会消费 inbox、不会接受 Plan、不会启动 Action；
+- Runtime 公开 `pauseReason = "host-background"`；
+- Host foreground **不得自动 resume**；只有产品层收到玩家显式确认后调用 `battle.resume()`；
 - 恢复后从原逻辑时刻继续，不补算暂停期间对应的 Tick；已排队 completion 在 resume 后第一个实际 reducer Tick 才有机会被消费。
 
 TIME-003 的 catch-up 只用于**Battle clock 仍在运行时** scheduler/event loop 晚醒等情况。
@@ -384,12 +386,13 @@ stale / lifecycle-invalid completion
 - 已经 in-flight 的 Decision request **不因 circuit pause 被 abort/revoke**；它们可以在 pause 期间完成并把 completion 放入 Decision Inbox，等 resume 后的真实 Tick消费；
 - PAUSED 期间没有后续 Tick，因此自然不会继续产生新的 Tick-driven Decision generation/request；
 - 不自动 cooldown/resume；
-- 必须外部显式 `battle.resume()` 才恢复，并把 availability streak 清零；
+- 进入 PAUSED 时公开 `pauseReason = "decision-circuit"`；
+- 必须由产品层在玩家显式选择“重试决策”后调用 `battle.resume()` 才恢复，并把 availability streak 清零；
 - Replay 不执行该 live availability circuit，因为 circuit pause 不改变 requestId / decisionGeneration / Actor decision authority / Decision record trace。
 
 Circuit 本身不得修改 Actor `decision` state、`decisionGeneration`、requestId 或 accepted-plan authority，也不得调用 request AbortController。Decision request 只有既有 lifecycle 原因（例如 damaging hit/death、cancel/close、session fatal、request replacement）才会按原规则失效/abort。
 
-该 circuit 是 operational control state，不进入 gameplay Snapshot/Replay，不改变 Plan validation、Actor state 或 Battle Tick规则。
+该 circuit 是 operational control state，不进入 Replay 或 Actor gameplay facts；但 public BattleSnapshot 在 PAUSED 时必须公开 `pauseReason="decision-circuit"`，供产品选择正确提示文案。它不改变 Plan validation、Actor state 或 Battle Tick规则。
 
 ## 6. Decision Protocol 与 PlanSubmission
 
