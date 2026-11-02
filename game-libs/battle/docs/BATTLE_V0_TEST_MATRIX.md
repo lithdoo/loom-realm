@@ -357,9 +357,9 @@
 
 ## 12. Core OPEN 状态
 
-当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。新增 `BATTLE-003` 是 resolved Simulation input amendment（不是新的 gameplay rule），处于 PROPOSED；T-INIT-001..005 已定义为实现后的 blocking acceptance，未通过前不得声称 initialHp continuity 已完成。
+当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。新增 `BATTLE-003`、`BATTLE-004` 与 `CTRL-002` 是实现 amendments（不是新的 gameplay reducer rule），处于 PROPOSED；T-INIT-001..005、T-ARENA-001..005 与 T-CTRL-016..020 / 相关 T-DEC cases 已定义为 blocking acceptance，未通过前不得声称对应闭环已完成。
 
-Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance；Decision implementation acceptance 已在 §8.1 冻结。PlayerGuidance concrete contract/wiring 明确延期，但 DecisionWorkflow extensibility boundary 已冻结；剩余 OPEN 只涉及非 Presentation Content 统一 schema、未来 Guidance/Host wiring 与 configured DeepSeekTransport 的 credential/network/product capability handoff，这些不得反向改变已冻结的 Core/Decision/Presentation Expected。
+Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance；Decision implementation acceptance 已在 §8.1 冻结。PlayerGuidance concrete contract/wiring 明确延期，但 DecisionWorkflow extensibility boundary 已冻结；pause reason / manual-resume policy 已冻结，剩余 Host 工作只是平台 background/foreground event 与 PokeMan Message Frame 接线。其他 OPEN 只涉及非 Presentation Content 统一 schema、未来 Guidance 与 configured DeepSeekTransport 的 credential/network/product capability handoff，这些不得反向改变已冻结 Expected。
 
 ## 13. 接真实 LLM 前的最低 Gate
 
@@ -381,7 +381,7 @@ Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation accept
 - 0-Tick instant batch；
 - seeded tile contention；
 - Plan reject + correction failure；
-- pause/background clock freeze；
+- pause/background clock freeze + `pauseReason` / `onPause`；foreground 不自动 resume；
 - 长时间无进展不自动 stalemate；
 - simultaneous lethal；
 - abort 后 late async completion。
