@@ -582,6 +582,7 @@ Event / EventStateMutation Content physical schema 与 EventStateList Shared Sta
 
 - Runtime `instanceId` 生成算法；
 - 非 Dialogue business fact → Mutation handler 的 Runtime 实现；
+- Map package live NPC replacement 能力是否已覆盖 Story Resolver refresh，以及缺失时的 Runtime 接口实现；
 - Mutation mismatch / OCC / UI 行为。
 
 这些都不是 Event data physical-schema gap。
