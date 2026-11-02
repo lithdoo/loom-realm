@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**既有 Simulation baseline（含 Decision availability circuit）、DeepSeek Decision implementation/replaceable DecisionWorkflow boundary 与 Presentation integration 已完成 closed-loop qualification；BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 `BattleArena` amendments 仍为 PROPOSED，待实现与 qualification；PlayerGuidance concrete feature 明确延期；configured DeepSeekTransport 的 product/platform wiring、pause-reason/retry UI 与 Host lifecycle composition 仍含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
+> 状态：**既有 Simulation baseline（含 Decision availability circuit）、DeepSeek Decision implementation/replaceable DecisionWorkflow boundary 与 Presentation integration 已完成 closed-loop qualification；BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 `BattleArena` amendments 仍为 PROPOSED，待实现与 qualification；PlayerGuidance concrete feature 明确延期；pause reason 与手动恢复 UX 已冻结，configured DeepSeekTransport / Host lifecycle 只剩具体平台事件接线与真实 E2E qualification**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
@@ -483,7 +483,7 @@ FUTURE / NOT FROZEN
 
 Battle 可以被 LoomRealm Frame/Subsystem 组合使用，但 `game-libs/battle` 本身不等于一个预先构建好的独立 Subsystem 进程。
 
-业务 composition 负责把 Frame/Host 生命周期映射给 Battle Runtime，例如 `frame.signal` abort → `battle.cancel()`、background → `battle.pause()`、resume → `battle.resume()`、Frame/session 离开 → `battle.close()`。真正的 Battle 内部终止/冻结语义仍由 Runtime 执行。
+业务 composition 负责把 Frame/Host 生命周期映射给 Battle Runtime，例如 `frame.signal` abort → `battle.cancel()`、background → `battle.pause("host-background")`、Frame/session 离开 → `battle.close()`。**foreground 不映射成自动 `battle.resume()`**；它只允许产品层显示暂停 Message，玩家显式选择继续/重试后才调用 `battle.resume()`。真正的 Battle 内部终止/冻结语义仍由 Runtime 执行。
 
 Frame abort / Battle cancel 遵循 `CTRL-001`：
 
@@ -500,27 +500,39 @@ abort/cancel
 
 所有迟到 Decision/Event 都必须因 Runtime lifecycle、AbortSignal 与 action/decision generation fencing 失去提交权。
 
-### 8.1 Decision availability circuit pause
+### 8.1 Pause reason 与产品手动恢复
 
-连续 LLM/provider 调用错误导致的暂停不是 DeepSeekDecision 自己调用 `battle.pause()`，而是 live Battle Runtime 根据已消费的 DecisionCompletion 维护 operational circuit breaker。
+Runtime 对外公开：
 
-固定策略：
+~~~ts
+type BattlePauseReason = "host-background" | "decision-circuit"
 
-~~~text
-3 consecutive authority-valid attempt_failure
-→ finish current Tick
-→ invoke that Tick's already-produced valid Decision commands normally
-→ enter the existing Battle PAUSED lifecycle
-→ freeze logical clock at the committed Tick boundary
-→ no later Tick / no new Tick-driven Decision generation while paused
-→ keep existing/in-flight Decision request authority unchanged
-→ Decision completion may enqueue while paused
-→ explicit battle.resume() required
+snapshot.status === "paused"
+→ snapshot.pauseReason MUST exist
 ~~~
 
-Circuit pause 不调用 Decision AbortSignal、不把 existing request变 stale，也不建立第二套 pause state machine。authority-valid attempt_failure、completed reset、same-Tick ordering、Replay exclusion、catch-up cut 与 session_fatal bypass 的 exact semantics 以 BATTLE_V0_SIMULATION.md §10/§16 为准；Host 不解释 concrete Decision code。
+每次真实 RUNNING → PAUSED transition 还通过 `onPause()` 发出 operational pause event；该事件只供 product composition 唤起 UI，不进入 Replay。
 
-这类自动暂停对外继续使用现有 `BattleStatus = "paused"` 与 `battle.resume()` lifecycle，不新增 gameplay timing/dueTick。Host/Product 如何向玩家呈现“AI 决策服务暂时不可用”、是否显示重试按钮，以及如何区分 background/manual pause 的 UI 文案属于产品级 integration；不得改变 Runtime circuit semantics。Host 的 background/foreground wiring 不应把任何 PAUSED 状态机械地无条件 resume；它只应恢复自己拥有的 external pause，circuit pause 仍要求产品显式调用 `battle.resume()`。
+两类 pause 的产品策略统一为“玩家手动恢复”：
+
+| reason | 触发 | 产品行为 | 恢复动作 |
+| --- | --- | --- | --- |
+| host-background | Host/App 进入后台 | background 时冻结 Battle；foreground 后弹出“战斗已暂停。游戏曾进入后台。” | 玩家点“继续战斗” → `battle.resume()` |
+| decision-circuit | 连续 3 次 authority-valid Decision attempt_failure | foreground 时立即弹出“AI 决策连续失败，战斗已暂停。” | 玩家点“重试决策” → `battle.resume()` |
+
+两个窗口都允许“退出战斗”；退出由 Battle Frame 调用 `battle.cancel()`，进入既有 cancelled result，不结算本场部分 HP。
+
+禁止：
+
+- Host foreground 自动 resume；
+- 用 provider HTTP code 猜 pause reason；
+- PokeMan 自己维护第二份 circuit 状态；
+- background 事件覆盖已经存在的 `decision-circuit` pause reason；
+- 同一次 PAUSED transition 叠加多个恢复窗口。
+
+Decision circuit 本身仍保持原冻结语义：不 abort/revoke in-flight Decision，不在 pause 中推进 Tick，不自动 cooldown；玩家选择“重试决策”后显式 resume 才清零 availability streak。Host-background pause 也不 abort Decision，玩家“继续战斗”后从冻结逻辑时刻继续。
+
+具体 Message Frame 文案 / action 由 PokeMan 77 固定；Battle Core 只提供 reason、pause transition 与 lifecycle methods。
 
 正常 BattleResult 使用不同的视觉生命周期：
 
@@ -603,10 +615,11 @@ Browser 可降级的异步视觉资源失败
 
 Pause/background policy 已由 Core `TIME-004` 冻结：
 
-- Host 明确暂停 Battle，或 App/Host 进入 background 状态时，Battle monotonic clock 一起冻结；
+- App/Host 进入 background → `battle.pause("host-background")`，Battle monotonic clock 冻结；
 - pause 期间不推进 `currentTick`；
 - pause 期间 movement、windup、recovery、protection 等 Tick 生命周期不推进；
 - Decision completion 可以在 pause 期间进入 inbox，但不会被消费、不会接受 Plan、不会启动 Action；
+- foreground 不自动 resume；产品先显示 Message，玩家显式继续后才 resume；
 - resume 后从原逻辑时刻继续，不补算 pause 期间 Tick；已排队 completion 在后续实际 Tick 消费。
 
 Core 的逐 Tick catch-up 仍保留，但只用于 Battle clock **仍在运行**时 scheduler/event loop 晚醒的情况。
@@ -641,7 +654,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-既有 Battle v0 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 均已完成 closed-loop qualification。BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 BattleArena 是明确 amendments，尚待实现与 qualification；它们不改变已冻结 gameplay reducer rules。PlayerGuidance 明确延期；configured DeepSeekTransport 的 credential/network/product capability handoff、产品级 pause-reason/retry UI 与 Host lifecycle composition 仍属于外部集成工作。
+既有 Battle v0 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 均已完成 closed-loop qualification。BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 BattleArena 是明确 amendments，尚待实现与 qualification；它们不改变已冻结 gameplay reducer rules。PlayerGuidance 明确延期；pause reason / 手动恢复产品规则已经冻结，剩余只是在具体 Host 中接入 background/foreground event、Message Frame 与 configured DeepSeekTransport 并完成 E2E qualification。
 
 已验证工程状态：
 
@@ -673,7 +686,7 @@ Presentation blocking integration OPEN 已清零。仍未冻结的集成项只�
 
 - **INTEGRATION-OPEN-003**：DeepSeek Decision protocol/workflow 已由 BATTLE_V0_DECISION.md 冻结；Integration 只剩 credential/network physical realization、configured DeepSeekTransport capability handoff 与缺失 capability 的产品级 wiring；
 - **INTEGRATION-OPEN-004**：PlayerGuidance exact contract / Host/InputTarget wiring 明确延期；DecisionWorkflow 扩展边界已冻结，因此该未来功能不得要求重构 Simulation-facing DecisionPort；
-- Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Decision circuit 的 automatic pause / explicit resume Runtime semantics 已冻结，产品层如何展示其 pause reason/重试 UI 仍属 integration wiring；Presentation 的 pause/resume 行为本身已冻结；
+- Host/Runtime Control 的具体平台事件来源仍需接线，但映射已冻结：background → `pause("host-background")`，foreground 不自动 resume；两类 pause 都通过 Message 由玩家手动继续/重试；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
 `@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle 既有 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 已完成 qualification；BATTLE-003 initialHp 与 BATTLE-004 BattleArena amendments 尚待实现与 qualification；configured DeepSeekTransport 与 product/Host composition 尚待外部集成。
