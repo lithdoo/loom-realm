@@ -46,7 +46,7 @@ Map Frame Handler 是 Map Subsystem 中已经存在的 Frame Handler。它在自
 
 这次集成至少要证明：
 
-1. 博士教学、劲敌挑战、战后确认和博士任务交接能通过独立 NPC interaction 按 Event state 正确触发。
+1. 博士教学、劲敌挑战和博士任务交接分别由对应 NPC interaction 触发；战后确认由正常 BattleResult 与 Integrity settlement 驱动，并按 Event state 正确推进。
 2. Map Frame Handler 能使用 Loom-realm 现有 `frame.call()` 顺序调用 Dialogue / Battle child Frame；Dialogue 不直接调用 Battle，Battle 不直接调用 Dialogue。
 3. Battle Content 能从 PokeMan FSDB / Shared State 正确解析为双方 Battle Manifestation。
 4. Battle Simulation 能作为独立 child Frame 运行，而不是由 Map 驱动 Tick。
