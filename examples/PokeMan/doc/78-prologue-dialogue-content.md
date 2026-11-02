@@ -2,7 +2,7 @@
 
 > 状态：**Narrative / Content Design**
 > 范围：Map 4 研究所的博士教学、劲敌互换卡片、教学 Battle 结果确认
-> 关联：[77-battle-integration-v1.md](./77-battle-integration-v1.md)、[64-dialogue.md](./64-dialogue.md)、[50-mvp-prologue.md](./50-mvp-prologue.md)
+> 关联：[79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)、[77-battle-integration-v1.md](./77-battle-integration-v1.md)、[64-dialogue.md](./64-dialogue.md)、[62-event.md](./62-event.md)、[50-mvp-prologue.md](./50-mvp-prologue.md)
 
 本文冻结第一条 Battle vertical slice 的固定 Dialogue 文案与分支语义。它定义“人物说什么、玩家能选什么、终点 Dialogue key 表达什么业务意图”，不扩展 Dialogue schema，也不把 Relationship / Contract / Card / Battle 操作塞进 Dialogue Content。
 
@@ -42,36 +42,51 @@
 ## 3. 对话流程
 
 ~~~text
+开局：
+EventStateList = prologue:lab-tutorial
 Map 4 / Professor interaction
   ↓
 professor-vertical-slice
-  ├─ 我明白了，去找劲敌 → professor-tutorial-ready
-  │                          → Map maps terminal id to ready
-  │                          → rival Dialogue
-  ├─ 再解释一次           → professor-tutorial-repeat
-  │                          ├─ 明白了 → professor-tutorial-ready
-  │                          └─ 稍后再说 → professor-tutorial-not-yet
-  └─ 我先准备一下         → professor-tutorial-not-yet
-                             → Map returns to normal interaction loop
+  ├─ 我明白了 → professor-tutorial-ready
+  │                 → Dialogue.mutation = prologue-tutorial-ready
+  │                 → prologue = rival-ready
+  │                 → Story Resolver refresh
+  ├─ 再解释一次 → professor-tutorial-repeat
+  │                 ├─ 明白了 → professor-tutorial-ready
+  │                 └─ 稍后再说 → professor-tutorial-not-yet
+  └─ 我先准备一下 → professor-tutorial-not-yet
+                       → no mutation，保持 lab-tutorial
 
-rival-lab interaction
+Map 4 / Rival interaction（仅 rival-ready）
   ↓
 lab-rival-intro
   ├─ 交换卡片，开始对战 → lab-rival-exchange-accept
-  │                        → business Runtime atomically exchanges reciprocal Cards / Contracts
-  │                        → success: Battle child Frame
-  │                        → failure: no Battle; show recoverable error
+  │                        → no Dialogue mutation
+  │                        → Business Runtime 原子交换双向 Contract / Card
+  │                        → 成功后调用 Battle child Frame
+  │                        → Battle 正常结算后选择结果 Dialogue
   └─ 我还没准备好       → lab-rival-defer
-                           → Map returns to normal interaction loop
+                           → no mutation，保持 rival-ready
 
-Battle terminal
+Battle terminal：
   ├─ ally_win             → lab-rival-after-ally-win
   ├─ enemy_win            → lab-rival-after-enemy-win
   └─ simultaneous_defeat  → lab-rival-after-draw
-                             → Map resumes after result Dialogue
+                              → 三者共用 prologue-battle-resolved
+                              → prologue = after-battle
+                              → Story Resolver refresh
+
+Map 4 / Professor interaction（仅 after-battle）
+  ↓
+professor-first-journey
+  ├─ 我这就出发 → professor-first-journey-accept
+  │                  → Dialogue.mutation = prologue-to-route
+  │                  → prologue = null，first-route = active
+  └─ 我还想准备一下 → professor-first-journey-not-yet
+                         → no mutation，保持 after-battle
 ~~~
 
-本流程中，Map 只根据 Dialogue terminal id / BattleResult 选择下一段 child Frame，不读取对白文本，也不猜测玩家意图。
+Map 只根据 terminalDialogueId 选择必要的业务操作，不读取对白文本，也不猜测玩家意图。Dialogue.mutation 由 Dialogue Subsystem 在 terminal completion 时执行；Map 不重复提交同一 Mutation。场景刷新由 Map / Story Orchestrator 在 Dialogue child 正常完成后触发，具体集成约束见 79。
 
 ## 4. 博士：玩法科普
 
@@ -179,7 +194,7 @@ Battle terminal
 
 ### 4.3 professor-tutorial-ready
 
-terminal Dialogue。Map 将 terminal id 映射为 professor conclusion = ready。
+terminal Dialogue。它是教学完成的唯一入口：Dialogue Subsystem 在返回成功 terminal result 前执行 prologue-tutorial-ready。Map 不再把 terminal id 映射成剧情状态，也不重复提交 Mutation。
 
 ~~~json
 {
@@ -192,13 +207,14 @@ terminal Dialogue。Map 将 terminal id 映射为 professor conclusion = ready�
       "speaker": "professor",
       "text": "等你们双方都点头，再开始测试。记住，真正的契约不能靠任何一方单方面决定。"
     }
-  ]
+  ],
+  "mutation": "prologue-tutorial-ready"
 }
 ~~~
 
 ### 4.4 professor-tutorial-not-yet
 
-terminal Dialogue。Map 将 terminal id 映射为 professor conclusion = not-yet；不调用劲敌 Dialogue，也不开始 Battle。
+terminal Dialogue，不附加 Mutation。玩家暂缓时不调用劲敌 Dialogue，也不开始 Battle；Event 保持 lab-tutorial，因此玩家之后仍能重新与博士交互。
 
 ~~~json
 {
@@ -210,6 +226,70 @@ terminal Dialogue。Map 将 terminal id 映射为 professor conclusion = not-yet
     {
       "speaker": "professor",
       "text": "准备好了再来找我。你也可以先在研究所里看看，想清楚以后再去找劲敌。"
+    }
+  ]
+}
+~~~
+
+### 4.5 professor-first-journey
+
+入口：prologue Event 进入 after-battle 后，博士仍在 Map 4，交互入口切换为 professor-first-journey。该段对话负责发布第一条道路 / 第一个城镇的外出任务。
+
+~~~json
+{
+  "lines": [
+    {
+      "speaker": "professor",
+      "text": "你们已经亲自体验过契约显现。刚才的结果不会伤害任何人的本体，但契约完整度会持续保留。"
+    },
+    {
+      "speaker": "professor",
+      "text": "接下来，我想请你去第一条道路尽头的城镇，替我确认一件研究所需要的事。路上也要学会照顾自己的随身卡片。"
+    },
+    {
+      "speaker": "professor",
+      "text": "你准备现在出发吗？"
+    }
+  ],
+  "choices": [
+    {
+      "text": "我这就出发",
+      "target": "professor-first-journey-accept"
+    },
+    {
+      "text": "我还想准备一下",
+      "target": "professor-first-journey-not-yet"
+    }
+  ]
+}
+~~~
+
+### 4.6 professor-first-journey-accept
+
+terminal Dialogue。只有这个分支推进到 first-route。Dialogue Subsystem 执行 prologue-to-route；该 Mutation 要求 prologue 当前为 after-battle，且 first-route 尚未 active。
+
+~~~json
+{
+  "lines": [
+    {
+      "speaker": "professor",
+      "text": "好。沿着出生镇外的道路前进，抵达第一个城镇后再完成我交代的事。一路小心。"
+    }
+  ],
+  "mutation": "prologue-to-route"
+}
+~~~
+
+### 4.7 professor-first-journey-not-yet
+
+terminal Dialogue，不附加 Mutation。Event 保持 after-battle，博士仍可再次交互；不启动 first-route。
+
+~~~json
+{
+  "lines": [
+    {
+      "speaker": "professor",
+      "text": "没关系。准备好以后再来找我，我会把路线和要确认的事项再告诉你。"
     }
   ]
 }
@@ -264,7 +344,7 @@ terminal Dialogue。Map 将 terminal id 映射为 professor conclusion = not-yet
 
 ### 5.2 lab-rival-exchange-accept
 
-terminal Dialogue。Map / PokeMan business Runtime 将这个 terminal id 解释为 accepted-challenge。
+terminal Dialogue，不附加 EventStateMutation。Map / PokeMan Business Runtime 将 terminalDialogueId = lab-rival-exchange-accept 解释为 accepted-challenge，并执行双向交换事务。只有事务确认成功后才启动 Battle。
 
 ~~~json
 {
@@ -287,7 +367,7 @@ terminal Dialogue。Map / PokeMan business Runtime 将这个 terminal id 解释�
 
 ### 5.3 lab-rival-defer
 
-terminal Dialogue。Map 将这个 terminal id 解释为 deferred；不交换卡片，不调用 Battle。
+terminal Dialogue，不附加 Mutation。Map 将 terminalDialogueId = lab-rival-defer 解释为 deferred；不交换卡片，不调用 Battle，Event 保持 rival-ready。
 
 ~~~json
 {
@@ -339,6 +419,9 @@ CarriedCards(rival)
 - 序章随身上限为 1；若任一方的 slot 0 已被占用，不得静默覆盖。
 - 两份 Relationship 与两份 CarriedCards 应通过同一个 Shared State transaction 原子提交；不能只交换一张卡，也不能留下半成立的双向契约。
 - transaction 未确认成功时不得启动 Battle；冲突 / 失败应显示可恢复错误，不能把对白播放完成误当成业务提交成功。
+- commit outcome unknown 时必须先按 Shared State authority reconcile，再决定是否重试。
+- 如果交换已经完整存在且内容一致，允许按幂等恢复继续 Battle；部分存在或内容冲突必须报告，不得静默覆盖。
+- Battle cancelled / failed 不回滚已经成功提交的交换，但不得播放胜负对白或推进 after-battle；后续重试不得重复创建或覆盖 Contract / Card。
 
 Battle 双方的含义：
 
@@ -364,6 +447,7 @@ Battle 双方的含义：
 
 ~~~json
 {
+  "mutation": "prologue-battle-resolved",
   "lines": [
     {
       "speaker": "rival",
@@ -399,6 +483,7 @@ Battle 双方的含义：
 
 ~~~json
 {
+  "mutation": "prologue-battle-resolved",
   "lines": [
     {
       "speaker": "rival",
@@ -434,6 +519,7 @@ Battle 双方的含义：
 
 ~~~json
 {
+  "mutation": "prologue-battle-resolved",
   "lines": [
     {
       "speaker": "rival",
@@ -461,48 +547,63 @@ Battle 双方的含义：
 
 ## 8. Result 与 Dialogue key 映射
 
-| BattleResult | 产品胜负 | Dialogue key | 必须确认的结果 |
-| --- | --- | --- | --- |
-| ally_win | 主角胜出 | lab-rival-after-ally-win | rival Card 的 Manifestation 获胜；劲敌持有的 player Card 显现 Integrity 归零 |
-| enemy_win | 劲敌胜出 | lab-rival-after-enemy-win | player Card 的 Manifestation 获胜；主角持有的 rival Card 显现 Integrity 归零 |
-| simultaneous_defeat | 平局 | lab-rival-after-draw | 两份 Manifestation Integrity 同时归零 |
+| BattleResult | 产品胜负 | Dialogue key | 必须确认的结果 | 共同 Mutation |
+| --- | --- | --- | --- | --- |
+| ally_win | 主角胜出 | lab-rival-after-ally-win | rival Card 的 Manifestation 获胜；劲敌持有的 player Card 显现 Integrity 归零 | prologue-battle-resolved |
+| enemy_win | 劲敌胜出 | lab-rival-after-enemy-win | player Card 的 Manifestation 获胜；主角持有的 rival Card 显现 Integrity 归零 | prologue-battle-resolved |
+| simultaneous_defeat | 平局 | lab-rival-after-draw | 两份 Manifestation Integrity 同时归零 | prologue-battle-resolved |
 
-只有 Battle 正常 terminal 且双方 Contract Integrity 已成功结算，Map 才能调用以上三段战后 Dialogue。Battle cancelled / failure 不属于胜负分支，不得播放这些结果确认对白。
+三段战后 Dialogue 的文本不同，但都表示当前教学 Battle 已结束，因此统一把 prologue 从 rival-ready 推进到 after-battle。不要为了保留暂时不影响后续场景的胜负差异而提前拆分 Event state。
+
+只有 Battle 正常 terminal 且双方 Contract Integrity 已成功结算，Map 才能调用以上三段战后 Dialogue。Battle cancelled / failure 不属于胜负分支，不得播放这些结果确认对白，也不得执行 Mutation。
 
 ## 9. Dialogue Content 与 Runtime 的责任边界
 
 | 内容 / 业务 | Owner |
 | --- | --- |
 | 台词、speaker、Choice、target Dialogue | struct.Dialogue |
-| 玩家选择“准备好 / 暂缓” | Dialogue Choice 与 terminal Dialogue id |
-| terminal id → ready / not-yet / accepted-challenge / deferred | PokeMan Dialogue / Map orchestration adapter |
-| 双向 Relationship Contract 创建 | PokeMan business Runtime |
-| 双向 CarriedCards 写入 | PokeMan business Runtime |
+| Choice target graph 执行、terminalDialogueId | PokeMan Dialogue Subsystem |
+| Dialogue.mutation 的 EventStateList 校验与 commit | PokeMan Dialogue Subsystem |
+| terminalDialogueId → accepted-challenge / deferred 等业务意图 | Map / Story Orchestration adapter |
+| 双向 Relationship Contract 创建 | PokeMan Business Runtime |
+| 双向 CarriedCards 写入 | PokeMan Business Runtime |
 | 两份 Contract Integrity 结算 | Battle Subsystem |
 | BattleResult / final HP | Battle Simulation |
-| Result-specific Dialogue 选择 | Map orchestration |
-| Event current state 推进 | EventStateMutation / Dialogue Runtime |
+| Result-specific Dialogue 选择 | Map / Story Orchestration |
+| Event state 解析后的 NPC scene | Story Resolver |
+| Event current state 持久化 | pokeman.EventStateList/current |
 
-明确禁止：
+固定约束：
 
-- 给 Choice 增加 action / result / mutation 字段。
-- 用 EventStateMutation 创建 Contract、Card 或启动 Battle。
-- 在对白里硬编码胜负数值或假装知道实时剩余 HP。
-- 由 Dialogue 直接调用 Battle Subsystem。
-- 由 Battle Subsystem 直接调用战后 Dialogue。
-- 把 Battle Manifestation 的失稳写成人物本体死亡、昏迷或受伤。
+- Choice 只跳到另一个 Dialogue，不增加 action / result / mutation 字段。
+- Dialogue.mutation 只推进 Event state，不创建 Contract、Card 或启动 Battle。
+- 博士教学完成由 professor-tutorial-ready 的 prologue-tutorial-ready mutation 推进。
+- 劲敌接受 / 暂缓不改变 Event state；接受后的双向交换由 Business Runtime 原子提交。
+- 三种 Battle 结果对白共用 prologue-battle-resolved。
+- 博士外出任务接受由 professor-first-journey-accept 的 prologue-to-route mutation 推进。
+- prologue-to-route 不属于 route-bandit-threat；路霸对白不得负责启动 first-route。
+- 在 Dialogue.mutation commit 成功之前，Dialogue Frame 不得以成功 terminal completion 返回。
+- Map 不重复执行 Dialogue.mutation；它只处理 terminalDialogueId 指定的业务操作，并在 child 正常完成后刷新当前 Map 场景。
+- Battle 不直接调用战后 Dialogue；由 Map / Story Orchestrator 根据 BattleResult 选择 Dialogue。
+- 不在对白里硬编码胜负数值或假装知道实时剩余 HP。
+- 不把 Battle Manifestation 的失稳写成人物本体死亡、昏迷或受伤。
 
-当前 Dialogue Content 先不附加 EventStateMutation。若战后确实需要让 rival 离开 Map 4，应另行更新 prologue Event 的 Map 绑定和场景状态，再通过单独 Mutation 推进；不能把场景离开逻辑混入 Contract / Battle 结算。
+场景状态与对白进度必须一致：Dialogue mutation 成功后，Map 必须重新读取 EventStateList 并解析当前 Map 的 NPC scene，不能只恢复旧的 Controls / interaction activation。完整集成顺序见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)。
 
 ## 10. 验收标准
 
 - 博士对白能讲清楚卡片、契约方向、显现体、Integrity 持续和中心修复。
-- 玩家可以选择重听或暂缓；暂缓时不触发劲敌交换和 Battle。
+- 新游戏 EventStateList 为 prologue:lab-tutorial；Map 4 中博士可交互、劲敌可见但不可交互。
+- 玩家可以选择重听或暂缓；暂缓时 Event state 不变。
+- 选择准备好后，Dialogue mutation 将 prologue 推进到 rival-ready；Map 不重载即可刷新出劲敌交互入口。
 - 劲敌对白明确表达双方自愿互换卡片；拒绝时不建立任何一边的 Contract。
 - 接受后，双向 Relationship / Contract 与双向 CarriedCards 一次原子提交。
 - 两张卡的 owner / servant 方向正确：player 持有 rival，rival 持有 player。
 - 只有交换事务成功后才进入 Battle。
-- 三种 BattleResult 各自进入正确的战后 Dialogue。
+- Battle cancelled / failed 不播放胜负对白、不推进 after-battle；已提交的双向 Contract / Card 保留，并支持安全重试。
+- 三种 BattleResult 各自进入正确的战后 Dialogue，且共用 prologue-battle-resolved。
 - 战后对白明确说明本体没有受伤、Integrity 已持久结算、归零后需要修复。
+- 战后 Dialogue mutation 将 prologue 推进到 after-battle；博士获得 professor-first-journey 交互入口，劲敌仍留在研究所但不再可交互。
+- 外出任务暂缓不推进 Event；接受后 prologue-to-route 原子结束 prologue 并激活 first-route。
 - 对话不显示虚构 HP 数字，不把动态 Battle state 写入固定 Dialogue Content。
-- 每条 Dialogue 都只使用当前冻结的 lines / speaker / choices / target shape，不扩展通用 Dialogue DSL。
+- 每条 Dialogue 都只使用当前冻结的 lines / speaker / choices / target / mutation shape，不扩展通用 Dialogue DSL。
