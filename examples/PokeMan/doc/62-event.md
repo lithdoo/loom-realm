@@ -534,7 +534,7 @@ Dialogue terminal
 
 Map 不重复执行 Dialogue.mutation。Mutation mismatch、OCC conflict、commit outcome unknown 或 Dialogue child failure 时，不得把旧场景当作新剧情状态已经生效；必须先处理失败 / reconcile，再恢复正常交互。
 
-场景刷新不能依赖重新启动整张 Map。当前 Map Frame、RenderDomain 与场景生命周期应保持连续；如果 Map package 当前没有支持 live NPC replacement 的接口，应先补齐该运行时能力。完整协作与序章具体状态见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)。
+场景刷新不能依赖重新启动整张 Map。当前 Map Frame、RenderDomain 与场景生命周期应保持连续。现有 `RPGMapHandler.setNPC()` 已支持 Map Enter 后替换 NPC 集合，`getSnapshot()` 可读取当前公开 Map facts；Story Resolver refresh 应直接使用该 public API，不需要扩展 Map package。完整协作与序章具体状态见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)。
 
 # Builder 检查
 
@@ -582,7 +582,7 @@ Event / EventStateMutation Content physical schema 与 EventStateList Shared Sta
 
 - Runtime `instanceId` 生成算法；
 - 非 Dialogue business fact → Mutation handler 的 Runtime 实现；
-- Map package live NPC replacement 能力是否已覆盖 Story Resolver refresh，以及缺失时的 Runtime 接口实现；
+- Story Resolver → `RPGMapHandler.setNPC()` 的具体 runtime wiring 与测试；
 - Mutation mismatch / OCC / UI 行为。
 
 这些都不是 Event data physical-schema gap。
