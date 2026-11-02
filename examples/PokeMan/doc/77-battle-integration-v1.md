@@ -1,6 +1,6 @@
 # PokeMan Battle Integration v1 设计
 
-> 状态：**Proposed / Design-only**
+> 状态：**Implemented + Tested + Browser/PWA Closed-loop Qualified**（真实 DeepSeek provider smoke 仍为 credential-gated explicit opt-in）
 >
 > 范围：将已完成 closed-loop qualification 的 Battle v0 组合进真实 PokeMan Game Package / Subsystem / Map / Host 流程。
 >

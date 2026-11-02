@@ -117,8 +117,9 @@ export function createPokeManRoutePlanner(fixture) {
         new Set([start.mapId]),
       );
     },
-    planNpcCollision(start) {
-      const placements = MAP_ONLY_NPC_PLACEMENTS[start.mapId] ?? [];
+    planNpcCollision(start, instanceId) {
+      const placements = (MAP_ONLY_NPC_PLACEMENTS[start.mapId] ?? [])
+        .filter((npc) => instanceId === undefined || npc.instanceId === instanceId);
       for (const npc of placements) {
         for (const movement of directions) {
           const source = Object.freeze({

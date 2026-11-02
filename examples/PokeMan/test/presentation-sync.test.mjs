@@ -24,6 +24,10 @@ const targetRelative = Object.freeze({
   css: join("[resource]Presentation", "map", "map.css.css"),
   dialogueJs: join("[resource]Presentation", "dialogue", "dialogue.browser.js.js"),
   dialogueCss: join("[resource]Presentation", "dialogue", "dialogue.css.css"),
+  battleJs: join("[resource]Presentation", "battle", "battle.browser.js.js"),
+  battleCss: join("[resource]Presentation", "battle", "battle.css.css"),
+  messageJs: join("[resource]Presentation", "message", "message.browser.js.js"),
+  messageCss: join("[resource]Presentation", "message", "message.css.css"),
   pageCss: join("[resource]Presentation", "page.css.css"),
 });
 
@@ -41,6 +45,10 @@ async function makeFixture(t) {
     css: join(repoRoot, "game-libs", "map", "browser", "map.css"),
     dialogueJs: join(exampleRoot, "presentation", "dialogue.browser.js"),
     dialogueCss: join(exampleRoot, "presentation", "dialogue.css"),
+    battleJs: join(repoRoot, "game-libs", "battle", "dist", "browser", "battle.browser.js"),
+    battleCss: join(repoRoot, "game-libs", "battle", "dist", "browser", "battle.css"),
+    messageJs: join(exampleRoot, "presentation", "message.browser.js"),
+    messageCss: join(exampleRoot, "presentation", "message.css"),
     pageCss: join(exampleRoot, "presentation.css"),
   };
   const dist = {
@@ -49,6 +57,8 @@ async function makeFixture(t) {
     controlsJs: source.controlsJs,
     js: join(repoRoot, "game-libs", "map", "dist", "browser", "map.browser.js"),
     css: join(repoRoot, "game-libs", "map", "dist", "browser", "map.css"),
+    battleJs: source.battleJs,
+    battleCss: source.battleCss,
   };
   const target = Object.fromEntries(Object.entries(targetRelative).map(([key, path]) => [key, join(fsdbRoot, path)]));
   await Promise.all([
@@ -56,11 +66,14 @@ async function makeFixture(t) {
     mkdir(join(repoRoot, "game-libs", "map", "dist", "browser"), { recursive: true }),
     mkdir(join(repoRoot, "game-libs", "schema-form", "dist", "browser"), { recursive: true }),
     mkdir(join(repoRoot, "game-libs", "game-common-controls", "dist", "browser"), { recursive: true }),
+    mkdir(join(repoRoot, "game-libs", "battle", "dist", "browser"), { recursive: true }),
     mkdir(join(exampleRoot, "presentation"), { recursive: true }),
     mkdir(join(fsdbRoot, "[resource]Presentation", "controls"), { recursive: true }),
     mkdir(join(fsdbRoot, "[resource]Presentation", "schema-form"), { recursive: true }),
     mkdir(join(fsdbRoot, "[resource]Presentation", "map"), { recursive: true }),
     mkdir(join(fsdbRoot, "[resource]Presentation", "dialogue"), { recursive: true }),
+    mkdir(join(fsdbRoot, "[resource]Presentation", "battle"), { recursive: true }),
+    mkdir(join(fsdbRoot, "[resource]Presentation", "message"), { recursive: true }),
   ]);
   const expected = {
     schemaFormJs: Buffer.from("customElements.define('lr-schema-form', class extends HTMLElement {});\n"),
@@ -70,6 +83,10 @@ async function makeFixture(t) {
     css: Buffer.from("lr-map-view { display: block; }\n"),
     dialogueJs: Buffer.from("(function () { customElements.define('lr-dialogue-view', class extends HTMLElement {}); })();\n"),
     dialogueCss: Buffer.from("lr-dialogue-view { display: block; }\n"),
+    battleJs: Buffer.from("customElements.define('lr-battle-view', class extends HTMLElement {});\n"),
+    battleCss: Buffer.from("lr-battle-view { display: block; }\n"),
+    messageJs: Buffer.from("customElements.define('pokeman-message', class extends HTMLElement {});\n"),
+    messageCss: Buffer.from("pokeman-message { display: block; }\n"),
     pageCss: Buffer.from("lr-map-view { width: 100vw; height: 100vh; }\n"),
   };
   await Promise.all([
@@ -80,6 +97,10 @@ async function makeFixture(t) {
     writeFile(source.css, expected.css),
     writeFile(source.dialogueJs, expected.dialogueJs),
     writeFile(source.dialogueCss, expected.dialogueCss),
+    writeFile(source.battleJs, expected.battleJs),
+    writeFile(source.battleCss, expected.battleCss),
+    writeFile(source.messageJs, expected.messageJs),
+    writeFile(source.messageCss, expected.messageCss),
     writeFile(source.pageCss, expected.pageCss),
     writeFile(dist.js, expected.js),
     writeFile(dist.css, expected.css),
@@ -117,15 +138,15 @@ test("sync copies built Map artifacts and the PokeMan page CSS idempotently", as
   for (const key of Object.keys(fixture.target)) {
     assert.deepEqual(await readFile(fixture.target[key]), fixture.expected[key]);
   }
-  assert.equal(counters.opens, 8);
+  assert.equal(counters.opens, 12);
   const renamesAfterFirstSync = counters.renames;
 
   await syncMapPresentation({ ...fixture, runBuild: false, fileOps });
-  assert.equal(counters.opens, 8, "an idempotent sync must not create staging files");
+  assert.equal(counters.opens, 12, "an idempotent sync must not create staging files");
   assert.equal(counters.renames, renamesAfterFirstSync, "an idempotent sync must not replace targets");
 
   await syncMapPresentation({ ...fixture, runBuild: false, checkOnly: true, fileOps });
-  assert.equal(counters.opens, 8, "--check must be read-only");
+  assert.equal(counters.opens, 12, "--check must be read-only");
 });
 
 test("--check detects missing and corrupted FSDB artifacts without repairing them", async (t) => {
@@ -172,6 +193,8 @@ test("a replacement failure restores the complete previous Presentation set", as
     ...await readdir(join(fixture.fsdbRoot, "[resource]Presentation", "schema-form")),
     ...await readdir(join(fixture.fsdbRoot, "[resource]Presentation", "dialogue")),
     ...await readdir(join(fixture.fsdbRoot, "[resource]Presentation", "map")),
+    ...await readdir(join(fixture.fsdbRoot, "[resource]Presentation", "battle")),
+    ...await readdir(join(fixture.fsdbRoot, "[resource]Presentation", "message")),
   ].filter((name) => name.includes(".loomrealm-sync."));
   assert.deepEqual(leftovers, []);
 });
@@ -195,6 +218,8 @@ test("presentation.json preserves the ordered classic Presentation bootstrap", a
       { namespace: "Presentation", key: "schema-form/schema-form.browser.css" },
       { namespace: "Presentation", key: "map/map.css" },
       { namespace: "Presentation", key: "dialogue/dialogue.css" },
+      { namespace: "Presentation", key: "battle/battle.css" },
+      { namespace: "Presentation", key: "message/message.css" },
       { namespace: "Presentation", key: "page.css" },
     ],
     scripts: [
@@ -202,6 +227,8 @@ test("presentation.json preserves the ordered classic Presentation bootstrap", a
       { namespace: "Presentation", key: "controls/device-input.browser.js" },
       { namespace: "Presentation", key: "map/map.browser.js" },
       { namespace: "Presentation", key: "dialogue/dialogue.browser.js" },
+      { namespace: "Presentation", key: "battle/battle.browser.js" },
+      { namespace: "Presentation", key: "message/message.browser.js" },
     ],
   });
 });

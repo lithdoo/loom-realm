@@ -11,6 +11,8 @@ const executablePaths = Object.freeze({
   base: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-base-subsystem.mjs"),
   map: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-map-subsystem.mjs"),
   dialogue: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-dialogue-subsystem.mjs"),
+  battle: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-battle-subsystem.mjs"),
+  message: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-message-subsystem.mjs"),
 });
 
 const movements = Object.freeze([
@@ -21,6 +23,47 @@ const movements = Object.freeze([
 ]);
 
 const renderDataDiagnostic = process.env.LOOMREALM_RENDER_DATA_DIAGNOSTIC === "1";
+
+function deepSeekResponse(text) {
+  return JSON.stringify({
+    object: "response",
+    status: "completed",
+    model: "deepseek-flash",
+    output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }],
+  });
+}
+
+async function fulfillDeterministicBattleDecision(route, calls) {
+  const request = route.request();
+  const body = JSON.parse(request.postData() ?? "null");
+  calls.push({ authorization: request.headers().authorization ?? null, body });
+  let output = "SITUATION\nThe arena facts are authoritative.\n\nSTRATEGY\nAdvance and use an authored skill.";
+  if (body?.text?.format?.type === "json_schema") {
+    const materialization = JSON.parse(body.input);
+    const battle = materialization.battle;
+    if (battle.selfActorId === "rival") {
+      const target = battle.actors.find((actor) => actor.actorId === "player");
+      const path = [];
+      let x = battle.planningOrigin.x;
+      while (x < target.tile.x - 1 && path.length < battle.constraints.maxPathSteps) {
+        x += 1;
+        path.push({ x, y: battle.planningOrigin.y });
+      }
+      output = JSON.stringify({
+        path,
+        skill: { skillId: "firebolt", targetActorId: "player", minCoefficient: 1 },
+      });
+    } else {
+      output = JSON.stringify({ path: [] });
+    }
+  }
+  await route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    headers: { "access-control-allow-origin": "*" },
+    body: deepSeekResponse(output),
+  });
+}
 
 async function mapSnapshot(page) {
   return page.evaluate(() => {
@@ -41,7 +84,7 @@ async function mapSnapshot(page) {
   });
 }
 
-async function waitForState(page, expected) {
+async function waitForState(page, expected, timeout = 20_000) {
   await page.waitForFunction((target) => {
     const view = document.querySelector("lr-map-view");
     const player = document.querySelector("lr-map-sprite")?._latestData;
@@ -53,18 +96,40 @@ async function waitForState(page, expected) {
       && player?.motion === null
       && document.documentElement.dataset.loomrealmProduct === "ready"
       && window.__loomrealmPwa.failure === null;
-  }, expected, { timeout: 20_000 });
+  }, expected, { timeout });
+}
+
+async function pressUntilState(page, action) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    await page.keyboard.press(action.code);
+    try {
+      await waitForState(page, action.expected, 750);
+      return;
+    } catch (error) {
+      if (!/Timeout/u.test(error?.message ?? "")) throw error;
+    }
+  }
+  await waitForState(page, action.expected, 1);
 }
 
 async function runActions(page, actions, history, samples = null) {
   for (const action of actions) {
     history.push(Object.freeze({ code: action.code, expected: action.expected }));
+    const current = await mapSnapshot(page);
+    const changesPosition = current.mapId !== action.expected.mapId
+      || current.player?.x !== action.expected.x
+      || current.player?.y !== action.expected.y;
     const before = samples === null ? null : await page.evaluate(() => ({
       at: performance.now(),
       visualEpoch: document.querySelector("lr-map-view")?._latestData?.visualEpoch ?? null,
     }));
-    await page.keyboard.press(action.code);
-    await waitForState(page, action.expected);
+    if (changesPosition) await pressUntilState(page, action);
+    else {
+      await page.keyboard.press(action.code);
+      await waitForState(page, action.expected);
+    }
+    if (current.mapId !== action.expected.mapId) await page.waitForTimeout(500);
     if (before !== null) {
       const after = await page.evaluate(() => ({
         at: performance.now(),
@@ -78,6 +143,12 @@ async function runActions(page, actions, history, samples = null) {
     }
   }
   return actions.at(-1)?.expected ?? null;
+}
+
+async function runFirstActionAfterChildFrame(page, action, history) {
+  history.push(Object.freeze({ code: `${action.code}(resume probe)`, expected: action.expected }));
+  await pressUntilState(page, action);
+  return action.expected;
 }
 
 function percentile(values, fraction) {
@@ -419,12 +490,14 @@ async function revealAndConfirm(page) {
 }
 
 async function completeProfessorDialogue(page) {
-  await waitForDialogue(page, "你终于来了。");
+  await waitForDialogue(page, "来得正好。卡片代表你与角色建立的契约，战斗中显现的是契约力量，不是角色本体。");
   await verifyDialogueObserverDetectsFlash(page);
   await observeDialogueShell(page);
   await revealAndConfirm(page);
-  await waitForDialogue(page, "准备好出发了吗？");
+  await waitForDialogue(page, "契约完整度会随战斗消耗并保留到下一场；归零代表显现体被击败，正常结算后最低保留 1 点。");
   await assertDialogueNeverHidden(page, "Conversation A → READY → B");
+  await revealAndConfirm(page);
+  await waitForDialogue(page, "你和劲敌将互换卡片，各自调用对方的显现体。听明白了吗？");
   await page.keyboard.press("KeyZ");
   await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 20_000 });
   const conversationId = await page.locator("lr-dialogue-conversation").getAttribute("conversation-id");
@@ -432,7 +505,7 @@ async function completeProfessorDialogue(page) {
   await page.waitForFunction(() => {
     const view = document.querySelector("lr-dialogue-view");
     return view?._mode === "history"
-      && [...view.querySelectorAll("lr-dialogue-history-entry")].some((entry) => entry.getAttribute("text") === "你终于来了。");
+      && [...view.querySelectorAll("lr-dialogue-history-entry")].some((entry) => entry.getAttribute("text") === "来得正好。卡片代表你与角色建立的契约，战斗中显现的是契约力量，不是角色本体。");
   }, null, { timeout: 20_000 });
   await page.keyboard.press("KeyX");
   await page.waitForFunction((expectedId) => {
@@ -442,10 +515,59 @@ async function completeProfessorDialogue(page) {
   }, conversationId, { timeout: 20_000 });
   await assertDialogueNeverHidden(page, "Conversation B History open/close");
   await page.keyboard.press("ArrowDown");
-  await page.waitForFunction(() => document.querySelector('lr-dialogue-choice[choice-id="ready"]')?.isSelected() === true, null, { timeout: 20_000 });
+  await page.waitForFunction(() => document.querySelector('lr-dialogue-choice[choice-id="0"]')?.isSelected() === true, null, { timeout: 20_000 });
   await page.keyboard.press("KeyZ");
-  await waitForDialogue(page, "很好，出发吧。");
+  await waitForDialogue(page, "很好。去找研究所另一边的劲敌吧。等你们双方都同意，再开始测试。");
   await assertDialogueNeverHidden(page, "Conversation B → READY → C");
+  await revealAndConfirm(page);
+  await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 20_000 });
+}
+
+async function completeRivalDeferDialogue(page) {
+  await waitForDialogue(page, "总算来了。我们来做一次真正的交换：我把自己的卡交给你，你也把自己的卡交给我。");
+  await revealAndConfirm(page);
+  await waitForDialogue(page, "进入战场的只是各自契约形成的显现。怎么样，愿意交换卡片，堂堂正正比一场吗？");
+  await page.keyboard.press("KeyZ");
+  await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 20_000 });
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.waitForFunction(() => document.querySelector('lr-dialogue-choice[choice-id="1"]')?.isSelected() === true, null, { timeout: 20_000 });
+  await page.keyboard.press("KeyZ");
+  await waitForDialogue(page, "好，我不会逼你。没有你的同意，这份契约就不会成立。准备好了再来。");
+  await revealAndConfirm(page);
+  await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 20_000 });
+}
+
+async function acceptRivalBattle(page) {
+  await waitForDialogue(page, "总算来了。我们来做一次真正的交换：我把自己的卡交给你，你也把自己的卡交给我。");
+  await revealAndConfirm(page);
+  await waitForDialogue(page, "进入战场的只是各自契约形成的显现。怎么样，愿意交换卡片，堂堂正正比一场吗？");
+  await page.keyboard.press("KeyZ");
+  await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 20_000 });
+  await page.keyboard.press("ArrowDown");
+  await page.waitForFunction(() => document.querySelector('lr-dialogue-choice[choice-id="0"]')?.isSelected() === true, null, { timeout: 20_000 });
+  await page.keyboard.press("KeyZ");
+  await waitForDialogue(page, "好，一言为定。你收下我的卡，我也收下你的卡。别手下留情。");
+  await revealAndConfirm(page);
+  await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 20_000 });
+}
+
+async function completeAllyWinDialogue(page) {
+  await waitForDialogue(page, "这次是你赢了。没想到我的显现体在你手里能发挥到这种程度。");
+  await revealAndConfirm(page);
+  await waitForDialogue(page, "结果确认：主角一方胜出。归零的契约正常结算后保留 1 点完整度，双方数值都已写回。");
+  await revealAndConfirm(page);
+  await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 20_000 });
+}
+
+async function completeFirstJourneyDialogue(page) {
+  await waitForDialogue(page, "你们已经亲自体验过契约显现。接下来，请去第一条道路尽头的城镇完成我交代的事。");
+  await page.keyboard.press("KeyZ");
+  await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 20_000 });
+  await page.keyboard.press("ArrowDown");
+  await page.waitForFunction(() => document.querySelector('lr-dialogue-choice[choice-id="0"]')?.isSelected() === true, null, { timeout: 20_000 });
+  await page.keyboard.press("KeyZ");
+  await waitForDialogue(page, "好。沿着出生镇外的道路前进，一路小心。");
   await revealAndConfirm(page);
   await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 20_000 });
 }
@@ -492,6 +614,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     let observeFirstProbe;
     const firstProbeObserved = new Promise((resolve) => { observeFirstProbe = resolve; });
     const probeAuthorizations = [];
+    const battleDecisionCalls = [];
     await context.route("https://api.deepseek.com/models", async (route) => {
       probeAuthorizations.push(route.request().headers().authorization ?? null);
       if (probeAuthorizations.length === 1) {
@@ -515,6 +638,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
         }),
       });
     });
+    await context.route("https://api.deepseek.com/responses", (route) => fulfillDeterministicBattleDecision(route, battleDecisionCalls));
     const installationId = await page.evaluate(async (value) => {
       const decode = (entry) => Uint8Array.from(atob(entry.body), (character) => character.charCodeAt(0));
       const installed = await window.__loomrealmPwaQualification.install({
@@ -643,7 +767,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
       window.__dialogueSessionBirths = births;
     });
     await page.keyboard.press("KeyZ");
-    await waitForDialogue(page, "你终于来了。");
+    await waitForDialogue(page, "来得正好。卡片代表你与角色建立的契约，战斗中显现的是契约力量，不是角色本体。");
     assert.equal(await page.locator("lr-dialogue-view").count(), 1);
     assert.equal(await page.locator("game-controls-input").count(), 1);
     assert.equal(await page.evaluate(() => document.querySelector("lr-map-view") === window.__pokemanMapBeforeDialogue), true);
@@ -663,30 +787,59 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     const move = moves.map((candidate) => ({ candidate, expected: planner.transition(state, candidate) }))
       .find(({ expected }) => expected.mapId === state.mapId && (expected.x !== state.x || expected.y !== state.y));
     assert.ok(move, "Map A2 must have a legal movement from the Professor interaction tile");
-    state = await runActions(page, [{ ...move.candidate, expected: move.expected }], history);
-    const repeatProfessor = planner.planNpcCollision(state);
-    assert.equal(repeatProfessor.npc.instanceId, "professor");
-    if (repeatProfessor.travel.length > 0) state = await runActions(page, repeatProfessor.travel, history);
-    state = await runActions(page, [repeatProfessor.collision], history);
+    state = await runFirstActionAfterChildFrame(page, { ...move.candidate, expected: move.expected }, history);
+    const rivalInteraction = planner.planNpcCollision(state, "rival-lab");
+    assert.equal(rivalInteraction.npc.instanceId, "rival-lab");
+    if (rivalInteraction.travel.length > 0) state = await runActions(page, rivalInteraction.travel, history);
+    state = await runActions(page, [rivalInteraction.collision], history);
     await page.keyboard.press("KeyZ");
-    await waitForDialogue(page, "你终于来了。");
+    await waitForDialogue(page, "总算来了。我们来做一次真正的交换：我把自己的卡交给你，你也把自己的卡交给我。");
     assert.equal(await page.evaluate(() => document.querySelector("lr-dialogue-view") !== window.__pokemanDialogueBeforeRepeat), true,
-      "second interaction must create a fresh Dialogue presentation");
+      "Rival interaction must create a fresh Dialogue presentation");
     assert.equal((await page.evaluate(() => window.__dialogueSessionBirths)).at(-1).initialHidden, true,
       "the second fresh Dialogue session must start from the initial hidden READY baseline");
-    await page.keyboard.press("Tab");
-    await page.waitForFunction(() => document.querySelector("lr-dialogue-view")?._mode === "history", null, { timeout: 20_000 });
-    assert.equal(await page.locator("lr-dialogue-history-entry").count(), 0, "second Dialogue session must start with fresh History");
-    await page.keyboard.press("KeyX");
-    await page.waitForFunction(() => document.querySelector("lr-dialogue-view")?._mode === "conversation", null, { timeout: 20_000 });
-    await page.keyboard.press("KeyX");
-    await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 20_000 });
+    assert.equal(await page.locator("lr-dialogue-history-entry").count(), 0, "Rival Dialogue must start with fresh History");
+    await acceptRivalBattle(page);
+    await page.locator("lr-battle-view").waitFor({ state: "attached", timeout: 20_000 });
+    try {
+      await page.locator("lr-battle-view").waitFor({ state: "detached", timeout: 25_000 });
+    } catch (cause) {
+      const battleView = await page.evaluate(() => ({
+        view: document.querySelector("lr-battle-view")?._data ?? null,
+        actors: [...document.querySelectorAll("lr-battle-actor")].map((actor) => actor._data),
+        hud: document.querySelector("lr-battle-hud")?._data ?? null,
+      }));
+      const materials = battleDecisionCalls.filter((call) => call.body?.text?.format?.type === "json_schema");
+      throw new Error(`${cause.message}\nBattle diagnostic: ${JSON.stringify({ calls: battleDecisionCalls.length, materials: materials.length, last: materials.at(-1)?.body?.input, battleView })}`);
+    }
+    assert.ok(battleDecisionCalls.length >= 4, "AI-vs-AI Battle must issue both analysis and materialization requests");
+    assert.equal(battleDecisionCalls.every((call) => call.authorization === `Bearer ${acceptedDraft}`), true,
+      "the private transport must keep the configured credential in Authorization only");
+    await completeAllyWinDialogue(page);
     await waitForState(page, state);
 
+    const afterBattleProfessor = planner.planNpcCollision(state, "professor");
+    assert.equal(afterBattleProfessor.npc.instanceId, "professor");
+    if (afterBattleProfessor.travel.length > 0) {
+      state = await runFirstActionAfterChildFrame(page, afterBattleProfessor.travel[0], history);
+      if (afterBattleProfessor.travel.length > 1) state = await runActions(page, afterBattleProfessor.travel.slice(1), history);
+    }
+    state = await runActions(page, [afterBattleProfessor.collision], history);
+    await page.keyboard.press("KeyZ");
+    await completeFirstJourneyDialogue(page);
+    await waitForState(page, state);
+
+    let needsChildFrameResumeProbe = true;
     for (const targetMapId of [2, 8, 2, 5, 7]) {
       const actions = planner.planToMap(state, targetMapId);
       assert.ok(actions.length > 0, `Map ${state.mapId} must route to Map ${targetMapId}`);
-      state = await runActions(page, actions, history);
+      let remainingActions = actions;
+      if (needsChildFrameResumeProbe) {
+        state = await runFirstActionAfterChildFrame(page, actions[0], history);
+        needsChildFrameResumeProbe = false;
+        remainingActions = actions.slice(1);
+      }
+      if (remainingActions.length > 0) state = await runActions(page, remainingActions, history);
       observed = await mapSnapshot(page);
       assert.equal(observed.mapId, targetMapId);
       assert.equal(observed.visual, "ready");

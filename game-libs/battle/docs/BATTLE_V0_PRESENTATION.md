@@ -2,7 +2,7 @@
 
 > 状态：**FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。
 >
-> 本文是 Battle v0 Presentation 的规范性实现合同。既有 MapRef-based Presentation baseline 已 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；BATTLE-004 独立 BattleArena loading 是当前唯一新增 Blocking Presentation amendment。除该 amendment 外，实现 agent 不得自行更换 public API、Render Tree、Node data ABI、坐标模型、camera、viewport policy、effect policy 或 lifecycle 语义。
+> 本文是 Battle v0 Presentation 的规范性实现合同。Presentation 与 BATTLE-004 独立 BattleArena loading 已 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED。实现 agent 不得自行更换 public API、Render Tree、Node data ABI、坐标模型、camera、viewport policy、effect policy 或 lifecycle 语义。
 >
 > - gameplay/runtime 权威语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；
 > - cross-layer 数据字段以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 中已冻结的 Presentation contracts 为准；

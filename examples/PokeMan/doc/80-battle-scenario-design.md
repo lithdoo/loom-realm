@@ -1,6 +1,6 @@
 # PokeMan 首场互换角色卡 Battle 场景与参数设计
 
-> 状态：**Proposed / Scenario-level design**
+> 状态：**Implemented + Tested + Scenario Qualified**
 >
 > 范围：冻结 Map 4 研究所首场双向角色卡教学 Battle 的参战身份、参数来源、技能数值、场景配置与结算规则。
 >

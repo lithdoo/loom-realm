@@ -9,18 +9,22 @@ const executablePaths = Object.freeze({
   base: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-base-subsystem.mjs"),
   map: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-map-subsystem.mjs"),
   dialogue: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-dialogue-subsystem.mjs"),
+  battle: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-battle-subsystem.mjs"),
+  message: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-message-subsystem.mjs"),
 });
 
-test("PokeMan qualification bundle uses real Content and the Base, Map, and Dialogue browser ESM graph", async () => {
+test("PokeMan qualification bundle uses full Content and the five-subsystem browser ESM graph", async () => {
   const fixture = await createPokeManPwaFixture({ executablePaths });
   const game = parseGameEntryV1(fixture.gameEntryText);
   const manifest = parsePwaLaunchManifestV1(fixture.launchManifestText);
   assert.equal(game.initial.subsystem, "base");
-  assert.deepEqual(game.subsystems.map(({ key }) => key), ["base", "map", "dialogue"]);
+  assert.deepEqual(game.subsystems.map(({ key }) => key), ["base", "map", "dialogue", "battle", "message"]);
   assert.deepEqual(manifest.subsystems, [
     { key: "base", module: "subsystems/base.mjs" },
     { key: "map", module: "subsystems/map.mjs" },
     { key: "dialogue", module: "subsystems/dialogue.mjs" },
+    { key: "battle", module: "subsystems/battle.mjs" },
+    { key: "message", module: "subsystems/message.mjs" },
   ]);
   assert.ok(fixture.content.length > 0);
 
@@ -28,12 +32,16 @@ test("PokeMan qualification bundle uses real Content and the Base, Map, and Dial
     { logicalModule: "subsystems/base.mjs", mime: "text/javascript" },
     { logicalModule: "subsystems/map.mjs", mime: "text/javascript" },
     { logicalModule: "subsystems/dialogue.mjs", mime: "text/javascript" },
+    { logicalModule: "subsystems/battle.mjs", mime: "text/javascript" },
+    { logicalModule: "subsystems/message.mjs", mime: "text/javascript" },
   ]);
   const graph = await buildPwaExecutableIndexV1(fixture.executables.map(({ logicalModule, source, contentVersion }) => ({ logicalModule, source, contentVersion })));
   assert.deepEqual(graph, fixture.executables.map(({ logicalModule, contentVersion }) => ({ logicalModule, contentVersion, imports: [] })));
   const base = fixture.executables[0].source;
   const map = fixture.executables[1].source;
   const dialogue = fixture.executables[2].source;
+  const battle = fixture.executables[3].source;
+  const message = fixture.executables[4].source;
   assert.match(base, /game-controls-input/);
   assert.match(base, /api\.deepseek\.com\/models/);
   assert.match(base, /pokeman\.SessionConfig/);
@@ -43,6 +51,9 @@ test("PokeMan qualification bundle uses real Content and the Base, Map, and Dial
   assert.match(map, /createControlsConsumer/);
   assert.match(dialogue, /RPGDialogue/);
   assert.match(dialogue, /professor-vertical-slice/);
+  assert.match(battle, /DeepSeekDecision/);
+  assert.match(battle, /BattleSimulationBuilder/);
+  assert.match(message, /pokeman-message/);
   for (const { source } of fixture.executables) {
     assert.doesNotMatch(source, /from\s*["']@loomrealm/u);
     assert.doesNotMatch(source, /import\s*\(\s*[^"']/u);

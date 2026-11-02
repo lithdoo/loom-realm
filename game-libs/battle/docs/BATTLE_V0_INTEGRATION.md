@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**既有 Simulation baseline（含 Decision availability circuit）、DeepSeek Decision implementation/replaceable DecisionWorkflow boundary 与 Presentation integration 已完成 closed-loop qualification；BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 `BattleArena` amendments 仍为 PROPOSED，待实现与 qualification；PlayerGuidance concrete feature 明确延期；pause reason 与手动恢复 UX 已冻结，configured DeepSeekTransport / Host lifecycle 只剩具体平台事件接线与真实 E2E qualification**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
+> 状态：**Simulation baseline（含 Decision availability circuit）、DeepSeek Decision implementation/replaceable DecisionWorkflow boundary、Presentation integration、BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 `BattleArena` amendments 均已完成 closed-loop qualification；PokeMan 已接入 configured DeepSeekTransport、Host lifecycle 与 Message manual recovery；PlayerGuidance concrete feature 明确延期；真实 provider smoke 仍为 credential-gated explicit opt-in**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
@@ -654,7 +654,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-既有 Battle v0 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 均已完成 closed-loop qualification。BATTLE-003 `ResolvedBattleActor.initialHp`、BATTLE-004 独立 BattleArena 与 CTRL-002 pauseReason / onPause 是明确 amendments，尚待实现与 qualification；它们不改变已冻结 gameplay reducer rules。PlayerGuidance 明确延期；pause reason / 手动恢复产品规则已经冻结，剩余只是在具体 Host 中接入 background/foreground event、Message Frame 与 configured DeepSeekTransport 并完成 E2E qualification。
+Battle v0 Presentation、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision、BATTLE-003 `ResolvedBattleActor.initialHp`、BATTLE-004 独立 BattleArena 与 CTRL-002 pauseReason / onPause 均已完成 closed-loop qualification；它们不改变已冻结 gameplay reducer rules。PokeMan Host 已接入 background/foreground event、Message Frame 与 configured DeepSeekTransport，并通过 credential-free product/browser E2E。PlayerGuidance 明确延期，真实 provider smoke 仍需显式凭据。
 
 已验证工程状态：
 
@@ -689,6 +689,6 @@ Presentation blocking integration OPEN 已清零。仍未冻结的集成项只�
 - Host/Runtime Control 的具体平台事件来源仍需接线，但映射已冻结：background → `pause("host-background")`，foreground 不自动 resume；两类 pause 都通过 Message 由玩家手动继续/重试；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
-`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle 既有 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 已完成 qualification；BATTLE-003 initialHp 与 BATTLE-004 BattleArena amendments 尚待实现与 qualification；configured DeepSeekTransport 与 product/Host composition 尚待外部集成。
+`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision、BATTLE-003 initialHp 与 BATTLE-004 BattleArena amendments 已完成 qualification；configured DeepSeekTransport 与 PokeMan product/Host composition 已集成并完成 credential-free E2E。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。

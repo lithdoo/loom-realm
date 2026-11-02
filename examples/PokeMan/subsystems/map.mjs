@@ -1,6 +1,8 @@
 import { defineSubsystem, failed, FrameCallRejectedError } from "@loomrealm/subsystem";
 import { RPGMapBuilder } from "@loomrealm-game/map";
 import { createControlsConsumer, createDirectionalControlsTracker } from "@loomrealm-game/common-controls/subsystem";
+import { exchangeRivalCards } from "./business-state.mjs";
+import { resolveStoryScene } from "./story.mjs";
 
 function toMapDirection(direction) {
   switch (direction) {
@@ -110,7 +112,7 @@ function validDialogueResult(value) {
     && (value.conclusion === "ready" || value.conclusion === "not-yet" || value.conclusion === "cancelled");
 }
 
-export function createPokeManMapSubsystem(scope, dependencies = {}) {
+function createLegacyPokeManMapSubsystem(scope, dependencies = {}) {
   const MapBuilder = dependencies.RPGMapBuilder ?? RPGMapBuilder;
   const createConsumer = dependencies.createControlsConsumer ?? createControlsConsumer;
   const createDirections = dependencies.createDirectionalControlsTracker ?? createDirectionalControlsTracker;
@@ -251,6 +253,126 @@ export function createPokeManMapSubsystem(scope, dependencies = {}) {
     }
     },
   };
+}
+
+const RESULT_DIALOGUE = Object.freeze({
+  ally_win: "lab-rival-after-ally-win",
+  enemy_win: "lab-rival-after-enemy-win",
+  simultaneous_defeat: "lab-rival-after-draw",
+});
+
+function validBattleOutcome(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).length === 3 && typeof value.battleId === "string" && value.battleId.length > 0
+    && Object.hasOwn(RESULT_DIALOGUE, value.result) && value.settlement === "committed";
+}
+
+function createStoryPokeManMapSubsystem(scope, dependencies = {}) {
+  const MapBuilder = dependencies.RPGMapBuilder ?? RPGMapBuilder;
+  const createConsumer = dependencies.createControlsConsumer ?? createControlsConsumer;
+  const createDirections = dependencies.createDirectionalControlsTracker ?? createDirectionalControlsTracker;
+  const resolveScene = dependencies.resolveStoryScene ?? resolveStoryScene;
+  const exchange = dependencies.exchangeRivalCards ?? exchangeRivalCards;
+  return {
+    async frame(frame) {
+      const input = frame.params;
+      const handler = new MapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
+      let currentMapId = input.mapId;
+      let currentScene = { placements: placementsForMap(input.mapId), interactions: new Map() };
+      const loadScene = async (mapId, signal = frame.signal) => {
+        const scene = await resolveScene(scope.content, scope.state, mapId, { signal, fallback: placementsForMap(mapId) });
+        if (mapId === currentMapId) currentScene = scene;
+        return scene;
+      };
+      handler.onMapEntering(async (context) => {
+        currentMapId = context.mapId;
+        const scene = await loadScene(context.mapId, context.signal);
+        context.setNPC(scene.placements);
+      });
+      handler.onMapEntered((event) => { currentMapId = event.mapId; });
+
+      let interactionWaiter;
+      handler.onNPCInteract((event) => {
+        const dialogueKey = currentScene.interactions.get(event.npc.instanceId);
+        if (dialogueKey !== undefined) interactionWaiter?.accept({ event, dialogueKey });
+      });
+      let activation;
+      const startControls = () => {
+        const directions = createDirections();
+        const apply = () => handler.controls.setMoveIntent(toMapDirection(directions.direction));
+        const consumer = createConsumer(scope.presentationEvents, frame, {
+          onState(state) { directions.acceptState(state); apply(); },
+          onEvent(event) {
+            directions.acceptEvent(event); apply();
+            if (event.action === "down" && !event.repeat && (event.button === "south" || event.button === "start")) handler.controls.confirm();
+          },
+        });
+        activation = { directions, consumer };
+      };
+      const stopControls = () => {
+        if (activation === undefined) return;
+        handler.controls.setMoveIntent(null); activation.directions.reset(); activation.consumer.close(); activation = undefined;
+      };
+      const arm = () => {
+        let active = true; let resolve;
+        const promise = new Promise((accept) => { resolve = accept; });
+        const waiter = { promise, accept(value) { if (active) { active = false; interactionWaiter = undefined; resolve(value); } }, disarm() { active = false; if (interactionWaiter === waiter) interactionWaiter = undefined; } };
+        interactionWaiter = waiter; return waiter;
+      };
+      const callChild = async (key, params) => {
+        try { return await frame.call(key, params); }
+        catch { return failed({ code: `POKEMAN_${key.toUpperCase()}_CALL_FAILED` }); }
+      };
+      const dialogueInput = (dialogueKey, event) => ({
+        dialogueKey,
+        source: { mapId: event.mapId, npc: { instanceId: event.npc.instanceId, npcId: event.npc.npcId } },
+      });
+      const refresh = async () => {
+        currentScene = await loadScene(currentMapId);
+        await handler.setNPC(currentScene.placements);
+      };
+
+      const mapRun = handler.run({ mapId: input.mapId, x: input.x, y: input.y, direction: input.direction });
+      let mapTerminal;
+      const terminal = mapRun.then((outcome) => { mapTerminal = outcome; return { kind: "map", outcome }; });
+      try {
+        while (true) {
+          const waiter = arm(); startControls();
+          const next = await Promise.race([terminal, waiter.promise.then((interaction) => ({ kind: "interaction", interaction }))]);
+          waiter.disarm(); stopControls();
+          if (next.kind === "map") return next.outcome;
+          if (mapTerminal !== undefined) return mapTerminal;
+          const { event, dialogueKey } = next.interaction;
+          const dialogue = await callChild("dialogue", dialogueInput(dialogueKey, event));
+          if (dialogue.type !== "completed") return dialogue;
+          if (typeof dialogue.value !== "string" || dialogue.value.length === 0) return failed({ code: "POKEMAN_DIALOGUE_RESULT_INVALID" });
+
+          if (dialogue.value === "lab-rival-exchange-accept") {
+            try { await exchange(scope.state, { signal: frame.signal }); }
+            catch { return failed({ code: "POKEMAN_EXCHANGE_FAILED" }); }
+            const battle = await callChild("battle", {
+              scenarioId: "lab-rival-tutorial",
+              source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } },
+            });
+            if (battle.type !== "completed") return battle;
+            if (!validBattleOutcome(battle.value)) return failed({ code: "POKEMAN_BATTLE_RESULT_INVALID" });
+            const resultDialogue = await callChild("dialogue", dialogueInput(RESULT_DIALOGUE[battle.value.result], event));
+            if (resultDialogue.type !== "completed") return resultDialogue;
+            if (resultDialogue.value !== RESULT_DIALOGUE[battle.value.result]) return failed({ code: "POKEMAN_DIALOGUE_RESULT_INVALID" });
+          }
+          try { await refresh(); }
+          catch { return failed({ code: "POKEMAN_STORY_REFRESH_FAILED" }); }
+        }
+      } finally {
+        interactionWaiter?.disarm(); stopControls();
+      }
+    },
+  };
+}
+
+export function createPokeManMapSubsystem(scope, dependencies = {}) {
+  if (scope.state === undefined || dependencies.RPGMapBuilder !== undefined) return createLegacyPokeManMapSubsystem(scope, dependencies);
+  return createStoryPokeManMapSubsystem(scope, dependencies);
 }
 
 export default defineSubsystem((scope) => createPokeManMapSubsystem(scope));

@@ -13,24 +13,28 @@ import {
 const root = new URL("../", import.meta.url);
 const identity = (entry) => `${entry.kind}/${entry.namespace}/${entry.key}`;
 
-test("Desktop and PWA manifests bind exactly the declared Base, Map, and Dialogue topology", async () => {
+test("Desktop and PWA manifests bind the full Base/Map/Dialogue/Battle/Message topology", async () => {
   const game = parseGameEntryV1(await readFile(new URL("game.json", root), "utf8"));
   const pwa = parsePwaLaunchManifestV1(await readFile(new URL("launch.pwa.json", root), "utf8"));
   const hostra = JSON.parse(await readFile(new URL("launch.hostra.json", root), "utf8"));
   assert.equal(game.initial.subsystem, "base");
-  assert.deepEqual(game.subsystems.map(({ key }) => key), ["base", "map", "dialogue"]);
+  assert.deepEqual(game.subsystems.map(({ key }) => key), ["base", "map", "dialogue", "battle", "message"]);
   assert.deepEqual(pwa, {
     formatVersion: 1,
     subsystems: [
       { key: "base", module: "subsystems/base.mjs" },
       { key: "map", module: "subsystems/map.mjs" },
       { key: "dialogue", module: "subsystems/dialogue.mjs" },
+      { key: "battle", module: "subsystems/battle.mjs" },
+      { key: "message", module: "subsystems/message.mjs" },
     ],
   });
   assert.deepEqual(hostra.subsystems, [
     { key: "base", module: "subsystems/base.mjs" },
     { key: "map", module: "subsystems/map.mjs" },
     { key: "dialogue", module: "subsystems/dialogue.mjs" },
+    { key: "battle", module: "subsystems/battle.mjs" },
+    { key: "message", module: "subsystems/message.mjs" },
   ]);
   assert.deepEqual(pwa.subsystems.map(({ key }) => key), game.subsystems.map(({ key }) => key));
 });
@@ -52,7 +56,7 @@ test("FSDB identities map to Content API kinds without leaking physical suffixes
   });
 });
 
-test("real PokeMan FSDB produces a deterministic map-only dependency closure", async () => {
+test("real PokeMan FSDB produces a deterministic full-content package", async () => {
   const first = await preparePokeManPwaContent();
   const second = await preparePokeManPwaContent();
   assert.deepEqual(first.map(identity), second.map(identity));
@@ -74,19 +78,16 @@ test("real PokeMan FSDB produces a deterministic map-only dependency closure", a
     "resource/resource.Presentation/map/map.css",
     "resource/resource.Presentation/dialogue/dialogue.browser.js",
     "resource/resource.Presentation/dialogue/dialogue.css",
+    "record/struct.BattleArena/lab-tutorial",
+    "record/struct.BattleSkill/grab",
+    "record/struct.BattleEffect/grab",
+    "resource/resource.Graphics/BattleEffects/Grab",
+    "resource/resource.Presentation/battle/battle.browser.js",
+    "resource/resource.Presentation/message/message.browser.js",
     "resource/resource.Presentation/page.css",
   ]) assert.ok(ids.has(expected), `missing ${expected}`);
 
-  const allowed = new Set([
-    "struct.Map",
-    "struct.MapTransfer",
-    "struct.Tileset",
-    "struct.NPC",
-    "resource.Graphics",
-    "resource.Presentation",
-  ]);
   for (const entry of first) {
-    assert.ok(allowed.has(entry.namespace), `non-map namespace selected: ${entry.namespace}`);
     assert.ok(!entry.key.endsWith(".json") && !entry.key.endsWith(".png") && !entry.key.endsWith(".css.css") && !entry.key.endsWith(".js.js"));
     assert.ok(!entry.key.includes(".meta"));
     if (entry.kind === "record") {
@@ -110,7 +111,7 @@ test("real PokeMan FSDB produces a deterministic map-only dependency closure", a
 test("content preparation fails closed on missing references and duplicate PWA identities", () => {
   assert.throws(
     () => requireFsdbEntry(new Map(), "resource", "Graphics", "Characters/Missing"),
-    /Missing PokeMan Map dependency/,
+    /Missing PokeMan dependency/,
   );
   const entry = {
     kind: "resource",

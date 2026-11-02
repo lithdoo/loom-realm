@@ -1,6 +1,6 @@
 # Battle v0 数据契约
 
-> 状态：**既有 Simulation-facing / Presentation contracts 已完成 qualification；BATTLE-003 `ResolvedBattleActor.initialHp`、BATTLE-004 独立 `BattleArena` 与 CTRL-002 `BattlePauseReason / onPause` 是 PROPOSED amendments，尚待实现与 qualification；Decision provider/prompt/structured-output concrete implementation 已由 BATTLE_V0_DECISION.md 冻结；外部 serialization 与 Host/Guidance wiring 保留明确 OPEN**。本文定义 Battle v0 canonical 数据边界。
+> 状态：**Simulation-facing / Presentation contracts 与 BATTLE-003 `ResolvedBattleActor.initialHp`、BATTLE-004 独立 `BattleArena`、CTRL-002 `BattlePauseReason / onPause` amendments 均已 IMPLEMENTED + TESTED + QUALIFIED；Decision provider/prompt/structured-output concrete implementation 已由 BATTLE_V0_DECISION.md 冻结；外部 serialization 与 Host/Guidance wiring 保留明确 OPEN**。本文定义 Battle v0 canonical 数据边界。
 >
 > 核心 gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；本文不重新定义 reducer 行为。
 
@@ -109,7 +109,7 @@ type ResourceRef = {
 
 实现时应优先复用仓库已有公共类型，而不是再定义一套平行结构。
 
-### BattleArenaRef — PROPOSED / BATTLE-004
+### BattleArenaRef — IMPLEMENTED / BATTLE-004
 
 目标 contract 不再要求 Battle Scene 引用探索 `struct.Map`：
 
@@ -125,7 +125,7 @@ type BattleArenaRef = {
 
 ## 4. Battle Content
 
-### 4.0 BattleArena — PROPOSED / BATTLE-004
+### 4.0 BattleArena — IMPLEMENTED / BATTLE-004
 
 BattleArena 是 Battle-owned authored Content：
 
@@ -832,7 +832,7 @@ interface PresentationPort {
 
 `failure` 只暴露 Presentation 在 resize/resource/internal callback 中发生、无法由调用栈捕获的 terminal fatal 事实。它不决定 `BattleResult`，不授予 Browser gameplay authority；Presentation 必须立即停止自己的 visual authority 并 cleanup，Runtime 观察后负责停止 Battle authority、映射最终 `BattleResult.failure`。该 channel 每 session 最多完成一次；显式 `close()` 后不得再完成。同步 `render()/pause()/resume()` fatal 仍直接 throw，由 Runtime 的同步调用边界处理。
 
-### 14.1 BattleSceneInit — FROZEN baseline + BATTLE-004 target amendment
+### 14.1 BattleSceneInit — FROZEN + BATTLE-004 IMPLEMENTED
 
 Presentation 初始化只依赖纯数据描述，不要求知道 Simulation 或 Decision concrete implementation。下面 shape 是 v0 exact Presentation ABI：
 

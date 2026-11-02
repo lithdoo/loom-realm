@@ -1,6 +1,6 @@
 # PokeMan Story / Dialogue / Event 集成设计
 
-> 状态：**Story Runtime / Content Integration Design**
+> 状态：**Implemented + Tested + Map 4 Closed-loop Qualified**
 > 范围：固定 Dialogue、Event state、Map 场景解析、业务 Runtime 与 Battle 的协作
 > 关联：[62-event.md](./62-event.md)、[64-dialogue.md](./64-dialogue.md)、[73-dialogue-gameplay-vertical-slice.md](./73-dialogue-gameplay-vertical-slice.md)、[78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)、[50-mvp-prologue.md](./50-mvp-prologue.md)、[67-shared-state-records.md](./67-shared-state-records.md)
 

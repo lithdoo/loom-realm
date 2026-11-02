@@ -2,15 +2,16 @@ import {
   assertActorId,
   type ActorId,
   type BattleResult,
+  type BattlePauseReason,
   type BattleStatus,
+  type BattleArenaRef,
   type Direction,
   type GridPosition,
-  type MapRef,
   type PlanSubmission,
   type ResourceRef,
   type ResolvedRangeMatrix,
   type Team,
-  validateMapRef,
+  validateBattleArenaRef,
   validateResourceRef,
 } from "../contracts.js";
 
@@ -29,6 +30,7 @@ export interface ResolvedBattleActor {
   readonly tile: GridPosition;
   readonly direction: Direction;
   readonly maxHp: number;
+  readonly initialHp?: number;
   readonly character: ResourceRef;
   readonly skills: readonly ResolvedBattleSkill[];
 }
@@ -42,7 +44,7 @@ export interface ResolvedBattleDefinition {
   readonly protectionTicks: number;
   readonly maxPathSteps: number;
   readonly map: {
-    readonly ref: MapRef;
+    readonly ref: BattleArenaRef;
     readonly width: number;
     readonly height: number;
     readonly passable: readonly (readonly boolean[])[];
@@ -128,6 +130,7 @@ export interface BattleState {
   sceneEpoch: number;
   currentTick: number;
   status: BattleStatus;
+  pauseReason: BattlePauseReason | null;
   actors: Map<ActorId, ActorRuntimeState>;
   reservations: Map<string, Reservation>;
   result: BattleResult | null;
@@ -232,7 +235,13 @@ export function validateResolvedBattleDefinition(value: unknown): ResolvedBattle
   const tiles = new Set<string>();
   const actors = Object.freeze(record.actors.map((rawActor, actorIndex): ResolvedBattleActor => {
     const label = `actors[${actorIndex}]`;
-    const actor = exact(rawActor, ["actorId", "team", "tile", "direction", "maxHp", "character", "skills"], label);
+    const hasInitialHp = rawActor !== null
+      && typeof rawActor === "object"
+      && !Array.isArray(rawActor)
+      && Object.hasOwn(rawActor, "initialHp");
+    const actor = exact(rawActor, hasInitialHp
+      ? ["actorId", "team", "tile", "direction", "maxHp", "initialHp", "character", "skills"]
+      : ["actorId", "team", "tile", "direction", "maxHp", "character", "skills"], label);
     assertActorId(actor.actorId);
     if (actorIds.has(actor.actorId)) throw new TypeError("actorId must be unique");
     actorIds.add(actor.actorId);
@@ -260,12 +269,16 @@ export function validateResolvedBattleDefinition(value: unknown): ResolvedBattle
         effect: unicodeString(skill.effect, `${skillLabel}.effect`),
       });
     }));
+    const maxHp = integer(actor.maxHp, `${label}.maxHp`, 1);
+    const initialHp = hasInitialHp ? integer(actor.initialHp, `${label}.initialHp`, 1) : undefined;
+    if (initialHp !== undefined && initialHp > maxHp) throw new TypeError(`${label}.initialHp must be <= maxHp`);
     return Object.freeze({
       actorId: actor.actorId,
       team: actor.team,
       tile,
       direction: direction(actor.direction, `${label}.direction`),
-      maxHp: integer(actor.maxHp, `${label}.maxHp`, 1),
+      maxHp,
+      ...(initialHp === undefined ? {} : { initialHp }),
       character: validateResourceRef(actor.character, `${label}.character`),
       skills,
     });
@@ -280,7 +293,7 @@ export function validateResolvedBattleDefinition(value: unknown): ResolvedBattle
     moveTicks,
     protectionTicks,
     maxPathSteps,
-    map: Object.freeze({ ref: validateMapRef(rawMap.ref), width, height, passable }),
+    map: Object.freeze({ ref: validateBattleArenaRef(rawMap.ref), width, height, passable }),
     actors,
   });
 }
@@ -291,7 +304,7 @@ export function createInitialState(definition: ResolvedBattleDefinition): Battle
     actors.set(actor.actorId, {
       actorId: actor.actorId,
       team: actor.team,
-      hp: actor.maxHp,
+      hp: actor.initialHp ?? actor.maxHp,
       maxHp: actor.maxHp,
       tile: { ...actor.tile },
       direction: actor.direction,
@@ -311,6 +324,7 @@ export function createInitialState(definition: ResolvedBattleDefinition): Battle
     sceneEpoch: definition.sceneEpoch,
     currentTick: 0,
     status: "created",
+    pauseReason: null,
     actors,
     reservations: new Map(),
     result: null,

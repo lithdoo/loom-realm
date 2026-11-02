@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**既有 Core gameplay、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision 与 Presentation Acceptance 均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；新增 BATTLE-003（显式 initialHp input）、BATTLE-004（独立 BattleArena）与 CTRL-002（pauseReason / onPause）为 PROPOSED，尚待实现与 qualification**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
+> 状态：**Core gameplay、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision、Presentation Acceptance、BATTLE-003（显式 initialHp input）、BATTLE-004（独立 BattleArena）与 CTRL-002（pauseReason / onPause）均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
 >
 > DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
@@ -32,7 +32,7 @@
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
 | T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
 
-### 1.1 Explicit initial HP amendment — BATTLE-003 (PROPOSED)
+### 1.1 Explicit initial HP amendment — BATTLE-003 (QUALIFIED)
 
 | Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
@@ -42,7 +42,7 @@
 | T-INIT-004 | BATTLE-003 | initialHp = 0、负数、超过 maxHp、非整数或非 safe integer | Definition validator reject |
 | T-INIT-005 | BATTLE-003, REPLAY-001 | 受损 initialHp 的 live Battle → Replay | Replay 从 record.initial 重建相同初始 hp/maxHp，并通过 deterministic qualification |
 
-### 1.2 Independent BattleArena amendment — BATTLE-004 (PROPOSED)
+### 1.2 Independent BattleArena amendment — BATTLE-004 (QUALIFIED)
 
 | Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
@@ -357,7 +357,7 @@
 
 ## 12. Core OPEN 状态
 
-当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。新增 `BATTLE-003`、`BATTLE-004` 与 `CTRL-002` 是实现 amendments（不是新的 gameplay reducer rule），处于 PROPOSED；T-INIT-001..005、T-ARENA-001..005 与 T-CTRL-016..020 / 相关 T-DEC cases 已定义为 blocking acceptance，未通过前不得声称对应闭环已完成。
+当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。`BATTLE-003`、`BATTLE-004` 与 `CTRL-002` 是实现 amendments（不是新的 gameplay reducer rule）；T-INIT-001..005、T-ARENA-001..005 与 T-CTRL-016..020 / 相关 T-DEC cases 已全部通过 automated blocking acceptance。
 
 Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance；Decision implementation acceptance 已在 §8.1 冻结。PlayerGuidance concrete contract/wiring 明确延期，但 DecisionWorkflow extensibility boundary 已冻结；pause reason / manual-resume policy 已冻结，剩余 Host 工作只是平台 background/foreground event 与 PokeMan Message Frame 接线。其他 OPEN 只涉及非 Presentation Content 统一 schema、未来 Guidance 与 configured DeepSeekTransport 的 credential/network/product capability handoff，这些不得反向改变已冻结 Expected。
 

@@ -1,33 +1,11 @@
 {
-    "byCharacter":  {
-                        "rival":  {
-                                      "events":  [
-                                                     "prologue"
-                                                 ],
-                                      "defaultMaps":  [
-                                                          1
-                                                      ]
-                                  }
-                    },
-    "byEvent":  {
-                    "prologue":  {
-                                     "characters":  [
-                                                        "rival"
-                                                    ],
-                                     "maps":  [
-                                                  1
-                                              ]
-                                 }
-                },
-    "byMap":  {
-                  "1":  {
-                            "events":  [
-                                           "prologue"
-                                       ],
-                            "characters":  [
-                                               "professor",
-                                               "rival"
-                                           ]
-                        }
-              }
+  "byMap": { "4": { "events": ["prologue"], "characters": ["professor", "rival"] } },
+  "byEvent": {
+    "prologue": { "maps": [4], "characters": ["professor", "rival"] },
+    "first-route": { "maps": [], "characters": [] }
+  },
+  "byCharacter": {
+    "professor": { "events": ["prologue"], "defaultMaps": [4] },
+    "rival": { "events": ["prologue"], "defaultMaps": [8] }
+  }
 }
