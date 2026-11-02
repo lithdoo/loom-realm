@@ -587,7 +587,7 @@ pokeman.EventStateList / current
 [
   {
     "eventId": "prologue",
-    "stateId": "after-tutorial-battle"
+    "stateId": "rival-ready"
   }
 ]
 ```
