@@ -216,12 +216,13 @@ Public surface 固定：
 ```ts
 interface BattleRuntime {
   run(): Promise<BattleResult>
-  pause(): void
+  pause(reason?: "host-background"): void
   resume(): void
   cancel(): void
   close(): void
   getSnapshot(): BattleSnapshot
   getReplay(): ReplayRecord
+  onPause(listener: (event: BattlePauseEvent) => void): () => void
 }
 ```
 
@@ -259,6 +260,8 @@ Method semantics：
 补充：
 
 - `run()` one-shot；重复 run 属 programmer error；
+- external `pause()` 只表达 Host/background pause；省略 reason 时兼容等价于 `pause("host-background")`，不得由产品用它伪造 Decision circuit；
+- `onPause(listener)` 订阅每次真实 RUNNING → PAUSED transition 的 operational event，并返回 unsubscribe；重复 pause no-op 不重复通知；该事件不进入 Replay/gameplay facts；
 - `close()` 幂等；
 - active `close()` 等价于 cancel authority + cleanup，并使 active run 以 `cancelled` settle；
 - CREATED 上直接 `close()` 只进入 CLOSED，不制造未发生的 BattleResult；CREATED 上 `cancel()` 记录 `cancelled` 后进入 CLOSED；
@@ -360,32 +363,38 @@ wakeCancel = clock.schedule(delayMs, wake)
 - 其他 checked gameplay arithmetic（例如 `currentTick + moveTicks`、`baseDamage * coefficientUnits`）超界 → `BattleResult.failure { source: "simulation", code: "BATTLE_NUMERIC_OVERFLOW" }`；
 - 都必须在产生不精确值之前失败，不得 wrap/静默继续。
 
-Pause：
+External Host pause：
 
 ~~~text
 RUNNING
+→ pauseReason = "host-background"
 → accumulatedRunningMs += now - runningAnchorMs
 → cancel wake
 → call presentation.pause() inside Runtime call boundary
 → if classified sync fatal: finish(presentation failure)
 → else status = PAUSED
+→ emit BattlePauseEvent { reason: "host-background" }
 ~~~
+
+Decision circuit pause 使用同一 PAUSED transition，但 reason 固定为 `"decision-circuit"`，并在 Tick-boundary circuit transition 成功后 emit 对应 BattlePauseEvent。任何进入 PAUSED 的成功路径都必须有且只有一个 pauseReason。
 
 Resume：
 
 ~~~text
 PAUSED
+→ remember current pauseReason
 → if decision availability circuitOpen:
      consecutiveFailures = 0
      circuitOpen = false
 → call presentation.resume() inside Runtime call boundary
 → if classified sync fatal: finish(presentation failure)
 → else runningAnchorMs = now
+→ clear pauseReason
 → status = RUNNING
 → schedule next wake
 ~~~
 
-普通 external pause 与 Decision circuit pause 都**不 abort Decision**；Decision completion 可以在 pause期间进入 Inbox并等待后续 Tick消费。
+普通 external pause 与 Decision circuit pause 都**不 abort Decision**；Decision completion 可以在 pause期间进入 Inbox并等待后续 Tick消费。重复 `pause("host-background")` 在已经 PAUSED 时是 no-op，绝不能把已有 `decision-circuit` reason 覆盖为 `host-background`。
 
 两者复用同一内部 PAUSED transition（cancel wake → presentation.pause() → status=PAUSED），但 logical-time cut 不同：
 
@@ -412,6 +421,7 @@ type BattleState = {
   sceneEpoch: number
   currentTick: number
   status: BattleStatus
+  pauseReason: BattlePauseReason | null
 
   actors: Map<ActorId, ActorRuntimeState>
   reservations: Map<TileKey, Reservation>
@@ -793,11 +803,11 @@ Circuit pause 与普通 pause 共享：
 - resume后不做 pause catch-up；
 - HP/tile/action/protection/timers 在 pause 期间不推进。
 
-两者唯一与 availability 相关的差异是：circuit pause 同时保持 `circuitOpen=true`，直到 explicit `resume()` 清零 guard。
+两者唯一与 availability 相关的差异是：circuit pause 同时保持 `circuitOpen=true`，且公开 `pauseReason="decision-circuit"`；Host pause 公开 `pauseReason="host-background"`。两者都保持 PAUSED，直到产品显式调用 `resume()`。
 
 ### 10.4 Explicit resume
 
-Decision circuit **不自动恢复**，不使用 retry timer/cooldown 自动 `resume()`。
+Decision circuit **不自动恢复**，不使用 retry timer/cooldown 自动 `resume()`。Host/background pause 同样不由 Runtime 自动恢复；Host foreground 只是产品层显示恢复提示的时机，真正恢复仍必须显式调用 `battle.resume()`。
 
 当 Runtime 当前 PAUSED 且 `circuitOpen === true` 时，外部显式调用：
 
@@ -1394,7 +1404,7 @@ AbortController
 scheduler handles
 ```
 
-Snapshot在每个 processed Tick结束后与该 Tick Projection基于同一 committed state产生。
+Snapshot在每个 processed Tick结束后与该 Tick Projection基于同一 committed state产生。非 Tick lifecycle transition 进入/离开 PAUSED 时，`getSnapshot()` 也必须立即反映 `status / pauseReason`：PAUSED 时 reason 必须存在，其他 status 必须 absent。
 
 ## 26. ReplayRecord
 
@@ -1738,7 +1748,7 @@ Implementation agent 按以下顺序落地，不重新设计边界：
    - ReplayDriver must not execute live availability guard
 
 9. simulation/runtime.ts
-   - preserve existing public pause()/resume() behavior for external pause
+   - preserve external pause()/resume() timing behavior while extending `pause(reason?)`, `pauseReason` Snapshot and `onPause` operational notification
    - add live-only DecisionAvailabilityGuard initialized to { consecutiveFailures: 0, circuitOpen: false }
    - after render + terminal gate, process TickOutput.decisionHealthSignals in order
    - threshold 3 latches circuitOpen/circuitPausePending
@@ -1826,6 +1836,6 @@ tests
 - serialized BattleActor/BattleSkill external subject/version/key encoding；
 - DeepSeek concrete Decision 的 provider/HTTP/failure semantics 已由 BATTLE_V0_DECISION.md 冻结且不属于 Simulation；这里只允许 Host credential/composition wiring 保持外部 OPEN；
 - Guidance Host/InputTarget wiring；
-- Host具体background/suspend事件来源。
+- Host具体background/suspend事件来源可以由各平台适配器决定，但一旦识别为 background，必须映射为 `pause("host-background")`；foreground 不得自动调用 resume。
 
 这些不得改变本文已冻结的 Simulation authority、state transition、Tick timing、Plan pipeline或public Runtime semantics。
