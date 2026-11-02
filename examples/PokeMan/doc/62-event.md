@@ -483,6 +483,18 @@ maps.<mapId>.npcs.<npcId>
 
 同一个 `npcId` 在不同 Map 出现合法；不同 Event 最终在同一 Map 产生相同 `npcId` 是 deterministic conflict，不做 last-wins。
 
+## Runtime instanceId — MVP FROZEN
+
+当前 MVP 的 Story Resolver 在把最终 NPC scene 转成 `NPCPlacement[]` 时固定：
+
+```text
+instanceId = npcId
+```
+
+原因是当前规则已经保证每张 Map 的最终 `npcId` 唯一，因此不需要第二套实例 identity 算法。Map-only placement 也应遵守同样约定。
+
+未来若产品需要“同一张 Map 同时出现多个相同 npcId 实例”，必须先扩展 Content / Resolver identity contract；在此之前实现不得自行拼接 mapId、序号、Event id 或随机字符串作为 instanceId。
+
 # StoryIndex
 
 Builder 生成：
@@ -580,7 +592,6 @@ Event / EventStateMutation Content physical schema 与 EventStateList Shared Sta
 
 当前相关开放项只剩 Runtime 行为：
 
-- Runtime `instanceId` 生成算法；
 - 非 Dialogue business fact → Mutation handler 的 Runtime 实现；
 - Story Resolver → `RPGMapHandler.setNPC()` 的具体 runtime wiring 与测试；
 - Mutation mismatch / OCC / UI 行为。
