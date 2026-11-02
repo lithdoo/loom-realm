@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**既有 Core gameplay、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision 与 Presentation Acceptance 均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；新增 BATTLE-003（显式 initialHp input）为 PROPOSED，尚待实现与 qualification**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
+> 状态：**既有 Core gameplay、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision 与 Presentation Acceptance 均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；新增 BATTLE-003（显式 initialHp input）与 BATTLE-004（独立 BattleArena）为 PROPOSED，尚待实现与 qualification**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
 >
 > DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
@@ -41,6 +41,16 @@
 | T-INIT-003 | BATTLE-003 | 显式 `1 <= initialHp < maxHp` | 初始 hp 使用 initialHp，maxHp 保持原上限；Replay initial 保留该值 |
 | T-INIT-004 | BATTLE-003 | initialHp = 0、负数、超过 maxHp、非整数或非 safe integer | Definition validator reject |
 | T-INIT-005 | BATTLE-003, REPLAY-001 | 受损 initialHp 的 live Battle → Replay | Replay 从 record.initial 重建相同初始 hp/maxHp，并通过 deterministic qualification |
+
+### 1.2 Independent BattleArena amendment — BATTLE-004 (PROPOSED)
+
+| Test ID | Rules | 场景 | Expected |
+| --- | --- | --- | --- |
+| T-ARENA-001 | BATTLE-004 | BattleSceneInit / ResolvedDefinition 引用 `arenaId` | Presentation 读取 `struct.BattleArena`，不读取 `struct.Map` |
+| T-ARENA-002 | BATTLE-004 | 7×7 Arena passable 全 true，visual tile 全 floor | Simulation 使用 authored passable；视觉 tile 不影响 gameplay |
+| T-ARENA-003 | BATTLE-004 | passable shape 与 width/height 不一致，或 data 不是 3-layer exact shape | Content / definition validator reject |
+| T-ARENA-004 | BATTLE-004 | Arena tileset_id 指向合法 Tileset，tile ids 合法 | Presentation 能加载 Tileset / Autotile Graphics 并绘制 Arena |
+| T-ARENA-005 | BATTLE-004 | RPG Map 4 passage/terrain/player pose 改变，但 Arena Content 不变 | 同一 Battle scenario 的 passable、spawn、Replay 初始事实完全不变 |
 
 ## 2. Time / Scheduler
 
