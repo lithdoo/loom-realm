@@ -97,8 +97,8 @@ key       = current
 
 ```json
 {
-  "mapId": 1,
-  "x": 12,
+  "mapId": 3,
+  "x": 3,
   "y": 8,
   "direction": 2
 }
@@ -204,6 +204,20 @@ EventStateEntry
 
 因此 `null` 只是 Event current state 的逻辑语义，不进入物理 entry。
 
+## MVP New Game baseline exact values
+
+当前 PokeMan MVP 的首次 session baseline 固定为：
+
+```text
+pokeman.PlayerWorld / current
+= { mapId: 3, x: 3, y: 8, direction: 2 }
+
+pokeman.EventStateList / current
+= [{ eventId: "prologue", stateId: "lab-tutorial" }]
+```
+
+它与当前 `game.json` 的玩家家起点和序章 Story state 对齐。两条 singleton Record 必须一起 materialize；不得只创建其中一条。具体 bootstrap owner 与 OCC 行为由 79 的 Base startup 规则冻结。
+
 # Relationship Record
 
 ## Record identity
@@ -234,6 +248,22 @@ pokeman.Relationship / A:B exists
 ```
 
 ## Value
+
+### 首次 Relationship 初始化默认值
+
+当 `pokeman.Relationship/A:B` Record 不存在，而业务需要首次建立该方向 Relationship 时，MVP 固定从以下 exact value 开始：
+
+```json
+{
+  "affinity": 0,
+  "hostile": false,
+  "relationshipText": ""
+}
+```
+
+如果同一原子业务事务同时建立 Contract，则在这个默认 value 上增加 `contract`。不得因为角色是宿敌、朋友或剧情 NPC 就在 Runtime 中硬编码另一组初始 affinity / relationshipText；后续关系变化必须通过明确业务规则修改。
+
+已有 Relationship 时，`affinity / hostile / relationshipText` 保持原值，除非当前业务明确拥有修改它们的 authority。
 
 没有 Contract：
 
@@ -572,9 +602,9 @@ pokeman.PlayerWorld / current
 
 ```json
 {
-  "mapId": 1,
-  "x": 8,
-  "y": 12,
+  "mapId": 3,
+  "x": 3,
+  "y": 8,
   "direction": 2
 }
 ```
@@ -602,9 +632,9 @@ pokeman.Relationship / player:rival
 
 ```json
 {
-  "affinity": 20,
+  "affinity": 0,
   "hostile": false,
-  "relationshipText": "与宿敌建立了正式契约。",
+  "relationshipText": "",
   "contract": {
     "integrity": 18,
     "skills": [
@@ -623,9 +653,9 @@ pokeman.Relationship / rival:player
 
 ```json
 {
-  "affinity": 15,
+  "affinity": 0,
   "hostile": false,
-  "relationshipText": "认可对方作为自己的对手与伙伴。",
+  "relationshipText": "",
   "contract": {
     "integrity": 20,
     "skills": [
@@ -665,7 +695,7 @@ pokeman.CarriedCards / rival
 ]
 ```
 
-以上双向示例对应 Map 4 首场互换角色卡：player 持有 rival，rival 持有 player。Integrity / skills 分别属于两条有向 Relationship，不属于 CarriedCards。
+以上双向示例对应 Map 4 首次互换角色卡、且交换前两条 Relationship 都不存在的情况：两边都从中性 Relationship 默认值开始，同时建立各自 Contract；player 持有 rival，rival 持有 player。若 Relationship 已存在，则必须保留其原有关系字段。Integrity / skills 分别属于两条有向 Relationship，不属于 CarriedCards。
 
 # 当前冻结结论
 
