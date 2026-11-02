@@ -1,6 +1,6 @@
 # Battle v0 Simulation Implementation Spec
 
-> 状态：**既有 Simulation gameplay/runtime baseline 与 Decision availability circuit (§10/§16) 已 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；`ResolvedBattleActor.initialHp` 是新增 PROPOSED input amendment，尚待实现与 qualification**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。
+> 状态：**既有 Simulation gameplay/runtime baseline 与 Decision availability circuit (§10/§16) 已 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 `BattleArena` 是新增 PROPOSED input/content amendments，尚待实现与 qualification**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。
 >
 > 目标：implementation agent 应能直接实现 headless/self-driven Simulation，而不需要自行选择 Clock、queue、Decision lifecycle、Plan handoff、Tick transaction、Projection cadence、terminal race 或 Replay 架构。
 
@@ -157,7 +157,7 @@ type ResolvedBattleDefinition = {
   maxPathSteps: number
 
   map: {
-    ref: MapRef
+    ref: BattleArenaRef
     width: number
     height: number
     // rows[y][x]；true = movement passable
@@ -205,7 +205,7 @@ type ResolvedBattleSkill = {
 - 每 Actor skillId 唯一；`baseDamage >= 0` safe integer；`windupTicks/recoveryTicks >= 0` safe integer；range遵循 SKILL-001/DAMAGE-001；effect为非空 id；
 - validator 成功后必须生成 detached immutable/deep-frozen Simulation-owned definition；Runtime/Replay不得持有调用方可变 actors/skills/range/passable 数组引用；
 - Runtime 初始 HP = `initialHp ?? maxHp`、reservations为空、action=idle、decision=none、Plan slots为空、generation/counters使用本文固定初值；`maxHp` 始终保持上限，不因当前 HP 改变；
-- `passable` 是纯数据，不把 RPGMap Runtime 注入 Simulation；
+- `passable` 是 BattleArena authored 纯数据，不从 RPGMap passage / terrain / runtime 推导，也不把 RPGMap Runtime 注入 Simulation；
 - Runtime 内 coefficient 使用 normalized integer units；
 - Simulation 从 resolved facts 构造 `BattleSceneInit`：actors按 actorId稳定排序，`effectIds` 对所有 actor skills 的 effect 去重后按 ECMAScript ordinal string order排序；后续 `RenderProjection.actors` 同样使用稳定 actorId顺序。
 
@@ -1817,9 +1817,9 @@ tests
   → T-DEC-023..036
 ~~~
 
-除上述既有 delta 外，不得重写已 qualification 的 reducer、Decision lifecycle、Replay schema 或 public Runtime ABI。唯一新增获准的 Simulation input amendment 是 `ResolvedBattleActor.initialHp`（见 BATTLE-003）；实现时只扩展 resolved definition / validator / initial state / Replay initial copy 与对应测试，不改变 reducer、Tick ordering、Decision lifecycle 或 Presentation ABI。
+除上述既有 delta 外，不得重写已 qualification 的 reducer、Decision lifecycle 或 Replay gameplay semantics。新增获准的 amendments 只有 BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 `BattleArenaRef`：前者扩展 actor initial state；后者只把 resolved grid / Presentation static content source 从探索 Map 改为 BattleArena，不改变 reducer、Tick ordering 或 Decision lifecycle。
 
-在 initialHp amendment 实现并 qualification 前，既有 baseline 的 qualification 仍然有效，但不得宣称受损 Contract 的跨 Battle HP continuity 已通过。
+在 BATTLE-003 / BATTLE-004 实现并 qualification 前，既有 baseline 的 qualification 仍然有效，但不得宣称受损 Contract continuity 或独立 BattleArena integration 已通过。
 
 仍可OPEN且不阻塞Simulation/Decision implementation的其他内容：
 
