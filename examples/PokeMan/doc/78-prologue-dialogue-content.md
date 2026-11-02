@@ -1,7 +1,7 @@
 # PokeMan 序章教学 Dialogue 内容设计
 
 > 状态：**Narrative / Content Design**
-> 范围：Map 4 研究所的博士教学、劲敌互换卡片、教学 Battle 结果确认
+> 范围：Map 4 研究所的博士教学、劲敌互换卡片、教学 Battle 结果确认，以及博士发布第一条道路任务
 > 关联：[79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)、[77-battle-integration-v1.md](./77-battle-integration-v1.md)、[64-dialogue.md](./64-dialogue.md)、[62-event.md](./62-event.md)、[50-mvp-prologue.md](./50-mvp-prologue.md)
 
 本文冻结第一条 Battle vertical slice 的固定 Dialogue 文案与分支语义。它定义“人物说什么、玩家能选什么、终点 Dialogue key 表达什么业务意图”，不扩展 Dialogue schema，也不把 Relationship / Contract / Card / Battle 操作塞进 Dialogue Content。
@@ -10,13 +10,13 @@
 
 ## 1. 叙事目标
 
-序章的三段对话分别承担不同职责：
+序章的四段对话分别承担不同职责：
 
 | 阶段 | 人物 | 玩家应该理解 / 完成什么 | 对话结束后的业务 |
 | --- | --- | --- | --- |
 | 玩法科普 | 主角 ↔ 博士 | 角色卡、契约、战斗显现、完整度、修复和自主行动 | 玩家选择准备好，或暂时离开 |
 | 互换卡片 | 主角 ↔ 劲敌 | 双方自愿建立双向契约，互相持有对方的卡 | 成功原子建立两份 Contract 和两张随身 Card，然后进入 Battle |
-| 结果确认 | 主角 ↔ 劲敌 ↔ 博士 | 确认谁赢、卡片完整度发生什么、人物本体没有受伤 | 展示 Battle 数值结果，结束本次教学链 |
+| 结果确认 | 主角 ↔ 劲敌 ↔ 博士 | 确认谁赢、卡片完整度发生什么、人物本体没有受伤 | 展示 Battle 数值结果，推进到 after-battle |\n| 任务交接 | 主角 ↔ 博士 | 理解下一段旅行目标与出发地点 | 接受后结束 prologue 并激活 first-route |
 
 叙事基调：
 
