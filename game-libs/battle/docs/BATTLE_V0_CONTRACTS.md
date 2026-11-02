@@ -609,7 +609,20 @@ type BattleStatus =
   | "paused"
   | "settled"
   | "closed"
+
+type BattlePauseReason =
+  | "host-background"
+  | "decision-circuit"
+
+type BattlePauseEvent = {
+  reason: BattlePauseReason
+}
 ```
+
+当前 v0 只公开两种产品需要区分的 pause reason：
+
+- `host-background`：Host / App 进入后台导致的 external pause；
+- `decision-circuit`：连续 Decision availability failure 达到 circuit threshold。
 
 稳定 Contract 不携带 raw `Error`、stack、provider response 或 Browser internal object；这些只进入 diagnostics/logging。
 
@@ -623,6 +636,7 @@ type BattleSnapshot = {
   currentTick: integer
   tickDurationMs: 200
   status: BattleStatus
+  pauseReason?: BattlePauseReason
 
   actors: readonly ActorSnapshot[]
   reservations: readonly ReservationSnapshot[]
@@ -676,6 +690,8 @@ type ReservationSnapshot = {
 ActorSnapshot 的 canonical 字段必须叫 `direction`，不得再并行使用 `facing`。Public Snapshot 不暴露 action/decision generation、requestId、Plan cursor 或 queue state。
 
 Snapshot ordering 固定：`actors` 按 actorId ECMAScript ordinal排序；`reservations` 按 actorId ordinal排序。v0 不使用 `Record<ActorId, ...>` 作为 public actor collection，避免开放字符串 key 的普通 JS object 特殊语义。
+
+`pauseReason` exact invariant：只有 `status === "paused"` 时字段存在；其他 status 必须 absent。进入 PAUSED 的 transition 必须先确定 reason，再发布 Snapshot / operational pause event；`resume()` 成功进入 RUNNING 时清除 reason。重复 pause no-op 不得覆盖原 reason，尤其 `decision-circuit` pause 期间发生 Host background 时仍保持 `decision-circuit`。
 
 BattleSnapshot 与 RenderProjection 是两类不同数据。v0 不公开没有明确 consumer/递增语义的 `battleEpoch / stateVersion`；late async fencing 使用 Runtime lifecycle、AbortSignal、`actionGeneration / decisionGeneration`。内部实现若需要诊断 revision，不得因此扩张 public Snapshot ABI。
 
