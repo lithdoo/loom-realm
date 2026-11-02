@@ -1,6 +1,6 @@
 # 固定对话
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文只设计作者写好的固定 Dialogue Content；Card 模式 AI 自由对话不在这里讨论。FSDB 物理编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文只设计作者写好的固定 Dialogue Content；Card 模式 AI 自由对话不在这里讨论。Dialogue / Event / Map 的完整集成见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)。FSDB 物理编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 归宿总表见 [数据落点](./60-data-placement.md)，人物见 [人物](./61-character.md)，Event / EventStateMutation 见 [事件](./62-event.md)。
 
@@ -309,6 +309,20 @@ return terminalDialogueId
 ```
 
 `terminalDialogueId` 是当前 Frame completion result，不进入 Shared State。
+
+## Terminal completion 与 Mutation commit boundary
+
+Dialogue graph 到达 terminal Dialogue 后：
+
+- 如果 terminal Dialogue 没有 mutation，Dialogue Frame 可以正常返回 terminalDialogueId。
+- 如果 terminal Dialogue 有 mutation，Dialogue Subsystem 必须先读取 EventStateMutation、读取 EventStateList/version、校验全部 from，并提交新的 EventStateList。
+- 只有 Mutation commit 成功后，Dialogue Frame 才能以 completed 返回 terminalDialogueId。
+- Mutation Content 读取失败、from mismatch、OCC conflict 或 commit outcome unknown 都不能伪装成成功 terminal；按 Dialogue Frame failure 返回，由 caller 处理。
+- Map / Story Orchestrator 不重复执行 mutation；它只消费 terminalDialogueId 中明确约定的业务意图，并在 child 正常完成后刷新当前 Map scene。
+
+terminalDialogueId 不是剧情进度，也不是业务 action。它只标识当前 graph 最终到达的 terminal Dialogue。Contract / Card / Battle 等业务操作由 Map / Story Orchestrator 调用对应 owner 完成，不放入 Dialogue Subsystem。
+
+具体序章分支、Mutation 分配和 Battle 协作见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)。
 
 # Runtime Memory
 
