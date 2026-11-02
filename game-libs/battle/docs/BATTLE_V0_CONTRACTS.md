@@ -1,6 +1,6 @@
 # Battle v0 数据契约
 
-> 状态：**既有 Simulation-facing / Presentation contracts 已完成 qualification；BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 `BattleArena` 是 PROPOSED amendments，尚待实现与 qualification；Decision provider/prompt/structured-output concrete implementation 已由 BATTLE_V0_DECISION.md 冻结；外部 serialization 与 Host/Guidance wiring 保留明确 OPEN**。本文定义 Battle v0 canonical 数据边界。
+> 状态：**既有 Simulation-facing / Presentation contracts 已完成 qualification；BATTLE-003 `ResolvedBattleActor.initialHp`、BATTLE-004 独立 `BattleArena` 与 CTRL-002 `BattlePauseReason / onPause` 是 PROPOSED amendments，尚待实现与 qualification；Decision provider/prompt/structured-output concrete implementation 已由 BATTLE_V0_DECISION.md 冻结；外部 serialization 与 Host/Guidance wiring 保留明确 OPEN**。本文定义 Battle v0 canonical 数据边界。
 >
 > 核心 gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；本文不重新定义 reducer 行为。
 
