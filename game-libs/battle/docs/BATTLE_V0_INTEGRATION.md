@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**Simulation（含 Decision availability circuit）、DeepSeek Decision implementation/replaceable DecisionWorkflow boundary 与 Presentation integration 已完成 closed-loop qualification；PlayerGuidance concrete feature 明确延期；configured DeepSeekTransport 的 product/platform wiring、pause-reason/retry UI 与 Host lifecycle composition 仍含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
+> 状态：**既有 Simulation baseline（含 Decision availability circuit）、DeepSeek Decision implementation/replaceable DecisionWorkflow boundary 与 Presentation integration 已完成 closed-loop qualification；新增 BATTLE-003 `ResolvedBattleActor.initialHp` amendment 仍为 PROPOSED，待实现与 qualification；PlayerGuidance concrete feature 明确延期；configured DeepSeekTransport 的 product/platform wiring、pause-reason/retry UI 与 Host lifecycle composition 仍含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
