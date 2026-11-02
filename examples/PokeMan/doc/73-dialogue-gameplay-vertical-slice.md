@@ -1353,7 +1353,7 @@ dialogue -> subsystems/dialogue.mjs
 
 PWA 使用相同 topology。
 
-`base` 继续拥有唯一 unified controls producer lifetime；它不变成 Dialogue orchestrator。
+`base` 继续拥有唯一 unified controls producer lifetime；它不承担 Dialogue 流程控制。
 
 ## 27.1 Exact PWA executable landing
 
