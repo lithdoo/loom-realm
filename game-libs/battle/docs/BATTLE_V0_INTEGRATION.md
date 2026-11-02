@@ -654,7 +654,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-既有 Battle v0 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 均已完成 closed-loop qualification。BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 BattleArena 是明确 amendments，尚待实现与 qualification；它们不改变已冻结 gameplay reducer rules。PlayerGuidance 明确延期；pause reason / 手动恢复产品规则已经冻结，剩余只是在具体 Host 中接入 background/foreground event、Message Frame 与 configured DeepSeekTransport 并完成 E2E qualification。
+既有 Battle v0 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 均已完成 closed-loop qualification。BATTLE-003 `ResolvedBattleActor.initialHp`、BATTLE-004 独立 BattleArena 与 CTRL-002 pauseReason / onPause 是明确 amendments，尚待实现与 qualification；它们不改变已冻结 gameplay reducer rules。PlayerGuidance 明确延期；pause reason / 手动恢复产品规则已经冻结，剩余只是在具体 Host 中接入 background/foreground event、Message Frame 与 configured DeepSeekTransport 并完成 E2E qualification。
 
 已验证工程状态：
 
@@ -666,7 +666,7 @@ collisionRetryCount
 ## 13. 推荐实施顺序
 
 ```text
-1. 按 BATTLE_V0_SPEC.md 的 BATTLE-003 / BATTLE-004 amendments 扩展 ResolvedBattleDefinition / validator（可选 initialHp；BattleArenaRef + authored passable），并让 Presentation 从 struct.BattleArena 加载 visual tile data
+1. 按 BATTLE_V0_SPEC.md 的 BATTLE-003 / BATTLE-004 / CTRL-002 amendments 扩展 ResolvedBattleDefinition / validator、BattleArena Presentation loading，以及 BattleRuntime pauseReason / onPause operational contract
 2. 按 BATTLE_V0_SIMULATION.md 实现自驱动 headless Simulation Runtime，并新增 package `./simulation` export
 3. 实现 frozen DecisionPort + Mock/Script/Deferred Decision
 4. 跑 frozen-rule deterministic Test Matrix
