@@ -367,7 +367,7 @@ Dialogue Content 的物理结构保持 [64-dialogue.md](./64-dialogue.md) 冻结
 
 ### 5.3 Battle Frame 输入
 
-Battle Frame 输入表达场景请求，而不是让 Map 任意指定 actor / skill / resolved definition：
+Battle Frame 输入只表达受支持的场景请求与世界侧来源身份，不携带 Battle 坐标。首场 Battle 使用独立 BattleArena，spawn 由 scenario 固定：
 
 ~~~ts
 type PokeManBattleFrameInput = {
@@ -377,14 +377,6 @@ type PokeManBattleFrameInput = {
     rival: {
       instanceId: "rival-lab";
       npcId: "rival-lab";
-      x: number;
-      y: number;
-      direction: 2 | 4 | 6 | 8;
-    };
-    player: {
-      x: number;
-      y: number;
-      direction: 2 | 4 | 6 | 8;
     };
   };
 };
@@ -393,25 +385,28 @@ type PokeManBattleFrameInput = {
 输入约束：
 
 - scenarioId 必须是受支持的 PokeMan Battle scenario key。
-- 本场 mapId 必须为 4。
-- rival 必须对应 Map 4 的 rival-lab placement。
-- 坐标必须是 safe integer，两个 tile 必须不同且可通行。
+- source.mapId 必须为 4，rival 必须对应当前 Map 4 的 rival-lab interaction source；这些字段只证明剧情来源，不用于 Battle navigation。
+- Map caller 不传玩家 tile、Rival tile、direction、passability 或 Arena tile data。
 - 不接受调用方直接传入 BattleActor / Skill / Effect 的可变对象。
 - 不接受 apiKey、transport、DecisionRequest、ResolvedBattleDefinition 或 BattleRuntime。
-- Battle Subsystem 根据固定 scenario mapping 和 Shared State 解析 ally=rival、enemy=player；Map caller 不是 Content / Contract authority。
+- Battle Subsystem 根据固定 scenario mapping 和 Shared State 解析 arena=lab-tutorial、ally=rival、enemy=player；Map caller 不是 Content / Contract / Arena authority。
 
 未来 Encounter Battle 可以由 Encounter / Story source 提供受验证的 source identity；不把 lab-rival-tutorial 的固定映射提升为通用 Map 规则。
 
-### 5.4 Actor 初始位置
+### 5.4 BattleArena 与 Actor 初始位置
 
-第一场 Battle 的两个 Manifestation 在 Map 4 的可见场景中落位：
+第一场 Battle 与探索 Map 坐标彻底解耦：
 
-- ally rival manifestation：玩家当前 tile / direction。
-- enemy player manifestation：rival-lab placement tile / direction。
-- 两个 tile 必须不同、位于 Map bounds 内，且在 Battle passability grid 中可通行。
-- 不合法时在初始化 Presentation / 启动 Simulation 前返回明确的 Battle input/content failure；不得悄悄把 Actor 放到任意 tile。
+- 使用 `struct.BattleArena/lab-tutorial`。
+- Arena 固定 7 × 7，passable 全 true。
+- ally rival manifestation 固定 spawn = (1,3)，direction = 6 / right。
+- enemy player manifestation 固定 spawn = (5,3)，direction = 4 / left。
+- 两个 spawn 必须在 Arena bounds 内且 `passable[y][x] === true`。
+- 不读取 RPGMap Runtime player pose、NPC placement、passage、terrain、bridge、ledge、transfer 或 collision。
+- Map 4 只决定 Battle 在什么剧情上下文被触发，不决定 Battle grid。
+- Presentation 可以复用研究所 Tileset / Autotile / Graphics 视觉素材，但视觉 tile 不反向决定 Battle passability。
 
-优先使用 Map public event / placement facts。如果现有 Map public event contract 不提供所需玩家位置，应评估并扩展 public contract；不得读取 RPGMap Runtime internal state。
+这样实现后，Battle 不需要 Map → Battle passability projection，也不需要扩展 Map public movement contract。
 
 ## 6. Battle Subsystem 组合
 
@@ -419,21 +414,23 @@ type PokeManBattleFrameInput = {
 
 Battle Subsystem 负责把 FSDB Content 和 Shared State 转成 Battle v0 的纯数据输入：
 
-1. 读取 Map 4、Tileset、Autotile 与 Battle Presentation 所需资源。
-2. 将 Map / Tileset authored movement facts 转成 Battle Simulation 要求的 width / height / passable[y][x]。
-3. 读取 CarriedCards(player)，确认宿敌 Card 在随身位。
-4. 读取 Relationship(player → rival)，验证 Contract Integrity / skills；解析为 ally BattleActor/rival。
-5. 读取 CarriedCards(rival)，确认主角 Card 在劲敌随身位。
-6. 读取 Relationship(rival → player)，验证 Contract Integrity / skills；解析为 enemy BattleActor/player。
-7. 读取双方 Contract 实际使用的 BattleSkill；对每个 Skill.effect 读取对应 BattleEffect。
-8. 验证 Record key 与 definition id 一致、所有 ContentRef / ResourceRef 存在、资源 contentVersion 合法。
-9. 生成 detached、immutable 的 ResolvedBattleDefinition。
+1. 根据 scenarioId 解析 `struct.BattleArena/lab-tutorial`。
+2. 验证 Arena 的 width / height / passable / tileset_id / visual tile data；不读取 `struct.Map/4`。
+3. 读取 Arena 引用的 `struct.Tileset`、Tileset / Autotile Graphics 与 Battle Presentation 所需资源。
+4. 读取 CarriedCards(player)，确认宿敌 Card 在随身位。
+5. 读取 Relationship(player → rival)，验证 Contract Integrity / skills；解析为 ally BattleActor/rival。
+6. 读取 CarriedCards(rival)，确认主角 Card 在劲敌随身位。
+7. 读取 Relationship(rival → player)，验证 Contract Integrity / skills；解析为 enemy BattleActor/player。
+8. 读取双方 Contract 实际使用的 BattleSkill；对每个 Skill.effect 读取对应 BattleEffect。
+9. 使用 scenario 固定 spawn 构造两个 Actor；验证 spawn 在 Arena bounds 内且 passable。
+10. 验证 Record key 与 definition id 一致、所有 ContentRef / ResourceRef 存在、资源 contentVersion 合法。
+11. 生成 detached、immutable 的 ResolvedBattleDefinition。
 
-PokeMan 直接复用 Battle v0 的 BattleActor / BattleSkill / BattleEffect contracts，不建立 PokeMan 私有的 BattleProfile、Skill 或 Effect schema。
+PokeMan 直接复用 Battle v0 的 BattleActor / BattleSkill / BattleEffect / BattleArena contracts，不建立 PokeMan 私有的 BattleProfile、Skill、Effect 或探索 Map projection schema。
 
-Simulation 只接收纯数据；Battle Presentation 仍由 BattlePresentationBuilder 使用 SubsystemScope / Frame 读取视觉资源。Battle Subsystem 不得把 RPGMap Handler、Map timer 或 Map movement completion 注入 Battle Core。
+Simulation 只接收纯数据；Battle Presentation 仍由 BattlePresentationBuilder 使用 SubsystemScope / Frame 读取 Arena 视觉资源。Battle Subsystem 不得把 RPGMap Handler、Map timer、Map passability 或 Map movement completion 注入 Battle Core。
 
-Battle passability 是 Battle 的 Simulation input，不是 RPGMap Runtime authority。实现必须按 Battle v0 Integration 对 Map 内容的要求生成纯数据；不得把 RPGMap Runtime movement、timer、transfer 或 Browser completion 当作 Battle Rule。若现有 Map public API 不足以复用 passability 计算，应使用受测试保护的纯 Content projection，而不是导入 Map package internal / dist/internal。
+Battle passability 直接来自 BattleArena authored data。Tileset / Autotile 只负责视觉；不得调用 Map package 的 `evaluatePassability()` / `planMovement()` 来推导 Battle grid。
 
 ### 6.2 三层构造顺序
 
@@ -624,13 +621,14 @@ persistedIntegrity = max(1, finalSnapshot.hp)
 1. Battle 开始前读取 Relationship(player → rival) 与 Relationship(rival → player)，记录两者 version，并验证 Card / Contract / BattleActor invariant。
 2. 正常 Battle 结束后，读取 ally rival 与 enemy player 的 final Snapshot HP；不得从 BattleResult 推导剩余 HP。
 3. 使用同一个 Shared State transaction：
-   - conditions 同时包含两份 Relationship 的读取 version；
-   - writes 同时替换两份 Relationship Record，保留各自 affinity、hostile、relationshipText、skills 等其他字段，只更新对应 `contract.integrity = max(1, finalSnapshot.hp)`；
-   - 若需要处理 OUTCOME_UNKNOWN 的 exactly-once reconciliation，在同一事务写入普通业务 operation-marker Record。
+   - conditions 同时要求两份 Relationship 仍是 Battle 开始前读取到的 version；
+   - writes 同时替换两份 Relationship Record，保留各自 affinity、hostile、relationshipText、skills 等其他字段，只更新对应 `contract.integrity = max(1, finalSnapshot.hp)`。
 4. 两份 Relationship 必须原子提交；不允许先写一边、再单独写另一边，避免双向契约出现半结算。
-5. CONFLICT 表示零写入；重新读取并按业务规则 reconciliation，不做无条件覆盖或盲目重试。
-6. OUTCOME_UNKNOWN 必须通过 operation marker 与相关 Records fresh-read reconciliation；Shared State 不自动重试。
-7. cancelled / failure 不提交本场部分 HP 损耗；Frame abort 不得留下半提交 Contract。
+5. COMMITTED：直接视为 settlement 成功。
+6. CONFLICT：不做 blind retry。fresh-read 两份 Relationship；若两份当前 authoritative value 都已经精确等于本次 expected value，则按幂等 reconciliation 视为成功；否则 settlement 失败并停止正常战后剧情。
+7. OUTCOME_UNKNOWN：同样 fresh-read 两份 Relationship。两份都精确等于 expected value则视为 reconciled success；否则视为未确认，不自动重试，也不播放胜负 Dialogue。
+8. 不新增 operation-marker Record、operation id 或第二套 settlement state machine。当前 settlement 是幂等的“把两份 Relationship 设置成 expected final values”，OCC + authoritative read-back 已足够。
+9. cancelled / failure 不提交本场部分 HP 损耗；Frame abort 不得留下半提交 Contract。
 
 Shared State 写入只发生在正常 Battle 退出结算时，不按 Tick 写入。不得新增 BattleRuntime HP Record，也不得把 live BattleSnapshot 变成 Shared State 的第二份 authority。只有双向 settlement 确认提交后，Battle child 才能向 Map 返回正常 BattleOutcome，Map 才能启动结果 Dialogue。
 
@@ -755,7 +753,7 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 - BattleActor record key 与 value.id 不一致时拒绝。
 - Skill 引用缺失、effect 引用缺失、ResourceRef 不存在或 contentVersion 非法时拒绝。
 - BattleEffect exact schema 校验通过；旧的 graphics/name shape 被拒绝。
-- Map 4 bounds、passability、两个 Manifestation 初始 tile 重叠或不可通行时拒绝。
+- `struct.BattleArena/lab-tutorial` 缺失、shape 非法、visual tile data 非法，或两个固定 spawn 越界 / 重叠 / 不可通行时拒绝。
 - 输出为 detached immutable ResolvedBattleDefinition。
 
 ### 12.2 Battle Subsystem
@@ -769,7 +767,7 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 - simultaneous_defeat 时两边都保存 1，但结果仍然是平局。
 - 下一场 Battle 从两份 Contract 的保存值传入 initialHp，maxHp 保持 BattleActor 上限。
 - 两份 Relationship 更新通过同一个 Shared State transaction 原子提交；验证任一 OCC condition 冲突时两边都零写入。
-- 验证 OUTCOME_UNKNOWN 的 operation-marker reconciliation，不自动重试 mutation。
+- 验证 CONFLICT / OUTCOME_UNKNOWN 均只做 fresh-read reconciliation：两份 Relationship 同时等于 expected values 才成功，否则不自动重试、不启动胜负 Dialogue。
 - Presentation initialize / render / failure / close 的生命周期。
 - Frame signal pre-abort 与 active abort。
 - Decision failure、circuit pause、显式 resume。
@@ -820,8 +818,8 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 
 | 阶段 | 内容 | 通过标准 |
 | --- | --- | --- |
-| P0 — Contract / lifecycle baseline | 冻结 `initialHp` 输入 amendment、1 HP 最低持久化规则与双向 settlement owner；确认 Host pause reason / lifecycle OPEN | Core input 与 PokeMan settlement 边界明确，不在 Map callback 中发明业务写入 |
-| P1 — Core input + Content | Battle Core 实现可选 `ResolvedBattleActor.initialHp`；PokeMan 按 Contract 显式传值；修正 Grab range、BattleEffect schema / Record / Graphics 与 Browser artifact sync | Core / Content validator 通过；旧 caller 省略字段仍默认 maxHp |
+| P0 — Contract / lifecycle baseline | 冻结 `initialHp`、独立 `BattleArena`、1 HP 最低持久化规则与双向 OCC settlement owner；确认 Host pause reason / lifecycle OPEN | Core input、Arena 与 PokeMan settlement 边界明确，不从 RPGMap 推导 Battle navigation，不新增 operation marker |
+| P1 — Core input + Content | Battle Core 实现可选 `ResolvedBattleActor.initialHp` 与 `BattleArenaRef` / Presentation loading；PokeMan 新增 `struct.BattleArena/lab-tutorial`，修正 Grab range、BattleEffect schema / Record / Graphics 与 Browser artifact sync | Core / Content validator 通过；Arena 不依赖 struct.Map；旧 initialHp caller 省略字段仍默认 maxHp |
 | P2 — Headless composition | 新建 Battle Subsystem、双向 Contract Resolver、FakeClock、ScriptDecision composition | 不启动 Browser 即可运行确定性 1v1；验证 initialHp、1 HP floor 与双向原子结算 |
 | P3 — Map 4 prologue vertical slice | Map 4 Professor → rival Dialogue → Battle → result-specific post-battle Dialogue；Map controls 整链暂停与最终 fresh resume | 三种 BattleResult 分支正确；settlement 后才触发 Dialogue；取消 / failure 不误触发剧情 |
 | P4 — DeepSeek transport | 从 SessionConfig 构造 PokeMan-private transport，接入双方 DeepSeekDecision | PWA / Hostra 的真实 provider request 可观察且可取消；AI vs AI 正常运行 |
