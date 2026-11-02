@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**既有 Core gameplay、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision 与 Presentation Acceptance 均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；新增 BATTLE-003（显式 initialHp input）与 BATTLE-004（独立 BattleArena）为 PROPOSED，尚待实现与 qualification**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
+> 状态：**既有 Core gameplay、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision 与 Presentation Acceptance 均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；新增 BATTLE-003（显式 initialHp input）、BATTLE-004（独立 BattleArena）与 CTRL-002（pauseReason / onPause）为 PROPOSED，尚待实现与 qualification**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
 >
 > DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
@@ -206,13 +206,13 @@
 | T-DEC-022 | CONTRACTS §9 | Tick N damaging hit触发新Decision | Observation recentEvents只含Tick N与N-1 relevant facts，稳定排序；长期Battle不积累无界Observation history |
 | T-DEC-023 | DEC-004/DEC-005, SIMULATION §10 | authority-valid attempt_failure 连续第1、2次被消费，code可任意不同 | Simulation不解释code；streak=1/2；Battle保持RUNNING；最早下一合法Tick可重新Decision |
 | T-DEC-024 | DEC-005, SIMULATION §10 | 两次attempt_failure后消费一个authority-valid DecisionCompletion.completed，但Plan随后被Simulation reject | completion先把streak重置0；PlanRejectReason/correction不属于Decision availability failure |
-| T-DEC-025 | DEC-005, SIMULATION §10/§16 | 连续第3个authority-valid attempt_failure在Tick N phase 9消费 | Tick N完整提交；render/terminal检查正常完成；本Tick已生成的合法Decision commands仍正常调用；随后进入既有PAUSED lifecycle；不schedule next wake |
+| T-DEC-025 | DEC-005, CTRL-002, SIMULATION §10/§16 | 连续第3个authority-valid attempt_failure在Tick N phase 9消费 | Tick N完整提交；本Tick合法Decision commands仍正常调用；随后进入PAUSED且 pauseReason=`decision-circuit`；onPause只发一次；不schedule next wake |
 | T-DEC-026 | DEC-005, SIMULATION §10/§29 | circuit trip时另一个Actor仍有active Decision request | 不abort、不revoke；Actor decision/requestId/generation保持不变；request可在PAUSED期间完成并enqueue；resume后第一个真实Tick按正常authority fence消费 |
 | T-DEC-027 | SIMULATION §10 | 同一Decision Inbox snapshot按stable order为 failure, failure, failure, success | 第3个failure后circuit latch open；同Tick后续success不得自动解锁；必须显式resume |
 | T-DEC-028 | DEC-005, SIMULATION §10 | streak=2后消费一个因既有lifecycle原因已stale的completion | 不读取concrete code；stale/lifecycle-invalid不产生availability signal，不增加、不重置streak，不触发pause |
 | T-DEC-029 | DEC-004/DEC-005, SIMULATION §10 | 任意authority-valid session_fatal，code取任意opaque值 | 不等待failure threshold；直接terminal BattleResult=failure source=decision，并可原样传播code但不按code分支 |
-| T-DEC-030 | SIMULATION §10 | decision circuit PAUSED后外部显式battle.resume() | streak清0、circuit关闭、presentation.resume成功后RUNNING；无pause catch-up；保留原thinking/in-flight request；PAUSED期间已enqueue completion在后续首个真实Tick正常消费 |
-| T-DEC-031 | SIMULATION §6/§10 | ordinary external pause/resume且circuit未open | 不因pause/resume本身清零已有failure streak；external pause与circuit pause都不abort/revoke active Decision；差异只在circuit guard与trigger |
+| T-DEC-030 | CTRL-002, SIMULATION §10 | decision circuit PAUSED后玩家选择重试，product显式battle.resume() | streak清0、circuit关闭、presentation.resume成功后RUNNING；pauseReason清除；无pause catch-up；保留原thinking/in-flight request；PAUSED期间已enqueue completion在后续首个真实Tick正常消费 |
+| T-DEC-031 | CTRL-002, SIMULATION §6/§10 | `pause("host-background")` / resume且circuit未open | PAUSED时 pauseReason=`host-background`；不因pause/resume本身清零已有failure streak；两类pause都不abort/revoke active Decision；resume后reason清除 |
 | T-DEC-032 | DEC-005, SIMULATION §10/Replay | Live中曾因3个attempt_failure进入circuit PAUSED；Replay重放相同Decision records | Replay不启用live circuit、不进入PAUSED；由于live circuit未改写requestId/generation/Actor decision authority，Replay仍产生相同Decision request/consume trace |
 | T-DEC-033 | DEC-004/DEC-005, CONTRACTS §16 | 三个authority-valid attempt_failure分别使用完全不同的concrete code | Simulation结果与code值无关：都只按category累计；证明circuit对Decision implementation/provider-neutral |
 | T-DEC-034 | SIMULATION §6/§10/§28 | late scheduler wake需要catch-up多个Tick，circuit在其中Tick N trip | Tick N完整提交后立即进入PAUSED；`accumulatedRunningMs = N * 200`；N+1..target不继续处理；resume后不得补跑pause前未处理的wall-time backlog |
@@ -292,6 +292,11 @@
 | T-CTRL-013 | SIMULATION §16/24 | 非 terminal Tick reducer输出 Decision command，但 presentation.render 同步 fatal | 先归约 presentation failure并 suppress Decision command；provider 不收到新 request |
 | T-CTRL-014 | SIMULATION §24 | Presentation抛 INVALID_STATE/SCENE_MISMATCH/PROJECTION_CONFLICT/INVALID_DATA | 视为 Runtime/contract invariant或programmer error，throw/reject；不包装成 BattleResult.failure |
 | T-CTRL-015 | SIMULATION §6/7 | currentTick/ID counter 下一次递增将超出 safe integer | 在溢出前停止 authority，BattleResult=failure source=simulation code=BATTLE_COUNTER_OVERFLOW；不得 wrap/继续 |
+| T-CTRL-016 | CTRL-002, TIME-004 | RUNNING 调 `pause("host-background")` | 进入PAUSED；Snapshot.pauseReason=host-background；onPause({reason:"host-background"})恰好一次；clock冻结 |
+| T-CTRL-017 | CTRL-002 | 已PAUSED/decision-circuit时再次 `pause("host-background")` | no-op；reason仍为decision-circuit；不得第二次发onPause |
+| T-CTRL-018 | CTRL-002 | 任一PAUSED状态显式resume成功 | 进入RUNNING；Snapshot不再含pauseReason；不得自动产生第二次resume |
+| T-CTRL-019 | CTRL-002 | RUNNING时调用legacy `pause()` 无参数 | 向后兼容等价于 `pause("host-background")` |
+| T-CTRL-020 | CTRL-002 | subscribe onPause 后unsubscribe，再次发生pause | unsubscribe后不再通知；不影响Runtime pause本身 |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
