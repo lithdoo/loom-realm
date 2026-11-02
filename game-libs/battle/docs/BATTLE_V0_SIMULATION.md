@@ -1,6 +1,6 @@
 # Battle v0 Simulation Implementation Spec
 
-> 状态：**Simulation gameplay/runtime baseline 与 Decision availability circuit (§10/§16) 均 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。
+> 状态：**既有 Simulation gameplay/runtime baseline 与 Decision availability circuit (§10/§16) 已 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；`ResolvedBattleActor.initialHp` 是新增 PROPOSED input amendment，尚待实现与 qualification**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。
 >
 > 目标：implementation agent 应能直接实现 headless/self-driven Simulation，而不需要自行选择 Clock、queue、Decision lifecycle、Plan handoff、Tick transaction、Projection cadence、terminal race 或 Replay 架构。
 
@@ -173,6 +173,8 @@ type ResolvedBattleActor = {
   tile: GridPosition
   direction: Direction
   maxHp: number
+  // Optional explicit current HP; omitted preserves the legacy full-HP default.
+  initialHp?: number
 
   // SceneInit 所需稳定视觉 facts；不参与 gameplay 判定。
   character: ResourceRef
@@ -199,10 +201,10 @@ type ResolvedBattleSkill = {
 - map `width/height >= 1` 且为 safe integer；`passable.length === height`，每行长度严格等于 width，元素只能是 boolean；
 - v0 actors 恰好两个、actorId唯一、team恰好1 ally + 1 enemy；
 - 两个 Actor 初始 committed tile 不得相同，必须在 bounds 内且 `passable[y][x] === true`；
-- Actor `maxHp >= 1` safe integer；direction必须为 2/4/6/8；character必须是合法 ResourceRef；
+- Actor `maxHp >= 1` safe integer；若提供 `initialHp`，必须是 safe integer 且 `1 <= initialHp <= maxHp`；省略时按 `maxHp` 初始化；direction必须为 2/4/6/8；character必须是合法 ResourceRef；
 - 每 Actor skillId 唯一；`baseDamage >= 0` safe integer；`windupTicks/recoveryTicks >= 0` safe integer；range遵循 SKILL-001/DAMAGE-001；effect为非空 id；
 - validator 成功后必须生成 detached immutable/deep-frozen Simulation-owned definition；Runtime/Replay不得持有调用方可变 actors/skills/range/passable 数组引用；
-- Runtime 初始 HP = maxHp、reservations为空、action=idle、decision=none、Plan slots为空、generation/counters使用本文固定初值；
+- Runtime 初始 HP = `initialHp ?? maxHp`、reservations为空、action=idle、decision=none、Plan slots为空、generation/counters使用本文固定初值；`maxHp` 始终保持上限，不因当前 HP 改变；
 - `passable` 是纯数据，不把 RPGMap Runtime 注入 Simulation；
 - Runtime 内 coefficient 使用 normalized integer units；
 - Simulation 从 resolved facts 构造 `BattleSceneInit`：actors按 actorId稳定排序，`effectIds` 对所有 actor skills 的 effect 去重后按 ECMAScript ordinal string order排序；后续 `RenderProjection.actors` 同样使用稳定 actorId顺序。
@@ -452,7 +454,7 @@ result = null
 reservations = empty
 
 per actor:
-  hp = maxHp
+  hp = initialHp ?? maxHp
   action = idle
   decision = none
   activePlan = null
@@ -1516,7 +1518,7 @@ ReplayDriver只接受 `replayability.type === "deterministic"`。对于 `in_prog
 
 不记录真实 Decision completion timestamp。Replay arrays 按产生 Tick、再按 actorId / effectId 等稳定 identity 写入，不以 Map insertion order 或 Promise order作为序列化权威。
 
-`initial` 是 Runtime build 时已验证的 `ResolvedBattleDefinition` 的 detached immutable deep copy；Replay 不重新访问 Decision/LLM 来恢复初始 gameplay facts，也不额外引入 definition fingerprint/hash algorithm。外部 Content serialization subject/version 如何生成该 resolved definition 仍属于 Integration，不影响 Replay。
+`initial` 是 Runtime build 时已验证的 `ResolvedBattleDefinition` 的 detached immutable deep copy；其中显式 `initialHp`（如提供）必须被保留，省略时 Replay 与原 Runtime 一样按 `maxHp` 初始化。Replay 不重新访问 Decision/LLM 来恢复初始 gameplay facts，也不额外引入 definition fingerprint/hash algorithm。外部 Content serialization subject/version 如何生成该 resolved definition 仍属于 Integration，不影响 Replay。
 
 
 ## 27. Replay execution
@@ -1668,7 +1670,8 @@ Simulation qualification必须提供：
 3. Decision races：Inbox snapshot、stale generation、correction、pending Plan；
 4. lifecycle：initialization、terminal、cancel/close、Presentation failure；
 5. Replay qualification：live→record→replay结果/snapshot/projection一致；
-6. existing Presentation integration：Simulation只消费已冻结Port，不重测Browser内部语义。
+6. existing Presentation integration：Simulation只消费已冻结Port，不重测Browser内部语义；
+7. initial HP amendment：覆盖字段省略（默认 maxHp）、显式满血、显式受损初值、0 / 超上限 / 非整数拒绝，并验证 Snapshot / Projection / Replay 保留初始 HP。
 
 ## 31. Implementation invariants
 
@@ -1765,6 +1768,7 @@ Definition of Done：
 - circuit catch-up cut 通过 FakeClock 验证为 `accumulatedRunningMs = currentTick * 200`，resume 不补跑 pause 前 backlog；
 - FakeClock tests never depend on real sleep/timer drift；
 - no gameplay path uses `Date.now()`, `Math.random()`, Browser animation ACK, Map Runtime state, or public `tick()`；
+- `ResolvedBattleActor.initialHp` amendment：省略时兼容默认 maxHp；提供时校验 `1 <= initialHp <= maxHp`；Runtime / Snapshot / Projection / Replay 一致使用该初始值；
 - Decision callback never mutates gameplay state；
 - deterministic live→Replay qualification matches final result/snapshot/gameplay Projection sequence；
 - external cancel/Presentation/invariant records are correctly marked audit-only；
@@ -1813,9 +1817,11 @@ tests
   → T-DEC-023..036
 ~~~
 
-除上述 delta 外，不得重写已 qualification 的 reducer、Decision lifecycle、Replay schema 或 public Runtime ABI。
+除上述既有 delta 外，不得重写已 qualification 的 reducer、Decision lifecycle、Replay schema 或 public Runtime ABI。唯一新增获准的 Simulation input amendment 是 `ResolvedBattleActor.initialHp`（见 BATTLE-003）；实现时只扩展 resolved definition / validator / initial state / Replay initial copy 与对应测试，不改变 reducer、Tick ordering、Decision lifecycle 或 Presentation ABI。
 
-仍可OPEN且不阻塞Simulation/Decision implementation的内容：
+在 initialHp amendment 实现并 qualification 前，既有 baseline 的 qualification 仍然有效，但不得宣称受损 Contract 的跨 Battle HP continuity 已通过。
+
+仍可OPEN且不阻塞Simulation/Decision implementation的其他内容：
 
 - serialized BattleActor/BattleSkill external subject/version/key encoding；
 - DeepSeek concrete Decision 的 provider/HTTP/failure semantics 已由 BATTLE_V0_DECISION.md 冻结且不属于 Simulation；这里只允许 Host credential/composition wiring 保持外部 OPEN；
