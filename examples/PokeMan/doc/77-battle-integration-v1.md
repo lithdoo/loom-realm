@@ -123,30 +123,29 @@ Dialogue / lab-rival-after-ally-win
 
 ### 3.2 Dialogue 的职责与返回值
 
-博士 Dialogue 使用当前已有的 professor-vertical-slice 业务结果：
+博士 Dialogue 使用 professor-vertical-slice 作为入口。固定内容、重听 / 暂缓分支和 terminal id 见 [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)。
 
-- ready：博士阶段完成，Map 继续调用劲敌 Dialogue。
-- not-yet / cancelled：结束本次序章链，返回 Map。
+Map 消费的业务结论：
+
+- professor-tutorial-ready → ready：Map 继续调用劲敌 Dialogue。
+- professor-tutorial-not-yet → not-yet：结束本次序章链，返回 Map。
 - child Frame failed / lifecycle cancelled：不推进下一阶段。
 
-劲敌 Dialogue 使用现有 lab-rival-intro Content 作为起点，但当前两个 choices 都指向自身，尚未形成可供 Map 消费的挑战结果。实现时需要让 Dialogue child 返回明确的业务结论，例如：
+劲敌 Dialogue 使用 lab-rival-intro 作为入口，Choice 只跳转到固定 terminal Dialogue：
 
-~~~ts
-type RivalIntroConclusion =
-  | "accepted-challenge"
-  | "deferred"
-  | "cancelled";
-~~~
+- lab-rival-exchange-accept → accepted-challenge：business Runtime 原子交换双向 Contract / Card；提交成功后才能进入 Battle。
+- lab-rival-defer → deferred：不建立 Contract、不写入 CarriedCards、不进入 Battle。
+- child Frame failed / lifecycle cancelled：不推进 Battle。
 
-只有 accepted-challenge 才能调用 Battle。Dialogue 本身不调用 Battle，也不负责创建 Battle Runtime。
+Dialogue Content 不创建 Relationship / Contract / Card，也不调用 Battle。terminal Dialogue id 由 PokeMan Dialogue / Map orchestration adapter 映射为上述业务结论；不扩展 Choice schema。
 
-战后 Dialogue 是独立的 Dialogue child Frame。建议先定义三个明确的 Content key：
+战后 Dialogue 使用以下三个固定 Content key，完整文案同样见文档 78：
 
 - lab-rival-after-ally-win
 - lab-rival-after-enemy-win
 - lab-rival-after-draw
 
-它们分别承接 ally 胜利、enemy 胜利和平局 / simultaneous defeat。第一轮文案可以很短，但必须让结果有可观察的剧情反馈。
+它们分别承接主角胜出、劲敌胜出和平局。只有 Battle 正常 terminal 且双方 Contract Integrity 成功结算后，Map 才能调用对应结果 Dialogue。
 
 ### 3.3 第一场 Battle：双方互相调用对方的 Battle Manifestation
 
@@ -299,7 +298,9 @@ Map 4 的 Professor interaction 是整条序章链的唯一入口：
 
 Map 只传业务 key 和来源身份，不传 RPGDialogue request、台词、choice、sprite、Presentation data 或 controls object。
 
-博士 Dialogue 沿用当前：
+Dialogue Content 的物理结构保持 [64-dialogue.md](./64-dialogue.md) 冻结的 lines / speaker / choices / target。具体台词与分支见 [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)。
+
+博士 Dialogue 沿用当前业务结果：
 
 ~~~ts
 type ProfessorDialogueResult = {
@@ -308,7 +309,7 @@ type ProfessorDialogueResult = {
 };
 ~~~
 
-劲敌 Dialogue 建议返回：
+劲敌 Dialogue 的业务结果：
 
 ~~~ts
 type RivalIntroResult = {
@@ -317,7 +318,9 @@ type RivalIntroResult = {
 };
 ~~~
 
-战后 Dialogue 的结果只需要表达正常结束 / 用户取消，不反向驱动 Battle。真实 child Frame failed 或 lifecycle cancelled 不得被解释为正常剧情结论。
+上述 conclusion 是 PokeMan Dialogue / Map orchestration adapter 根据 terminal Dialogue id 得出的业务语义，不是 Dialogue Choice 上的新字段。Dialogue Runtime 仍按现有 contract 返回 terminalDialogueId。
+
+战后 Dialogue 的正常完成只表示该段结果确认对白已经结束，不反向驱动 Battle。真实 child Frame failed 或 lifecycle cancelled 不得被解释为正常剧情结论。
 
 ### 5.3 Battle Frame 输入
 
@@ -779,6 +782,7 @@ PokeMan：
 - [67-shared-state-records.md](./67-shared-state-records.md) — Relationship / Contract / CarriedCards 物理 Record。
 - [76-deepseek-session-configuration.md](./76-deepseek-session-configuration.md) — Session credential 与 PokeMan-private DeepSeek Transport 边界。
 - [73-dialogue-gameplay-vertical-slice.md](./73-dialogue-gameplay-vertical-slice.md) — Map child Frame / controls activation 参考实现。
+- [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md) — Map 4 序章的博士玩法科普、劲敌双向卡片交换、三种 Battle 结果确认对白与业务边界。
 
 Battle：
 
