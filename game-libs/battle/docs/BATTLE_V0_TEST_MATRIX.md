@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**Core gameplay FROZEN；Simulation（含 Decision availability circuit）、DeepSeekDecision 与 Presentation Acceptance 均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
+> 状态：**既有 Core gameplay、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision 与 Presentation Acceptance 均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；新增 BATTLE-003（显式 initialHp input）为 PROPOSED，尚待实现与 qualification**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
 >
 > DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
@@ -31,6 +31,16 @@
 | T-ARCH-021 | CONTRACTS §10 | ActorId 包含开放字符串如 "__proto__"/"10"/"a" | BattleSnapshot.actors 仍为 ordinal-sorted readonly array，不使用 Record/object key authority；reservations同样稳定排序 |
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
 | T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
+
+### 1.1 Explicit initial HP amendment — BATTLE-003 (PROPOSED)
+
+| Test ID | Rules | 场景 | Expected |
+| --- | --- | --- | --- |
+| T-INIT-001 | BATTLE-002, BATTLE-003 | `ResolvedBattleActor.initialHp` 省略 | Runtime 初始 `hp = maxHp`，保持既有 caller 兼容 |
+| T-INIT-002 | BATTLE-003 | 显式 `initialHp = maxHp` | 初始 Snapshot / Projection 的 hp 等于 maxHp |
+| T-INIT-003 | BATTLE-003 | 显式 `1 <= initialHp < maxHp` | 初始 hp 使用 initialHp，maxHp 保持原上限；Replay initial 保留该值 |
+| T-INIT-004 | BATTLE-003 | initialHp = 0、负数、超过 maxHp、非整数或非 safe integer | Definition validator reject |
+| T-INIT-005 | BATTLE-003, REPLAY-001 | 受损 initialHp 的 live Battle → Replay | Replay 从 record.initial 重建相同初始 hp/maxHp，并通过 deterministic qualification |
 
 ## 2. Time / Scheduler
 
@@ -332,7 +342,7 @@
 
 ## 12. Core OPEN 状态
 
-当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。
+当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。新增 `BATTLE-003` 是 resolved Simulation input amendment（不是新的 gameplay rule），处于 PROPOSED；T-INIT-001..005 已定义为实现后的 blocking acceptance，未通过前不得声称 initialHp continuity 已完成。
 
 Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance；Decision implementation acceptance 已在 §8.1 冻结。PlayerGuidance concrete contract/wiring 明确延期，但 DecisionWorkflow extensibility boundary 已冻结；剩余 OPEN 只涉及非 Presentation Content 统一 schema、未来 Guidance/Host wiring 与 configured DeepSeekTransport 的 credential/network/product capability handoff，这些不得反向改变已冻结的 Core/Decision/Presentation Expected。
 
@@ -340,6 +350,7 @@ Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation accept
 
 至少应先用 headless Mock/Script 测通：
 
+- `ResolvedBattleActor.initialHp`：字段省略兼容 maxHp、显式受损初值、非法值拒绝、Snapshot / Projection / Replay 一致；
 - overdue Tick catch-up；
 - Decision inbox snapshot 边界：snapshot 前到达本 Tick消费、snapshot 后到达下一 Tick消费；
 - turn-only / turn+skill 的 Action 配额；
