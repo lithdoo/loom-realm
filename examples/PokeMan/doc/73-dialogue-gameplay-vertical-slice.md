@@ -1395,7 +1395,7 @@ apps/pwa/test/staging-build.test.mjs
 
 PokeMan自己的 `@loomrealm-game/rpg-dialogue` 必须位于 `dependencies`，不再只属于 `devDependencies`。
 
-## 27.2 PWA Content closure does NOT expand to Dialogue content
+## 27.2 This test slice PWA Content closure does NOT expand to Dialogue content
 
 本 slice 不读取：
 
