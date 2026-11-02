@@ -145,6 +145,8 @@ World / Dialogue / Battle / System Menu
 - 获得角色卡等需要玩家明确确认的业务消息；
 - “无法携带更多角色卡”等业务提示；
 - 存档 / 读取失败等可恢复错误；
+- Battle 因 Host background 暂停后的“继续战斗 / 退出战斗”确认；
+- Battle 因 Decision circuit 暂停后的“重试决策 / 退出战斗”确认；
 - 警告信息；
 - `确认 / 取消`、`是 / 否` 等模态选择；
 - 退出游戏、覆盖存档等危险操作前的确认。
