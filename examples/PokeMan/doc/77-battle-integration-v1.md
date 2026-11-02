@@ -4,9 +4,9 @@
 >
 > 范围：将已完成 closed-loop qualification 的 Battle v0 组合进真实 PokeMan Game Package / Subsystem / Map / Host 流程。
 >
-> 本文不重新定义 Battle gameplay rules、Decision protocol、Simulation Runtime 或 Presentation ABI。它们分别以 Battle v0 Spec、Contracts、Simulation、Decision、Presentation 和 Integration 文档为准。
+> 本文不重新定义 Battle gameplay rules、Decision protocol、Simulation Runtime 或 Presentation ABI。为支持 Contract Integrity 连续性，只提出一项窄范围 Simulation input amendment：`ResolvedBattleActor.initialHp`；该输入不改变 Battle gameplay rules，具体约束见 Battle Core Spec / Simulation 文档。
 >
-> 本文只冻结 PokeMan 侧的组合方式、第一条集成验证路径、数据边界、已知跨模块阻塞与验收标准。首场互换角色卡的参战身份、技能矩阵与建议数值见 [80-battle-scenario-design.md](./80-battle-scenario-design.md)。
+> 本文冻结 PokeMan 侧的组合方式、第一条集成验证路径、数据边界、正常 Battle settlement 规则与验收标准。首场互换角色卡的参战身份、技能矩阵与建议数值见 [80-battle-scenario-design.md](./80-battle-scenario-design.md)。
 
 ## 1. 目标
 
@@ -57,7 +57,7 @@ Map Frame Handler 是 Map Subsystem 中已经存在的 Frame Handler。它在自
 
 **第一条产品纵向切片仍是 Map 4 的双向卡片交换与教学 Battle。** Map 5 的 road-bandit 保留为后续普通 Encounter / 本体参战验证，不再作为第一次 Battle 的入口。
 
-当前 Battle v0 的 Resolved Actor input 仍存在 initialHp 字段缺口，见第 8 节。它不阻止两份全新、满 Integrity Contract 进行第一次教学战斗，但会阻止后续 Battle 正确恢复已经受损的 Integrity；不能把一次满血首战误报成完整的跨战斗连续性验证。
+当前 Core baseline 尚未实现显式 `initialHp` 输入；本设计要求在 PokeMan 连续战斗验收前完成该窄范围 amendment。正常 Battle 退出时还必须把 final HP = 0 的 Contract-backed 卡片以 1 Integrity 保存，BattleResult 仍按归一化前的 final Snapshot 判定。
 
 ## 2. 当前仓库基线
 
@@ -568,57 +568,79 @@ BattleResult 本身只表示 ally_win / enemy_win / simultaneous_defeat / cancel
 
 这里的 HP 是两份有向 Contract 各自的 Battle Manifestation Integrity，不是主角或宿敌本体的生命值。
 
-### 8.2 当前 Battle v0 无法表达受损 Contract 的初始 HP
+### 8.2 Core 输入契约扩展：ResolvedBattleActor.initialHp
 
-当前 ResolvedBattleActor 只有 maxHp，没有 initialHp；Simulation 初始化时固定：
+当前 ResolvedBattleActor 只有 maxHp，Simulation 初始化时固定：
 
 ~~~text
 ActorRuntimeState.hp = ActorRuntimeState.maxHp
 ActorRuntimeState.maxHp = ResolvedBattleActor.maxHp
 ~~~
 
-因此当前 public contract 无法同时表达：
+目标是增加可选 `initialHp` 输入，而不是改变 BattleActor Content：
 
-~~~text
-maxHp     = BattleActor.<actor>.max_hp
-initialHp = Relationship(<holder> → <servant>).contract.integrity
+~~~ts
+type ResolvedBattleActor = {
+  actorId: ActorId;
+  team: Team;
+  tile: GridPosition;
+  direction: Direction;
+  maxHp: number;
+  initialHp?: number;
+  // character / skills unchanged
+};
 ~~~
 
-**对本次第一次教学 Battle：** 两份 Contract 刚建立时都应以各自基础 BattleActor.max_hp 初始化 Integrity，因此默认 initialHp = maxHp 正好符合首战要求。该缺口不阻止满 Integrity 的第一次 Map 4 Battle。
+约束：
 
-**对后续 Battle：** 首战结束后，两份 Contract Integrity 会因战斗损耗而下降；下一场 Battle 必须把当前 integrity 作为 initialHp，同时保留 BattleActor.max_hp 作为 maxHp。当前 v0 做不到这一点。如果把 maxHp 直接设置成 contract.integrity，HUD 最大值会错误地变成当前 HP，不能作为 workaround。
+- `maxHp` 仍来自 `BattleActor.max_hp`，表示稳定上限。
+- PokeMan 的 `initialHp` 必须来自对应方向 `Relationship(<holder> → <servant>).contract.integrity`。
+- 提供 `initialHp` 时必须是 safe integer，且 `1 <= initialHp <= maxHp`；0 Integrity 不允许构造新的 Battle Manifestation。
+- 省略 `initialHp` 的既有 Battle caller 继续以 `maxHp` 初始化，保持兼容。
+- Simulation 初始化使用 `initialHp ?? maxHp`；initial Snapshot、RenderProjection、Replay 的 `record.initial` 必须反映真实初始 HP。
+- validator、Snapshot、Replay definition / validation 和 deterministic tests 同步覆盖该字段。
+- Battle Core 不读取 Relationship、Contract 或 PokeMan Content；它只接收已解析数值。
 
-完整的跨 Battle Contract Integrity 闭环需要一个独立的 Battle Core contract amendment，审议明确的 initialHp 输入（或等价的初始 Actor HP 字段），约束为：
-
-- maxHp 仍来自 BattleActor.max_hp。
-- initialHp 来自对应方向的 Relationship.contract.integrity。
-- 0 <= initialHp <= maxHp；initialHp 为 0 时，PokeMan 不应启动该 Contract 的 Battle Manifestation。
-- 未提供 initialHp 的既有 Battle callers 保持以 maxHp 初始化的兼容语义。
-- Simulation validator、initial snapshot、RenderProjection、Replay definition / validation 和 deterministic tests 同步覆盖该字段。
-- Battle Core 不读取 Relationship、Contract 或 PokeMan Content；它只接收已解析的数值。
-
-该字段不在本设计 PR 中修改 Battle Core，也不允许 PokeMan 通过伪造 maxHp 绕过它。
+这是一个 Simulation input contract amendment，不改变 Tick reducer、Decision protocol、Damage、BattleResult 或 Presentation ABI。该 amendment 在当前文档中是目标设计，尚不代表 Runtime 已实现。不得通过伪造 `maxHp = contract.integrity` 绕过；否则 HUD 最大值会错误地变成当前 HP。
 
 ### 8.3 双向结算与 Shared State transaction
 
-正常 Battle terminal 后，Battle Subsystem 从 final Snapshot 读取双方最终 HP，并把两份 Relationship Contract Integrity 作为一个业务事务提交：
+正常 Battle terminal 时，Battle Subsystem 必须先读取未经归一化的 final Snapshot，并保留原始 BattleResult。正常退出 Battle、向 Map 返回 child outcome 之前，对两份 Contract-backed Actor 分别计算：
+
+~~~text
+persistedIntegrity = max(1, finalSnapshot.hp)
+~~~
+
+- final HP 大于 0：原样保存。
+- final HP 等于 0：保存为 1。
+- 双方同 Tick 归零：BattleResult 仍是 `simultaneous_defeat`，两份 Contract 都保存为 1。
+- 1 HP 下限只作用于 Shared State settlement，不修改 Simulation Snapshot、BattleResult、Replay 或胜负对白。
+- 该规则只作用于 Contract-backed Manifestation；普通本体 / transient Actor 的本场 HP 不因此获得长期持久化。
+
+双向业务事务：
 
 1. Battle 开始前读取 Relationship(player → rival) 与 Relationship(rival → player)，记录两者 version，并验证 Card / Contract / BattleActor invariant。
-2. Battle 正常结束后，读取 ally rival 与 enemy player 的 final Snapshot HP。
+2. 正常 Battle 结束后，读取 ally rival 与 enemy player 的 final Snapshot HP；不得从 BattleResult 推导剩余 HP。
 3. 使用同一个 Shared State transaction：
    - conditions 同时包含两份 Relationship 的读取 version；
-   - writes 同时替换两份 Relationship Record，保留各自 affinity、hostile、relationshipText、skills 等其他字段，只更新对应 contract.integrity；
+   - writes 同时替换两份 Relationship Record，保留各自 affinity、hostile、relationshipText、skills 等其他字段，只更新对应 `contract.integrity = max(1, finalSnapshot.hp)`；
    - 若需要处理 OUTCOME_UNKNOWN 的 exactly-once reconciliation，在同一事务写入普通业务 operation-marker Record。
 4. 两份 Relationship 必须原子提交；不允许先写一边、再单独写另一边，避免双向契约出现半结算。
 5. CONFLICT 表示零写入；重新读取并按业务规则 reconciliation，不做无条件覆盖或盲目重试。
 6. OUTCOME_UNKNOWN 必须通过 operation marker 与相关 Records fresh-read reconciliation；Shared State 不自动重试。
 7. cancelled / failure 不提交本场部分 HP 损耗；Frame abort 不得留下半提交 Contract。
 
-Shared State 写入只发生在 Battle 正常 terminal 之后，不按 Tick 写入。不得新增 BattleRuntime HP Record，也不得把 live BattleSnapshot 变成 Shared State 的第二份 authority。
-
-在 initialHp amendment 合并前，第一场满 Integrity 教学 Battle 可以使用 maxHp 启动，并将 final Snapshot 原子写回双方 Contract；但不能声称下一场 Battle 已能从受损 Integrity 恢复。Map 5 road-bandit 或任何需要再次调用这两份 Manifestation 的后续战斗，必须等 initialHp amendment 落地后再验收连续性。
+Shared State 写入只发生在正常 Battle 退出结算时，不按 Tick 写入。不得新增 BattleRuntime HP Record，也不得把 live BattleSnapshot 变成 Shared State 的第二份 authority。只有双向 settlement 确认提交后，Battle child 才能向 Map 返回正常 BattleOutcome，Map 才能启动结果 Dialogue。
 
 ## 9. DeepSeek Decision 与 credential 边界
+
+### 9.1 当前有意采用 AI vs AI
+
+本次 Battle Integration 中，Ally 与 Enemy 都由各自的 DecisionPort 自主决策；真实 provider 集成时双方都可以使用 DeepSeekDecision。Headless / deterministic 测试使用 ScriptDecision 或 fake DecisionPort。
+
+AI vs AI 是当前有意选择的验证范围，用来先验证 Battle Actor、Decision、Simulation、Presentation、BattleResult 和 Contract settlement 的闭环；不是当前缺口，也不要求玩家在本阶段提交战术 Plan。PlayerGuidance、直接操控、Character personality / Relationship affinity 对 Decision 的影响属于后续玩法阶段，不阻塞本次集成。
+
+### 9.2 Credential boundary
 
 当前 PokeMan 已经由 Base Gate 把验证成功的 key 保存到 Session-only Record：
 
@@ -670,7 +692,7 @@ Programmer error / contract invariant violation 仍按 Battle Core contract thro
 
 ### 10.2 Normal Result
 
-Normal BattleResult 后，Simulation 进入 SETTLED 并保留 final Projection / Presentation。Battle Frame 在结算和最小结果确认完成前持有本场 Handler；真正离开 Battle Frame 时才调用 battle.close()，由 Runtime 关闭 Presentation。
+Normal BattleResult 后，Simulation 进入 SETTLED 并保留 final Projection / Presentation。Battle Subsystem 先读取原始 final Snapshot；在正常退出 Battle、向 Map 返回 child outcome 之前完成双向 Integrity settlement（归零者保存为 1）。Battle Frame 在结果确认完成前持有本场 Handler；真正离开 Battle Frame 时才调用 battle.close()，由 Runtime 关闭 Presentation。
 
 Map 不应在 Battle Result 同一时刻提前 close Battle Presentation，也不应在 Battle child Frame 尚未返回时重新激活 Map controls。
 
@@ -741,6 +763,9 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 - 满 Integrity 的 rival / player 双 Manifestation 可以启动首场确定性 1v1。
 - 正常 ally_win / enemy_win / simultaneous_defeat。
 - final Snapshot 的双方 HP 映射到正确方向的 Relationship Contract。
+- final Snapshot HP = 0 时，正常退出 settlement 保存为 1；BattleResult 仍依据原始 final Snapshot 判定。
+- simultaneous_defeat 时两边都保存 1，但结果仍然是平局。
+- 下一场 Battle 从两份 Contract 的保存值传入 initialHp，maxHp 保持 BattleActor 上限。
 - 两份 Relationship 更新通过同一个 Shared State transaction 原子提交；验证任一 OCC condition 冲突时两边都零写入。
 - 验证 OUTCOME_UNKNOWN 的 operation-marker reconciliation，不自动重试 mutation。
 - Presentation initialize / render / failure / close 的生命周期。
@@ -748,7 +773,10 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 - Decision failure、circuit pause、显式 resume。
 - Battle Frame 每次创建新的 Builder / Handler / Runtime。
 - close / abort / failure 后不残留 scheduler、resource listener 或 controls consumer。
-- 在 initialHp amendment 前，后续 Battle 仅使用满 Integrity fixture 做 Runtime 生命周期 / 清理测试，不宣称 Contract Integrity 恢复已通过。
+- 验证 `initialHp` 省略时仍默认 `maxHp`，显式传入时保留受损初值且不改变 maxHp。
+- 验证正常退出时 final HP 0 → persisted Integrity 1；正数原样保存；双向结算原子提交。
+- 验证 BattleResult 在 1 HP settlement floor 之前确定；simultaneous_defeat 仍然是平局。
+- 验证下一场 Battle 从上场持久化 Integrity 初始化双方 HP。
 
 ### 12.3 Map child-Frame integration：Map 4 序章链
 
@@ -777,10 +805,10 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 - Browser E2E 验证 Map 4 研究所、rival / player 两个 Manifestation、移动、技能效果、双方 HP、BattleResult 和结果对应的战后 Dialogue。
 - PWA / Chromium 验证真实 Worker / Presentation 资源路径。
 - Desktop / Hostra 验证 launch manifest、Frame lifecycle、provider transport 和 Browser assets。
-- 在同一宿主内重复启动 / 退出 Battle Runtime，验证资源和 listener 正确释放；在 initialHp amendment 前使用满 Integrity fixture，不把该测试描述成跨战斗 HP 恢复。
-- 在真实 DeepSeek qualification 中验证请求、合法 PlanSubmission、Decision failure 与 circuit pause / resume。
-- initialHp amendment 合并后，额外验证双方受损 Contract 进入下一场 Manifestation Battle 时保留各自原始 maxHp 和正确的初始 HP，并验证 OCC settlement / conflict / outcome-unknown reconciliation。
-- Map 5 road-bandit 的 Browser / Product qualification 单独安排在 P7，不与 Map 4 教学链混合。
+- 在同一宿主内重复启动 / 退出 Battle Runtime，验证资源和 listener 正确释放。
+- 在真实 DeepSeek qualification 中验证双方 Decision 请求、合法 PlanSubmission、Decision failure 与 circuit pause / resume；玩家手动指导不属于本阶段验收。
+- 验证进程中断后的 Battle / Dialogue 恢复不在本阶段；它留到 Save / Load 设计阶段。
+- Map 5 road-bandit 的 Browser / Product qualification 单独安排在 P6，不与 Map 4 教学链混合。
 
 未运行的真实 PWA、Desktop、Hostra 或 DeepSeek 测试不得用 unit / Mock 结果代替。
 
@@ -790,16 +818,15 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 
 | 阶段 | 内容 | 通过标准 |
 | --- | --- | --- |
-| P0 — Contract / lifecycle baseline | 审议 Battle initialHp 缺口、Host pause reason / lifecycle OPEN；确认双向 Contract 建立与 Dialogue outcome mutation 的业务 owner | 不在实现中临时发明 Core API 或把 Contract 写入 Map callback |
-| P1 — Content / package | 添加 Battle dependency、按 80 修正 Grab range、修正 BattleEffect schema / Record / Graphics、Browser artifact sync；校验 player / rival BattleActor 与双方 Contract skills | Content validator / package / sync check 通过 |
-| P2 — Headless composition | 新建 Battle Subsystem、双向 Contract Resolver、FakeClock、ScriptDecision composition | 不启动 Browser 也能完成确定性 rival-manifestation vs player-manifestation 1v1，并原子结算两份 Contract |
-| P3 — Map 4 prologue vertical slice | Map 4 Professor → rival Dialogue → Battle → result-specific post-battle Dialogue；Map controls 整链暂停与最终 fresh resume | 四段 child Frame 顺序正确，三个 BattleResult 分支正确，取消 / failure 不误触发剧情 |
-| P4 — DeepSeek transport | 从 SessionConfig 构造 PokeMan-private transport，接入 DeepSeekDecision | PWA / Hostra 的真实 provider request 可观察且可取消 |
-| P5 — Contract continuity | Battle Core initialHp contract amendment + bilateral OCC settlement / reconciliation | 第二场及后续 Battle 从双方各自的 Contract Integrity 正确初始化，maxHp 保持不变 |
-| P6 — Product qualification | Browser / PWA / Desktop / Host lifecycle / failure / replay | 真实宿主的端到端证据完整 |
-| P7 — Map 5 Encounter follow-up | road-bandit visible Encounter / 本体参战 / Encounter source | 与 Map 4 教学链分离，证明普通 NPC 本体可进入同一 Battle Runtime |
+| P0 — Contract / lifecycle baseline | 冻结 `initialHp` 输入 amendment、1 HP 最低持久化规则与双向 settlement owner；确认 Host pause reason / lifecycle OPEN | Core input 与 PokeMan settlement 边界明确，不在 Map callback 中发明业务写入 |
+| P1 — Core input + Content | Battle Core 实现可选 `ResolvedBattleActor.initialHp`；PokeMan 按 Contract 显式传值；修正 Grab range、BattleEffect schema / Record / Graphics 与 Browser artifact sync | Core / Content validator 通过；旧 caller 省略字段仍默认 maxHp |
+| P2 — Headless composition | 新建 Battle Subsystem、双向 Contract Resolver、FakeClock、ScriptDecision composition | 不启动 Browser 即可运行确定性 1v1；验证 initialHp、1 HP floor 与双向原子结算 |
+| P3 — Map 4 prologue vertical slice | Map 4 Professor → rival Dialogue → Battle → result-specific post-battle Dialogue；Map controls 整链暂停与最终 fresh resume | 三种 BattleResult 分支正确；settlement 后才触发 Dialogue；取消 / failure 不误触发剧情 |
+| P4 — DeepSeek transport | 从 SessionConfig 构造 PokeMan-private transport，接入双方 DeepSeekDecision | PWA / Hostra 的真实 provider request 可观察且可取消；AI vs AI 正常运行 |
+| P5 — Product qualification | Browser / PWA / Desktop / Host lifecycle / failure / replay | 真实宿主的端到端证据完整 |
+| P6 — Map 5 Encounter follow-up | road-bandit visible Encounter / 本体参战 / Encounter source | 与 Map 4 教学链分离，证明普通 NPC 本体可进入同一 Battle Runtime |
 
-P2–P4 可以先用两份满 Integrity Contract 验证第一次教学 Battle。首战 final Snapshot 可以原子写回双方 Contract；但在 initialHp amendment 合并前，不得把第二场 Manifestation Battle 标记为通过，也不得把 Contract Integrity 的跨战斗闭环标记为完成。
+Save / Load 和进程中断后的结果恢复不属于上述阶段；它们留到未来存档设计阶段。当前阶段只验收同一运行期间的 Battle terminal → bilateral settlement → result Dialogue 正常流程。
 
 ## 14. 明确非目标
 
@@ -810,9 +837,10 @@ P2–P4 可以先用两份满 Integrity Contract 验证第一次教学 Battle。
 - Map 5 通用 Encounter generation、随机 spawn / defeated persistence；road-bandit 是后续单独阶段。
 - 通用 Story Graph / Story Subsystem；当前只由 Map 编排固定序章链。
 - 完整 Relationship / Contract 建立剧情以外的 Card 管理 UI。
-- Save / Load 与跨 Session credential persistence。
+- Save / Load、跨进程中断恢复，以及“Battle 已结算但战后 Dialogue 尚未完成”的恢复 / 去重机制；这些与未来存档设计一起确定。
+- 跨 Session credential persistence。
 - 通用 Framework credential / network capability。
-- 修改 Battle movement / skill / damage / LOS / stalemate 等 Core gameplay rules。
+- 修改 Battle movement / skill / damage / LOS 等 Core gameplay rules；本阶段继续沿用 Core 已有的无最大时长 / 无正式 stalemate 规则，不增加强制结束逻辑。
 - 为 PokeMan 复制 Battle Simulation、Decision 或 Browser Renderer。
 - 把 Map Runtime timer / movement / Browser completion 复用为 Battle authority。
 - 让 Dialogue 直接调用 Battle，或让 Battle 直接调用战后 Dialogue。
