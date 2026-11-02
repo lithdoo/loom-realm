@@ -140,6 +140,35 @@ World / Dialogue / Battle / System Menu
           返回 caller
 ```
 
+当前 MVP Message Frame 的最小业务 contract 冻结为：
+
+```ts
+type PokeManMessageFrameInputV1 = {
+  messageKey: string;
+  text: string;
+  actions: readonly {
+    id: string;
+    label: string;
+  }[];
+};
+
+type PokeManMessageFrameResultV1 = {
+  messageKey: string;
+  actionId: string;
+};
+```
+
+约束：
+
+- `messageKey` 非空，用于 caller correlation / 测试，不是 Shared State identity；
+- `text` 是本次模态消息正文；
+- `actions` 至少 1 项，action id 非空且唯一；
+- Message 只返回玩家选择，不执行 caller 的业务 mutation；
+- caller 根据 `actionId` 决定 resume / cancel / retry 等行为；
+- Message Frame 自己拥有本次模态 UI / Controls activation，完成后释放并返回 caller；
+- cancelled / failed Frame 不能伪装成某个 action。
+
+Battle pause 当前正是该 contract 的直接 consumer；`battle-host-background-paused` 与 `battle-decision-circuit-paused` 的 exact text/actions 由 77 冻结。
 典型用途包括：
 
 - 获得角色卡等需要玩家明确确认的业务消息；
