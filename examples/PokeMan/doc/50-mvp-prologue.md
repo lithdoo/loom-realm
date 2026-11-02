@@ -3,6 +3,8 @@
 > 从 `../DESIGN.md` 拆分；原文档保持不变。
 >
 > 序章 Event / Dialogue 的状态机与 Runtime 集成见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)，具体对白见 [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)。
+>
+> Map 4 首场互换角色卡的参战身份与数值配置见 [80-battle-scenario-design.md](./80-battle-scenario-design.md)。
 
 ## 序章目标
 
