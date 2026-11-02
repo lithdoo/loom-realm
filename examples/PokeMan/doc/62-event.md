@@ -1,6 +1,6 @@
 # 事件
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义 Event / EventStateMutation / EventStateList 的业务语义；Shared State 物理结构见 [67-shared-state-records.md](./67-shared-state-records.md)，FSDB 编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义 Event / EventStateMutation / EventStateList 的业务语义；Dialogue / Map / Story Runtime 的集成见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)。Shared State 物理结构见 [67-shared-state-records.md](./67-shared-state-records.md)，FSDB 编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 # 定位
 
@@ -515,6 +515,26 @@ Runtime NPC Instances
 ```
 
 StoryIndex 是 derived Content，不进入 Shared State / Save；其精确派生字段可以随 Resolver 查询实现调整，不视为新的业务数据 authority 或 MVP 核心 schema 缺口。
+
+# Map scene refresh after Event mutation
+
+Story Resolver 不只在 Map Enter 时运行。Map / Story Orchestrator 还必须在 Dialogue child 正常完成、且 Dialogue Subsystem 已成功提交 EventStateMutation 后，重新读取 EventStateList 并解析当前 Map 的 NPC scene。
+
+固定顺序：
+
+~~~text
+Dialogue terminal
+→ Dialogue Subsystem commits EventStateList
+→ Dialogue Frame returns completed(terminalDialogueId)
+→ Map / Story Orchestrator reads current EventStateList
+→ Story Resolver resolves current Map scene
+→ Map updates live NPC scene
+→ Map resumes ordinary controls
+~~~
+
+Map 不重复执行 Dialogue.mutation。Mutation mismatch、OCC conflict、commit outcome unknown 或 Dialogue child failure 时，不得把旧场景当作新剧情状态已经生效；必须先处理失败 / reconcile，再恢复正常交互。
+
+场景刷新不能依赖重新启动整张 Map。当前 Map Frame、RenderDomain 与场景生命周期应保持连续；如果 Map package 当前没有支持 live NPC replacement 的接口，应先补齐该运行时能力。完整协作与序章具体状态见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)。
 
 # Builder 检查
 
