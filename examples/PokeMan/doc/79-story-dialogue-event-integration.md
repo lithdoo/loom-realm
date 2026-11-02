@@ -501,7 +501,7 @@ Story Resolver 成为 authority 后，map.mjs 中 Map 4 的 professor / rival-la
 12. 玩家暂缓外出任务，Event 保持 after-battle；再次与博士交互仍可接受。
 13. 玩家接受任务后，prologue-to-route 原子结束 prologue 并激活 first-route。
 14. 离开研究所后，Map 5 / Map 7 场景由 first-route 与 Story Resolver 提供；prologue 移除后 Character fallback 按规则恢复。
-15. 重新载入游戏后，EventStateList 能恢复正确剧情阶段，地图交互与剧情进度一致。
+15. Save / Load 与跨进程恢复不属于本次集成验收；当前只要求同一运行期间 EventStateList、Map scene 与剧情进度一致。未来存档设计再冻结重新载入后的恢复语义。
 
 ## 12. 明确不做
 
