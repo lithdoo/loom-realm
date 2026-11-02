@@ -692,11 +692,23 @@ Programmer error / contract invariant violation 仍按 Battle Core contract thro
 
 ### 10.2 Normal Result
 
-Normal BattleResult 后，Simulation 进入 SETTLED 并保留 final Projection / Presentation。Battle Subsystem 先读取原始 final Snapshot；在正常退出 Battle、向 Map 返回 child outcome 之前完成双向 Integrity settlement（归零者保存为 1）。Battle Frame 在结果确认完成前持有本场 Handler；真正离开 Battle Frame 时才调用 battle.close()，由 Runtime 关闭 Presentation。
+Normal BattleResult 后，Simulation 进入 SETTLED 并保留 final Projection / Presentation。Battle Subsystem 读取原始 final Snapshot，完成双向 Integrity settlement（归零者保存为 1），然后调用 `battle.close()` 关闭 Battle Presentation，并以已结算的 PokeManBattleOutcome 返回 Map。
 
-Map 不应在 Battle Result 同一时刻提前 close Battle Presentation，也不应在 Battle child Frame 尚未返回时重新激活 Map controls。
+本阶段**不设计独立 Battle Result acknowledgement / confirm button / result overlay input**。Map 在 Battle child 正常返回后，立即根据 BattleResult 调用对应 result Dialogue；该 Dialogue 就是唯一的玩家结果确认界面。Battle Presentation 不接收任何“继续”Controls，也不为了等待确认而延长 Battle Frame 生命周期。
 
-Battle Result acknowledgement 只用于“查看结果后继续”，不等于 PlayerGuidance，也不向 Simulation 提交战术 Plan。
+固定顺序：
+
+~~~text
+Battle terminal
+→ get final Snapshot / BattleResult
+→ bilateral OCC settlement
+→ battle.close() / Presentation cleanup
+→ Battle Frame completed(PokeManBattleOutcome)
+→ Map frame.call(result Dialogue)
+→ Dialogue mutation → after-battle
+~~~
+
+Map controls 在整个 Rival accepted → Battle → result Dialogue 连续序列期间保持关闭；只有 result Dialogue 返回后才恢复 fresh Map activation。
 
 ### 10.3 Decision circuit pause 与 Host background
 
@@ -803,7 +815,7 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 
 - Battle browser JS/CSS 通过统一 Presentation sync script 进入 FSDB。
 - Browser E2E 验证 Map 4 研究所、rival / player 两个 Manifestation、移动、技能效果、双方 HP、BattleResult 和结果对应的战后 Dialogue。
-- PWA / Chromium 验证真实 Worker / Presentation 资源路径。
+- PWA / Chromium 验证真实 Worker / Presentation 资源路径，并证明 prepared content 包含完整 PokeMan FSDB 与 battle browser assets；不得继续使用 map-only closure。
 - Desktop / Hostra 验证 launch manifest、Frame lifecycle、provider transport 和 Browser assets。
 - 在同一宿主内重复启动 / 退出 Battle Runtime，验证资源和 listener 正确释放。
 - 在真实 DeepSeek qualification 中验证双方 Decision 请求、合法 PlanSubmission、Decision failure 与 circuit pause / resume；玩家手动指导不属于本阶段验收。
@@ -812,18 +824,31 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 
 未运行的真实 PWA、Desktop、Hostra 或 DeepSeek 测试不得用 unit / Mock 结果代替。
 
+### 12.5 PWA Content packaging — MVP FROZEN
+
+当前 `prepare-pwa-content.mjs` 的 map-only dependency closure 不再满足 Story / Dialogue / Battle vertical slice。MVP 不设计复杂的按引用裁剪算法，固定采用“PokeMan FSDB 全量 + Presentation refs”策略：
+
+1. `listFsdbEntries()` 返回的 `[FSDB]PokeMan` 全部 content entries 都进入 prepared PWA content；不再根据 initial Map / MapTransfer / MAP_ONLY_NPC_PLACEMENTS 选择子集。
+2. 保持 `mapFsdbEntryToPwaIdentity()` 的 identity 映射、唯一性检查和 deterministic sort。
+3. `presentation.json` 中声明的外部 `Presentation` resource refs 仍全部加入，包括 schema-form、controls、map、dialogue、battle 与 page browser assets。
+4. PWA executable modules 必须包含 `base / map / dialogue / battle`；`game.json` 与 `launch.pwa.json` 同步声明 battle subsystem。
+5. Content / Builder validator 在 packaging 前负责发现坏引用或坏 schema；packager 不通过“没有选中该 record”来隐藏无效 Content。
+6. MVP 阶段不做 tree-shaking / dependency closure optimization。等 Content 体量真正成为问题后再独立设计，不阻塞当前闭环。
+
+因此 StoryIndex、Dialogue、Event、EventStateMutation、BattleActor、BattleSkill、BattleEffect、BattleArena、Character、NPC、Map/Tileset 及相关 Graphics 都会可靠进入 PWA，不存在 Runtime 动态解析到某个合法 record 但包内缺失的问题。
+
 ## 13. 实施顺序
 
 建议分成以下可独立验收的阶段：
 
 | 阶段 | 内容 | 通过标准 |
 | --- | --- | --- |
-| P0 — Contract / lifecycle baseline | 冻结 `initialHp`、独立 `BattleArena`、1 HP 最低持久化规则与双向 OCC settlement owner；确认 Host pause reason / lifecycle OPEN | Core input、Arena 与 PokeMan settlement 边界明确，不从 RPGMap 推导 Battle navigation，不新增 operation marker |
+| P0 — Contract / lifecycle baseline | 冻结 `initialHp`、独立 `BattleArena`、Relationship 默认值、Base baseline bootstrap、1 HP 最低持久化规则、双向 OCC settlement、result Dialogue confirmation 与 PWA full-content packaging | 实现 agent 不需要再决定默认关系、bootstrap owner、结果确认 UI、Map passability 或 PWA dependency closure |
 | P1 — Core input + Content | Battle Core 实现可选 `ResolvedBattleActor.initialHp` 与 `BattleArenaRef` / Presentation loading；PokeMan 新增 `struct.BattleArena/lab-tutorial`，修正 Grab range、BattleEffect schema / Record / Graphics 与 Browser artifact sync | Core / Content validator 通过；Arena 不依赖 struct.Map；旧 initialHp caller 省略字段仍默认 maxHp |
 | P2 — Headless composition | 新建 Battle Subsystem、双向 Contract Resolver、FakeClock、ScriptDecision composition | 不启动 Browser 即可运行确定性 1v1；验证 initialHp、1 HP floor 与双向原子结算 |
 | P3 — Map 4 prologue vertical slice | Map 4 Professor → rival Dialogue → Battle → result-specific post-battle Dialogue；Map controls 整链暂停与最终 fresh resume | 三种 BattleResult 分支正确；settlement 后才触发 Dialogue；取消 / failure 不误触发剧情 |
 | P4 — DeepSeek transport | 从 SessionConfig 构造 PokeMan-private transport，接入双方 DeepSeekDecision | PWA / Hostra 的真实 provider request 可观察且可取消；AI vs AI 正常运行 |
-| P5 — Product qualification | Browser / PWA / Desktop / Host lifecycle / failure / replay | 真实宿主的端到端证据完整 |
+| P5 — Product qualification | Browser / PWA / Desktop / Host lifecycle / failure / replay | PWA 使用全量 PokeMan FSDB packaging，Battle 无独立 acknowledgement UI，真实宿主端到端证据完整 |
 | P6 — Map 5 Encounter follow-up | road-bandit visible Encounter / 本体参战 / Encounter source | 与 Map 4 教学链分离，证明普通 NPC 本体可进入同一 Battle Runtime |
 
 Save / Load 和进程中断后的结果恢复不属于上述阶段；它们留到未来存档设计阶段。当前阶段只验收同一运行期间的 Battle terminal → bilateral settlement → result Dialogue 正常流程。
