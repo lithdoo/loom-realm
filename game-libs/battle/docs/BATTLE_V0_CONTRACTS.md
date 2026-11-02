@@ -1,6 +1,6 @@
 # Battle v0 数据契约
 
-> 状态：**既有 Simulation-facing contracts FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；新增 `ResolvedBattleActor.initialHp` 仅属于 BATTLE-003 Simulation input amendment（PROPOSED，尚待实现），不改变本文 root shared cross-layer contract；Presentation contract FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision provider/prompt/structured-output concrete implementation 已由 BATTLE_V0_DECISION.md 冻结；外部 serialization 与 Host/Guidance wiring 保留明确 OPEN**。本文定义 Battle v0 canonical 数据边界；既有 Simulation 与 Presentation TypeScript contract/validator 均已落地。
+> 状态：**既有 Simulation-facing / Presentation contracts 已完成 qualification；BATTLE-003 `ResolvedBattleActor.initialHp` 与 BATTLE-004 独立 `BattleArena` 是 PROPOSED amendments，尚待实现与 qualification；Decision provider/prompt/structured-output concrete implementation 已由 BATTLE_V0_DECISION.md 冻结；外部 serialization 与 Host/Guidance wiring 保留明确 OPEN**。本文定义 Battle v0 canonical 数据边界。
 >
 > 核心 gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；本文不重新定义 reducer 行为。
 
@@ -109,18 +109,48 @@ type ResourceRef = {
 
 实现时应优先复用仓库已有公共类型，而不是再定义一套平行结构。
 
-### MapRef — FROZEN
+### BattleArenaRef — PROPOSED / BATTLE-004
+
+目标 contract 不再要求 Battle Scene 引用探索 `struct.Map`：
 
 ```ts
-type MapRef = {
-  mapId: integer
+type BattleArenaRef = {
+  arenaId: string
 }
 ```
 
-`mapId` 必须是正 safe integer，并对应 `struct.Map` 的 record key。Presentation 不接受 Map Runtime instance。
+`arenaId` 必须是非空 Unicode scalar string，并对应 `struct.BattleArena` 的 record key。
+
+现有实现中的 `MapRef { mapId }` 属 BATTLE-004 合并前的 legacy Presentation input。BATTLE-004 落地后，Battle Presentation 不再读取 `struct.Map`；探索 Map 与 Battle grid 没有 identity / coordinate continuity 要求。
 
 ## 4. Battle Content
 
+### 4.0 BattleArena — PROPOSED / BATTLE-004
+
+BattleArena 是 Battle-owned authored Content：
+
+```ts
+type BattleArenaContent = {
+  id: string
+  width: integer
+  height: integer
+  passable: readonly (readonly boolean[])[]
+  tileset_id: integer
+  data: ProjectedTable
+}
+```
+
+约束：
+
+- record key 必须等于 `id`；
+- width / height 为正 safe integer；
+- passable 必须是 exact `height × width` boolean matrix；
+- `passable` 是 Simulation navigation authority；
+- `data` 是 exact 3-layer ProjectedTable，`xSize=width / ySize=height / zSize=3`，只用于 Presentation；
+- `tileset_id` 指向已有 `struct.Tileset`，只复用 Tileset / Autotile visual resources；
+- BattleArena 不包含 RPGMap behaviors、transfer、bridge、ledge、terrain 或 NPC。
+
+视觉 tile data 与 passable 是两个并列 authored facts；Presentation 不从 tile passage 推导 gameplay passability。
 ### 4.1 BattleActor
 
 当前概念结构：
@@ -286,7 +316,7 @@ type BattleConfig = {
   moveTicks: integer
   protectionTicks: integer
 
-  map: MapRef
+  map: BattleArenaRef
   actors: readonly InitialActorPlacement[]
 }
 ```
@@ -786,7 +816,7 @@ interface PresentationPort {
 
 `failure` 只暴露 Presentation 在 resize/resource/internal callback 中发生、无法由调用栈捕获的 terminal fatal 事实。它不决定 `BattleResult`，不授予 Browser gameplay authority；Presentation 必须立即停止自己的 visual authority 并 cleanup，Runtime 观察后负责停止 Battle authority、映射最终 `BattleResult.failure`。该 channel 每 session 最多完成一次；显式 `close()` 后不得再完成。同步 `render()/pause()/resume()` fatal 仍直接 throw，由 Runtime 的同步调用边界处理。
 
-### 14.1 BattleSceneInit — FROZEN
+### 14.1 BattleSceneInit — FROZEN baseline + BATTLE-004 target amendment
 
 Presentation 初始化只依赖纯数据描述，不要求知道 Simulation 或 Decision concrete implementation。下面 shape 是 v0 exact Presentation ABI：
 
@@ -795,7 +825,7 @@ type BattleSceneInit = {
   battleId: string
   sceneEpoch: integer
   tickDurationMs: 200
-  map: MapRef
+  map: BattleArenaRef
   actors: readonly Array<{
     actorId: ActorId
     team: Team
@@ -807,7 +837,7 @@ type BattleSceneInit = {
 
 这里描述的是**本 Battle Scene 的稳定视觉资源/identity**，不重复携带会随 Runtime 改变的 tile、direction、HP 或 movement。Actor identity 只由 `actorId` 决定，collection 顺序不承载 team/side 语义。v0 Simulation 只会产生两个 Actor，但 Presentation 的 collection/reconciliation 不应硬编码固定两个 slot。
 
-Presentation 可以据此加载 Map/Character/BattleEffect 等静态视觉资源；第一次权威动态视觉状态统一由随后的一次 `RenderProjection` 提供。`effectIds` 必须是本 Battle 可能由 Skill 引用的 BattleEffect id 的去重、按 ECMAScript ordinal string order 稳定排列集合；不得使用 locale-sensitive 排序。Presentation 在 initialize 阶段解析 `struct.BattleEffect` 与其 Graphics。
+BATTLE-004 目标实现中，Presentation 据此加载 BattleArena / Tileset / Autotile / Character / BattleEffect 等静态视觉资源，不读取 `struct.Map`；第一次权威动态视觉状态统一由随后的一次 `RenderProjection` 提供。`effectIds` 必须是本 Battle 可能由 Skill 引用的 BattleEffect id 的去重、按 ECMAScript ordinal string order 稳定排列集合；不得使用 locale-sensitive 排序。Presentation 在 initialize 阶段解析 `struct.BattleEffect` 与其 Graphics。
 
 Runtime 必须在 Battle clock 启动前先完成 `initialize(scene)`，再发布 initial Projection（通常为 tick 0），从而避免 SceneInit 与 RenderProjection 同时维护两份 tile/direction/HP 初值。
 
