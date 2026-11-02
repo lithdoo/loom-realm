@@ -654,7 +654,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-Battle v0 Presentation、Simulation（含 Decision availability circuit）与 DeepSeekDecision 均已完成 closed-loop qualification。PlayerGuidance 明确延期；configured DeepSeekTransport 的 credential/network/product capability handoff、产品级 pause-reason/retry UI 与 Host lifecycle composition 仍属于外部集成工作。
+既有 Battle v0 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 均已完成 closed-loop qualification。新增 BATTLE-003 `ResolvedBattleActor.initialHp` 是明确的 Simulation input amendment，尚待实现与 qualification；它不改变 gameplay rules。PlayerGuidance 明确延期；configured DeepSeekTransport 的 credential/network/product capability handoff、产品级 pause-reason/retry UI 与 Host lifecycle composition 仍属于外部集成工作。
 
 已验证工程状态：
 
@@ -666,7 +666,7 @@ Battle v0 Presentation、Simulation（含 Decision availability circuit）与 De
 ## 13. 推荐实施顺序
 
 ```text
-1. 实现 ResolvedBattleDefinition / Simulation-facing validator
+1. 按 BATTLE_V0_SPEC.md 的 BATTLE-003 amendment 扩展 ResolvedBattleDefinition / Simulation-facing validator（可选 initialHp；省略时默认 maxHp）
 2. 按 BATTLE_V0_SIMULATION.md 实现自驱动 headless Simulation Runtime，并新增 package `./simulation` export
 3. 实现 frozen DecisionPort + Mock/Script/Deferred Decision
 4. 跑 frozen-rule deterministic Test Matrix
@@ -689,6 +689,6 @@ Presentation blocking integration OPEN 已清零。仍未冻结的集成项只�
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Decision circuit 的 automatic pause / explicit resume Runtime semantics 已冻结，产品层如何展示其 pause reason/重试 UI 仍属 integration wiring；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
-`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation、Simulation（含 Decision availability circuit）与 DeepSeekDecision 已完成 qualification；configured DeepSeekTransport 与 product/Host composition 尚待外部集成。
+`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle 既有 Presentation、Simulation baseline（含 Decision availability circuit）与 DeepSeekDecision 已完成 qualification；BATTLE-003 initialHp amendment 尚待实现与 qualification；configured DeepSeekTransport 与 product/Host composition 尚待外部集成。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。
