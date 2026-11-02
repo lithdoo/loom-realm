@@ -86,7 +86,7 @@ professor-first-journey
                          → no mutation，保持 after-battle
 ~~~
 
-Map 只根据 terminalDialogueId 选择必要的业务操作，不读取对白文本，也不猜测玩家意图。Dialogue.mutation 由 Dialogue Subsystem 在 terminal completion 时执行；Map 不重复提交同一 Mutation。场景刷新由 Map / Story Orchestrator 在 Dialogue child 正常完成后触发，具体集成约束见 79。
+Map 只根据 terminalDialogueId 选择必要的业务操作，不读取对白文本，也不猜测玩家意图。Dialogue.mutation 由 Dialogue Subsystem 在 terminal completion 时执行；Map 不重复提交同一 Mutation。场景刷新由 Map Subsystem 的 Map Frame Handler 在 Dialogue child 正常完成且 EventStateList 已成功变化后触发，具体集成约束见 79。
 
 ## 4. 博士：玩法科普
 
@@ -564,12 +564,12 @@ Battle 双方的含义：
 | 台词、speaker、Choice、target Dialogue | struct.Dialogue |
 | Choice target graph 执行、terminalDialogueId | PokeMan Dialogue Subsystem |
 | Dialogue.mutation 的 EventStateList 校验与 commit | PokeMan Dialogue Subsystem |
-| terminalDialogueId → accepted-challenge / deferred 等业务意图 | Map / Story Orchestration adapter |
+| terminalDialogueId → accepted-challenge / deferred 等业务意图 | Map Frame Handler 内的固定映射 |
 | 双向 Relationship Contract 创建 | PokeMan Business Runtime |
 | 双向 CarriedCards 写入 | PokeMan Business Runtime |
 | 两份 Contract Integrity 结算 | Battle Subsystem |
 | BattleResult / final HP | Battle Simulation |
-| Result-specific Dialogue 选择 | Map / Story Orchestration |
+| Result-specific Dialogue 选择 | Map Frame Handler |
 | Event state 解析后的 NPC scene | Story Resolver |
 | Event current state 持久化 | pokeman.EventStateList/current |
 
@@ -584,7 +584,7 @@ Battle 双方的含义：
 - prologue-to-route 不属于 route-bandit-threat；路霸对白不得负责启动 first-route。
 - 在 Dialogue.mutation commit 成功之前，Dialogue Frame 不得以成功 terminal completion 返回。
 - Map 不重复执行 Dialogue.mutation；它只处理 terminalDialogueId 指定的业务操作，并在 child 正常完成后刷新当前 Map 场景。
-- Battle 不直接调用战后 Dialogue；由 Map / Story Orchestrator 根据 BattleResult 选择 Dialogue。
+- Battle 不直接调用战后 Dialogue；由 Map Subsystem 的 Map Frame Handler 根据 BattleResult 选择 Dialogue。
 - 不在对白里硬编码胜负数值或假装知道实时剩余 HP。
 - 不把 Battle Manifestation 的失稳写成人物本体死亡、昏迷或受伤。
 
