@@ -4,7 +4,7 @@
 >
 > 范围：冻结 Map 4 研究所首场双向角色卡教学 Battle 的参战身份、参数来源、技能数值、场景配置与结算规则。
 >
-> 本文沿用 Battle v0 gameplay rules，只提出一项窄范围 Core 输入契约扩展：`ResolvedBattleActor.initialHp`。它不改变战斗规则；目标契约见 Battle Core Spec / Simulation 文档。所有标为“建议初值”的参数必须经过 ScriptDecision / FakeClock 确定性测试和产品试玩后，才能转为产品冻结值。
+> 本文沿用 Battle v0 gameplay rules，并冻结两项窄范围 Core / Content 输入扩展：`ResolvedBattleActor.initialHp` 与独立 `BattleArena`。BattleArena 不读取探索 Map Content，只复用已有 Tileset / Autotile / Graphics 视觉素材；目标契约见 Battle Core Spec / Contracts / Simulation / Presentation 文档。所有标为“建议初值”的参数必须经过 ScriptDecision / FakeClock 确定性测试和产品试玩后，才能转为产品冻结值。
 
 关联文档：
 
@@ -110,7 +110,8 @@ pokeman.Relationship / rival:player
 | 当前实际技能列表 | Relationship(holder → servant).contract.skills[] | 建立 Contract 后由 Contract 持有 |
 | 单个技能的伤害 / range / windup / recovery | struct.BattleSkill | Battle gameplay 参数 |
 | 技能特效资源与显示时长 | struct.BattleEffect | Presentation-only 参数 |
-| team / tile / direction / moveTicks / protectionTicks / seed | ResolvedBattleDefinition | 本场 Battle 初始化参数 |
+| Battle arena width / height / passable / visual tiles | struct.BattleArena | 独立战斗场地；不从探索 Map 派生 |
+| team / tile / direction / moveTicks / protectionTicks / seed | ResolvedBattleDefinition | 本场 Battle 初始化参数；Actor spawn 由 scenario 决定 |
 | 实时 HP / tile / action / result | Battle Simulation | 本场唯一 Runtime authority |
 | 移动、转向、技能与目标意图 | DecisionPort | 只提交 PlanSubmission，不直接修改 Simulation |
 
@@ -289,7 +290,8 @@ Battle v0 当前没有 accuracy / critical / element / armor / MP / ammo / unive
 | maxPathSteps | 6 | Core default | 单次 Plan 最多提交 6 个 future path steps |
 | battleSeed | battleId | Scenario recommendation | 将唯一 battleId 作为可回放 seed |
 | actors.length | 2 | Core frozen | 恰好一个 ally、一个 enemy |
-| map | Map 4 | Scenario fixed | 研究所地图 |
+| arena | lab-tutorial | Scenario fixed | 独立 Battle Arena，不引用 Map 4 |
+| arena size | 7 × 7 | Scenario fixed | 简单开放式教学场 |
 | max battle duration | none | Core frozen / intentionally deferred | 当前验证范围有意不设强制最大时长 |
 | stalemate | none | Core frozen / intentionally deferred | 当前验证范围有意不自动判定平局 |
 
@@ -306,28 +308,85 @@ protectionTicks = 2 的精确含义：若 Tick 10 受到有效伤害，则 Tick 
 
 moveTicks / protectionTicks 是本场配置参数，不得写入 BattleActor 或 BattleSkill，也不因角色不同而各设一份。若未来需要角色专属移动速度或韧性，应先扩展 Battle Core contract；v0 不做隐式差异。
 
-### 5.2 地图与初始位置
+### 5.2 独立 Battle Arena
 
-当前 Map 4 的 Map Content 尺寸为 20 × 15。
+首场教学 Battle 不再使用 Map 4 作为 Battle navigation / Presentation map。Map 4 只负责剧情发生地点和 Rival interaction；进入 Battle 后切换到独立 authored arena：
 
-初始位置来源：
+~~~text
+Map 4 / Research Lab
+  → Rival interaction
+  → frame.call("battle", scenarioId = "lab-rival-tutorial")
+  → struct.BattleArena / lab-tutorial
+~~~
+
+BattleArena 与 RPG Map 的边界固定：
+
+- 不引用 `struct.Map/4`。
+- 不读取 RPGMap passability、passages、terrain_tags、bridge、ledge、transfer、NPC collision 或玩家当前 tile。
+- 不从 Map Runtime 复制玩家 / Rival 的坐标。
+- Arena 自己 author `width / height / passable`。
+- Presentation 只复用 `struct.Tileset`、Autotile / Tileset Graphics 的 tile 编码与视觉资源。
+- Arena 的 `passable` 是 Battle Simulation authority；视觉 tile 是否看起来像墙不会反向改变通行规则。
+- Map 和 Battle Arena 之间没有坐标连续性要求。
+
+BattleArena 目标 Content shape：
+
+~~~ts
+type BattleArenaContent = {
+  id: string
+  width: number
+  height: number
+  passable: readonly (readonly boolean[])[]
+  tileset_id: number
+  data: ProjectedTable
+}
+~~~
+
+其中 `data` 沿用 Map 的 3-layer tile-id 投影格式，仅用于 Battle Presentation；`tileset_id` 只用于定位已有 `struct.Tileset` 与 Tileset / Autotile Graphics，不导入 Map gameplay semantics。
+
+首场 `struct.BattleArena/lab-tutorial` 固定：
+
+- width = 7；
+- height = 7；
+- passable 全部为 true；
+- tileset_id = 3，复用研究所当前使用的 Tileset 视觉素材；
+- layer 0 使用研究所已有 floor tile id 624 铺满 7 × 7；
+- layer 1 / 2 全部为 0；
+- 不包含 Map behaviors、transfer、bridge 或 terrain 规则。
+
+概念布局：
+
+~~~text
+.......
+.......
+.......
+.A...E.
+.......
+.......
+.......
+~~~
+
+`.` 只是说明该格 Battle-passable；不是从视觉 tile 推导出来的通行结论。
+
+### 5.3 Actor 初始位置
+
+首场 spawn 固定属于 scenario，不读取 Map Runtime pose：
 
 | Actor | tile | direction | 来源 |
 | --- | --- | --- | --- |
-| rival / ally | 玩家当前 Map tile | 玩家当前 direction | Map Runtime 的公开 player pose |
-| player / enemy | (8, 5) | 2 / down | Map 4 rival-lab placement |
+| rival / ally | (1, 3) | 6 / right | lab-rival-tutorial scenario |
+| player / enemy | (5, 3) | 4 / left | lab-rival-tutorial scenario |
 
 要求：
 
-- 两个 tile 必须不同、在 Map bounds 内、且在 Battle passability grid 中可通行。
-- Map 4 的 passable[y][x] 必须从 Map / Tileset authored movement facts 派生；不能把 Browser sprite、NPC collision 临时状态或 Map Runtime timer 传入 Simulation。
-- rival-lab placement 是 NPC source；玩家当前位置必须来自 Map public facts，不得读取 Map package internal state。
-- 不合法时在创建 Battle Runtime 前明确拒绝，不得静默把 Actor 放到邻近格或重叠格。
-- 初始 direction 是 Battle Rule input，必须使用合法方向 2 / 4 / 6 / 8。
+- 两个 tile 必须不同、在 BattleArena bounds 内且 `passable[y][x] === true`。
+- 初始 direction 必须为 2 / 4 / 6 / 8。
+- Map caller 只传 scenario identity 与 NPC source identity，不传 Battle spawn coordinates。
+- Arena / scenario 数据不合法时，在创建 Battle Runtime 前明确拒绝；不得静默搬动 Actor。
 
-### 5.3 ResolvedBattleDefinition 组合示意
+### 5.4 ResolvedBattleDefinition 组合示意
 
-以下仅表示参数来源与组合方式：`rivalContractIntegrity = Relationship(player → rival).contract.integrity`，`playerContractIntegrity = Relationship(rival → player).contract.integrity`；skills 必须由两份 Contract 解析；passable 必须由实际 Map Content 派生，不能在 Map Handler 手写：
+`rivalContractIntegrity = Relationship(player → rival).contract.integrity`，`playerContractIntegrity = Relationship(rival → player).contract.integrity`；skills 必须由两份 Contract 解析；Arena width / height / passable 直接来自 `struct.BattleArena/lab-tutorial`：
 
 ~~~ts
 const definition: ResolvedBattleDefinition = {
@@ -339,17 +398,17 @@ const definition: ResolvedBattleDefinition = {
   protectionTicks: 2,
   maxPathSteps: 6,
   map: {
-    ref: { mapId: 4 },
-    width: 20,
-    height: 15,
-    passable,
+    ref: { arenaId: "lab-tutorial" },
+    width: 7,
+    height: 7,
+    passable: arena.passable,
   },
   actors: [
     {
       actorId: "rival",
       team: "ally",
-      tile: playerPose.tile,
-      direction: playerPose.direction,
+      tile: { x: 1, y: 3 },
+      direction: 6,
       maxHp: 18,
       initialHp: rivalContractIntegrity,
       character: {
@@ -361,8 +420,8 @@ const definition: ResolvedBattleDefinition = {
     {
       actorId: "player",
       team: "enemy",
-      tile: { x: 8, y: 5 },
-      direction: 2,
+      tile: { x: 5, y: 3 },
+      direction: 4,
       maxHp: 20,
       initialHp: playerContractIntegrity,
       character: {
@@ -375,7 +434,7 @@ const definition: ResolvedBattleDefinition = {
 }
 ~~~
 
-上例中的 `initialHp` 是待实现的 Core 输入契约扩展：PokeMan 从各自 Relationship Contract 解析当前值并显式传入。`maxHp` 仍保持 BattleActor 的基础上限；不得用当前 Integrity 覆盖 maxHp。Core 扩展落地前，上例是目标组合形态，不代表当前 Runtime 已支持。
+`initialHp` 与 `BattleArenaRef` 都是本文要求落地的 Core 输入 amendment。`maxHp` 仍保持 BattleActor 基础上限；不得用当前 Integrity 覆盖 maxHp。
 
 ## 6. BattleEffect：只定义视觉，不定义战斗规则
 
