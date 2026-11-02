@@ -361,6 +361,8 @@ max contract.integrity = BattleActor.max_hp
 0 <= contract.integrity <= BattleActor.max_hp
 ```
 
+结构层仍允许 `integrity = 0`，以表达历史数据或其他业务写入的失效契约；但 PokeMan 不允许用 0 Integrity 构造新的 Battle Manifestation。正常 Battle 结算采用业务规则：对每个 Contract-backed Actor 写入 `max(1, finalSnapshot.hp)`。因此 HP 在本场战斗中归零的卡片，正常退出 Battle 时保存为 1 Integrity；BattleResult 仍依据结算前的原始 final Snapshot 判定。取消 / failure 不提交本场部分 HP。此规则属于 Battle settlement 语义，不改变本节的 Shared State Record shape。
+
 ## skills
 
 ```text
