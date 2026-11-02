@@ -710,20 +710,67 @@ Battle terminal
 
 Map controls 在整个 Rival accepted → Battle → result Dialogue 连续序列期间保持关闭；只有 result Dialogue 返回后才恢复 fresh Map activation。
 
-### 10.3 Decision circuit pause 与 Host background
+### 10.3 Pause reason 与玩家手动恢复 — FROZEN
 
-Battle v0 已冻结 Decision availability circuit：达到阈值后 Runtime 进入现有 PAUSED lifecycle，需要显式 resume。PokeMan 必须处理 paused 状态，不能让用户无限等待。
+当前只区分两种产品需要处理的 Battle pause：
 
-但当前 BattleSnapshot 公开的 status 只有 paused，没有可区分 circuit pause / Host background / application pause 的 reason。Battle Integration 也明确把产品级 pause-reason / retry UI 与 Host lifecycle composition 留作 OPEN。
+| pauseReason | 触发 | 提示 | 玩家动作 |
+| --- | --- | --- | --- |
+| `host-background` | App / Host 进入后台，product composition 调用 `battle.pause("host-background")` | `战斗已暂停。游戏曾进入后台。` | `继续战斗` / `退出战斗` |
+| `decision-circuit` | 连续 3 个 authority-valid Decision attempt_failure 触发 Runtime circuit | `AI 决策连续失败，战斗已暂停。` | `重试决策` / `退出战斗` |
 
-因此：
+两种 pause **一律不自动恢复**。Host foreground 只表示“现在可以向玩家显示窗口”，不得直接调用 `battle.resume()`。
 
-- PokeMan 不得根据某个 HTTP error 猜测 Runtime pause reason。
-- Host foreground 不得无条件 resume 任意 paused Battle，否则可能错误地解除 Decision circuit pause。
-- Host background → Battle.pause()、Host foreground → 对应 external pause resume 的来源和 ownership 必须在 Host lifecycle 接线时单独验证。
-- 若产品要求显示精确 pause reason，先审议最小公开 diagnostics / lifecycle signal；不得由 PokeMan 读取 Simulation internal state。
+Battle Runtime 必须通过 public `BattleSnapshot.pauseReason` 与 `onPause()` operational event 暴露当前原因；PokeMan 不根据 HTTP error、Presentation state 或 Host 自己的猜测推断 reason。
 
-这是进入真实 Host qualification 前的明确 OPEN，不因 Frame abort 已经接通而自动解决。
+Battle Frame 使用现有产品设计中的模态 Message Frame 显示暂停窗口。固定流程：
+
+~~~text
+runtime onPause(reason)
+→ Battle Frame 保持 runtime PAUSED
+→ 若当前 Host 在 foreground：frame.call("message", pause prompt)
+→ 若当前 Host 在 background：只记住 pending prompt，等 foreground 后再 call Message
+→ 玩家选择 continue / retry
+→ Battle Frame 显式 battle.resume()
+→ 玩家选择 exit
+→ Battle Frame battle.cancel()
+~~~
+
+当前 Battle pause prompt 的业务 contract 固定为：
+
+~~~ts
+type PokeManBattlePausePrompt =
+  | {
+      messageKey: "battle-host-background-paused";
+      text: "战斗已暂停。游戏曾进入后台。";
+      actions: readonly [
+        { id: "continue"; label: "继续战斗" },
+        { id: "exit"; label: "退出战斗" },
+      ];
+    }
+  | {
+      messageKey: "battle-decision-circuit-paused";
+      text: "AI 决策连续失败，战斗已暂停。";
+      actions: readonly [
+        { id: "retry"; label: "重试决策" },
+        { id: "exit"; label: "退出战斗" },
+      ];
+    };
+~~~
+
+Message Frame 只返回玩家选择，不拥有 Battle lifecycle authority。`continue / retry` 都由 Battle Frame 调用同一个 `battle.resume()`；区别只在文案与按钮语义。`exit` 调用 `battle.cancel()`，结果走现有 cancelled 路径：不提交本场部分 HP、不播放胜负 Dialogue、不推进 Event。
+
+边界规则：
+
+- Host background 发生时立即 pause；实际后台期间不要求强行显示窗口。
+- Host foreground 后如果 Snapshot 仍是 `paused/host-background`，显示“继续战斗”窗口；禁止自动 resume。
+- Decision circuit 在 foreground 触发时立即显示“重试决策”窗口；如果触发后又进入 background，则窗口可等 foreground 后显示。
+- 已经 `paused/decision-circuit` 时再收到 Host background，不得把 pauseReason 覆盖为 `host-background`。
+- 同一次 PAUSED transition 只允许一个 pause prompt activation；重复 lifecycle event 不得叠多个 Message Frame。
+- Message child pending 时 Battle Runtime 保持 PAUSED，Battle Frame 不创建第二个 ControlsConsumer 来绕过 Message。
+- 玩家选择恢复后如果 Decision 服务仍失败，可以再次达到 threshold、再次进入 `decision-circuit` 并重新提示。
+
+这样 Host lifecycle 和 Decision availability 共用一套简单产品规则：**任何 Battle pause 都必须经过玩家确认才能继续，只是提示文本不同。**
 
 ## 11. Battle Frame 返回值与 Map 的剧情分支
 
@@ -843,12 +890,12 @@ Map 只需要 result enum；不读取 Snapshot / Replay / Content / provider dat
 
 | 阶段 | 内容 | 通过标准 |
 | --- | --- | --- |
-| P0 — Contract / lifecycle baseline | 冻结 `initialHp`、独立 `BattleArena`、Relationship 默认值、Base baseline bootstrap、1 HP 最低持久化规则、双向 OCC settlement、result Dialogue confirmation 与 PWA full-content packaging | 实现 agent 不需要再决定默认关系、bootstrap owner、结果确认 UI、Map passability 或 PWA dependency closure |
+| P0 — Contract / lifecycle baseline | 冻结 `initialHp`、独立 `BattleArena`、Relationship 默认值、Base baseline bootstrap、1 HP 最低持久化、双向 OCC settlement、result Dialogue confirmation、两类 pauseReason 手动恢复与 PWA full-content packaging | 实现 agent 不需要再决定默认关系、bootstrap owner、结果确认 UI、pause UX、Map passability 或 PWA dependency closure |
 | P1 — Core input + Content | Battle Core 实现可选 `ResolvedBattleActor.initialHp` 与 `BattleArenaRef` / Presentation loading；PokeMan 新增 `struct.BattleArena/lab-tutorial`，修正 Grab range、BattleEffect schema / Record / Graphics 与 Browser artifact sync | Core / Content validator 通过；Arena 不依赖 struct.Map；旧 initialHp caller 省略字段仍默认 maxHp |
 | P2 — Headless composition | 新建 Battle Subsystem、双向 Contract Resolver、FakeClock、ScriptDecision composition | 不启动 Browser 即可运行确定性 1v1；验证 initialHp、1 HP floor 与双向原子结算 |
 | P3 — Map 4 prologue vertical slice | Map 4 Professor → rival Dialogue → Battle → result-specific post-battle Dialogue；Map controls 整链暂停与最终 fresh resume | 三种 BattleResult 分支正确；settlement 后才触发 Dialogue；取消 / failure 不误触发剧情 |
 | P4 — DeepSeek transport | 从 SessionConfig 构造 PokeMan-private transport，接入双方 DeepSeekDecision | PWA / Hostra 的真实 provider request 可观察且可取消；AI vs AI 正常运行 |
-| P5 — Product qualification | Browser / PWA / Desktop / Host lifecycle / failure / replay | PWA 使用全量 PokeMan FSDB packaging，Battle 无独立 acknowledgement UI，真实宿主端到端证据完整 |
+| P5 — Product qualification | Browser / PWA / Desktop / Host lifecycle / failure / replay | PWA 使用全量 PokeMan FSDB packaging；Battle 无独立 result acknowledgement；background / decision-circuit 两类 pause 都经 Message 手动恢复；真实宿主端到端证据完整 |
 | P6 — Map 5 Encounter follow-up | road-bandit visible Encounter / 本体参战 / Encounter source | 与 Map 4 教学链分离，证明普通 NPC 本体可进入同一 Battle Runtime |
 
 Save / Load 和进程中断后的结果恢复不属于上述阶段；它们留到未来存档设计阶段。当前阶段只验收同一运行期间的 Battle terminal → bilateral settlement → result Dialogue 正常流程。
