@@ -564,4 +564,3 @@ Battle Subsystem 必须先读取未经归一化的 final Snapshot，并据此保
 Battle cancelled / failure 不属于正常胜负结果，不提交本场部分 HP 损耗，不调用上述战后 Dialogue，也不推进 Event。Save / Load、进程中断后从“Battle 已结算但战后 Dialogue 未完成”状态恢复，明确留到未来存档设计阶段，本次不实现恢复凭证或额外状态机。
 
 三种正常结果共用 prologue-battle-resolved，进入 after-battle。
-
