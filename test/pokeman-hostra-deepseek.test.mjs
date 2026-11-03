@@ -299,8 +299,8 @@ async function assertSchemaFormPresentation(page) {
     rootDefined: true,
     fieldDefined: true,
     schemaCssAvailable: true,
-    loadedStyles: 4,
-    loadedScripts: 4,
+    loadedStyles: 6,
+    loadedScripts: 6,
   });
 }
 
@@ -362,6 +362,8 @@ test("real Hostra runs the actual PokeMan Gate before Map and controls", { timeo
     { key: "base", module: "subsystems/base.mjs" },
     { key: "map", module: "subsystems/map.mjs" },
     { key: "dialogue", module: "subsystems/dialogue.mjs" },
+    { key: "battle", module: "subsystems/battle.mjs" },
+    { key: "message", module: "subsystems/message.mjs" },
   ]);
 
   await runHostraQualification("deterministic", async ({ page, observer }) => {
