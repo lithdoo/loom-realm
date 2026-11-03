@@ -1,6 +1,6 @@
 # Battle v0 Simulation Implementation Spec
 
-> 状态：**Simulation gameplay/runtime baseline 与 Decision availability circuit (§10/§16) 均 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。
+> 状态：**Simulation gameplay/runtime baseline、Decision availability circuit (§10/§16)、BATTLE-003 `ResolvedBattleActor.initialHp`、BATTLE-004 独立 `BattleArena` 与 CTRL-002 pauseReason / onPause 均已 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。
 >
 > 目标：implementation agent 应能直接实现 headless/self-driven Simulation，而不需要自行选择 Clock、queue、Decision lifecycle、Plan handoff、Tick transaction、Projection cadence、terminal race 或 Replay 架构。
 
@@ -157,7 +157,7 @@ type ResolvedBattleDefinition = {
   maxPathSteps: number
 
   map: {
-    ref: MapRef
+    ref: BattleArenaRef
     width: number
     height: number
     // rows[y][x]；true = movement passable
@@ -173,6 +173,8 @@ type ResolvedBattleActor = {
   tile: GridPosition
   direction: Direction
   maxHp: number
+  // Optional explicit current HP; omitted preserves the legacy full-HP default.
+  initialHp?: number
 
   // SceneInit 所需稳定视觉 facts；不参与 gameplay 判定。
   character: ResourceRef
@@ -199,11 +201,11 @@ type ResolvedBattleSkill = {
 - map `width/height >= 1` 且为 safe integer；`passable.length === height`，每行长度严格等于 width，元素只能是 boolean；
 - v0 actors 恰好两个、actorId唯一、team恰好1 ally + 1 enemy；
 - 两个 Actor 初始 committed tile 不得相同，必须在 bounds 内且 `passable[y][x] === true`；
-- Actor `maxHp >= 1` safe integer；direction必须为 2/4/6/8；character必须是合法 ResourceRef；
+- Actor `maxHp >= 1` safe integer；若提供 `initialHp`，必须是 safe integer 且 `1 <= initialHp <= maxHp`；省略时按 `maxHp` 初始化；direction必须为 2/4/6/8；character必须是合法 ResourceRef；
 - 每 Actor skillId 唯一；`baseDamage >= 0` safe integer；`windupTicks/recoveryTicks >= 0` safe integer；range遵循 SKILL-001/DAMAGE-001；effect为非空 id；
 - validator 成功后必须生成 detached immutable/deep-frozen Simulation-owned definition；Runtime/Replay不得持有调用方可变 actors/skills/range/passable 数组引用；
-- Runtime 初始 HP = maxHp、reservations为空、action=idle、decision=none、Plan slots为空、generation/counters使用本文固定初值；
-- `passable` 是纯数据，不把 RPGMap Runtime 注入 Simulation；
+- Runtime 初始 HP = `initialHp ?? maxHp`、reservations为空、action=idle、decision=none、Plan slots为空、generation/counters使用本文固定初值；`maxHp` 始终保持上限，不因当前 HP 改变；
+- `passable` 是 BattleArena authored 纯数据，不从 RPGMap passage / terrain / runtime 推导，也不把 RPGMap Runtime 注入 Simulation；
 - Runtime 内 coefficient 使用 normalized integer units；
 - Simulation 从 resolved facts 构造 `BattleSceneInit`：actors按 actorId稳定排序，`effectIds` 对所有 actor skills 的 effect 去重后按 ECMAScript ordinal string order排序；后续 `RenderProjection.actors` 同样使用稳定 actorId顺序。
 
@@ -214,12 +216,13 @@ Public surface 固定：
 ```ts
 interface BattleRuntime {
   run(): Promise<BattleResult>
-  pause(): void
+  pause(reason?: "host-background"): void
   resume(): void
   cancel(): void
   close(): void
   getSnapshot(): BattleSnapshot
   getReplay(): ReplayRecord
+  onPause(listener: (event: BattlePauseEvent) => void): () => void
 }
 ```
 
@@ -257,6 +260,8 @@ Method semantics：
 补充：
 
 - `run()` one-shot；重复 run 属 programmer error；
+- external `pause()` 只表达 Host/background pause；省略 reason 时兼容等价于 `pause("host-background")`，不得由产品用它伪造 Decision circuit；
+- `onPause(listener)` 订阅每次真实 RUNNING → PAUSED transition 的 operational event，并返回 unsubscribe；重复 pause no-op 不重复通知；该事件不进入 Replay/gameplay facts；
 - `close()` 幂等；
 - active `close()` 等价于 cancel authority + cleanup，并使 active run 以 `cancelled` settle；
 - CREATED 上直接 `close()` 只进入 CLOSED，不制造未发生的 BattleResult；CREATED 上 `cancel()` 记录 `cancelled` 后进入 CLOSED；
@@ -358,32 +363,38 @@ wakeCancel = clock.schedule(delayMs, wake)
 - 其他 checked gameplay arithmetic（例如 `currentTick + moveTicks`、`baseDamage * coefficientUnits`）超界 → `BattleResult.failure { source: "simulation", code: "BATTLE_NUMERIC_OVERFLOW" }`；
 - 都必须在产生不精确值之前失败，不得 wrap/静默继续。
 
-Pause：
+External Host pause：
 
 ~~~text
 RUNNING
+→ pauseReason = "host-background"
 → accumulatedRunningMs += now - runningAnchorMs
 → cancel wake
 → call presentation.pause() inside Runtime call boundary
 → if classified sync fatal: finish(presentation failure)
 → else status = PAUSED
+→ emit BattlePauseEvent { reason: "host-background" }
 ~~~
+
+Decision circuit pause 使用同一 PAUSED transition，但 reason 固定为 `"decision-circuit"`，并在 Tick-boundary circuit transition 成功后 emit 对应 BattlePauseEvent。任何进入 PAUSED 的成功路径都必须有且只有一个 pauseReason。
 
 Resume：
 
 ~~~text
 PAUSED
+→ remember current pauseReason
 → if decision availability circuitOpen:
      consecutiveFailures = 0
      circuitOpen = false
 → call presentation.resume() inside Runtime call boundary
 → if classified sync fatal: finish(presentation failure)
 → else runningAnchorMs = now
+→ clear pauseReason
 → status = RUNNING
 → schedule next wake
 ~~~
 
-普通 external pause 与 Decision circuit pause 都**不 abort Decision**；Decision completion 可以在 pause期间进入 Inbox并等待后续 Tick消费。
+普通 external pause 与 Decision circuit pause 都**不 abort Decision**；Decision completion 可以在 pause期间进入 Inbox并等待后续 Tick消费。重复 `pause("host-background")` 在已经 PAUSED 时是 no-op，绝不能把已有 `decision-circuit` reason 覆盖为 `host-background`。
 
 两者复用同一内部 PAUSED transition（cancel wake → presentation.pause() → status=PAUSED），但 logical-time cut 不同：
 
@@ -410,6 +421,7 @@ type BattleState = {
   sceneEpoch: number
   currentTick: number
   status: BattleStatus
+  pauseReason: BattlePauseReason | null
 
   actors: Map<ActorId, ActorRuntimeState>
   reservations: Map<TileKey, Reservation>
@@ -452,7 +464,7 @@ result = null
 reservations = empty
 
 per actor:
-  hp = maxHp
+  hp = initialHp ?? maxHp
   action = idle
   decision = none
   activePlan = null
@@ -791,11 +803,11 @@ Circuit pause 与普通 pause 共享：
 - resume后不做 pause catch-up；
 - HP/tile/action/protection/timers 在 pause 期间不推进。
 
-两者唯一与 availability 相关的差异是：circuit pause 同时保持 `circuitOpen=true`，直到 explicit `resume()` 清零 guard。
+两者唯一与 availability 相关的差异是：circuit pause 同时保持 `circuitOpen=true`，且公开 `pauseReason="decision-circuit"`；Host pause 公开 `pauseReason="host-background"`。两者都保持 PAUSED，直到产品显式调用 `resume()`。
 
 ### 10.4 Explicit resume
 
-Decision circuit **不自动恢复**，不使用 retry timer/cooldown 自动 `resume()`。
+Decision circuit **不自动恢复**，不使用 retry timer/cooldown 自动 `resume()`。Host/background pause 同样不由 Runtime 自动恢复；Host foreground 只是产品层显示恢复提示的时机，真正恢复仍必须显式调用 `battle.resume()`。
 
 当 Runtime 当前 PAUSED 且 `circuitOpen === true` 时，外部显式调用：
 
@@ -1392,7 +1404,7 @@ AbortController
 scheduler handles
 ```
 
-Snapshot在每个 processed Tick结束后与该 Tick Projection基于同一 committed state产生。
+Snapshot在每个 processed Tick结束后与该 Tick Projection基于同一 committed state产生。非 Tick lifecycle transition 进入/离开 PAUSED 时，`getSnapshot()` 也必须立即反映 `status / pauseReason`：PAUSED 时 reason 必须存在，其他 status 必须 absent。
 
 ## 26. ReplayRecord
 
@@ -1516,7 +1528,7 @@ ReplayDriver只接受 `replayability.type === "deterministic"`。对于 `in_prog
 
 不记录真实 Decision completion timestamp。Replay arrays 按产生 Tick、再按 actorId / effectId 等稳定 identity 写入，不以 Map insertion order 或 Promise order作为序列化权威。
 
-`initial` 是 Runtime build 时已验证的 `ResolvedBattleDefinition` 的 detached immutable deep copy；Replay 不重新访问 Decision/LLM 来恢复初始 gameplay facts，也不额外引入 definition fingerprint/hash algorithm。外部 Content serialization subject/version 如何生成该 resolved definition 仍属于 Integration，不影响 Replay。
+`initial` 是 Runtime build 时已验证的 `ResolvedBattleDefinition` 的 detached immutable deep copy；其中显式 `initialHp`（如提供）必须被保留，省略时 Replay 与原 Runtime 一样按 `maxHp` 初始化。Replay 不重新访问 Decision/LLM 来恢复初始 gameplay facts，也不额外引入 definition fingerprint/hash algorithm。外部 Content serialization subject/version 如何生成该 resolved definition 仍属于 Integration，不影响 Replay。
 
 
 ## 27. Replay execution
@@ -1668,7 +1680,8 @@ Simulation qualification必须提供：
 3. Decision races：Inbox snapshot、stale generation、correction、pending Plan；
 4. lifecycle：initialization、terminal、cancel/close、Presentation failure；
 5. Replay qualification：live→record→replay结果/snapshot/projection一致；
-6. existing Presentation integration：Simulation只消费已冻结Port，不重测Browser内部语义。
+6. existing Presentation integration：Simulation只消费已冻结Port，不重测Browser内部语义；
+7. initial HP amendment：覆盖字段省略（默认 maxHp）、显式满血、显式受损初值、0 / 超上限 / 非整数拒绝，并验证 Snapshot / Projection / Replay 保留初始 HP。
 
 ## 31. Implementation invariants
 
@@ -1735,7 +1748,7 @@ Implementation agent 按以下顺序落地，不重新设计边界：
    - ReplayDriver must not execute live availability guard
 
 9. simulation/runtime.ts
-   - preserve existing public pause()/resume() behavior for external pause
+   - preserve external pause()/resume() timing behavior while extending `pause(reason?)`, `pauseReason` Snapshot and `onPause` operational notification
    - add live-only DecisionAvailabilityGuard initialized to { consecutiveFailures: 0, circuitOpen: false }
    - after render + terminal gate, process TickOutput.decisionHealthSignals in order
    - threshold 3 latches circuitOpen/circuitPausePending
@@ -1765,6 +1778,7 @@ Definition of Done：
 - circuit catch-up cut 通过 FakeClock 验证为 `accumulatedRunningMs = currentTick * 200`，resume 不补跑 pause 前 backlog；
 - FakeClock tests never depend on real sleep/timer drift；
 - no gameplay path uses `Date.now()`, `Math.random()`, Browser animation ACK, Map Runtime state, or public `tick()`；
+- `ResolvedBattleActor.initialHp` amendment：省略时兼容默认 maxHp；提供时校验 `1 <= initialHp <= maxHp`；Runtime / Snapshot / Projection / Replay 一致使用该初始值；
 - Decision callback never mutates gameplay state；
 - deterministic live→Replay qualification matches final result/snapshot/gameplay Projection sequence；
 - external cancel/Presentation/invariant records are correctly marked audit-only；
@@ -1813,13 +1827,15 @@ tests
   → T-DEC-023..036
 ~~~
 
-除上述 delta 外，不得重写已 qualification 的 reducer、Decision lifecycle、Replay schema 或 public Runtime ABI。
+除上述既有 delta 外，不得重写已 qualification 的 reducer、Decision lifecycle 或 Replay gameplay semantics。新增获准的 amendments 只有 BATTLE-003 `ResolvedBattleActor.initialHp`、BATTLE-004 `BattleArenaRef` 与 CTRL-002 pauseReason / onPause：前两者扩展输入 / Content；CTRL-002 只扩展 operational lifecycle observation，不改变 reducer、Tick ordering 或 Decision authority。
 
-仍可OPEN且不阻塞Simulation/Decision implementation的内容：
+BATTLE-003 / BATTLE-004 / CTRL-002 已完成 automated qualification；受损 initialHp、独立 BattleArena integration 与两类 pauseReason Runtime contract 均已闭环。具体产品 Message/manual-recovery qualification 由 PokeMan integration tests 覆盖。
+
+仍可OPEN且不阻塞Simulation/Decision implementation的其他内容：
 
 - serialized BattleActor/BattleSkill external subject/version/key encoding；
 - DeepSeek concrete Decision 的 provider/HTTP/failure semantics 已由 BATTLE_V0_DECISION.md 冻结且不属于 Simulation；这里只允许 Host credential/composition wiring 保持外部 OPEN；
 - Guidance Host/InputTarget wiring；
-- Host具体background/suspend事件来源。
+- Host具体background/suspend事件来源可以由各平台适配器决定，但一旦识别为 background，必须映射为 `pause("host-background")`；foreground 不得自动调用 resume。
 
 这些不得改变本文已冻结的 Simulation authority、state transition、Tick timing、Plan pipeline或public Runtime semantics。

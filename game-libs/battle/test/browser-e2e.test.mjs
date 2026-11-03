@@ -185,7 +185,7 @@ test("RenderDomain state traverses WebProjector into battle custom elements", { 
     const table = (values, xSize, ySize = 1, zSize = 1) => ({ dimensions: zSize === 1 && ySize === 1 ? 1 : 3, xSize, ySize, zSize, values });
     const priorities = Array(500).fill(0); priorities[385] = 2;
     const records = new Map([
-      ["struct.Map:1", { tileset_id: 1, width: 30, height: 20, data: table(mapValues, 30, 20, 3) }],
+      ["struct.BattleArena:test", { id: "test", tileset_id: 1, width: 30, height: 20, passable: Array.from({ length: 20 }, () => Array(30).fill(true)), data: table(mapValues, 30, 20, 3) }],
       ["struct.Tileset:1", { id: 1, tileset_name: "test.png", autotile_names: ["water[2]", "calm", null, null, null, null, null], priorities: table(priorities, 500) }],
       ["struct.BattleEffect:spark", { id: "spark", image: { namespace: "resource.Graphics", key: "BattleEffects/spark.png" }, anchor: "tile-center", timing: { fade_in_ticks: 1, hold_ticks: 2, fade_out_ticks: 1 } }],
     ]);
@@ -203,7 +203,7 @@ test("RenderDomain state traverses WebProjector into battle custom elements", { 
     };
     const frame = { id: "handler-e2e", params: null, signal: controller.signal, async call() { return { type: "cancelled" }; } };
     const handler = new BattlePresentationBuilder(scope, frame).build();
-    const scene = { battleId: "handler-battle", sceneEpoch: 7, tickDurationMs: 200, map: { mapId: 1 }, actors: [
+    const scene = { battleId: "handler-battle", sceneEpoch: 7, tickDurationMs: 200, map: { arenaId: "test" }, actors: [
       { actorId: "hero", team: "ally", character: { namespace: "resource.Graphics", key: "Characters/hero.png" } },
       { actorId: "enemy", team: "enemy", character: { namespace: "resource.Graphics", key: "Characters/enemy.png" } },
     ], effectIds: ["spark"] };

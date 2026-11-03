@@ -372,7 +372,7 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
       window.__dialogueSessionBirths = births;
     });
     await page.keyboard.press("KeyZ");
-    await waitForDialogue(page, "你终于来了。");
+    await waitForDialogue(page, "来得正好。卡片代表你与角色建立的契约，战斗中显现的是契约力量，不是角色本体。");
     assert.equal((await page.evaluate(() => window.__dialogueSessionBirths)).at(-1).initialHidden, true,
       "a fresh Dialogue session must be created from the initial hidden READY baseline");
     assert.equal(await page.evaluate(() => document.querySelector("lr-map-view") === window.__stagingMapBeforeDialogue), true,
@@ -386,7 +386,7 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     const mapBeforeCustomDialogue = await page.evaluate(() => structuredClone(document.querySelector("lr-map-sprite")._latestData));
     await sendCustomControls(page, ["south"]);
     try {
-      await waitForDialogue(page, "准备好出发了吗？");
+      await waitForDialogue(page, "契约完整度会随战斗消耗并保留到下一场；归零代表显现体被击败，正常结算后最低保留 1 点。");
     } finally {
       await sendCustomControls(page, []);
     }
@@ -419,18 +419,22 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     await page.waitForFunction(() => document.querySelector("lr-dialogue-view")?._mode === "conversation", null, { timeout: 25_000 });
     await assertDialogueNeverHidden(page, "Conversation B History open/close");
 
-    // History paused the reveal; finish it before choosing (first commit only
-    // reveals), then submit the ready choice.
+    // Finish the second line, advance to the authored choice line, then select
+    // the first formal graph edge (ready).
+    await revealAndConfirm(page);
+    await waitForDialogue(page, "你和劲敌将互换卡片，各自调用对方的显现体。听明白了吗？");
     await page.keyboard.press("KeyZ");
     await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 25_000 });
     await page.keyboard.press("ArrowDown");
-    await page.waitForFunction(() => document.querySelector('lr-dialogue-choice[choice-id="ready"]')?.isSelected() === true, null, { timeout: 25_000 });
+    await page.waitForFunction(() => document.querySelector('lr-dialogue-choice[choice-id="0"]')?.isSelected() === true, null, { timeout: 25_000 });
     await page.keyboard.press("KeyZ");
-    await waitForDialogue(page, "很好，出发吧。");
+    await waitForDialogue(page, "很好。去找研究所另一边的劲敌吧。等你们双方都同意，再开始测试。");
     await assertDialogueNeverHidden(page, "Conversation B → READY → C");
     await revealAndConfirm(page);
     await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 25_000 });
+    planner.setEventStates([{ eventId: "prologue", stateId: "rival-ready" }]);
     await waitForMap(page, state);
+    await page.waitForTimeout(500);
     assert.equal(await page.evaluate(() => document.querySelector("lr-map-view") === window.__stagingMapBeforeDialogue), true,
       "the same Map view remains mounted after the Dialogue session closes");
 
@@ -444,22 +448,33 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     assert.ok(move, "resumed Map must accept movement");
     state = await act(page, [{ ...move.candidate, expected: move.expected }]);
 
-    // A second NPC interaction creates a fresh Dialogue session that starts from
-    // the initial hidden READY baseline again.
+    // The state mutation immediately replaces the interactable Professor with
+    // the Rival, whose fresh Dialogue session starts from READY again.
     const firstSessionElement = await page.evaluate(() => window.__dialogueSessionBirths.length);
-    const repeatProfessor = planner.planNpcCollision(state);
-    assert.equal(repeatProfessor.npc.instanceId, "professor");
-    if (repeatProfessor.travel.length > 0) state = await act(page, repeatProfessor.travel);
-    state = await act(page, [repeatProfessor.collision]);
+    const rival = planner.planNpcCollision(state, "rival-lab");
+    assert.equal(rival.npc.instanceId, "rival-lab");
+    if (rival.travel.length > 0) state = await act(page, rival.travel);
+    state = await act(page, [rival.collision]);
     await page.keyboard.press("KeyZ");
-    await waitForDialogue(page, "你终于来了。");
+    await waitForDialogue(page, "总算来了。我们来做一次真正的交换：我把自己的卡交给你，你也把自己的卡交给我。");
     assert.equal(await page.evaluate(() => window.__dialogueSessionBirths.length), firstSessionElement + 1,
       "the second interaction must create a fresh Dialogue presentation");
     assert.equal((await page.evaluate(() => window.__dialogueSessionBirths)).at(-1).initialHidden, true,
       "the fresh second session starts with an initial READY hidden shell");
-    await page.keyboard.press("KeyX");
+    await revealAndConfirm(page);
+    await waitForDialogue(page, "进入战场的只是各自契约形成的显现。怎么样，愿意交换卡片，堂堂正正比一场吗？");
+    await page.keyboard.press("KeyZ");
+    await page.waitForFunction(() => document.querySelector("lr-dialogue-conversation")?._revealComplete === true, null, { timeout: 25_000 });
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.waitForFunction(() => document.querySelector('lr-dialogue-choice[choice-id="1"]')?.isSelected() === true, null, { timeout: 25_000 });
+    await page.keyboard.press("KeyZ");
+    await waitForDialogue(page, "好，我不会逼你。没有你的同意，这份契约就不会成立。准备好了再来。");
+    await revealAndConfirm(page);
     await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 25_000 });
-    await waitForMap(page, state);
+    await page.waitForFunction(() => document.querySelector("lr-map-view")?.dataset.mapVisualState === "ready"
+      && document.documentElement.dataset.loomrealmProduct === "ready"
+      && window.__loomrealmPwa.failure === null, null, { timeout: 25_000 });
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await completeDeepSeekGate(page, draft);

@@ -49,3 +49,12 @@ export {
   type SessionEventFatalLatch,
   type SessionEventFatalSource,
 } from "./fatal-source.js";
+export {
+  createHostLifecyclePublisher,
+  subscribeHostLifecycle,
+  type HostLifecyclePublisher,
+  type HostLifecyclePublisherOptions,
+  type HostLifecycleSnapshot,
+  type HostLifecycleState,
+  type HostLifecycleSubscription,
+} from "./host-lifecycle.js";

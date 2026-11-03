@@ -2,7 +2,7 @@
 
 > 状态：**FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。
 >
-> 本文是 Battle v0 Presentation 的规范性实现合同。**Blocking Presentation OPEN = 0**：实现 agent 不得自行更换 public API、Render Tree、Node data ABI、坐标模型、camera、viewport policy、effect policy 或 lifecycle 语义。
+> 本文是 Battle v0 Presentation 的规范性实现合同。Presentation 与 BATTLE-004 独立 BattleArena loading 已 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED。实现 agent 不得自行更换 public API、Render Tree、Node data ABI、坐标模型、camera、viewport policy、effect policy 或 lifecycle 语义。
 >
 > - gameplay/runtime 权威语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；
 > - cross-layer 数据字段以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 中已冻结的 Presentation contracts 为准；
@@ -19,7 +19,7 @@ Presentation 不解释 Battle Rule，不决定 gameplay transition。
 
 因此它可以决定：
 
-- Map/Tileset/Autotile 怎样画；
+- BattleArena / Tileset / Autotile 怎样画；
 - Actor Sprite 怎样显示；
 - committed move step 怎样插值；
 - HP、死亡、技能效果怎样表现；
@@ -70,6 +70,17 @@ Battle 不复用 RPGMap Runtime，但复用这套**模块接入方式**：
 - Browser 表现继续通过 game-lib 自带 browser assets/custom elements；
 - Presentation 对上只暴露 Battle 语义，不向 Simulation 暴露 `RenderDomain` / DOM。
 
+### 2.1 BATTLE-004：Presentation 只加载 BattleArena，不加载探索 Map
+
+BATTLE-004 目标实现中，`BattleSceneInit.map` 携带 `BattleArenaRef { arenaId }`。Presentation 初始化时：
+
+1. 读取 `struct.BattleArena/<arenaId>`；
+2. 校验 width / height / passable / tileset_id / 3-layer tile data；
+3. 读取 Arena 的 `struct.Tileset/<tileset_id>` 与 Tileset / Autotile Graphics；
+4. 使用 Arena.data 绘制 tile；
+5. 不读取 `struct.Map`，也不读取 passages / terrain / bridge / transfer 来决定 gameplay。
+
+Arena.passable 属 Simulation input；Presentation 不需要使用它做 movement 判定。BattleArena 的 visual tile data 与 gameplay passable 可以独立 author。
 ## 3. 模块与 Session 生命周期
 
 必须区分“长期复用的 Battle 库”与“一场 Battle 的 session”。
@@ -297,7 +308,7 @@ type BattleSceneInit = {
   battleId: string
   sceneEpoch: number
   tickDurationMs: 200
-  map: MapRef
+  map: BattleArenaRef
   actors: readonly BattleActorRenderInit[]
   effectIds: readonly string[]
 }
@@ -340,7 +351,7 @@ validate scene identity / ActorId bounds+uniqueness / stable effectIds
 创建 session AbortController，并与 frame.signal 共同作为资源取消 authority
     ↓
 并行加载：
-  struct.Map
+  struct.BattleArena
   struct.Tileset
   Tileset/Autotile Graphics identity
   Character Graphics identity
@@ -673,7 +684,7 @@ Handler 内部直接使用：
 
 | Subsystem surface | Presentation 用途 |
 | --- | --- |
-| `scope.content` | Map/Tileset/Autotile/Character/BattleEffect 资源 |
+| `scope.content` | BattleArena/Tileset/Autotile/Character/BattleEffect 资源 |
 | `scope.viewport` | layout / camera / resize |
 | `scope.createRenderDomain()` | 创建本场 RenderDomain |
 | `frame.signal` | 本场外部取消/资源读取取消 |
@@ -1020,7 +1031,7 @@ serialized initial RenderDomain state / one update candidate < 1000000 bytes
 
 ### 14.3 lr-battle-view — FROZEN
 
-`lr-battle-view` 负责 Map/Tileset/Autotile、logical viewport、camera/world transform、tile depth 与 named slots。
+`lr-battle-view` 负责 BattleArena/Tileset/Autotile、logical viewport、camera/world transform、tile depth 与 named slots。
 
 Browser-facing refs MUST 已由 subsystem Presentation resolve 出 `contentVersion`：
 

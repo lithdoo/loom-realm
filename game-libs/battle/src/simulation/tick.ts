@@ -309,6 +309,7 @@ export function createSnapshot(state: BattleState): BattleSnapshot {
     currentTick: state.currentTick,
     tickDurationMs: 200,
     status: state.status,
+    ...(state.status === "paused" ? { pauseReason: state.pauseReason! } : {}),
     actors: Object.freeze(actors),
     reservations: Object.freeze(reservations),
     ...(state.result === null ? {} : { result: Object.freeze(structuredClone(state.result)) }),

@@ -13,7 +13,7 @@ async function json(path) {
   return JSON.parse(await readFile(new URL(path, root), "utf8"));
 }
 
-test("the parsed Game Entry declares Base, Map, and Dialogue from the player home", async () => {
+test("the parsed Game Entry declares the full PokeMan subsystem topology from the player home", async () => {
   const game = parseGameEntryV1(await readFile(new URL("game.json", root), "utf8"));
   assert.deepEqual(game, {
     formatVersion: 1,
@@ -26,7 +26,7 @@ test("the parsed Game Entry declares Base, Map, and Dialogue from the player hom
         characterName: "Player",
       },
     },
-    subsystems: [{ key: "base" }, { key: "map" }, { key: "dialogue" }],
+    subsystems: [{ key: "base" }, { key: "map" }, { key: "dialogue" }, { key: "battle" }, { key: "message" }],
   });
 
   assert.deepEqual(await json("launch.hostra.json"), {
@@ -35,6 +35,8 @@ test("the parsed Game Entry declares Base, Map, and Dialogue from the player hom
       { key: "base", module: "subsystems/base.mjs" },
       { key: "map", module: "subsystems/map.mjs" },
       { key: "dialogue", module: "subsystems/dialogue.mjs" },
+      { key: "battle", module: "subsystems/battle.mjs" },
+      { key: "message", module: "subsystems/message.mjs" },
     ],
   });
   const base = await readFile(new URL("subsystems/base.mjs", root), "utf8");
@@ -58,6 +60,8 @@ test("Map and Dialogue presentation are resolved from PokeMan Content resources"
       { namespace: "Presentation", key: "schema-form/schema-form.browser.css" },
       { namespace: "Presentation", key: "map/map.css" },
       { namespace: "Presentation", key: "dialogue/dialogue.css" },
+      { namespace: "Presentation", key: "battle/battle.css" },
+      { namespace: "Presentation", key: "message/message.css" },
       { namespace: "Presentation", key: "page.css" },
     ],
     scripts: [
@@ -65,6 +69,8 @@ test("Map and Dialogue presentation are resolved from PokeMan Content resources"
       { namespace: "Presentation", key: "controls/device-input.browser.js" },
       { namespace: "Presentation", key: "map/map.browser.js" },
       { namespace: "Presentation", key: "dialogue/dialogue.browser.js" },
+      { namespace: "Presentation", key: "battle/battle.browser.js" },
+      { namespace: "Presentation", key: "message/message.browser.js" },
     ],
   });
 
@@ -75,6 +81,10 @@ test("Map and Dialogue presentation are resolved from PokeMan Content resources"
   await access(new URL("[resource]Presentation/map/map.browser.js.js", fsdbRoot));
   await access(new URL("[resource]Presentation/dialogue/dialogue.css.css", fsdbRoot));
   await access(new URL("[resource]Presentation/dialogue/dialogue.browser.js.js", fsdbRoot));
+  await access(new URL("[resource]Presentation/battle/battle.css.css", fsdbRoot));
+  await access(new URL("[resource]Presentation/battle/battle.browser.js.js", fsdbRoot));
+  await access(new URL("[resource]Presentation/message/message.css.css", fsdbRoot));
+  await access(new URL("[resource]Presentation/message/message.browser.js.js", fsdbRoot));
   await access(new URL("[resource]Presentation/page.css.css", fsdbRoot));
 });
 
@@ -115,7 +125,7 @@ test("Map-only NPC placements stay in bounds and resolve NPC sprites", async () 
   for (const mapId of requiredMapIds) {
     const map = await json(`[FSDB]PokeMan/[struct]Map/${mapId}.json`);
     const placements = placementsForMap(mapId);
-    assert.equal(placements, MAP_ONLY_NPC_PLACEMENTS[mapId]);
+    assert.deepEqual(placements, MAP_ONLY_NPC_PLACEMENTS[mapId] ?? []);
     for (const placement of placements) {
       assert.ok(placement.x >= 0 && placement.x < map.width, `${placement.instanceId} x is outside Map ${mapId}`);
       assert.ok(placement.y >= 0 && placement.y < map.height, `${placement.instanceId} y is outside Map ${mapId}`);

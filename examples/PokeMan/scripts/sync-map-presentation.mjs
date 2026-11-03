@@ -15,6 +15,10 @@ const TARGET_RELATIVE = Object.freeze({
   css: join("[resource]Presentation", "map", "map.css.css"),
   dialogueJs: join("[resource]Presentation", "dialogue", "dialogue.browser.js.js"),
   dialogueCss: join("[resource]Presentation", "dialogue", "dialogue.css.css"),
+  battleJs: join("[resource]Presentation", "battle", "battle.browser.js.js"),
+  battleCss: join("[resource]Presentation", "battle", "battle.css.css"),
+  messageJs: join("[resource]Presentation", "message", "message.browser.js.js"),
+  messageCss: join("[resource]Presentation", "message", "message.css.css"),
   pageCss: join("[resource]Presentation", "page.css.css"),
 });
 const DIST_RELATIVE = Object.freeze({
@@ -23,6 +27,8 @@ const DIST_RELATIVE = Object.freeze({
   controlsJs: join("game-libs", "game-common-controls", "dist", "browser", "device-input.browser.js"),
   js: join("game-libs", "map", "dist", "browser", "map.browser.js"),
   css: join("game-libs", "map", "dist", "browser", "map.css"),
+  battleJs: join("game-libs", "battle", "dist", "browser", "battle.browser.js"),
+  battleCss: join("game-libs", "battle", "dist", "browser", "battle.css"),
 });
 const SOURCE_RELATIVE = Object.freeze({
   schemaFormJs: join("game-libs", "schema-form", "dist", "browser", "schema-form.browser.js"),
@@ -32,6 +38,10 @@ const SOURCE_RELATIVE = Object.freeze({
   css: join("game-libs", "map", "browser", "map.css"),
   dialogueJs: join("examples", "PokeMan", "presentation", "dialogue.browser.js"),
   dialogueCss: join("examples", "PokeMan", "presentation", "dialogue.css"),
+  battleJs: join("game-libs", "battle", "dist", "browser", "battle.browser.js"),
+  battleCss: join("game-libs", "battle", "dist", "browser", "battle.css"),
+  messageJs: join("examples", "PokeMan", "presentation", "message.browser.js"),
+  messageCss: join("examples", "PokeMan", "presentation", "message.css"),
   pageCss: join("examples", "PokeMan", "presentation.css"),
 });
 const RESOURCE_LABELS = Object.freeze({
@@ -42,6 +52,10 @@ const RESOURCE_LABELS = Object.freeze({
   css: "map CSS",
   dialogueJs: "dialogue browser JS",
   dialogueCss: "dialogue CSS",
+  battleJs: "battle browser JS",
+  battleCss: "battle CSS",
+  messageJs: "message browser JS",
+  messageCss: "message CSS",
   pageCss: "page CSS",
 });
 
@@ -102,6 +116,10 @@ async function runNpmBuild(repoRoot) {
     Object.freeze({
       args: Object.freeze(["run", "build", "-w", "@loomrealm-game/schema-form"]),
       label: "Schema Form browser build",
+    }),
+    Object.freeze({
+      args: Object.freeze(["run", "build", "-w", "@loomrealm-game/battle"]),
+      label: "Battle browser build",
     }),
   ]);
   for (const command of commands) {

@@ -49,7 +49,7 @@ test("PokeMan staging build is self-contained and dependency-ordered for fresh R
   assert.equal(new Set(order).size, order.length, "workspace should not be built twice");
   const position = new Map(order.map((name, index) => [name, index]));
 
-  // PokeMan staging also builds Base, Map, Dialogue, and Schema Form artifacts from source and
+  // PokeMan staging also builds Base, Map, Dialogue, Battle, and Schema Form artifacts from source and
   // creates an FSDB fixture, none of which is a declared app/pwa runtime dependency.
   const required = new Set();
   const visit = (name) => {
@@ -66,6 +66,7 @@ test("PokeMan staging build is self-contained and dependency-ordered for fresh R
     "@loomrealm-game/map",
     "@loomrealm-game/rpg-dialogue",
     "@loomrealm-game/schema-form",
+    "@loomrealm-game/battle",
     "@loomrealm/fsdb",
   ]) visit(name);
   required.delete("@loomrealm/pwa"); // Built by tsc after prerequisites.

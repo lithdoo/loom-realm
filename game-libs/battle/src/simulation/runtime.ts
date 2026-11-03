@@ -1,6 +1,10 @@
 import {
   compareActorId,
+  type BattlePauseEvent,
+  type BattlePauseReason,
   type BattleResult,
+  type BattleStatus,
+  type BattleTransition,
   type BattleSceneInit,
   type BattleSnapshot,
   type DecisionCompletion,
@@ -23,12 +27,14 @@ export interface BattleClock {
 
 export interface BattleRuntime {
   run(): Promise<BattleResult>;
-  pause(): void;
+  pause(reason?: "host-background"): void;
   resume(): void;
   cancel(): void;
   close(): void;
   getSnapshot(): BattleSnapshot;
   getReplay(): ReplayRecord;
+  onPause(listener: (event: BattlePauseEvent) => void): () => void;
+  onTransition(listener: (event: BattleTransition) => void): () => void;
 }
 
 export interface BattleSimulationDependencies {
@@ -124,6 +130,8 @@ export class BattleRuntimeImpl implements BattleRuntime {
   readonly #verifiedReplayTicks = new Set<number>();
   readonly #verifiedReplayDecisions = new Set<string>();
   readonly #decisionAvailabilityGuard: DecisionAvailabilityGuard | null;
+  readonly #pauseListeners = new Set<(event: BattlePauseEvent) => void>();
+  readonly #transitionListeners = new Set<(event: BattleTransition) => void>();
   #runCalled = false;
   #runResolve: ((result: BattleResult) => void) | null = null;
   #runReject: ((error: unknown) => void) | null = null;
@@ -163,7 +171,7 @@ export class BattleRuntimeImpl implements BattleRuntime {
   }
 
   async #initialize(): Promise<void> {
-    this.#state.status = "initializing";
+    this.#transition("initializing");
     this.#signal.addEventListener("abort", this.#onAbort, { once: true });
     this.#signalListening = true;
     if (this.#signal.aborted) {
@@ -193,7 +201,6 @@ export class BattleRuntimeImpl implements BattleRuntime {
       const command = ensureDecision(this.#definition, this.#state, actor, this.#recorder.ticks, "initial", 0);
       if (command !== null) commands.push(command);
     }
-    this.#state.status = "running";
     try {
       this.#runningAnchorMs = this.#readClock();
     } catch (error) {
@@ -201,10 +208,11 @@ export class BattleRuntimeImpl implements BattleRuntime {
       return;
     }
     this.#invokeCommands(commands);
-    if (this.#state.status === "running") this.#scheduleNextWake();
+    this.#transition("running");
+    this.#scheduleNextWake();
   }
 
-  pause(): void {
+  pause(reason: "host-background" = "host-background"): void {
     if (this.#state.status === "created") throw new Error("Cannot pause before run");
     if (this.#state.status !== "running") return;
     try {
@@ -214,7 +222,7 @@ export class BattleRuntimeImpl implements BattleRuntime {
       this.#accumulatedRunningMs += delta;
       this.#cancelWake();
       this.#presentation.pause();
-      if (this.#state.status === "running") this.#state.status = "paused";
+      if (this.#state.status === "running") this.#commitPause(reason);
     } catch (error) {
       this.#handlePresentationOrClockThrow(error);
     }
@@ -231,7 +239,8 @@ export class BattleRuntimeImpl implements BattleRuntime {
       this.#presentation.resume();
       if (this.#state.status !== "paused") return;
       this.#runningAnchorMs = this.#readClock();
-      this.#state.status = "running";
+      this.#state.pauseReason = null;
+      this.#transition("running");
       this.#scheduleNextWake();
     } catch (error) {
       this.#handlePresentationOrClockThrow(error);
@@ -247,12 +256,12 @@ export class BattleRuntimeImpl implements BattleRuntime {
     if (this.#state.status === "closed") return;
     if (this.#state.status === "created") {
       this.#cleanup();
-      this.#state.status = "closed";
+      this.#transition("closed");
       return;
     }
     if (this.#state.status === "settled") {
       this.#presentation.close();
-      this.#state.status = "closed";
+      this.#transition("closed");
       return;
     }
     this.cancel();
@@ -264,6 +273,45 @@ export class BattleRuntimeImpl implements BattleRuntime {
 
   getReplay(): ReplayRecord {
     return this.#recorder.snapshot();
+  }
+
+  onPause(listener: (event: BattlePauseEvent) => void): () => void {
+    if (typeof listener !== "function") throw new TypeError("Battle pause listener must be a function");
+    this.#pauseListeners.add(listener);
+    return () => this.#pauseListeners.delete(listener);
+  }
+
+  onTransition(listener: (event: BattleTransition) => void): () => void {
+    if (typeof listener !== "function") throw new TypeError("Battle transition listener must be a function");
+    this.#transitionListeners.add(listener);
+    return () => this.#transitionListeners.delete(listener);
+  }
+
+  #transition(to: BattleStatus): void {
+    const from = this.#state.status;
+    const legal: Readonly<Record<BattleStatus, readonly BattleStatus[]>> = {
+      created: ["initializing", "closed"],
+      initializing: ["running", "closed"],
+      running: ["paused", "settled", "closed"],
+      paused: ["running", "settled", "closed"],
+      settled: ["closed"],
+      closed: [],
+    };
+    if (!legal[from].includes(to)) throw new Error(`Illegal Battle transition: ${from} -> ${to}`);
+    this.#state.status = to;
+    const event = Object.freeze({ from, to });
+    for (const listener of [...this.#transitionListeners]) {
+      try { listener(event); } catch { /* operational observers do not own Battle authority */ }
+    }
+  }
+
+  #commitPause(reason: BattlePauseReason): void {
+    this.#state.pauseReason = reason;
+    this.#transition("paused");
+    const event = Object.freeze({ reason });
+    for (const listener of [...this.#pauseListeners]) {
+      try { listener(event); } catch { /* operational observers do not own Battle authority */ }
+    }
   }
 
   #readClock(): number {
@@ -378,7 +426,7 @@ export class BattleRuntimeImpl implements BattleRuntime {
       this.#accumulatedRunningMs = checkedMultiply(this.#state.currentTick, this.#definition.tickDurationMs);
       this.#cancelWake();
       this.#presentation.pause();
-      if (this.#state.status === "running") this.#state.status = "paused";
+      if (this.#state.status === "running") this.#commitPause("decision-circuit");
     } catch (error) {
       this.#handlePresentationOrClockThrow(error);
     }
@@ -522,11 +570,11 @@ export class BattleRuntimeImpl implements BattleRuntime {
     for (const actorId of [...this.#requests.keys()]) this.#abortRequest(actorId);
     this.#removeSignalListener();
     if (result.type === "ally_win" || result.type === "enemy_win" || result.type === "simultaneous_defeat") {
-      this.#state.status = "settled";
+      this.#transition("settled");
     } else {
       this.#clearActiveAuthority();
       this.#presentation.close();
-      this.#state.status = "closed";
+      this.#transition("closed");
     }
     this.#runResolve?.(result);
     this.#runResolve = null;
@@ -544,7 +592,7 @@ export class BattleRuntimeImpl implements BattleRuntime {
     this.#removeSignalListener();
     this.#recorder.rejectInvariant();
     try { this.#presentation.close(); } catch { /* cleanup is best effort */ }
-    this.#state.status = "closed";
+    this.#transition("closed");
     this.#runReject?.(error);
     this.#runResolve = null;
     this.#runReject = null;

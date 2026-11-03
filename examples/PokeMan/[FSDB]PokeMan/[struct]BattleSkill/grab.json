@@ -2,14 +2,13 @@
     "id":  "grab",
     "name":  "Grab",
     "damage":  4,
-    "effect":  "firebolt",
+    "effect":  "grab",
     "timing":  {
                    "windup_ticks":  1,
                    "recovery_ticks":  1
                },
     "range":  [
-                  0,
-                  1,
-                  0
+                  [0, 1.0, 0],
+                  [0, "↑", 0]
               ]
 }

@@ -1,6 +1,6 @@
 # Shared State Record 设计
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文冻结 PokeMan MVP 核心 Shared State 的物理 Record 粒度、namespace/key 编码、value shape 与数据约束。Content FSDB 物理结构见 [Content FSDB 物理模型](./68-content-fsdb.md)。本文只讨论数据结构，不讨论谁提交、何时提交、事务、冲突或失败处理。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文冻结 PokeMan MVP 核心 Shared State 的物理 Record 粒度、namespace/key 编码、value shape 与数据约束。Content FSDB 物理结构见 [Content FSDB 物理模型](./68-content-fsdb.md)。本文只讨论数据结构，不讨论谁提交、何时提交、事务、冲突或失败处理。Map 4 首场互换角色卡的具体 roster 与参数见 [80-battle-scenario-design.md](./80-battle-scenario-design.md)。
 
 # Authority 前提
 
@@ -97,8 +97,8 @@ key       = current
 
 ```json
 {
-  "mapId": 1,
-  "x": 12,
+  "mapId": 3,
+  "x": 3,
   "y": 8,
   "direction": 2
 }
@@ -204,6 +204,20 @@ EventStateEntry
 
 因此 `null` 只是 Event current state 的逻辑语义，不进入物理 entry。
 
+## MVP New Game baseline exact values
+
+当前 PokeMan MVP 的首次 session baseline 固定为：
+
+```text
+pokeman.PlayerWorld / current
+= { mapId: 3, x: 3, y: 8, direction: 2 }
+
+pokeman.EventStateList / current
+= [{ eventId: "prologue", stateId: "lab-tutorial" }]
+```
+
+它与当前 `game.json` 的玩家家起点和序章 Story state 对齐。两条 singleton Record 必须一起 materialize；不得只创建其中一条。具体 bootstrap owner 与 OCC 行为由 79 的 Base startup 规则冻结。
+
 # Relationship Record
 
 ## Record identity
@@ -234,6 +248,22 @@ pokeman.Relationship / A:B exists
 ```
 
 ## Value
+
+### 首次 Relationship 初始化默认值
+
+当 `pokeman.Relationship/A:B` Record 不存在，而业务需要首次建立该方向 Relationship 时，MVP 固定从以下 exact value 开始：
+
+```json
+{
+  "affinity": 0,
+  "hostile": false,
+  "relationshipText": ""
+}
+```
+
+如果同一原子业务事务同时建立 Contract，则在这个默认 value 上增加 `contract`。不得因为角色是宿敌、朋友或剧情 NPC 就在 Runtime 中硬编码另一组初始 affinity / relationshipText；后续关系变化必须通过明确业务规则修改。
+
+已有 Relationship 时，`affinity / hostile / relationshipText` 保持原值，除非当前业务明确拥有修改它们的 authority。
 
 没有 Contract：
 
@@ -360,6 +390,8 @@ new contract.integrity = BattleActor.max_hp
 max contract.integrity = BattleActor.max_hp
 0 <= contract.integrity <= BattleActor.max_hp
 ```
+
+结构层仍允许 `integrity = 0`，以表达历史数据或其他业务写入的失效契约；但 PokeMan 不允许用 0 Integrity 构造新的 Battle Manifestation。正常 Battle 结算采用业务规则：对每个 Contract-backed Actor 写入 `max(1, finalSnapshot.hp)`。因此 HP 在本场战斗中归零的卡片，正常退出 Battle 时保存为 1 Integrity；BattleResult 仍依据结算前的原始 final Snapshot 判定。取消 / failure 不提交本场部分 HP。此规则属于 Battle settlement 语义，不改变本节的 Shared State Record shape。
 
 ## skills
 
@@ -536,6 +568,8 @@ empty CarriedCards
 
 Shared State 底层 contract 可以允许 record value `null`，但 PokeMan 这四类 canonical value 不使用它。
 
+物理 absence 不能只看 `value`。`read()` 对 never-materialized Record 与显式初始 `null` 都可能返回 `value=null, version=0`；Runtime 必须结合相同或更新 revision 的 `list(namespace)` membership 判定。只有 identity 不在 materialized index 中时才是业务 absence；identity 已 materialize 而 value 为 `null` 时一律是非法 PokeMan State，不得被 baseline 或按需初始化覆盖。
+
 Record 本身从未 materialize 时的 PokeMan 业务语义固定如下：
 
 ```text
@@ -560,6 +594,8 @@ pokeman.CarriedCards / A
 
 `CarriedCards/A` 的 absent 与 materialized `[]` 在 Shared State 物理历史上仍然不同，但在 PokeMan 当前编队业务读取上等价，都表示“当前没有随身 Card”。不要求为每个 Character 预先 materialize 一个空 `CarriedCards` Record。
 
+相反，materialized `null` 不等价于上述任何一种合法空值：Relationship 必须使用 field absence 表达 no Contract，CarriedCards 必须使用 `[]`，两个 baseline singleton 必须使用各自 canonical value。
+
 # 完整示例
 
 ## durable PlayerWorld checkpoint
@@ -570,9 +606,9 @@ pokeman.PlayerWorld / current
 
 ```json
 {
-  "mapId": 1,
-  "x": 8,
-  "y": 12,
+  "mapId": 3,
+  "x": 3,
+  "y": 8,
   "direction": 2
 }
 ```
@@ -587,7 +623,7 @@ pokeman.EventStateList / current
 [
   {
     "eventId": "prologue",
-    "stateId": "after-tutorial-battle"
+    "stateId": "rival-ready"
   }
 ]
 ```
@@ -600,11 +636,11 @@ pokeman.Relationship / player:rival
 
 ```json
 {
-  "affinity": 20,
+  "affinity": 0,
   "hostile": false,
-  "relationshipText": "与宿敌建立了正式契约。",
+  "relationshipText": "",
   "contract": {
-    "integrity": 8,
+    "integrity": 18,
     "skills": [
       "firebolt",
       "grab"
@@ -621,13 +657,13 @@ pokeman.Relationship / rival:player
 
 ```json
 {
-  "affinity": 15,
+  "affinity": 0,
   "hostile": false,
-  "relationshipText": "认可对方作为自己的对手与伙伴。",
+  "relationshipText": "",
   "contract": {
-    "integrity": 10,
+    "integrity": 20,
     "skills": [
-      "strike"
+      "firebolt"
     ]
   }
 }
@@ -647,6 +683,23 @@ pokeman.CarriedCards / player
   }
 ]
 ```
+
+## rival carried cards
+
+```text
+pokeman.CarriedCards / rival
+```
+
+```json
+[
+  {
+    "slot": 0,
+    "servantCharacterId": "player"
+  }
+]
+```
+
+以上双向示例对应 Map 4 首次互换角色卡、且交换前两条 Relationship 都不存在的情况：两边都从中性 Relationship 默认值开始，同时建立各自 Contract；player 持有 rival，rival 持有 player。若 Relationship 已存在，则必须保留其原有关系字段。Integrity / skills 分别属于两条有向 Relationship，不属于 CarriedCards。
 
 # 当前冻结结论
 

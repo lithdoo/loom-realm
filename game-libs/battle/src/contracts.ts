@@ -19,8 +19,8 @@ export interface ResolvedResourceRef {
   readonly contentVersion: string;
 }
 
-export interface MapRef {
-  readonly mapId: number;
+export interface BattleArenaRef {
+  readonly arenaId: string;
 }
 
 export interface BattleActorRenderInit {
@@ -33,7 +33,7 @@ export interface BattleSceneInit {
   readonly battleId: string;
   readonly sceneEpoch: number;
   readonly tickDurationMs: 200;
-  readonly map: MapRef;
+  readonly map: BattleArenaRef;
   readonly actors: readonly BattleActorRenderInit[];
   readonly effectIds: readonly string[];
 }
@@ -282,6 +282,17 @@ export type BattleResult =
 
 export type BattleStatus = "created" | "initializing" | "running" | "paused" | "settled" | "closed";
 
+export interface BattleTransition {
+  readonly from: BattleStatus;
+  readonly to: BattleStatus;
+}
+
+export type BattlePauseReason = "host-background" | "decision-circuit";
+
+export interface BattlePauseEvent {
+  readonly reason: BattlePauseReason;
+}
+
 export type ActorSnapshotAction =
   | { readonly type: "idle" }
   | {
@@ -325,6 +336,7 @@ export interface BattleSnapshot {
   readonly currentTick: number;
   readonly tickDurationMs: 200;
   readonly status: BattleStatus;
+  readonly pauseReason?: BattlePauseReason;
   readonly actors: readonly ActorSnapshot[];
   readonly reservations: readonly ReservationSnapshot[];
   readonly result?: BattleResult;
@@ -414,9 +426,9 @@ export function validateResourceRef(value: unknown, label = "ResourceRef"): Reso
   });
 }
 
-export function validateMapRef(value: unknown): MapRef {
-  const item = exact(value, ["mapId"], "MapRef");
-  return Object.freeze({ mapId: safeInteger(item.mapId, "MapRef.mapId", 1) });
+export function validateBattleArenaRef(value: unknown): BattleArenaRef {
+  const item = exact(value, ["arenaId"], "BattleArenaRef");
+  return Object.freeze({ arenaId: nonEmptyString(item.arenaId, "BattleArenaRef.arenaId") });
 }
 
 export function validateBattleEffectContent(value: unknown, recordKey: string): BattleEffectContent {
@@ -499,7 +511,7 @@ export function validateBattleSceneInit(value: unknown): BattleSceneInit {
     battleId,
     sceneEpoch,
     tickDurationMs: 200,
-    map: validateMapRef(item.map),
+    map: validateBattleArenaRef(item.map),
     actors,
     effectIds,
   });

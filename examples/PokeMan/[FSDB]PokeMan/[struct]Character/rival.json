@@ -1,11 +1,11 @@
 {
     "defaultScenes":  {
-                          "1":  {
+                          "8":  {
                                     "rival-casual":  {
                                                          "placement":  {
                                                                            "y":  6,
                                                                            "direction":  2,
-                                                                           "x":  10
+                                                                           "x":  8
                                                                        },
                                                          "interaction":  {
                                                                              "dialogue":  "lab-rival-intro"

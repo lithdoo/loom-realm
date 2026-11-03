@@ -1353,7 +1353,7 @@ dialogue -> subsystems/dialogue.mjs
 
 PWA 使用相同 topology。
 
-`base` 继续拥有唯一 unified controls producer lifetime；它不变成 Dialogue orchestrator。
+`base` 继续拥有唯一 unified controls producer lifetime；它不承担 Dialogue 流程控制。
 
 ## 27.1 Exact PWA executable landing
 
@@ -1395,27 +1395,19 @@ apps/pwa/test/staging-build.test.mjs
 
 PokeMan自己的 `@loomrealm-game/rpg-dialogue` 必须位于 `dependencies`，不再只属于 `devDependencies`。
 
-## 27.2 PWA Content closure does NOT expand to Dialogue content
+## 27.2 This test slice PWA Content closure does NOT expand to Dialogue content
 
-本 slice不读取：
+本 slice 不读取：
 
 ```text
 struct.Dialogue/*
 ```
 
-Professor的 `struct.NPC/professor` 与 `resource.Graphics/Characters/Professor` 已属于现有 reachable Map/NPC closure。
+Professor 的 `struct.NPC/professor` 与 `resource.Graphics/Characters/Professor` 已属于现有 reachable Map/NPC closure。
 
-所以：
+所以本验证切片的 Content closure 不因 Dialogue graph 扩大。**这是 professor-only hard-coded vertical slice 的边界，不是正式 Story Runtime 的生产 Content 策略。**
 
-```text
-PWA executable set
-→ base + map + dialogue
-
-PWA Content data closure
-→ 不因为 Dialogue graph扩大
-```
-
-不要为了“有 Dialogue Subsystem”把全部 `struct.Dialogue`、Story或Character tables打进 PWA。
+正式 Dialogue graph runner 会读取被引用的 `struct.Dialogue` 与 `struct.EventStateMutation`；生产 Content closure 应从实际入口 / Event / Choice target / Mutation 引用递归计算，并包含所需的 Event、Character、NPC 与资源，不应把无关 Dialogue 全表无条件打包。具体集成见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)。
 
 # 28. Initial spawn policy
 
@@ -1865,22 +1857,21 @@ Controls Activation lifecycle
 
 # 37. Next step after qualification
 
-本 vertical slice通过后，再设计正式：
+本 vertical slice 通过后，不再重新决定 Dialogue graph 的基本数据语义。正式生产设计已经分别由：
 
-```text
-PokeMan Dialogue runner
-```
+- [64-dialogue.md](./64-dialogue.md)：固定 Dialogue graph、Choice.target、terminalDialogueId 与 mutation commit 语义；
+- [62-event.md](./62-event.md)：Event state、EventStateMutation、StoryIndex 与 scene takeover；
+- [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)：Map Frame Handler 的 child Frame 调用、场景刷新、序章状态机、业务事务与 Battle 协作；
+- [78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)：序章具体对白与 Dialogue key。
 
-届时再决定：
+后续实现工作是把当前 professor-only hard-coded validation slice 演进为上述生产 contract：
 
-- `struct.Dialogue` 如何读取；
-- Line sequence；
-- `Choice.target` exact semantics；
-- generic NPC → Dialogue mapping；
-- Character / appearance resolver；
-- mutation commit timing；
-- Story / World caller；
-- History persistence。
+- 读取并验证 struct.Dialogue Content；
+- 执行 Choice.target graph 并返回 terminalDialogueId；
+- 在 terminal completion 时执行可选 EventStateMutation；
+- 将 Map NPC interaction 与 Story Resolver 的 dialogueKey 连接；
+- 在 EventStateList 成功变化后刷新当前 Map scene；
+- 将实际可达 Dialogue / Event / Mutation 纳入生产 Content closure；
+- 保留 73 已验证的独立 child Frame、Controls ownership、Map suspension 与 cleanup 语义。
 
 **是否使用独立 Dialogue Subsystem / child Frame 已在本 slice 中确定，不再作为后续待决项。**
-

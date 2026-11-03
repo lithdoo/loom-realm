@@ -14,6 +14,7 @@ import {
 import { DESKTOP_BOOTSTRAP_CHANNEL, type DesktopRendererBootstrapEnvelope } from "./desktop-bootstrap.js";
 import { connectBrowserControlCarrier } from "./browser-control-carrier.js";
 import { createDesktopRendererViewportSource } from "./renderer-viewport-source.js";
+import { connectDesktopHostLifecycle } from "./renderer-host-lifecycle.js";
 import { connectLoopbackRendererDataBinding } from "./window-data-binding.js";
 
 const NativeURL = URL;
@@ -31,6 +32,7 @@ function validEnvelope(value: unknown): value is DesktopRendererBootstrapEnvelop
     typeof envelope.controlEndpoint === "string" && envelope.controlEndpoint.startsWith("ws://127.0.0.1:") &&
     typeof envelope.dataSettlementEndpoint === "string" && envelope.dataSettlementEndpoint.startsWith("ws://127.0.0.1:") &&
     typeof envelope.presentationEventsEndpoint === "string" && envelope.presentationEventsEndpoint.startsWith("ws://127.0.0.1:") &&
+    typeof envelope.hostLifecycleEndpoint === "string" && envelope.hostLifecycleEndpoint.startsWith("ws://127.0.0.1:") &&
     content !== null && typeof content === "object" && typeof content.origin === "string" &&
     typeof content.installationId === "string" && typeof content.token === "string";
 }
@@ -69,11 +71,13 @@ void (async () => {
   const envelope = bootstrap();
   const objectUrls: string[] = [];
   const resourceClient = createRendererResourceClient(envelope.content, lifetime.signal);
-  const [controlCarrier, dataBinding, presentationEventCarrier] = await Promise.all([
+  const [controlCarrier, dataBinding, presentationEventCarrier, hostLifecycle] = await Promise.all([
     connectBrowserControlCarrier(envelope.controlEndpoint, lifetime.signal, NativeWebSocket),
     connectLoopbackRendererDataBinding(envelope.dataSettlementEndpoint, NativeWebSocket),
     connectBrowserControlCarrier(envelope.presentationEventsEndpoint, lifetime.signal, NativeWebSocket),
+    connectDesktopHostLifecycle(envelope.hostLifecycleEndpoint, window, NativeWebSocket),
   ]);
+  lifetime.signal.addEventListener("abort", () => hostLifecycle.close(), { once: true });
   const viewportSource = createDesktopRendererViewportSource(window);
   const holder = createRendererControlHolder(
     dataBinding,

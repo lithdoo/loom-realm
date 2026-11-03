@@ -108,10 +108,53 @@ BattleConfig / validator 必须拒绝 combat Actor 数量不是 2 的 v0 Battle�
 
 实现内部仍遵循 `ARCH-006` 的 actorId-addressed collection；“集合可容纳 N Actor”只是降低未来版本迁移成本，不代表 v0 接受 N>2。
 
-### BATTLE-002 — 默认满血开战 — FROZEN
+### BATTLE-002 — 默认满血开战 — FROZEN（兼容默认值）
 
-v0 Actor 初始 HP 等于 `max_hp`，暂不需要独立 `initial_hp` Content 字段。
+当 `ResolvedBattleActor.initialHp` 未提供时，Actor 初始 HP 等于 `maxHp`。这保留既有 Battle caller 的满血启动语义。`initialHp` 是 Simulation resolved input，不是 `BattleActor` Content 字段。
 
+### BATTLE-003 — 显式初始 HP — IMPLEMENTED + TESTED + QUALIFIED
+
+`ResolvedBattleActor` 增加可选 `initialHp`，用于让调用方在保留 `maxHp` 上限的同时指定本场初始 HP：
+
+- 字段省略：`initialHp = maxHp`，兼容 BATTLE-002。
+- 字段提供：必须是 safe integer，且 `1 <= initialHp <= maxHp`。
+- Actor Runtime 初始 `hp = initialHp`；`maxHp` 始终保持最大值。
+- 初始 Snapshot / RenderProjection / Replay initial definition 必须反映该初始 HP。
+- validator 与 deterministic tests 必须覆盖字段省略、满血、受损值、0、超过 maxHp 和非整数等情况。
+- 该字段只扩展 Simulation 初始化输入，不改变 Tick reducer、Decision、Movement、Skill、Damage、BattleResult 或 Presentation gameplay semantics。
+
+PokeMan 等 Contract-backed caller 从各自 Relationship Contract 解析 `initialHp`；Battle Core 不读取任何上层业务数据。该 amendment 已完成 validator、Runtime、Snapshot、Projection、Replay 与 regression qualification。
+
+### BATTLE-004 — 独立 BattleArena Content — IMPLEMENTED + TESTED + QUALIFIED
+
+Battle v0 的战斗网格不再要求引用探索 `struct.Map`。目标 contract 引入：
+
+```ts
+type BattleArenaRef = {
+  arenaId: string
+}
+
+type BattleArenaContent = {
+  id: string
+  width: number
+  height: number
+  passable: readonly (readonly boolean[])[]
+  tileset_id: number
+  data: ProjectedTable
+}
+```
+
+规则：
+
+- `BattleArena` 是 Battle-owned authored Content；不继承 RPGMap movement / transfer / bridge / ledge / terrain / NPC semantics。
+- `passable[y][x]` 是 Simulation navigation authority，必须与 width / height 精确匹配。
+- `data` 只供 Presentation 绘制，沿用已有 3-layer tile-id ProjectedTable 编码；它不能反向决定 passable。
+- `tileset_id` 只用于读取已有 `struct.Tileset` 与 Tileset / Autotile Graphics。
+- Battle Presentation 不再要求 `struct.Map`；它从 `struct.BattleArena/<arenaId>` 加载视觉 tile data。
+- `ResolvedBattleDefinition.map.ref` 与 `BattleSceneInit.map` 的 target reference 改为 `BattleArenaRef`；字段名 `map` 可继续表示 Battle grid，不代表 RPGMap。
+- 该 amendment 不改变 movement、skill、damage、result、Decision 或 Replay gameplay semantics；只去掉 Battle 对探索 Map Content 的依赖。
+
+PokeMan 首场教学战固定使用 `struct.BattleArena/lab-tutorial`。validator、Presentation loading 与 browser qualification 已完成；不得通过读取 Map 4 passage/terrain 来替代该 Arena。
 ### PLAN-001 — 短期计划长度 — FROZEN
 
 `PlanConstraints.maxPathSteps` 必须存在。
@@ -242,12 +285,14 @@ while lastProcessedTick < targetTick:
 
 ### TIME-004 — Pause / Background 冻结 Battle Clock — FROZEN
 
-当 Host 明确暂停 Battle，或 App/Host 进入 background 状态时：
+当 App/Host 进入 background 状态时，产品 composition 必须映射为 `battle.pause("host-background")`：
 
 - Battle monotonic clock 冻结；
 - `currentTick` 不推进；
 - move、windup、recovery、protection 等 gameplay Tick 生命周期不推进；
 - Decision/LLM 可以在现实时间继续完成并把 completion 放进 Decision Inbox，但 pause 期间不会消费 inbox、不会接受 Plan、不会启动 Action；
+- Runtime 公开 `pauseReason = "host-background"`；
+- Host foreground **不得自动 resume**；只有产品层收到玩家显式确认后调用 `battle.resume()`；
 - 恢复后从原逻辑时刻继续，不补算暂停期间对应的 Tick；已排队 completion 在 resume 后第一个实际 reducer Tick 才有机会被消费。
 
 TIME-003 的 catch-up 只用于**Battle clock 仍在运行时** scheduler/event loop 晚醒等情况。
@@ -341,12 +386,13 @@ stale / lifecycle-invalid completion
 - 已经 in-flight 的 Decision request **不因 circuit pause 被 abort/revoke**；它们可以在 pause 期间完成并把 completion 放入 Decision Inbox，等 resume 后的真实 Tick消费；
 - PAUSED 期间没有后续 Tick，因此自然不会继续产生新的 Tick-driven Decision generation/request；
 - 不自动 cooldown/resume；
-- 必须外部显式 `battle.resume()` 才恢复，并把 availability streak 清零；
+- 进入 PAUSED 时公开 `pauseReason = "decision-circuit"`；
+- 必须由产品层在玩家显式选择“重试决策”后调用 `battle.resume()` 才恢复，并把 availability streak 清零；
 - Replay 不执行该 live availability circuit，因为 circuit pause 不改变 requestId / decisionGeneration / Actor decision authority / Decision record trace。
 
 Circuit 本身不得修改 Actor `decision` state、`decisionGeneration`、requestId 或 accepted-plan authority，也不得调用 request AbortController。Decision request 只有既有 lifecycle 原因（例如 damaging hit/death、cancel/close、session fatal、request replacement）才会按原规则失效/abort。
 
-该 circuit 是 operational control state，不进入 gameplay Snapshot/Replay，不改变 Plan validation、Actor state 或 Battle Tick规则。
+该 circuit 是 operational control state，不进入 Replay 或 Actor gameplay facts；但 public BattleSnapshot 在 PAUSED 时必须公开 `pauseReason="decision-circuit"`，供产品选择正确提示文案。它不改变 Plan validation、Actor state 或 Battle Tick规则。
 
 ## 6. Decision Protocol 与 PlanSubmission
 
@@ -883,6 +929,27 @@ v0 不因为战斗持续过久或长时间无伤害而自动结束，也不设�
 
 只记录 REPLAY-002 的无进展 diagnostics；未来如果模拟数据证明需要，再通过新规则加入 `stalemate`，不得在 v0 Runtime 中暗加超时胜负。
 
+### CTRL-002 — Pause reason 与显式玩家恢复 — IMPLEMENTED + TESTED + QUALIFIED
+
+Runtime target contract 公开两种 pause reason：
+
+```text
+host-background
+decision-circuit
+```
+
+规则：
+
+- 任意成功 RUNNING → PAUSED transition 必须同时形成唯一 pauseReason；
+- external `pause()` 的默认 / 唯一 v0 reason 是 `host-background`；
+- Decision availability circuit trip 的 reason 固定为 `decision-circuit`；
+- PAUSED 时 public Snapshot 必须带 pauseReason，非 PAUSED 时字段 absent；
+- Runtime 通过 operational `onPause()` 通知 product composition；该事件不进入 Replay；
+- 重复 pause no-op 不重复通知、不覆盖已有 reason；
+- `resume()` 成功进入 RUNNING 时清除 pauseReason；
+- Runtime 自己不自动 resume；Host foreground 也不得自动 resume，恢复必须由产品层在玩家显式确认后调用 `battle.resume()`。
+
+本规则只扩展 operational control contract，不改变 gameplay reducer / Tick / Decision authority。Runtime 与 PokeMan Message/manual-recovery composition 已完成 automated qualification。
 ### CTRL-001 — abort/cancel 是即时控制平面 — FROZEN
 
 Frame abort、Battle cancel、Subsystem 退出不是普通 Tick Event。
@@ -971,6 +1038,6 @@ collisionRetryCount
 - `OPEN-CLOCK-001` → TIME-004：pause/background 冻结 Battle clock。
 - `OPEN-STALEMATE-001` → RESULT-002：v0 不设正式 stalemate / 最大战斗时长，只记录 diagnostics。
 
-**当前 Core gameplay 没有未冻结 OPEN 项。**
+**当前 Core gameplay 规则没有未冻结 OPEN 项。**三项实现 amendment：`BATTLE-003`（`ResolvedBattleActor.initialHp`）、`BATTLE-004`（独立 `BattleArena`）与 `CTRL-002`（pauseReason / onPause / 显式玩家恢复）均已完成实现与对应 qualification。
 
-Presentation v0 的 BattleEffect、Projection、Browser ABI、camera/viewport/effect lifecycle 已在 Contracts / Presentation 中冻结。仍保持 OPEN 的主要是非 Presentation Content 的统一 subject/version、真实 Decision provider metadata/cancel/defaults、Guidance/Host wiring 等外部集成项；这些不改变已经冻结的 Core gameplay 或 Presentation 语义。
+Presentation v0 的 BattleEffect、Projection、Browser ABI、camera/viewport/effect lifecycle 已在 Contracts / Presentation 中冻结。仍保持 OPEN 的其他事项主要是非 Presentation Content 的统一 subject/version、真实 Decision provider metadata/cancel/defaults、Guidance/Host wiring 等外部集成项；这些不改变已经冻结的 Core gameplay 或 Presentation 语义。

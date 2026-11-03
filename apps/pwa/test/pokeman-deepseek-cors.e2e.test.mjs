@@ -9,6 +9,8 @@ const executablePaths = Object.freeze({
   base: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-base-subsystem.mjs"),
   map: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-map-subsystem.mjs"),
   dialogue: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-dialogue-subsystem.mjs"),
+  battle: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-battle-subsystem.mjs"),
+  message: join(import.meta.dirname, "..", "dist", "qualification", "pokeman-message-subsystem.mjs"),
 });
 
 test("real PWA Base Worker observes DeepSeek 401 through the direct CORS path", {

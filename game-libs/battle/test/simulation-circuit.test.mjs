@@ -69,7 +69,7 @@ function definition() {
   return {
     battleId: "battle:circuit", sceneEpoch: 1, battleSeed: "circuit-seed", tickDurationMs: 200,
     moveTicks: 2, protectionTicks: 0, maxPathSteps: 6,
-    map: { ref: { mapId: 1 }, width: 7, height: 7, passable: Array.from({ length: 7 }, () => Array(7).fill(true)) },
+    map: { ref: { arenaId: "test" }, width: 7, height: 7, passable: Array.from({ length: 7 }, () => Array(7).fill(true)) },
     actors: [
       {
         actorId: "a", team: "ally", tile: point(2, 3), direction: 6, maxHp: 5,
@@ -127,6 +127,7 @@ test("T-DEC-023/025/026/027/033/035: third provider-neutral failure latches afte
   const paused = live.runtime.getSnapshot();
   assert.equal(paused.currentTick, 3);
   assert.equal(paused.status, "paused");
+  assert.equal(paused.pauseReason, "decision-circuit");
   assert.equal(live.presentation.pauseCount, 1);
   assert.equal(live.decision.requests.length, 5, "b's prefetch command must be invoked before circuit pause");
   assert.equal(live.decision.requests[4].request.actorId, "b");
@@ -141,6 +142,7 @@ test("T-DEC-023/025/026/027/033/035: third provider-neutral failure latches afte
   assert.equal(live.decision.requests[4].signal.aborted, false);
 
   live.runtime.resume();
+  assert.equal("pauseReason" in live.runtime.getSnapshot(), false);
   assert.equal(live.presentation.resumeCount, 1);
   live.clock.advance(199);
   assert.equal(live.runtime.getSnapshot().currentTick, 3);

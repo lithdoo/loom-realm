@@ -51,7 +51,12 @@ struct record 的 FSDB key
 │
 ├─ [struct]BattleEffect/                # @loomrealm-game/battle presentation contract
 │  ├─ .info.meta
-│  └─ firebolt.json
+│  ├─ firebolt.json
+│  └─ grab.json
+│
+├─ [struct]BattleArena/                 # @loomrealm-game/battle arena contract
+│  ├─ .info.meta
+│  └─ lab-tutorial.json
 │
 ├─ [struct]Dialogue/
 │  ├─ .info.meta
@@ -100,6 +105,10 @@ struct record 的 FSDB key
 → namespace = struct.BattleEffect
 → key       = firebolt
 
+[struct]BattleArena/lab-tutorial.json
+→ namespace = struct.BattleArena
+→ key       = lab-tutorial
+
 [struct]Event/prologue.json
 → namespace = struct.Event
 → key       = prologue
@@ -145,7 +154,7 @@ Encounter
 StoryIndex
 ```
 
-BattleActor / BattleSkill / BattleEffect 是 **package-owned contract 的 PokeMan FSDB binding**，不是 PokeMan 自有 schema。其 value 是否包含 `id` 由 battle contract 决定；PokeMan 只额外要求 record key 与 package contract 的 definition `id` 一致。
+BattleActor / BattleSkill / BattleEffect / BattleArena 是 **package-owned contract 的 PokeMan FSDB binding**，不是 PokeMan 自有 schema.其 value 是否包含 `id` 由 battle contract 决定；PokeMan 只额外要求 record key 与 package contract 的 definition `id` 一致。
 
 ## Character key 的额外业务约束
 
@@ -215,6 +224,7 @@ PokeMan 不重新定义 BattleActor / BattleSkill / BattleEffect 字段。它把
 BattleActor  → struct.BattleActor / <battleActorId>
 BattleSkill  → struct.BattleSkill / <battleSkillId>
 BattleEffect → struct.BattleEffect / <battleEffectId>
+BattleArena  → struct.BattleArena / <battleArenaId>
 ```
 
 固定：
@@ -228,6 +238,9 @@ struct.BattleSkill record key
 
 struct.BattleEffect record key
 = BattleEffect.id
+
+struct.BattleArena record key
+= BattleArena.id
 ```
 
 BattleActor authored contract 已有：
@@ -259,6 +272,49 @@ struct.BattleEffect / <effectId>
 并要求引用存在。
 
 这只是 PokeMan Game Package 的 concrete serialization binding；battle package 的 gameplay contract 仍是唯一 schema authority。
+
+## BattleArena
+
+`struct.BattleArena` 是 Battle package 的独立战斗场地 Content，不是 `struct.Map` 的别名，也不参与探索 Map topology。
+
+目标 exact shape：
+
+```json
+{
+  "id": "lab-tutorial",
+  "width": 7,
+  "height": 7,
+  "passable": [
+    [true, true, true, true, true, true, true],
+    [true, true, true, true, true, true, true],
+    [true, true, true, true, true, true, true],
+    [true, true, true, true, true, true, true],
+    [true, true, true, true, true, true, true],
+    [true, true, true, true, true, true, true],
+    [true, true, true, true, true, true, true]
+  ],
+  "tileset_id": 3,
+  "data": {
+    "dimensions": 3,
+    "xSize": 7,
+    "ySize": 7,
+    "zSize": 3,
+    "values": ["<7×7 layer0 tile ids, then layer1, then layer2>"]
+  }
+}
+```
+
+规则：
+
+- record key 必须等于 `BattleArena.id`；
+- `width / height` 是正 safe integer；
+- `passable` 必须恰好是 `height × width` boolean matrix；它是 Battle Simulation 的 authored navigation authority；
+- `data` 沿用 Map 的 3-layer ProjectedTable tile-id 编码，仅供 Battle Presentation；`xSize === width`、`ySize === height`、`zSize === 3`；
+- `tileset_id` 必须对应存在的 `struct.Tileset`；Presentation 可以继续读取该 Tileset 及其 Tileset / Autotile Graphics；
+- BattleArena 不包含 `behaviors / passages / terrain_tags / bridge / transfer / NPC`；这些探索语义不进入 Battle；
+- Battle passability 不从 visual tile、Tileset passages 或 Map Runtime 推导。
+
+首场 `lab-tutorial` 固定 7×7、全 passable、tileset_id=3；layer 0 使用 tile id 624 铺满，layer 1 / 2 为 0。Map 4 只负责剧情触发，不是 BattleArena 的数据源。
 
 ## battleActor ContentRef
 
@@ -1026,8 +1082,9 @@ CarriedCards(A).servantCharacterId = B
 - `struct.Character/player` 存在；
 - `struct.Character` key 满足 `[a-z0-9][a-z0-9._-]{0,119}`；
 - PokeMan 自有固定-target key 引用存在于目标 table；
-- `struct.BattleActor / struct.BattleSkill / struct.BattleEffect` value 满足对应 battle package contract；
-- BattleActor / BattleSkill / BattleEffect record key 与其 value 内 definition `id` 相等；
+- `struct.BattleActor / struct.BattleSkill / struct.BattleEffect / struct.BattleArena` value 满足对应 battle package contract；
+- BattleActor / BattleSkill / BattleEffect / BattleArena record key 与其 value 内 definition `id` 相等；
+- BattleArena `passable` 与 `data` dimensions 必须与 width / height 一致，tileset_id 指向存在的 struct.Tileset；
 - BattleActor `skills[]` 每个 id 指向存在的 `struct.BattleSkill`，且同一 BattleActor 内不重复；
 - BattleSkill `effect` 指向存在的 `struct.BattleEffect`；
 - Character `battleActor.namespace === "struct.BattleActor"`，且 key 可解析；
@@ -1089,6 +1146,25 @@ initial source
 
 Content 不复制这些 mutable values。
 
+# MVP PWA packaging policy
+
+当前 Story / Dialogue / Battle vertical slice 不再适合 map-only content closure。MVP PWA preparation 固定采用简单、可验证的全量策略：
+
+```text
+[FSDB]PokeMan
+→ listFsdbEntries() 的全部 content entries
+→ 全部进入 prepared PWA content
+
+presentation.json
+→ 所有外部 Presentation resource refs
+→ 全部进入 prepared PWA content
+```
+
+因此 packager 不负责理解 StoryIndex / Event / Dialogue / Battle dependency graph，也不根据初始 Map 去裁剪 PokeMan FSDB。Content Builder / validator 负责引用正确性，packager 只负责 deterministic identity mapping、读取、去重和排序。
+
+当前 MVP 明确不做 Content tree-shaking。这样可以保证 Runtime 通过合法 key 动态解析到的 Character、Dialogue、Event、Mutation、BattleActor、BattleSkill、BattleEffect、BattleArena、Map/Tileset/Graphics 都实际存在于 PWA 包中。
+
+
 # 当前冻结结论
 
 经过最终数据闭环复核，PokeMan MVP 的核心 Content physical schema 与跨 record 引用已经收口。
@@ -1101,6 +1177,7 @@ MVP player Character = struct.Character/player
 BattleActor  → struct.BattleActor
 BattleSkill  → struct.BattleSkill
 BattleEffect → struct.BattleEffect
+BattleArena  → struct.BattleArena
 BattleActor.skills[] → BattleSkill key string[]
 BattleSkill.effect → BattleEffect key string
 battleActor ContentRef.namespace = struct.BattleActor

@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**Core gameplay FROZEN；Simulation（含 Decision availability circuit）、DeepSeekDecision 与 Presentation Acceptance 均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
+> 状态：**Core gameplay、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision、Presentation Acceptance、BATTLE-003（显式 initialHp input）、BATTLE-004（独立 BattleArena）与 CTRL-002（pauseReason / onPause）均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
 >
 > DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
@@ -10,10 +10,10 @@
 | --- | --- | --- | --- |
 | T-ARCH-001 | ARCH-001, ARCH-003 | Presentation 动画提前/延后结束 | Simulation Tick、tile、HP、result 不变 |
 | T-ARCH-002 | ARCH-002 | AI 想走 Engine 未预生成的路线 | Decision 可直接提交 path；Simulation 只校验，不替换路线 |
-| T-ARCH-003 | ARCH-004 | Battle 加载 RPGMap-compatible Map/Character | 复用素材形式，不调用 RPGMap Runtime movement/timer |
+| T-ARCH-003 | ARCH-004, BATTLE-004 | Battle 加载独立 BattleArena + Character | Arena 只复用 Tileset/Autotile/Character 视觉素材，不读取 struct.Map 或 RPGMap Runtime movement/timer |
 | T-ARCH-004 | ARCH-001, ARCH-003 | camera/DOM/Sprite 状态变化 | 不改变权威 Battle State |
 | T-ARCH-005 | ARCH-005, TIME-001, TIME-002, TIME-003 | 业务只构造 Simulation + ScriptDecision + Null/Recording Presentation，并用可控 clock 推进时间；业务不调用 public tick | Simulation 自己按 200 ms scheduler / event queue / reducer 运行完整 Battle、结算 BattleResult 并记录 Replay |
-| T-ARCH-006 | ARCH-005 | 不创建 Decision/Simulation instance，只给 Presentation BattleSceneInit + synthetic RenderProjection | 可初始化 Map/Actor 并表现 movement/effect；无需了解 Decision/Simulation concrete implementation |
+| T-ARCH-006 | ARCH-005, BATTLE-004 | 不创建 Decision/Simulation instance，只给 Presentation BattleSceneInit + synthetic RenderProjection | 可初始化 BattleArena/Actor 并表现 movement/effect；无需了解 Decision/Simulation concrete implementation |
 | T-ARCH-007 | ARCH-002, ARCH-005 | 仅替换注入的 ScriptDecision 为 DeepSeekDecision，二者实现同一 DecisionPort | Simulation 的 clock/reducer/Plan 规则无需改变；Presentation 无感知 |
 | T-ARCH-008 | ARCH-006, BATTLE-001 | v0 BattleConfig 提供 3 个 combat Actor | 启动前 validation reject；actor collection N-ready 不等于 v0 支持多人 |
 | T-ARCH-009 | ARCH-006 | 同一合法 1v1 Config 只交换 actors collection 的排列顺序，actorId/team/其他事实不变 | identity、side 与规则语义不随数组位置改变；需要稳定遍历时按稳定 actorId key |
@@ -31,6 +31,26 @@
 | T-ARCH-021 | CONTRACTS §10 | ActorId 包含开放字符串如 "__proto__"/"10"/"a" | BattleSnapshot.actors 仍为 ordinal-sorted readonly array，不使用 Record/object key authority；reservations同样稳定排序 |
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
 | T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
+
+### 1.1 Explicit initial HP amendment — BATTLE-003 (QUALIFIED)
+
+| Test ID | Rules | 场景 | Expected |
+| --- | --- | --- | --- |
+| T-INIT-001 | BATTLE-002, BATTLE-003 | `ResolvedBattleActor.initialHp` 省略 | Runtime 初始 `hp = maxHp`，保持既有 caller 兼容 |
+| T-INIT-002 | BATTLE-003 | 显式 `initialHp = maxHp` | 初始 Snapshot / Projection 的 hp 等于 maxHp |
+| T-INIT-003 | BATTLE-003 | 显式 `1 <= initialHp < maxHp` | 初始 hp 使用 initialHp，maxHp 保持原上限；Replay initial 保留该值 |
+| T-INIT-004 | BATTLE-003 | initialHp = 0、负数、超过 maxHp、非整数或非 safe integer | Definition validator reject |
+| T-INIT-005 | BATTLE-003, REPLAY-001 | 受损 initialHp 的 live Battle → Replay | Replay 从 record.initial 重建相同初始 hp/maxHp，并通过 deterministic qualification |
+
+### 1.2 Independent BattleArena amendment — BATTLE-004 (QUALIFIED)
+
+| Test ID | Rules | 场景 | Expected |
+| --- | --- | --- | --- |
+| T-ARENA-001 | BATTLE-004 | BattleSceneInit / ResolvedDefinition 引用 `arenaId` | Presentation 读取 `struct.BattleArena`，不读取 `struct.Map` |
+| T-ARENA-002 | BATTLE-004 | 7×7 Arena passable 全 true，visual tile 全 floor | Simulation 使用 authored passable；视觉 tile 不影响 gameplay |
+| T-ARENA-003 | BATTLE-004 | passable shape 与 width/height 不一致，或 data 不是 3-layer exact shape | Content / definition validator reject |
+| T-ARENA-004 | BATTLE-004 | Arena tileset_id 指向合法 Tileset，tile ids 合法 | Presentation 能加载 Tileset / Autotile Graphics 并绘制 Arena |
+| T-ARENA-005 | BATTLE-004 | RPG Map 4 passage/terrain/player pose 改变，但 Arena Content 不变 | 同一 Battle scenario 的 passable、spawn、Replay 初始事实完全不变 |
 
 ## 2. Time / Scheduler
 
@@ -186,13 +206,13 @@
 | T-DEC-022 | CONTRACTS §9 | Tick N damaging hit触发新Decision | Observation recentEvents只含Tick N与N-1 relevant facts，稳定排序；长期Battle不积累无界Observation history |
 | T-DEC-023 | DEC-004/DEC-005, SIMULATION §10 | authority-valid attempt_failure 连续第1、2次被消费，code可任意不同 | Simulation不解释code；streak=1/2；Battle保持RUNNING；最早下一合法Tick可重新Decision |
 | T-DEC-024 | DEC-005, SIMULATION §10 | 两次attempt_failure后消费一个authority-valid DecisionCompletion.completed，但Plan随后被Simulation reject | completion先把streak重置0；PlanRejectReason/correction不属于Decision availability failure |
-| T-DEC-025 | DEC-005, SIMULATION §10/§16 | 连续第3个authority-valid attempt_failure在Tick N phase 9消费 | Tick N完整提交；render/terminal检查正常完成；本Tick已生成的合法Decision commands仍正常调用；随后进入既有PAUSED lifecycle；不schedule next wake |
+| T-DEC-025 | DEC-005, CTRL-002, SIMULATION §10/§16 | 连续第3个authority-valid attempt_failure在Tick N phase 9消费 | Tick N完整提交；本Tick合法Decision commands仍正常调用；随后进入PAUSED且 pauseReason=`decision-circuit`；onPause只发一次；不schedule next wake |
 | T-DEC-026 | DEC-005, SIMULATION §10/§29 | circuit trip时另一个Actor仍有active Decision request | 不abort、不revoke；Actor decision/requestId/generation保持不变；request可在PAUSED期间完成并enqueue；resume后第一个真实Tick按正常authority fence消费 |
 | T-DEC-027 | SIMULATION §10 | 同一Decision Inbox snapshot按stable order为 failure, failure, failure, success | 第3个failure后circuit latch open；同Tick后续success不得自动解锁；必须显式resume |
 | T-DEC-028 | DEC-005, SIMULATION §10 | streak=2后消费一个因既有lifecycle原因已stale的completion | 不读取concrete code；stale/lifecycle-invalid不产生availability signal，不增加、不重置streak，不触发pause |
 | T-DEC-029 | DEC-004/DEC-005, SIMULATION §10 | 任意authority-valid session_fatal，code取任意opaque值 | 不等待failure threshold；直接terminal BattleResult=failure source=decision，并可原样传播code但不按code分支 |
-| T-DEC-030 | SIMULATION §10 | decision circuit PAUSED后外部显式battle.resume() | streak清0、circuit关闭、presentation.resume成功后RUNNING；无pause catch-up；保留原thinking/in-flight request；PAUSED期间已enqueue completion在后续首个真实Tick正常消费 |
-| T-DEC-031 | SIMULATION §6/§10 | ordinary external pause/resume且circuit未open | 不因pause/resume本身清零已有failure streak；external pause与circuit pause都不abort/revoke active Decision；差异只在circuit guard与trigger |
+| T-DEC-030 | CTRL-002, SIMULATION §10 | decision circuit PAUSED后玩家选择重试，product显式battle.resume() | streak清0、circuit关闭、presentation.resume成功后RUNNING；pauseReason清除；无pause catch-up；保留原thinking/in-flight request；PAUSED期间已enqueue completion在后续首个真实Tick正常消费 |
+| T-DEC-031 | CTRL-002, SIMULATION §6/§10 | `pause("host-background")` / resume且circuit未open | PAUSED时 pauseReason=`host-background`；不因pause/resume本身清零已有failure streak；两类pause都不abort/revoke active Decision；resume后reason清除 |
 | T-DEC-032 | DEC-005, SIMULATION §10/Replay | Live中曾因3个attempt_failure进入circuit PAUSED；Replay重放相同Decision records | Replay不启用live circuit、不进入PAUSED；由于live circuit未改写requestId/generation/Actor decision authority，Replay仍产生相同Decision request/consume trace |
 | T-DEC-033 | DEC-004/DEC-005, CONTRACTS §16 | 三个authority-valid attempt_failure分别使用完全不同的concrete code | Simulation结果与code值无关：都只按category累计；证明circuit对Decision implementation/provider-neutral |
 | T-DEC-034 | SIMULATION §6/§10/§28 | late scheduler wake需要catch-up多个Tick，circuit在其中Tick N trip | Tick N完整提交后立即进入PAUSED；`accumulatedRunningMs = N * 200`；N+1..target不继续处理；resume后不得补跑pause前未处理的wall-time backlog |
@@ -272,6 +292,11 @@
 | T-CTRL-013 | SIMULATION §16/24 | 非 terminal Tick reducer输出 Decision command，但 presentation.render 同步 fatal | 先归约 presentation failure并 suppress Decision command；provider 不收到新 request |
 | T-CTRL-014 | SIMULATION §24 | Presentation抛 INVALID_STATE/SCENE_MISMATCH/PROJECTION_CONFLICT/INVALID_DATA | 视为 Runtime/contract invariant或programmer error，throw/reject；不包装成 BattleResult.failure |
 | T-CTRL-015 | SIMULATION §6/7 | currentTick/ID counter 下一次递增将超出 safe integer | 在溢出前停止 authority，BattleResult=failure source=simulation code=BATTLE_COUNTER_OVERFLOW；不得 wrap/继续 |
+| T-CTRL-016 | CTRL-002, TIME-004 | RUNNING 调 `pause("host-background")` | 进入PAUSED；Snapshot.pauseReason=host-background；onPause({reason:"host-background"})恰好一次；clock冻结 |
+| T-CTRL-017 | CTRL-002 | 已PAUSED/decision-circuit时再次 `pause("host-background")` | no-op；reason仍为decision-circuit；不得第二次发onPause |
+| T-CTRL-018 | CTRL-002 | 任一PAUSED状态显式resume成功 | 进入RUNNING；Snapshot不再含pauseReason；不得自动产生第二次resume |
+| T-CTRL-019 | CTRL-002 | RUNNING时调用legacy `pause()` 无参数 | 向后兼容等价于 `pause("host-background")` |
+| T-CTRL-020 | CTRL-002 | subscribe onPause 后unsubscribe，再次发生pause | unsubscribe后不再通知；不影响Runtime pause本身 |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
@@ -332,14 +357,15 @@
 
 ## 12. Core OPEN 状态
 
-当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。
+当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。`BATTLE-003`、`BATTLE-004` 与 `CTRL-002` 是实现 amendments（不是新的 gameplay reducer rule）；T-INIT-001..005、T-ARENA-001..005 与 T-CTRL-016..020 / 相关 T-DEC cases 已全部通过 automated blocking acceptance。
 
-Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance；Decision implementation acceptance 已在 §8.1 冻结。PlayerGuidance concrete contract/wiring 明确延期，但 DecisionWorkflow extensibility boundary 已冻结；剩余 OPEN 只涉及非 Presentation Content 统一 schema、未来 Guidance/Host wiring 与 configured DeepSeekTransport 的 credential/network/product capability handoff，这些不得反向改变已冻结的 Core/Decision/Presentation Expected。
+Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance；Decision implementation acceptance 已在 §8.1 冻结。PlayerGuidance concrete contract/wiring 明确延期，但 DecisionWorkflow extensibility boundary 已冻结；pause reason / manual-resume policy 已冻结，剩余 Host 工作只是平台 background/foreground event 与 PokeMan Message Frame 接线。其他 OPEN 只涉及非 Presentation Content 统一 schema、未来 Guidance 与 configured DeepSeekTransport 的 credential/network/product capability handoff，这些不得反向改变已冻结 Expected。
 
 ## 13. 接真实 LLM 前的最低 Gate
 
 至少应先用 headless Mock/Script 测通：
 
+- `ResolvedBattleActor.initialHp`：字段省略兼容 maxHp、显式受损初值、非法值拒绝、Snapshot / Projection / Replay 一致；
 - overdue Tick catch-up；
 - Decision inbox snapshot 边界：snapshot 前到达本 Tick消费、snapshot 后到达下一 Tick消费；
 - turn-only / turn+skill 的 Action 配额；
@@ -355,7 +381,7 @@ Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation accept
 - 0-Tick instant batch；
 - seeded tile contention；
 - Plan reject + correction failure；
-- pause/background clock freeze；
+- pause/background clock freeze + `pauseReason` / `onPause`；foreground 不自动 resume；
 - 长时间无进展不自动 stalemate；
 - simultaneous lethal；
 - abort 后 late async completion。

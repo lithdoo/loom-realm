@@ -8,10 +8,11 @@ import {
 } from "./contracts.js";
 import {
   cameraFor, projectTiles, sameEffectProjection, sameLayout, sameMovement, sameProjection,
-  validateMap, validateTileset, type LoadedBattleMap,
+  validateBattleArena, validateTileset, type LoadedBattleArena,
 } from "./presentation-semantics.js";
 
 export type { PresentationErrorCode } from "./contracts.js";
+export { validateBattleArena } from "./presentation-semantics.js";
 
 export class BattlePresentationError extends Error {
   constructor(readonly code: PresentationErrorCode, message: string = code, options?: ErrorOptions) { super(message, options); this.name = "BattlePresentationError"; }
@@ -49,7 +50,7 @@ function invalidData(error: unknown): BattlePresentationError { return error ins
 
 class Handler implements BattlePresentationHandler {
   private state: State = "NEW"; private session = new AbortController(); private generation = 0;
-  private scene?: BattleSceneInit; private loaded?: LoadedBattleMap; private actorRefs = new Map<string, ResolvedResourceRef>(); private effects = new Map<string, EffectAsset>();
+  private scene?: BattleSceneInit; private loaded?: LoadedBattleArena; private actorRefs = new Map<string, ResolvedResourceRef>(); private effects = new Map<string, EffectAsset>();
   private layout?: TileViewportLayout; private domain?: RenderDomain; private unsubscribe?: () => void; private resizeTimer?: ReturnType<typeof setTimeout>; private pendingViewport?: ViewportSize;
   private visualEpoch = 0; private lastTick = -1; private projection?: RenderProjection; private seenEffects = new Map<string, SkillEffectProjection>(); private motionFacts = new Map<string, NonNullable<ActorRenderProjection["movement"]>>();
   private resolveFailure!: (failure: PresentationFailure) => void; private failureReported = false;
@@ -69,16 +70,16 @@ class Handler implements BattlePresentationHandler {
       this.scene = validatedScene; scene = validatedScene;
       const signal = this.session.signal;
       const mapTask = (async () => {
-        const map = validateMap((await this.scope.content.record("struct.Map", String(scene.map.mapId), { signal })).value);
-        const tileset = validateTileset((await this.scope.content.record("struct.Tileset", String(map.tileset_id), { signal })).value, map.tileset_id);
+        const arena = validateBattleArena((await this.scope.content.record("struct.BattleArena", scene.map.arenaId, { signal })).value, scene.map.arenaId);
+        const tileset = validateTileset((await this.scope.content.record("struct.Tileset", String(arena.tileset_id), { signal })).value, arena.tileset_id);
         const tilesetKey = `Tilesets/${tileset.tileset_name}`; const tilesetResource = await this.scope.content.resource("resource.Graphics", tilesetKey, { signal });
         const autotileRefs = await Promise.all(tileset.autotile_names.map(async (name) => name === null ? null : resolved("resource.Graphics", `Autotiles/${name}`, (await this.scope.content.resource("resource.Graphics", `Autotiles/${name}`, { signal })).contentVersion)));
-        for (const tileId of map.data.values) {
+        for (const tileId of arena.data.values) {
           if (tileId === 0) continue;
           const slot = tileId >= 48 && tileId < 384 ? Math.floor((tileId - 48) / 48) : -1;
           if (tileId < 48 || tileId >= tileset.priorities.xSize || (slot >= 0 && autotileRefs[slot] === null)) throw new TypeError(`Unsupported map tile ${tileId}`);
         }
-        return Object.freeze({ map, tileset, tilesetRef: resolved("resource.Graphics", tilesetKey, tilesetResource.contentVersion), autotileRefs: Object.freeze(autotileRefs) });
+        return Object.freeze({ arena, tileset, tilesetRef: resolved("resource.Graphics", tilesetKey, tilesetResource.contentVersion), autotileRefs: Object.freeze(autotileRefs) });
       })();
       const actorTask = Promise.all(scene.actors.map(async (actor) => [actor.actorId, resolved(actor.character.namespace, actor.character.key, (await this.scope.content.resource(actor.character.namespace, actor.character.key, { signal })).contentVersion)] as const));
       const effectTask = Promise.all(scene.effectIds.map(async (id) => {
@@ -108,7 +109,7 @@ class Handler implements BattlePresentationHandler {
     if (projection.sceneEpoch !== this.scene!.sceneEpoch) throw new BattlePresentationError("PRESENTATION_SCENE_MISMATCH");
     const roster = [...this.scene!.actors.map((a) => a.actorId)].sort(compareActorId), incoming = [...projection.actors.map((a) => a.actorId)].sort(compareActorId);
     if (roster.length !== incoming.length || roster.some((actorId, index) => actorId !== incoming[index]) || projection.effectStarts.some((effect) => !this.effects.has(effect.effect))) throw new BattlePresentationError("PRESENTATION_INVALID_DATA");
-    const inside = (point: { readonly x: number; readonly y: number }) => point.x < this.loaded!.map.width && point.y < this.loaded!.map.height;
+    const inside = (point: { readonly x: number; readonly y: number }) => point.x < this.loaded!.arena.width && point.y < this.loaded!.arena.height;
     if (projection.actors.some((actor) => !inside(actor.tile) || (actor.movement !== null && (!inside(actor.movement.from) || !inside(actor.movement.to)))) || projection.effectStarts.some((effect) => effect.tile !== null && !inside(effect.tile))) throw new BattlePresentationError("PRESENTATION_INVALID_DATA");
     if (projection.tick < this.lastTick) return;
     if (projection.tick === this.lastTick) {
@@ -194,8 +195,8 @@ class Handler implements BattlePresentationHandler {
     return starts;
   }
   private payloads(projection: RenderProjection, visualEpoch: number, effects: readonly SkillEffectProjection[], paused: boolean) {
-    const actors = [...projection.actors].sort((a, b) => compareActorId(a.actorId, b.actorId)); const camera = cameraFor(this.loaded!.map, this.layout!, actors);
-    const view = { sceneEpoch: this.scene!.sceneEpoch, visualEpoch, paused, viewportWidth: this.layout!.windowWidth, viewportHeight: this.layout!.windowHeight, barHeight: this.layout!.barHeight, contentWidth: this.layout!.contentWidth, contentHeight: this.layout!.contentHeight, columns: this.layout!.columns, rows: this.layout!.rows, logicalWidth: this.layout!.logicalWidth, logicalHeight: this.layout!.logicalHeight, scaleX: this.layout!.scaleX, scaleY: this.layout!.scaleY, mapWidth: this.loaded!.map.width, mapHeight: this.loaded!.map.height, ...camera, tileset: this.loaded!.tilesetRef, autotiles: this.loaded!.autotileRefs, tiles: projectTiles(this.loaded!, camera.cameraX, camera.cameraY, this.layout!) };
+    const actors = [...projection.actors].sort((a, b) => compareActorId(a.actorId, b.actorId)); const camera = cameraFor(this.loaded!.arena, this.layout!, actors);
+    const view = { sceneEpoch: this.scene!.sceneEpoch, visualEpoch, paused, viewportWidth: this.layout!.windowWidth, viewportHeight: this.layout!.windowHeight, barHeight: this.layout!.barHeight, contentWidth: this.layout!.contentWidth, contentHeight: this.layout!.contentHeight, columns: this.layout!.columns, rows: this.layout!.rows, logicalWidth: this.layout!.logicalWidth, logicalHeight: this.layout!.logicalHeight, scaleX: this.layout!.scaleX, scaleY: this.layout!.scaleY, mapWidth: this.loaded!.arena.width, mapHeight: this.loaded!.arena.height, ...camera, tileset: this.loaded!.tilesetRef, autotiles: this.loaded!.autotileRefs, tiles: projectTiles(this.loaded!, camera.cameraX, camera.cameraY, this.layout!) };
     const actorData = actors.map((actor) => ({ sceneEpoch: this.scene!.sceneEpoch, visualEpoch, paused, actorId: actor.actorId, tileX: actor.tile.x, tileY: actor.tile.y, direction: actor.direction, sprite: this.actorRefs.get(actor.actorId)!, life: actor.life, motion: actor.movement === null ? null : { id: actor.movement.motionId, fromWorldX: safeProduct(actor.movement.from.x, TILE_SIZE_PX, "movement.fromWorldX"), fromWorldY: safeProduct(actor.movement.from.y, TILE_SIZE_PX, "movement.fromWorldY"), toWorldX: safeProduct(actor.movement.to.x, TILE_SIZE_PX, "movement.toWorldX"), toWorldY: safeProduct(actor.movement.to.y, TILE_SIZE_PX, "movement.toWorldY"), durationMs: safeProduct(actor.movement.completeTick - actor.movement.startTick, this.scene!.tickDurationMs, "movement.durationMs") } }));
     const effectData = { sceneEpoch: this.scene!.sceneEpoch, visualEpoch, paused, effectStarts: effects.map((effect) => { const asset = this.effects.get(effect.effect)!; return { effectId: effect.effectId, result: effect.result as "hit" | "immune", image: asset.image, worldX: safeSum(safeProduct(effect.tile!.x, TILE_SIZE_PX, "effect.worldX"), TILE_SIZE_PX / 2, "effect.worldX"), worldY: safeSum(safeProduct(effect.tile!.y, TILE_SIZE_PX, "effect.worldY"), TILE_SIZE_PX / 2, "effect.worldY"), fadeInMs: safeProduct(asset.content.timing.fade_in_ticks, this.scene!.tickDurationMs, "effect.fadeInMs"), holdMs: safeProduct(asset.content.timing.hold_ticks, this.scene!.tickDurationMs, "effect.holdMs"), fadeOutMs: safeProduct(asset.content.timing.fade_out_ticks, this.scene!.tickDurationMs, "effect.fadeOutMs") }; }) };
     const hud = { sceneEpoch: this.scene!.sceneEpoch, visualEpoch, actors: actors.map((actor) => ({ actorId: actor.actorId, team: this.scene!.actors.find((item) => item.actorId === actor.actorId)!.team, hp: actor.hp, maxHp: actor.maxHp })) };

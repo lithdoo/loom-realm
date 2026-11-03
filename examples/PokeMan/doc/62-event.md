@@ -1,6 +1,6 @@
 # 事件
 
-> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义 Event / EventStateMutation / EventStateList 的业务语义；Shared State 物理结构见 [67-shared-state-records.md](./67-shared-state-records.md)，FSDB 编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
+> 独立技术设计记录。不改写 `../DESIGN.md`。本文定义 Event / EventStateMutation / EventStateList 的业务语义；Dialogue / Map / Story Runtime 的集成见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)。Shared State 物理结构见 [67-shared-state-records.md](./67-shared-state-records.md)，FSDB 编码见 [68-content-fsdb.md](./68-content-fsdb.md)。
 
 # 定位
 
@@ -483,6 +483,18 @@ maps.<mapId>.npcs.<npcId>
 
 同一个 `npcId` 在不同 Map 出现合法；不同 Event 最终在同一 Map 产生相同 `npcId` 是 deterministic conflict，不做 last-wins。
 
+## Runtime instanceId — MVP FROZEN
+
+当前 MVP 的 Story Resolver 在把最终 NPC scene 转成 `NPCPlacement[]` 时固定：
+
+```text
+instanceId = npcId
+```
+
+原因是当前规则已经保证每张 Map 的最终 `npcId` 唯一，因此不需要第二套实例 identity 算法。Map-only placement 也应遵守同样约定。
+
+未来若产品需要“同一张 Map 同时出现多个相同 npcId 实例”，必须先扩展 Content / Resolver identity contract；在此之前实现不得自行拼接 mapId、序号、Event id 或随机字符串作为 instanceId。
+
 # StoryIndex
 
 Builder 生成：
@@ -515,6 +527,26 @@ Runtime NPC Instances
 ```
 
 StoryIndex 是 derived Content，不进入 Shared State / Save；其精确派生字段可以随 Resolver 查询实现调整，不视为新的业务数据 authority 或 MVP 核心 schema 缺口。
+
+# Map scene refresh after Event mutation
+
+Story Resolver 不只在 Map Enter 时运行。Map Subsystem 的 Map Frame Handler 还必须在 Dialogue child 正常完成、且 Dialogue Subsystem 已成功提交 EventStateMutation 后，重新读取 EventStateList 并解析当前 Map 的 NPC scene。
+
+固定顺序：
+
+~~~text
+Dialogue terminal
+→ Dialogue Subsystem commits EventStateList
+→ Dialogue Frame returns completed(terminalDialogueId)
+→ Map Frame Handler reads current EventStateList
+→ Story Resolver resolves current Map scene
+→ Map updates live NPC scene
+→ Map resumes ordinary controls
+~~~
+
+Map 不重复执行 Dialogue.mutation。Mutation mismatch、OCC conflict、commit outcome unknown 或 Dialogue child failure 时，不得把旧场景当作新剧情状态已经生效；必须先处理失败 / reconcile，再恢复正常交互。
+
+场景刷新不能依赖重新启动整张 Map。当前 Map Frame、RenderDomain 与场景生命周期应保持连续。现有 `RPGMapHandler.setNPC()` 已支持 Map Enter 后替换 NPC 集合，`getSnapshot()` 可读取当前公开 Map facts；Story Resolver refresh 应直接使用该 public API，不需要扩展 Map package。完整协作与序章具体状态见 [79-story-dialogue-event-integration.md](./79-story-dialogue-event-integration.md)。
 
 # Builder 检查
 
@@ -560,8 +592,8 @@ Event / EventStateMutation Content physical schema 与 EventStateList Shared Sta
 
 当前相关开放项只剩 Runtime 行为：
 
-- Runtime `instanceId` 生成算法；
 - 非 Dialogue business fact → Mutation handler 的 Runtime 实现；
+- Story Resolver → `RPGMapHandler.setNPC()` 的具体 runtime wiring 与测试；
 - Mutation mismatch / OCC / UI 行为。
 
 这些都不是 Event data physical-schema gap。

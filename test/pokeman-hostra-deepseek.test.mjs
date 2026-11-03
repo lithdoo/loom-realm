@@ -131,7 +131,7 @@ function launchHostra(userData) {
   child.once("exit", (code, signal) => {
     readyReject(new Error(`Hostra exited before ready (${code ?? signal})`));
   });
-  return { child, ready };
+  return { child, ready, output: () => output };
 }
 
 async function createProbeObserver() {
@@ -299,8 +299,8 @@ async function assertSchemaFormPresentation(page) {
     rootDefined: true,
     fieldDefined: true,
     schemaCssAvailable: true,
-    loadedStyles: 4,
-    loadedScripts: 4,
+    loadedStyles: 6,
+    loadedScripts: 6,
   });
 }
 
@@ -338,6 +338,9 @@ async function runHostraQualification(mode, body) {
     const opened = await openPokeManWindow(ready);
     browser = opened.browser;
     await body({ page: opened.page, observer });
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.stack ?? cause.message : String(cause);
+    throw new Error(`${detail}\nHostra diagnostics:\n${hostra.output()}`, { cause });
   } finally {
     try {
       await browser?.close().catch(() => {});
@@ -362,6 +365,8 @@ test("real Hostra runs the actual PokeMan Gate before Map and controls", { timeo
     { key: "base", module: "subsystems/base.mjs" },
     { key: "map", module: "subsystems/map.mjs" },
     { key: "dialogue", module: "subsystems/dialogue.mjs" },
+    { key: "battle", module: "subsystems/battle.mjs" },
+    { key: "message", module: "subsystems/message.mjs" },
   ]);
 
   await runHostraQualification("deterministic", async ({ page, observer }) => {

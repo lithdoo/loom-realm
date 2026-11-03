@@ -1002,8 +1002,13 @@ Base
 = startup configuration gate
 = owns current PokeMan direct DeepSeek startup probe
 
+PokeMan baseline bootstrap
+= runs after DeepSeek Gate success
+= atomically materializes PlayerWorld/current + EventStateList/current when both are absent
+= does not create Relationship / CarriedCards
+
 Map / later gameplay
-= cannot start before Gate success
+= cannot start before Gate success + baseline readiness
 
 future Battle
 = reads Session credential only in concrete product composition
@@ -1022,8 +1027,11 @@ UNCONFIGURED
 → FORM_ACTIVE
 → VALIDATING
 → SESSION_CONFIG_COMMITTED
-→ READY
-→ downstream Frame
+→ CREDENTIAL_READY
+→ POKEMAN_BASELINE_READY
+→ downstream Map Frame
 ~~~
 
 失败只能回到可继续编辑/重试的 FORM_ACTIVE；不能在 credential 未验证或 Shared State 未形成 authoritative ready fact 时越过 Gate。
+
+Base 的 baseline bootstrap 不属于 credential Gate 本身，但执行顺序固定在 Gate 之后、`frame.call("map")` 之前。两条 singleton baseline Record 只允许“同时 absent → 原子创建”或“同时存在且合法 → 保留”；单边存在视为 PokeMan invariant failure。具体值与 OCC reconciliation 见 67 / 79。

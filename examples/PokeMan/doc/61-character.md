@@ -303,6 +303,18 @@ RelationshipValue
 
 `A → B` 与 `B → A` 是独立 Relationship，不要求对称。
 
+MVP 对“Relationship Record 不存在，但业务现在需要首次建立该方向关系”的初始化规则固定为：
+
+```json
+{
+  "affinity": 0,
+  "hostile": false,
+  "relationshipText": ""
+}
+```
+
+也就是：不存在的 Relationship 从中性关系开始；不得由调用者临时编造 affinity 或叙事文本。若同一业务动作同时建立 Contract，则在以上默认 value 上原子增加 `contract` 字段。已有 Relationship 则必须保留原有 `affinity / hostile / relationshipText`，只按业务规则增加或更新允许修改的字段。
+
 **Relationship Record 存在不表示 Contract 已成立。** Record 可以保存 affinity / hostile / relationshipText，而 `contract` 缺失。
 
 `affinity` 是有限整数。`hostile` 与 affinity 是独立事实。
@@ -543,10 +555,10 @@ Event A 对 X absent + Event B 对 X placement
 
 跨 source 合并后的同 Map `npcId` 冲突由 Story Resolver deterministic reject。
 
-# 当前未决
+# 当前冻结结论
 
 Character / Battle Content binding / Relationship / Contract / CarriedCards 的 MVP 物理结构已经分别由 `68` / `67` 冻结。
 
 当前没有 BattleSkill identity / Contract.skills physical gap：`Contract.skills[]` 直接复用 battle 模块既有的 `skillId: string`；PokeMan Game Package 的 Battle Content table 绑定也已经固定为 `struct.BattleActor` / `struct.BattleSkill`。
 
-剩余 `instanceId` 具体生成算法属于 Runtime，不是 Content / Shared State data physical-schema gap。
+当前 MVP 的 Runtime `instanceId` 已由 62 冻结为 `instanceId = npcId`；因为每张 Map 的最终 npcId 唯一，不再保留单独的 instanceId 生成算法 OPEN。未来只有在同一 Map 允许多个相同 npcId 实例时才需要版本化扩展该 identity contract。

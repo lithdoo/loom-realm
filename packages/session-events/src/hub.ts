@@ -141,6 +141,12 @@ export class SessionEventHub {
   private readonly channelIndex = new Map<string, Set<HubSubscription>>();
   private readonly onFatal?: (fact: SessionEventHubFatalFact) => void;
   private terminalValue = false;
+  private hostLifecycle: {
+    readonly owner: symbol;
+    readonly sessionEpoch: string;
+    sequence: number;
+    state: "background" | "foreground";
+  } | null = null;
   private readyValue = true;
   private settleTerminated!: () => void;
   readonly terminated: Promise<void>;
@@ -190,6 +196,46 @@ export class SessionEventHub {
         return this.route(sourceSubsystemKey, accepted, targetSubsystemKey);
       },
     });
+  }
+
+  installHostLifecyclePublisher(
+    owner: symbol,
+    sessionEpoch: string,
+    initialState?: "background" | "foreground",
+  ): void {
+    if (this.terminalValue) throw sessionEventError("TERMINAL", "Session Event Hub is terminal");
+    if (this.hostLifecycle !== null) throw new Error("Host lifecycle publisher already exists");
+    if (typeof sessionEpoch !== "string" || sessionEpoch.length === 0 || utf8ByteLength(sessionEpoch) > 1024) {
+      throw new TypeError("Invalid Host lifecycle session epoch");
+    }
+    if (initialState !== undefined && initialState !== "background" && initialState !== "foreground") {
+      throw new TypeError("Invalid Host lifecycle state");
+    }
+    this.hostLifecycle = {
+      owner,
+      sessionEpoch,
+      sequence: initialState === undefined ? -1 : 0,
+      state: initialState ?? "foreground",
+    };
+  }
+
+  publishHostLifecycle(owner: symbol, state: "background" | "foreground"): Promise<void> {
+    if (state !== "background" && state !== "foreground") return Promise.reject(new TypeError("Invalid Host lifecycle state"));
+    const current = this.hostLifecycle;
+    if (this.terminalValue) return Promise.reject(sessionEventError("TERMINAL", "Session Event Hub is terminal"));
+    if (current === null || current.owner !== owner) return Promise.reject(new Error("Host lifecycle publisher is closed"));
+    if (current.sequence >= 0 && current.state === state) return Promise.resolve();
+    current.sequence += 1;
+    current.state = state;
+    return this.route("host", validatePublish("host.lifecycle", "state", Object.freeze({
+      sessionEpoch: current.sessionEpoch,
+      sequence: current.sequence,
+      state,
+    })));
+  }
+
+  closeHostLifecyclePublisher(owner: symbol): void {
+    if (this.hostLifecycle?.owner === owner) this.hostLifecycle = null;
   }
 
   terminate(): void {
@@ -262,6 +308,19 @@ export class SessionEventHub {
       }
       subscriptions.add(subscription);
     }
+    const retained = this.hostLifecycle;
+    if (channels.includes("host.lifecycle") && retained !== null && retained.sequence >= 0) {
+      subscription.enqueue(Object.freeze({
+        channel: "host.lifecycle",
+        type: "state",
+        payload: snapshotJsonValue(Object.freeze({
+          sessionEpoch: retained.sessionEpoch,
+          sequence: retained.sequence,
+          state: retained.state,
+        })),
+        source: Object.freeze({ subsystemKey: "host" }),
+      }));
+    }
 
     // The candidate is installed before this checkpoint. A publish or terminal
     // in the same turn can therefore exercise the required pre-visible race.
@@ -300,6 +359,7 @@ export class SessionEventHub {
     if (this.terminalValue) return false;
     this.terminalValue = true;
     this.readyValue = false;
+    this.hostLifecycle = null;
     this.settleTerminated();
     for (const binding of [...this.bindings]) binding.terminalize("hub-terminal");
     return true;

@@ -70,7 +70,7 @@ Relationship(holder → servant)
 | 完好 | 较高 | 显现稳定，可以正常继续战斗 |
 | 受损 | 中等 | 这份契约的战斗显现已经出现明显损耗 |
 | 残破 | 很低但大于 0 | 显现非常不稳定，接近无法继续战斗 |
-| 失效 | 0 | 当前无法继续形成战斗化身 |
+| 战斗中归零 | 0（仅为本场 Simulation terminal 状态） | 本场显现体被击败；正常 Battle 结算时，Contract Integrity 最低保存为 1 |
 
 具体状态名称、视觉效果和百分比阈值以后再调；当前只固定 **Battle HP 映射 `Relationship.contract.integrity`，而不是角色本体生命值**。
 
@@ -90,20 +90,22 @@ slot = 0        // 当前随身
 
 这些可以同时成立。
 
-`Integrity = 0` 表示这份契约当前无法继续形成 Battle Manifestation，并不意味着角色本人昏迷、死亡或受到同等物理伤害。
+`Battle Simulation 中 HP = 0` 表示该显现体在本场战斗中被击败，并不意味着角色本人昏迷、死亡或受到同等物理伤害。对 Contract-backed Manifestation，正常 Battle 结果结算时，持久化值使用 `max(1, finalSnapshot.hp)`：非零 HP 原样保存，归零的卡片保存为 1 HP。因此正常 Battle 不会把 Contract 持久化为 0；若读取到历史或外部写入的 `integrity = 0`，该 Contract 仍不能形成新的 Battle Manifestation，必须先由业务修复。
 
 长期 Integrity 在 Battle 结束后写回同一 Contract，因此即使随后把 Card 从随身队伍移除，损耗也不会消失：
 
 ```text
+正常受损的情况：
+
 Relationship(player → rival).contract.integrity = 100
 ↓
 Card(player, rival, slot=0) 进入 Battle
 ↓
 Battle hp 100 → 48
 ↓
-Battle 结束
+Battle 正常结束并结算
 ↓
-Relationship(player → rival).contract.integrity = 48
+Relationship(player → rival).contract.integrity = max(1, 48) = 48
 ↓
 Card 可以继续随身，也可以从随身队伍移除
 ↓
@@ -112,6 +114,16 @@ Integrity 仍然是 48
 到达中心
 ↓
 修复 contract.integrity → BattleActor.max_hp
+
+本场被击败的情况：
+
+Battle finalSnapshot.hp = 0
+↓
+BattleResult 先按原始 final Snapshot 判定胜负
+↓
+正常退出 Battle 时结算
+↓
+Relationship(player → rival).contract.integrity = max(1, 0) = 1
 ```
 
 这样道路上的连续战斗会产生类似传统 Pokémon 的旅行资源压力，但设定上消耗的是契约关系的战斗显现能力，而不是远处角色本人的生命值。
@@ -273,9 +285,13 @@ Battle 中换卡
 
 ## 角色性格真实影响战斗
 
-同一句 Guidance，不同人物应产生不同理解和执行方式。角色性格、能力、关系和当前战局共同影响 Decision，避免所有从者最终表现为同一种通用 AI。
+产品目标：同一句 Guidance，不同人物应产生不同理解和执行方式。角色性格、能力、关系和当前战局共同影响 Decision，避免所有从者最终表现为同一种通用 AI。
 
 同一个 Character 被不同主公契约时，各自有向 Relationship 的 affinity、Contract Integrity、技能集以及未来 Guidance / 成长状态可以不同，因此同一人物的不同契约 Battle Manifestation 也可以形成不同表现。
+
+**当前 v0 实现边界：** 这仍是产品目标，不代表当前 Battle v0 已经接入人物性格。canonical BattleDecisionContextV0 只包含 actorId / team、实时战斗状态、技能、地图窗口、近期事件和 PlanConstraints；不包含 Character.aiCharacterText、Relationship.affinity 或 relationshipText。PlayerGuidance 也尚未实现。当前不能声称角色性格或主公战术指令已经影响首场 Battle 的决策。未来必须通过 typed、request-scoped DecisionWorkflow extension 实现，不得用全局 mutable prompt state 绕过 Battle contract。
+
+Map 4 首场互换角色卡的实际 roster 与参数见 [80-battle-scenario-design.md](./80-battle-scenario-design.md)。
 
 ## 长期养成方向
 

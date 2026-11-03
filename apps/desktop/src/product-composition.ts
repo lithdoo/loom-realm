@@ -5,11 +5,12 @@ import { fileURLToPath } from "node:url";
 import { createHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain, type MainSessionResult } from "@loomrealm/main";
 import { createSharedStateAuthority, type SharedStateAuthority } from "@loomrealm/shared-state";
-import { createSessionEventFatalLatch, createSessionEventHub, type SessionEventHub } from "@loomrealm/session-events";
+import { createHostLifecyclePublisher, createSessionEventFatalLatch, createSessionEventHub, type HostLifecyclePublisher, type SessionEventHub } from "@loomrealm/session-events";
 import { createDesktopContentService, prepareDesktopContentView, type DesktopContentGrant, type PreparedDesktopContentView } from "./content-service.js";
 import { DesktopDataConnectionBroker } from "./data-broker.js";
 import { DESKTOP_BOOTSTRAP_CHANNEL, type DesktopRendererBootstrapEnvelope } from "./desktop-bootstrap.js";
 import { connectHostraRpc, type HostraRpc } from "./hostra-rpc.js";
+import { createDesktopHostLifecycleEndpoint, type DesktopHostLifecycleEndpoint } from "./host-lifecycle-websocket.js";
 import { createLoopbackDataSettlement, type LoopbackDataSettlement } from "./loopback-data-settlement.js";
 import { LoopbackRendererControlBinding, type LoopbackRendererDocument } from "./loopback-renderer-control.js";
 import {
@@ -53,11 +54,13 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
   let documentControl: LoopbackRendererDocument | null = null;
   let documentData: LoopbackDataSettlement | null = null;
   let documentPresentationEvents: DesktopPresentationEventEndpoint | null = null;
+  let documentHostLifecycle: DesktopHostLifecycleEndpoint | null = null;
   let broker: DesktopDataConnectionBroker | null = null;
   let rendererControl: LoopbackRendererControlBinding | null = null;
   let main: Promise<MainSessionResult> | null = null;
   let sharedState: SharedStateAuthority | null = null;
   let sessionEvents: SessionEventHub | null = null;
+  let hostLifecycle: HostLifecyclePublisher | null = null;
   let windowId: string | null = null;
   let termination: Promise<void> | null = null;
   let resolveClosed!: () => void;
@@ -72,6 +75,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
     documentControl?.retire(cause); documentControl = null;
     documentData?.close(); documentData = null;
     void documentPresentationEvents?.close(); documentPresentationEvents = null;
+    void documentHostLifecycle?.close(); documentHostLifecycle = null;
     if (documentGrant !== null) content?.revokeGrant(documentGrant);
     documentGrant = null;
   };
@@ -90,6 +94,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
       }
       sharedState?.terminate();
       sessionEvents?.terminate();
+      hostLifecycle?.close();
       retireDocument(reason);
       rendererControl?.close();
       observe({ type: "renderer-control-closed" });
@@ -156,6 +161,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
     });
     const sessionEventsFatal = createSessionEventFatalLatch();
     sessionEvents = createSessionEventHub({ onFatal: () => sessionEventsFatal.report() });
+    hostLifecycle = createHostLifecyclePublisher(sessionEvents, { sessionEpoch: randomBytes(24).toString("hex") });
     observe({ type: "startup-stage", stage: "session-events" });
     const view = await prepareDesktopContentView(prepared);
     preparedView = view;
@@ -173,6 +179,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
         const control = await rendererControl!.beginDocument(signal);
         let settlement: LoopbackDataSettlement | null = null;
         let presentationEvents: DesktopPresentationEventEndpoint | null = null;
+        let lifecycleEvents: DesktopHostLifecycleEndpoint | null = null;
         let grant: DesktopContentGrant | null = null;
         try {
           settlement = await createLoopbackDataSettlement();
@@ -193,12 +200,14 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
             );
             return true;
           });
+          lifecycleEvents = await createDesktopHostLifecycleEndpoint((state) => hostLifecycle!.publish(state));
           if (signal.aborted) throw signal.reason;
           grant = content!.createGrant({ permissions: ["resources"], expiresAtUnixMs: Date.now() + 86_400_000 });
           const access = content!.access(grant);
           documentControl = control;
           documentData = settlement;
           documentPresentationEvents = presentationEvents;
+          documentHostLifecycle = lifecycleEvents;
           documentGrant = grant;
           observe({ type: "document-bootstrap", rendererIdentity: createHash("sha256").update(control.rendererIdentity).digest("hex") });
           return Object.freeze({
@@ -208,11 +217,12 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
             controlEndpoint: control.controlEndpoint,
             dataSettlementEndpoint: settlement.endpoint,
             presentationEventsEndpoint: presentationEvents.endpoint,
+            hostLifecycleEndpoint: lifecycleEvents.endpoint,
             content: Object.freeze({ origin: access.origin.href, installationId: access.installationId, token: access.token }),
             presentation,
           });
         } catch (cause) {
-          control.retire(cause); settlement?.close(); void presentationEvents?.close(); if (grant !== null) content!.revokeGrant(grant);
+          control.retire(cause); settlement?.close(); void presentationEvents?.close(); void lifecycleEvents?.close(); if (grant !== null) content!.revokeGrant(grant);
           throw cause;
         }
       },

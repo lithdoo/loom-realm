@@ -1,10 +1,4 @@
 {
-    "to":  {
-               "prologue":  null,
-               "first-route":  "active"
-           },
-    "from":  {
-                 "prologue":  "lab-complete",
-                 "first-route":  null
-             }
+  "from": { "prologue": "after-battle", "first-route": null },
+  "to": { "prologue": null, "first-route": "active" }
 }

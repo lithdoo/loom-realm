@@ -90,7 +90,7 @@ function definition(overrides = {}) {
     moveTicks: 2,
     protectionTicks: 0,
     maxPathSteps: 6,
-    map: { ref: { mapId: 1 }, width: 7, height: 7, passable },
+    map: { ref: { arenaId: "test" }, width: 7, height: 7, passable },
     actors: [
       {
         actorId: "a", team: "ally", tile: point(2, 3), direction: 6, maxHp: 5,
@@ -123,6 +123,32 @@ test("ResolvedBattleDefinition validation detaches and freezes all gameplay arra
   assert.throws(() => validateResolvedBattleDefinition({ ...definition(), moveTicks: 0 }));
   assert.throws(() => validateResolvedBattleDefinition({ ...definition(), actors: definition().actors.slice(0, 1) }));
   assert.throws(() => validateResolvedBattleDefinition({ ...definition(), actors: definition().actors.map((actor) => ({ ...actor, team: "ally" })) }));
+});
+
+test("T-INIT-001..004: explicit initialHp is optional, bounded, immutable, and preserves maxHp", () => {
+  const omitted = validateResolvedBattleDefinition(definition());
+  assert.equal(createInitialState(omitted).actors.get("a").hp, 5);
+  const explicitActors = definition().actors.map((actor, index) => ({ ...actor, initialHp: index === 0 ? 2 : actor.maxHp }));
+  const explicit = validateResolvedBattleDefinition(definition({ actors: explicitActors }));
+  const state = createInitialState(explicit);
+  assert.deepEqual([state.actors.get("a").hp, state.actors.get("a").maxHp], [2, 5]);
+  assert.deepEqual([state.actors.get("b").hp, state.actors.get("b").maxHp], [5, 5]);
+  for (const initialHp of [0, -1, 6, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => validateResolvedBattleDefinition(definition({
+      actors: definition().actors.map((actor, index) => index === 0 ? { ...actor, initialHp } : actor),
+    })));
+  }
+});
+
+test("T-ARENA-002/003/005: definition owns detached arena passability independent from visual/map facts", () => {
+  const source = definition();
+  source.map.passable[0][0] = false;
+  const resolved = validateResolvedBattleDefinition(source);
+  source.map.passable[0][0] = true;
+  assert.equal(resolved.map.ref.arenaId, "test");
+  assert.equal(resolved.map.passable[0][0], false);
+  assert.throws(() => validateResolvedBattleDefinition({ ...definition(), map: { ...definition().map, passable: [[true]] } }));
+  assert.throws(() => validateResolvedBattleDefinition({ ...definition(), map: { ...definition().map, ref: { mapId: 4 } } }));
 });
 
 test("Builder validation failure does not consume it, while successful build is one-shot", () => {
@@ -206,6 +232,27 @@ test("pause freezes logical time and queued Decision until resume", async () => 
   assert.deepEqual(await run, { type: "cancelled" });
 });
 
+test("T-CTRL-016..020: pause reason, transition notification, legacy default, and unsubscribe are exact", async () => {
+  const live = runtimeFor(definition(), new DeferredDecision());
+  const events = [];
+  const unsubscribe = live.runtime.onPause((event) => events.push(event));
+  const run = live.runtime.run(); await flush();
+  live.runtime.pause();
+  assert.equal(live.runtime.getSnapshot().pauseReason, "host-background");
+  assert.deepEqual(events, [{ reason: "host-background" }]);
+  live.runtime.pause("host-background");
+  assert.equal(events.length, 1);
+  live.runtime.resume();
+  assert.equal(live.runtime.getSnapshot().status, "running");
+  assert.equal("pauseReason" in live.runtime.getSnapshot(), false);
+  unsubscribe();
+  live.runtime.pause("host-background");
+  assert.equal(events.length, 1);
+  assert.equal(live.runtime.getSnapshot().pauseReason, "host-background");
+  live.runtime.cancel();
+  assert.deepEqual(await run, { type: "cancelled" });
+});
+
 test("scheduler wake and pause cannot leave a partially committed Tick", async () => {
   const clock = new FakeBattleClock();
   const presentation = new RecordingPresentation();
@@ -257,6 +304,29 @@ test("instant simultaneous damage produces simultaneous defeat and deterministic
   assert.deepEqual(await replayRun, { type: "simultaneous_defeat" });
   assert.deepEqual(replay.getSnapshot(), liveSnapshot);
   assert.deepEqual(replayPresentation.projections, presentation.projections);
+});
+
+test("T-INIT-003/005: damaged initialHp reaches Snapshot, Projection, Replay, and deterministic replay", async () => {
+  const actors = definition().actors.map((actor, index) => ({ ...actor, initialHp: index === 0 ? 3 : 4 }));
+  const def = definition({ actors });
+  const decision = new ScriptDecision(() => ({ path: [] }));
+  const live = runtimeFor(def, decision);
+  const run = live.runtime.run(); await flush();
+  assert.deepEqual(live.runtime.getSnapshot().actors.map((actor) => [actor.hp, actor.maxHp]), [[3, 5], [4, 5]]);
+  assert.deepEqual(live.presentation.projections[0].actors.map((actor) => [actor.hp, actor.maxHp]), [[3, 5], [4, 5]]);
+  live.clock.advance(200); live.runtime.cancel(); await run;
+  const record = live.runtime.getReplay();
+  assert.deepEqual(record.initial.actors.map((actor) => actor.initialHp), [3, 4]);
+  assert.equal(record.replayability.type, "audit_only");
+
+  const terminalDecision = new ScriptDecision((request) => ({ path: [], skill: { skillId: "strike", targetActorId: request.actorId === "a" ? "b" : "a", minCoefficient: 1 } }));
+  const terminal = runtimeFor(def, terminalDecision);
+  const terminalRun = terminal.runtime.run(); await flush(); terminal.clock.advance(200); await terminalRun;
+  const replayClock = new FakeBattleClock();
+  const replay = new BattleReplayBuilder({ clock: replayClock, signal: new AbortController().signal, presentation: new RecordingPresentation() }).build(terminal.runtime.getReplay());
+  assert.deepEqual(replay.getSnapshot().actors.map((actor) => [actor.hp, actor.maxHp]), [[3, 5], [4, 5]]);
+  const replayRun = replay.run(); await flush(); replayClock.advance(200); await replayRun;
+  assert.deepEqual(replay.getSnapshot(), terminal.runtime.getSnapshot());
 });
 
 test("multi-step path materializes one step at a time", async () => {

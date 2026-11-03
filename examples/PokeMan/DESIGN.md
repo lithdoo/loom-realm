@@ -140,11 +140,42 @@ World / Dialogue / Battle / System Menu
           返回 caller
 ```
 
+当前 MVP Message Frame 的最小业务 contract 冻结为：
+
+```ts
+type PokeManMessageFrameInputV1 = {
+  messageKey: string;
+  text: string;
+  actions: readonly {
+    id: string;
+    label: string;
+  }[];
+};
+
+type PokeManMessageFrameResultV1 = {
+  messageKey: string;
+  actionId: string;
+};
+```
+
+约束：
+
+- `messageKey` 非空，用于 caller correlation / 测试，不是 Shared State identity；
+- `text` 是本次模态消息正文；
+- `actions` 至少 1 项，action id 非空且唯一；
+- Message 只返回玩家选择，不执行 caller 的业务 mutation；
+- caller 根据 `actionId` 决定 resume / cancel / retry 等行为；
+- Message Frame 自己拥有本次模态 UI / Controls activation，完成后释放并返回 caller；
+- cancelled / failed Frame 不能伪装成某个 action。
+
+Battle pause 当前正是该 contract 的直接 consumer；`battle-host-background-paused` 与 `battle-decision-circuit-paused` 的 exact text/actions 由 77 冻结。
 典型用途包括：
 
 - 获得角色卡等需要玩家明确确认的业务消息；
 - “无法携带更多角色卡”等业务提示；
 - 存档 / 读取失败等可恢复错误；
+- Battle 因 Host background 暂停后的“继续战斗 / 退出战斗”确认；
+- Battle 因 Decision circuit 暂停后的“重试决策 / 退出战斗”确认；
 - 警告信息；
 - `确认 / 取消`、`是 / 否` 等模态选择；
 - 退出游戏、覆盖存档等危险操作前的确认。
@@ -513,7 +544,7 @@ Simulation
 | 完好 | 较高 | 显现稳定，可以正常继续战斗 |
 | 受损 | 中等 | 卡片已经出现明显战斗损耗 |
 | 残破 | 很低但大于 0 | 显现非常不稳定，接近无法继续战斗 |
-| 失效 | 0 | 当前无法继续形成战斗化身 |
+| 本场被击败 | 0（仅本场 terminal） | 本场显现体被击败；正常退出 Battle 时 Contract 最低保存为 1 |
 
 具体状态名称、视觉效果和百分比阈值以后再调；当前只固定 **HP 数值映射角色卡完整度，而不是角色生命值**。
 
@@ -529,7 +560,7 @@ Card HP = 35%
 
 两者可以同时成立。
 
-`Card HP = 0` 表示这张角色卡当前无法继续形成 Battle Manifestation，并不意味着角色本人昏迷、死亡或受到同等物理伤害。
+`Battle final HP = 0` 表示这张角色卡的显现体在本场被击败，并不意味着角色本人昏迷、死亡或受到同等物理伤害。正常退出 Battle 结算时，Contract Integrity 使用 `max(1, final HP)` 持久化，因此正常 Battle 后卡片最低保留 1 点，可再次显现但非常脆弱。
 
 角色卡的 Battle 状态在战斗结束后继续保留，直到被中心等恢复手段修复：
 
@@ -1072,7 +1103,7 @@ Map Enter
 - **中心管理器作为主要城镇中的标准化角色卡服务节点，承担全量角色卡管理、完整属性核实与卡片修复。**
 - **不提供随身全角色 Pokédex 式完整数据库。**
 - **Battle Manifestation 的 HP 表示角色卡完整度 / 显现稳定度，不表示人物本体生命值。**
-- **Card HP 可以跨 Battle 持续；0 HP 表示卡片暂时失效，而非人物死亡。**
+- **Card HP 可以跨 Battle 持续；本场 0 HP 表示显现体被击败，正常退出结算后最低持久化为 1 HP，而非人物死亡。**
 - **本体直接参战时的 HP 是本场 Battle condition，不需要成为持久人物生命条。**
 - **道路以 Visible Encounter 为基础，普通 Encounter 在进入地图时生成后直接可见。**
 - **普通 Encounter Entity 可以是 transient，重要人物才需要完整长期 Character identity。**

@@ -1,7 +1,7 @@
 import { preparePwaGame } from "@loomrealm/game-launcher-pwa";
 import { runMain } from "@loomrealm/main";
 import { createSharedStateAuthority } from "@loomrealm/shared-state";
-import { createSessionEventFatalLatch, createSessionEventHub } from "@loomrealm/session-events";
+import { createHostLifecyclePublisher, createSessionEventFatalLatch, createSessionEventHub } from "@loomrealm/session-events";
 import { moduleDirectoryPath, pwaPath } from "./base-path.js";
 import { parsePwaRuntimeInfoV1, parsePwaSessionBootstrapV1, sameServiceWorkerGeneration } from "./bootstrap-protocol.js";
 import { getInstallation, readInstallationObject } from "./installation-store.js";
@@ -65,6 +65,19 @@ async function start(raw: unknown): Promise<void> {
   const sharedStateFatal = Object.freeze({ subscribe(listener: () => void) { fatalListener = listener; if (fatal) queueMicrotask(listener); return () => { if (fatalListener === listener) fatalListener = null; }; } });
   const sessionEventsFatal = createSessionEventFatalLatch();
   const sessionEventHub = createSessionEventHub({ onFatal: () => sessionEventsFatal.report() });
+  const hostLifecycle = createHostLifecyclePublisher(sessionEventHub, {
+    sessionEpoch: bootstrap.sessionEpoch,
+    initialState: bootstrap.hostLifecycleState,
+  });
+  const onHostLifecycle = (event: MessageEvent<unknown>) => {
+    if (event.data !== "background" && event.data !== "foreground") {
+      sessionEventsFatal.report();
+      return;
+    }
+    void hostLifecycle.publish(event.data).catch(() => sessionEventsFatal.report());
+  };
+  bootstrap.hostLifecyclePort.addEventListener("message", onHostLifecycle);
+  bootstrap.hostLifecyclePort.start();
   const controller = new AbortController();
   const platform = new PwaPlatform({
     launchPlan: prepared.launchPlan,
@@ -91,6 +104,9 @@ async function start(raw: unknown): Promise<void> {
     });
     session.postMessage(Object.freeze({ type: "loomrealm.pwa.session-status", version: 1, status: "settled", sessionEpoch: bootstrap.sessionEpoch, result }));
   } finally {
+    bootstrap.hostLifecyclePort.removeEventListener("message", onHostLifecycle);
+    bootstrap.hostLifecyclePort.close();
+    hostLifecycle.close();
     session.removeEventListener("message", onShutdown);
     await platform.close();
     authority.terminate();

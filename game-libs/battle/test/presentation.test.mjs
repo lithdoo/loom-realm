@@ -11,14 +11,14 @@ const table = (values, xSize, ySize = 1, zSize = 1) => ({ dimensions: zSize === 
 const priorities = Array(500).fill(0); priorities[384] = 0; priorities[385] = 2;
 const mapValues = Array(8 * 8 * 3).fill(0); mapValues[0] = 384; mapValues[1 + 1 * 8 + 2 * 64] = 385;
 const records = new Map([
-  ["struct.Map:1", { tileset_id: 1, width: 8, height: 8, data: table(mapValues, 8, 8, 3), behaviors: [] }],
+  ["struct.BattleArena:test", { id: "test", tileset_id: 1, width: 8, height: 8, passable: Array.from({ length: 8 }, () => Array(8).fill(true)), data: table(mapValues, 8, 8, 3) }],
   ["struct.Tileset:1", { id: 1, tileset_name: "field.png", autotile_names: [null, null, null, null, null, null, null], passages: table(Array(500).fill(0), 500), priorities: table(priorities, 500), terrain_tags: table(Array(500).fill(0), 500) }],
   ["struct.BattleEffect:spark", { id: "spark", image: { namespace: "resource.Graphics", key: "BattleEffects/spark.png" }, anchor: "tile-center", timing: { fade_in_ticks: 1, hold_ticks: 2, fade_out_ticks: 1 } }],
 ]);
 const scene = (actors = [
   { actorId: "hero", team: "ally", character: { namespace: "resource.Graphics", key: "Characters/hero.png" } },
   { actorId: "enemy", team: "enemy", character: { namespace: "resource.Graphics", key: "Characters/enemy.png" } },
-]) => ({ battleId: "b1", sceneEpoch: 7, tickDurationMs: 200, map: { mapId: 1 }, actors, effectIds: ["spark"] });
+]) => ({ battleId: "b1", sceneEpoch: 7, tickDurationMs: 200, map: { arenaId: "test" }, actors, effectIds: ["spark"] });
 const actor = (actorId, teamX, overrides = {}) => ({ actorId, tile: { x: teamX, y: 2 }, direction: 2, hp: 100, maxHp: 100, life: "alive", movement: null, ...overrides });
 const projection = (tick = 0, overrides = {}) => ({ sceneEpoch: 7, tick, actors: [actor("hero", 2), actor("enemy", 5)], effectStarts: [], ...overrides });
 
@@ -146,7 +146,7 @@ test("content and renderer failures are classified and capacity failure has no p
   const missing = harness({ width: 640, height: 480 }, { content: { async record(){ throw new Error("gone"); } } }); const one = new BattlePresentationBuilder(missing.scope, missing.frame).build(); await assert.rejects(one.initialize(scene()), { code: "PRESENTATION_CONTENT_FAILED" });
   const commit = harness({ width: 640, height: 480 }, { scope: { createRenderDomain(){ throw new Error("renderer down"); } } }); const two = new BattlePresentationBuilder(commit.scope, commit.frame).build(); await two.initialize(scene()); assert.throws(() => two.render(projection()), { code: "PRESENTATION_COMMIT_FAILED" });
   const giantValues = Array(10_000 * 16 * 3).fill(384);
-  const giant = harness({ width: 10_000_000, height: 480 }, { content: { async record(namespace, key) { if (namespace === "struct.Map") return { value: { tileset_id: 1, width: 10_000, height: 16, data: table(giantValues, 10_000, 16, 3) }, contentVersion: version }; const value = records.get(`${namespace}:${key}`); return { value, contentVersion: version }; } } });
+  const giant = harness({ width: 10_000_000, height: 480 }, { content: { async record(namespace, key) { if (namespace === "struct.BattleArena") return { value: { id: key, tileset_id: 1, width: 10_000, height: 16, passable: Array.from({ length: 16 }, () => Array(10_000).fill(true)), data: table(giantValues, 10_000, 16, 3) }, contentVersion: version }; const value = records.get(`${namespace}:${key}`); return { value, contentVersion: version }; } } });
   const huge = await ready(giant); assert.throws(() => huge.handler.render(projection()), { code: "PRESENTATION_COMMIT_FAILED" }); assert.equal(huge.h.domains.length, 0);
 });
 
@@ -158,7 +158,7 @@ test("Null and Recording Presentation are direct substitutes", async () => {
 test("camera uses alive movement targets, midpoint, bounds, and all-dead fallback", async () => {
   const width = 100, height = 50, values = Array(width * height * 3).fill(0); values[0] = 384;
   const wide = harness({ width: 640, height: 480 }, { content: { async record(namespace, key) {
-    if (namespace === "struct.Map") return { value: { tileset_id: 1, width, height, data: table(values, width, height, 3) }, contentVersion: version };
+    if (namespace === "struct.BattleArena") return { value: { id: key, tileset_id: 1, width, height, passable: Array.from({ length: height }, () => Array(width).fill(true)), data: table(values, width, height, 3) }, contentVersion: version };
     const value = records.get(`${namespace}:${key}`); if (!value) throw new Error("missing"); return { value, contentVersion: version };
   } } });
   const { h, handler } = await ready(wide);
@@ -225,7 +225,7 @@ test("subsequent renderer-capacity failure closes atomically without a partial v
 test("async resize capacity fatal closes once and resolves the Runtime failure channel", async () => {
   const width = 10_000, height = 16, values = Array(width * height * 3).fill(384);
   const oversized = harness({ width: 640, height: 480 }, { content: { async record(namespace, key) {
-    if (namespace === "struct.Map") return { value: { tileset_id: 1, width, height, data: table(values, width, height, 3) }, contentVersion: version };
+    if (namespace === "struct.BattleArena") return { value: { id: key, tileset_id: 1, width, height, passable: Array.from({ length: height }, () => Array(width).fill(true)), data: table(values, width, height, 3) }, contentVersion: version };
     const value = records.get(`${namespace}:${key}`); if (!value) throw new Error("missing"); return { value, contentVersion: version };
   } } });
   const { h, handler } = await ready(oversized); handler.render(projection());

@@ -98,7 +98,7 @@ function integrationDefinition() {
   return {
     battleId: "battle:deepseek-integration", sceneEpoch: 1, battleSeed: "seed", tickDurationMs: 200,
     moveTicks: 2, protectionTicks: 0, maxPathSteps: 6,
-    map: { ref: { mapId: 1 }, width: 7, height: 7, passable: Array.from({ length: 7 }, () => Array(7).fill(true)) },
+    map: { ref: { arenaId: "test" }, width: 7, height: 7, passable: Array.from({ length: 7 }, () => Array(7).fill(true)) },
     actors: [
       {
         actorId: "a", team: "ally", tile: { x: 2, y: 3 }, direction: 6, maxHp: 5,

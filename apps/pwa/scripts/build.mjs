@@ -65,6 +65,14 @@ async function buildRoot() {
       join(root, "..", "..", "examples", "PokeMan", "subsystems", "dialogue.mjs"),
       join(output, "qualification", "pokeman-dialogue-subsystem.mjs"),
     );
+    await bundleSubsystem(
+      join(root, "..", "..", "examples", "PokeMan", "subsystems", "battle.mjs"),
+      join(output, "qualification", "pokeman-battle-subsystem.mjs"),
+    );
+    await bundleSubsystem(
+      join(root, "..", "..", "examples", "PokeMan", "subsystems", "message.mjs"),
+      join(output, "qualification", "pokeman-message-subsystem.mjs"),
+    );
   }
   await writeFile(join(output, "index.html"), indexHtml("/window.js"), "utf8");
   await writeFile(join(output, "generation.json"), `${JSON.stringify({ version: 1, generation })}\n`, "utf8");
@@ -80,6 +88,8 @@ async function buildStaging() {
     base: join(output, "staging", "pokeman-base-subsystem.mjs"),
     map: join(output, "staging", "pokeman-map-subsystem.mjs"),
     dialogue: join(output, "staging", "pokeman-dialogue-subsystem.mjs"),
+    battle: join(output, "staging", "pokeman-battle-subsystem.mjs"),
+    message: join(output, "staging", "pokeman-message-subsystem.mjs"),
   });
   const stagingEntries = Object.freeze([
     { input: join(sourceRoot, "pokeman-window-entry.ts"), output: "window.js" },
