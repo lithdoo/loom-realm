@@ -147,6 +147,7 @@ function runDesktopTests() {
 function buildPokeManHostraStack() {
   npm(
     "run", "build",
+    "-w", "@loomrealm-game/battle",
     "-w", "@loomrealm-game/schema-form",
     "-w", "@loomrealm-game/rpg-dialogue",
   );
