@@ -30,8 +30,23 @@ export function validateDialogueContent(value) {
   const choices = value.choices ?? [];
   if (!Array.isArray(choices) || choices.some((choice) => !exactObject(choice, ["text", "target"])
       || typeof choice.text !== "string" || choice.text.length === 0 || typeof choice.target !== "string" || choice.target.length === 0)) throw new TypeError("Invalid Dialogue choices");
+  if (value.choices !== undefined && choices.length === 0) throw new TypeError("Dialogue choices must not be empty");
   if (choices.length > 0 && value.mutation !== undefined) throw new TypeError("Dialogue choices and mutation are mutually exclusive");
   return Object.freeze({ ...value, choices: Object.freeze(choices.map((choice) => Object.freeze({ ...choice }))) });
+}
+
+async function resolveCharacterName(content, characterId, cache, signal) {
+  let name = cache.get(characterId);
+  if (name === undefined) {
+    const character = (await content.record("struct.Character", characterId, { signal }))?.value;
+    if (character === null || typeof character !== "object" || Array.isArray(character)
+        || typeof character.name !== "string" || character.name.length === 0) {
+      throw new TypeError(`Dialogue references invalid Character ${characterId}`);
+    }
+    name = character.name;
+    cache.set(characterId, name);
+  }
+  return name;
 }
 
 export function createPokeManDialogueGraphSubsystem(scope, dependencies = {}) {
@@ -57,6 +72,7 @@ export function createPokeManDialogueGraphSubsystem(scope, dependencies = {}) {
         });
         let currentId = frame.params.dialogueKey;
         const records = new Map();
+        const characterNames = new Map();
         while (true) {
           let record = records.get(currentId);
           if (record === undefined) {
@@ -66,9 +82,12 @@ export function createPokeManDialogueGraphSubsystem(scope, dependencies = {}) {
           let selectedTarget;
           for (const [index, line] of record.lines.entries()) {
             const final = index === record.lines.length - 1;
+            const speakerName = line.speaker === undefined
+              ? record.speakerName ?? ""
+              : await resolveCharacterName(scope.content, line.speaker, characterNames, frame.signal);
             const result = await dialogue.openConversation({
               conversation: {
-                speakerName: line.speaker ?? record.speakerName ?? "",
+                speakerName,
                 text: line.text,
                 choices: final ? record.choices.map((choice, choiceIndex) => ({ choiceId: String(choiceIndex), text: choice.text, data: {} })) : [],
                 data: {},
@@ -82,7 +101,7 @@ export function createPokeManDialogueGraphSubsystem(scope, dependencies = {}) {
               if (!Number.isSafeInteger(choiceIndex) || choiceIndex < 0 || choiceIndex >= record.choices.length) throw new TypeError("Dialogue selected an invalid choice");
               selectedTarget = record.choices[choiceIndex].target;
             }
-            dialogue.appendHistory({ entryId: `${currentId}:${index}`, speakerName: line.speaker ?? record.speakerName ?? "", text: line.text });
+            dialogue.appendHistory({ entryId: `${currentId}:${index}`, speakerName, text: line.text });
           }
           if (selectedTarget !== undefined) { currentId = selectedTarget; continue; }
           if (record.mutation !== undefined) {
