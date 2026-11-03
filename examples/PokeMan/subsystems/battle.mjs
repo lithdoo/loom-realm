@@ -110,7 +110,70 @@ export function createPokeManBattleSubsystem(scope, dependencies = {}) {
       let pendingHostPause = false;
       let pendingPause;
       let promptInFlight = false;
+      let pendingHostPauseTimer;
+      let frameActive = true;
+      const stopPendingHostPauseMonitor = () => {
+        if (pendingHostPauseTimer === undefined) return;
+        clearTimeout(pendingHostPauseTimer);
+        pendingHostPauseTimer = undefined;
+      };
+      const showPendingPrompt = async () => {
+        if (runtime === undefined || !hostForeground || promptInFlight || pendingPause === undefined) return;
+        promptInFlight = true;
+        const reason = pendingPause;
+        pendingPause = undefined;
+        const prompt = PAUSE_PROMPTS[reason];
+        try {
+          const outcome = await frame.call("message", prompt);
+          if (outcome.type === "cancelled") { runtime.cancel(); return; }
+          if (outcome.type === "failed") { childFailure = outcome.error.code; runtime.cancel(); return; }
+          if (!validMessageResult(outcome.value, prompt)) { childFailure = "POKEMAN_MESSAGE_RESULT_INVALID"; runtime.cancel(); return; }
+          if (outcome.value.actionId === "exit") runtime.cancel();
+          else runtime.resume();
+        } catch {
+          childFailure = "POKEMAN_MESSAGE_CALL_FAILED";
+          runtime.cancel();
+        } finally {
+          promptInFlight = false;
+          if (pendingPause !== undefined) void showPendingPrompt();
+        }
+      };
+      const applyPendingHostPause = () => {
+        if (!frameActive || !pendingHostPause || hostForeground || runtime === undefined) {
+          if (!pendingHostPause || hostForeground) stopPendingHostPauseMonitor();
+          return;
+        }
+        const status = runtime.getSnapshot().status;
+        if (status === "running") {
+          pendingHostPause = false;
+          stopPendingHostPauseMonitor();
+          runtime.pause("host-background");
+        } else if (status === "created" || status === "initializing") {
+          if (pendingHostPauseTimer === undefined) {
+            pendingHostPauseTimer = setTimeout(() => {
+              pendingHostPauseTimer = undefined;
+              applyPendingHostPause();
+            }, 1);
+          }
+        } else {
+          pendingHostPause = false;
+          stopPendingHostPauseMonitor();
+        }
+      };
+      const acceptLifecycle = (state) => {
+        if (state === "background") {
+          hostForeground = false;
+          pendingHostPause = true;
+          applyPendingHostPause();
+        } else {
+          hostForeground = true;
+          pendingHostPause = false;
+          stopPendingHostPauseMonitor();
+          void showPendingPrompt();
+        }
+      };
       try {
+        lifecycle = await subscribeLifecycle(scope, acceptLifecycle);
         const authority = await readContracts(scope.state, { signal: frame.signal });
         const definition = await resolveBattle(scope.content, authority, { signal: frame.signal });
         const config = await readConfiguration(scope.state, frame.signal);
@@ -120,68 +183,13 @@ export function createPokeManBattleSubsystem(scope, dependencies = {}) {
           clock: dependencies.clock ?? clockFactory(), signal: frame.signal, decision, presentation,
         }).build(definition);
 
-        const showPendingPrompt = async () => {
-          if (!hostForeground || promptInFlight || pendingPause === undefined) return;
-          promptInFlight = true;
-          const reason = pendingPause;
-          pendingPause = undefined;
-          const prompt = PAUSE_PROMPTS[reason];
-          try {
-            const outcome = await frame.call("message", prompt);
-            if (outcome.type === "cancelled") { runtime.cancel(); return; }
-            if (outcome.type === "failed") { childFailure = outcome.error.code; runtime.cancel(); return; }
-            if (!validMessageResult(outcome.value, prompt)) { childFailure = "POKEMAN_MESSAGE_RESULT_INVALID"; runtime.cancel(); return; }
-            if (outcome.value.actionId === "exit") runtime.cancel();
-            else runtime.resume();
-          } catch {
-            childFailure = "POKEMAN_MESSAGE_CALL_FAILED";
-            runtime.cancel();
-          } finally {
-            promptInFlight = false;
-            if (pendingPause !== undefined) void showPendingPrompt();
-          }
-        };
-
         removePauseListener = runtime.onPause(({ reason }) => {
           pendingPause ??= reason;
           void showPendingPrompt();
         });
-        const applyPendingHostPause = () => {
-          if (!pendingHostPause || hostForeground) return;
-          const status = runtime.getSnapshot().status;
-          if (status === "running") {
-            pendingHostPause = false;
-            runtime.pause("host-background");
-          } else if (status === "paused" || status === "settled" || status === "cancelled" || status === "failed") {
-            pendingHostPause = false;
-          }
-        };
-        lifecycle = await subscribeLifecycle(scope, (state) => {
-          if (state === "background") {
-            hostForeground = false;
-            pendingHostPause = true;
-            applyPendingHostPause();
-          } else {
-            hostForeground = true;
-            pendingHostPause = false;
-            void showPendingPrompt();
-          }
-        });
-
-        let monitorStopped = false;
-        let monitorTimer;
-        const monitorRunning = () => {
-          if (monitorStopped) return;
-          applyPendingHostPause();
-          const status = runtime.getSnapshot().status;
-          if (status === "created" || status === "initializing") monitorTimer = setTimeout(monitorRunning, 0);
-        };
         const run = runtime.run();
-        monitorRunning();
-        const result = await run.finally(() => {
-          monitorStopped = true;
-          if (monitorTimer !== undefined) clearTimeout(monitorTimer);
-        });
+        applyPendingHostPause();
+        const result = await run;
         if (result.type === "cancelled") {
           return childFailure === undefined ? cancelled() : failed({ code: childFailure });
         }
@@ -196,6 +204,8 @@ export function createPokeManBattleSubsystem(scope, dependencies = {}) {
         if (frame.signal.aborted) return cancelled();
         return failed({ code: "POKEMAN_BATTLE_INTEGRATION_FAILED", message: cause instanceof Error ? cause.message.slice(0, 512) : undefined });
       } finally {
+        frameActive = false;
+        stopPendingHostPauseMonitor();
         removePauseListener?.();
         lifecycle?.close();
         runtime?.close();

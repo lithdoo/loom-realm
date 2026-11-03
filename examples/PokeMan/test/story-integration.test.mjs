@@ -80,6 +80,11 @@ test("StoryIndex drift and broken Character/Event references fail qualification"
   const prologue = await realValue("struct.Event", "prologue");
   prologue.states["lab-tutorial"].maps["4"].npcs.professor.character = "ghost";
   await assert.rejects(validateStoryContent(contentWith(new Map([["struct.Event/prologue", prologue]]))), /Invalid Character reference/u);
+
+  await assert.rejects(validateStoryContent(contentWith(), { sourceIds: {
+    characters: ["center-servant", "ghost", "player", "professor", "rival", "route-trainee"],
+    events: ["first-route", "prologue"],
+  } }), /complete Character source keys/u);
 });
 
 test("two active Events producing the same Map npcId fail deterministically instead of last-wins", async () => {
@@ -110,6 +115,12 @@ test("occupied cells and incompatible Character takeover are deterministic failu
   const takeover = { states: { active: { maps: { "4": { npcs: { "rival-casual": { character: "rival", placement: { x: 1, y: 1, direction: 2 } } } } } } } };
   await assert.rejects(resolveStoryScene(
     contentWith(new Map([["struct.StoryIndex/current", index], ["struct.Event/collision", takeover]])),
+    stateFor([{ eventId: "prologue", stateId: "lab-tutorial" }, { eventId: "collision", stateId: "active" }]), 4,
+  ), /Incompatible Character takeover for rival/u);
+
+  const absence = { states: { active: { maps: { "4": { npcs: { "rival-casual": { character: "rival", absent: true } } } } } } };
+  await assert.rejects(resolveStoryScene(
+    contentWith(new Map([["struct.StoryIndex/current", index], ["struct.Event/collision", absence]])),
     stateFor([{ eventId: "prologue", stateId: "lab-tutorial" }, { eventId: "collision", stateId: "active" }]), 4,
   ), /Incompatible Character takeover for rival/u);
 });

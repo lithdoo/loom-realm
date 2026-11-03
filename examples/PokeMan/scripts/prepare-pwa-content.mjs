@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listFsdbEntries, openFsdb, openFsdbObject } from "@loomrealm/fsdb";
+import { validateEventStateMutationContent } from "../subsystems/business-state.mjs";
+import { validateStoryContent } from "../subsystems/story.mjs";
 
 const exampleRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const defaultFsdbRoot = join(exampleRoot, "[FSDB]PokeMan");
@@ -51,6 +53,35 @@ export function assertUniquePwaContent(entries) {
   }
 }
 
+/** Build-time full-source validation; Runtime intentionally has no namespace enumeration authority. */
+export async function validatePokeManContentGraph(entries) {
+  if (!Array.isArray(entries)) throw new TypeError("Invalid PokeMan Content entries");
+  assertUniquePwaContent(entries);
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const records = new Map();
+  for (const entry of entries) {
+    if (entry.kind !== "record") continue;
+    if (typeof entry.namespace !== "string" || typeof entry.key !== "string" || !(entry.bytes instanceof Uint8Array)) throw new TypeError("Invalid PokeMan record entry");
+    let value;
+    try { value = JSON.parse(decoder.decode(entry.bytes)); }
+    catch (cause) { throw new TypeError(`Invalid JSON record ${entry.namespace}/${entry.key}`, { cause }); }
+    records.set(`${entry.namespace}\0${entry.key}`, value);
+  }
+  const content = Object.freeze({
+    async record(namespace, key) {
+      const value = records.get(`${namespace}\0${key}`);
+      return value === undefined ? null : Object.freeze({ value: structuredClone(value) });
+    },
+  });
+  const sourceIds = Object.freeze({
+    characters: Object.freeze(entries.filter((entry) => entry.kind === "record" && entry.namespace === "struct.Character").map((entry) => entry.key).sort(codePointCompare)),
+    events: Object.freeze(entries.filter((entry) => entry.kind === "record" && entry.namespace === "struct.Event").map((entry) => entry.key).sort(codePointCompare)),
+  });
+  await validateStoryContent(content, { sourceIds });
+  const mutations = entries.filter((entry) => entry.kind === "record" && entry.namespace === "struct.EventStateMutation").sort((left, right) => codePointCompare(left.key, right.key));
+  for (const mutation of mutations) await validateEventStateMutationContent(content, records.get(`${mutation.namespace}\0${mutation.key}`));
+}
+
 async function readFsdbEntry(db, entry) {
   const lease = await openFsdbObject(db, entry.identity, new AbortController().signal);
   if (lease === null) throw new Error(`Indexed FSDB entry disappeared: ${fsdbIdentityKey(entry.identity).replaceAll("\0", "/")}`);
@@ -76,7 +107,7 @@ export async function preparePokeManPwaContent(options = {}) {
     })));
     content.sort((left, right) => codePointCompare(left.kind, right.kind)
       || codePointCompare(left.namespace, right.namespace) || codePointCompare(left.key, right.key));
-    assertUniquePwaContent(content);
+    await validatePokeManContentGraph(content);
     return Object.freeze(content);
   } finally { await db.close(); }
 }

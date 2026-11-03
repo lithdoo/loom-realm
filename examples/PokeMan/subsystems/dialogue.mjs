@@ -83,7 +83,7 @@ export function createPokeManDialogueGraphSubsystem(scope, dependencies = {}) {
           if (selectedTarget !== undefined) { currentId = selectedTarget; continue; }
           if (record.mutation !== undefined) {
             const mutation = (await scope.content.record("struct.EventStateMutation", record.mutation, { signal: frame.signal }))?.value;
-            await applyMutation(scope.state, mutation, { signal: frame.signal });
+            await applyMutation(scope.state, mutation, { signal: frame.signal, content: scope.content });
           }
           return completed(currentId);
         }

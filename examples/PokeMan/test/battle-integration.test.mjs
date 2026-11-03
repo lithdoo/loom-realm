@@ -17,6 +17,10 @@ import { resolveStoryScene } from "../subsystems/story.mjs";
 
 const id = (key) => `${key.namespace}/${key.key}`;
 const clone = (value) => structuredClone(value);
+const eventContent = (events = {
+  prologue: { states: { "lab-tutorial": {}, "rival-ready": {}, "after-battle": {} } },
+  "first-route": { states: { active: {} } },
+}) => ({ async record(namespace, key) { return namespace === "struct.Event" && events[key] !== undefined ? { value: clone(events[key]) } : null; } });
 
 class FakeState {
   constructor(values = {}) {
@@ -29,6 +33,17 @@ class FakeState {
       const record = this.values.get(id(key)) ?? { value: null, version: 0 };
       return { key, value: clone(record.value), version: record.version };
     }) };
+  }
+  async list({ namespace } = {}) {
+    return {
+      revision: this.commits.length,
+      records: [...this.values.entries()]
+        .filter(([identity]) => namespace === undefined || identity.startsWith(`${namespace}/`))
+        .map(([identity, record]) => {
+          const separator = identity.indexOf("/");
+          return { key: { namespace: identity.slice(0, separator), key: identity.slice(separator + 1) }, version: record.version };
+        }),
+    };
   }
   async commit(transaction) {
     this.commits.push(clone(transaction));
@@ -60,6 +75,18 @@ test("baseline bootstrap rejects a single missing record and structural equality
   assert.equal(partial.commits.length, 0);
   assert.equal(equalJsonValue({ a: 1, nested: { x: true, y: null } }, { nested: { y: null, x: true }, a: 1 }), true);
   assert.equal(equalJsonValue([1, 2], [2, 1]), false);
+});
+
+test("baseline bootstrap never overwrites materialized null records", async () => {
+  const bothNull = new FakeState({ [id(PLAYER_WORLD_KEY)]: null, [id(EVENT_STATE_LIST_KEY)]: null });
+  bothNull.values.get(id(PLAYER_WORLD_KEY)).version = 2;
+  bothNull.values.get(id(EVENT_STATE_LIST_KEY)).version = 3;
+  await assert.rejects(() => ensurePokeManBaseline(bothNull), { code: "POKEMAN_STATE_INVALID" });
+  assert.equal(bothNull.commits.length, 0);
+
+  const oneInitialNull = new FakeState({ [id(PLAYER_WORLD_KEY)]: null });
+  await assert.rejects(() => ensurePokeManBaseline(oneInitialNull), { code: "POKEMAN_STATE_INVALID" });
+  assert.equal(oneInitialNull.commits.length, 0);
 });
 
 test("Base validates the durable checkpoint but launches Map from frame params", async () => {
@@ -114,6 +141,18 @@ test("bilateral exchange rejects partial or conflicting CarriedCards instead of 
   assert.equal(state.commits.length, 0);
 });
 
+test("bilateral exchange rejects materialized null Relationship and CarriedCards records", async () => {
+  const relationship = new FakeState({ [id(PLAYER_TO_RIVAL_KEY)]: null });
+  relationship.values.get(id(PLAYER_TO_RIVAL_KEY)).version = 2;
+  await assert.rejects(() => exchangeRivalCards(relationship), { code: "POKEMAN_RELATIONSHIP_INVALID" });
+  assert.equal(relationship.commits.length, 0);
+
+  const cards = new FakeState({ [id(PLAYER_CARDS_KEY)]: null });
+  cards.values.get(id(PLAYER_CARDS_KEY)).version = 2;
+  await assert.rejects(() => exchangeRivalCards(cards), { code: "POKEMAN_EXCHANGE_CONFLICT" });
+  assert.equal(cards.commits.length, 0);
+});
+
 test("settlement uses original authority versions, applies the 1 HP floor, and reconciles uncertain evidence", async () => {
   const state = new FakeState();
   await exchangeRivalCards(state);
@@ -136,10 +175,28 @@ test("simultaneous defeat persists both Contracts at the 1 HP floor in one trans
 
 test("EventStateMutation validates from and atomically replaces EventStateList", async () => {
   const state = new FakeState({ [id(EVENT_STATE_LIST_KEY)]: BASELINE_EVENT_STATES });
-  const result = await applyEventStateMutation(state, { from: { prologue: "lab-tutorial" }, to: { prologue: "rival-ready" } });
+  const content = eventContent();
+  const result = await applyEventStateMutation(state, { from: { prologue: "lab-tutorial" }, to: { prologue: "rival-ready" } }, { content });
   assert.deepEqual(result.eventStates, [{ eventId: "prologue", stateId: "rival-ready" }]);
   assert.equal(state.commits.at(-1).writes.length, 1);
-  await assert.rejects(() => applyEventStateMutation(state, { from: { prologue: "lab-tutorial" }, to: { prologue: "after-battle" } }), { code: "POKEMAN_EVENT_MUTATION_MISMATCH" });
+  await assert.rejects(() => applyEventStateMutation(state, { from: { prologue: "lab-tutorial" }, to: { prologue: "after-battle" } }, { content }), { code: "POKEMAN_EVENT_MUTATION_MISMATCH" });
+});
+
+test("EventStateMutation validates Event and state Content before any Shared State commit", async () => {
+  const state = new FakeState({ [id(EVENT_STATE_LIST_KEY)]: [{ eventId: "prologue", stateId: "rival-ready" }] });
+  await assert.rejects(
+    () => applyEventStateMutation(state, { from: { prologue: "rival-ready" }, to: { prologue: "after-battle-misspelled" } }, { content: eventContent() }),
+    { code: "POKEMAN_EVENT_MUTATION_CONTENT_INVALID" },
+  );
+  await assert.rejects(
+    () => applyEventStateMutation(state, { from: { missing: null }, to: { missing: "active" } }, { content: eventContent() }),
+    { code: "POKEMAN_EVENT_MUTATION_CONTENT_INVALID" },
+  );
+  await assert.rejects(
+    () => applyEventStateMutation(state, { from: { prologue: "rival-ready" }, to: { "first-route": "active" } }, { content: eventContent() }),
+    { code: "POKEMAN_EVENT_MUTATION_INVALID" },
+  );
+  assert.equal(state.commits.length, 0);
 });
 
 test("Story Resolver makes exactly the Event-state owner interactable on Map 4", async () => {
@@ -326,6 +383,47 @@ test("background during Battle initialization is remembered and pauses only afte
   status = "running";
   while (status !== "paused") await new Promise((resolve) => setTimeout(resolve, 1));
   assert.equal(pauseCalls, 1);
+  assert.equal(prompt, undefined);
+  lifecycleListener("foreground");
+  while (prompt === undefined) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(prompt.value.messageKey, "battle-host-background-paused");
+  resolveMessage(completed({ messageKey: prompt.value.messageKey, actionId: "continue" }));
+  assert.equal((await pending).type, "cancelled");
+});
+
+test("Battle subscribes before asynchronous business and Content initialization", async () => {
+  let lifecycleListener; let pauseListener; let releaseContracts; let resolveRun; let resolveMessage;
+  let contractsStarted = false; let status = "created"; let runCalls = 0;
+  const contractsReady = new Promise((resolve) => { releaseContracts = resolve; });
+  const runResult = new Promise((resolve) => { resolveRun = resolve; });
+  const messageResult = new Promise((resolve) => { resolveMessage = resolve; });
+  const runtime = {
+    onPause(listener) { pauseListener = listener; return () => {}; },
+    run() { runCalls += 1; status = "initializing"; return runResult; },
+    getSnapshot() { return { battleId: "battle-early-background", status, ...(status === "paused" ? { pauseReason: "host-background" } : {}), actors: [] }; },
+    pause(reason) { assert.equal(reason, "host-background"); assert.equal(status, "running"); status = "paused"; pauseListener({ reason }); },
+    resume() { status = "running"; resolveRun({ type: "cancelled" }); },
+    cancel() { resolveRun({ type: "cancelled" }); }, close() {},
+  };
+  let prompt;
+  const subsystem = createPokeManBattleSubsystem({ state: {}, content: {}, events: {} }, {
+    async readBattleContracts() { contractsStarted = true; await contractsReady; return {}; },
+    resolveLabTutorialBattle: async () => ({}), readDeepSeekConfiguration: async () => ({ apiKey: "x" }),
+    decision: {}, presentation: {}, runtime, settleBattleContracts: async () => {},
+    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; return { close() {} }; },
+  });
+  const pending = subsystem.frame({
+    params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },
+    signal: new AbortController().signal,
+    async call(key, value) { prompt = { key, value }; return messageResult; },
+  });
+  while (lifecycleListener === undefined || !contractsStarted) await new Promise((resolve) => setImmediate(resolve));
+  lifecycleListener("background");
+  assert.equal(runCalls, 0, "background is captured before Runtime construction");
+  releaseContracts();
+  while (status !== "initializing") await new Promise((resolve) => setImmediate(resolve));
+  status = "running";
+  while (status !== "paused") await new Promise((resolve) => setTimeout(resolve, 1));
   assert.equal(prompt, undefined);
   lifecycleListener("foreground");
   while (prompt === undefined) await new Promise((resolve) => setImmediate(resolve));

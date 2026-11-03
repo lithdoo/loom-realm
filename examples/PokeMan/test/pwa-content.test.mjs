@@ -8,6 +8,7 @@ import {
   mapFsdbEntryToPwaIdentity,
   preparePokeManPwaContent,
   requireFsdbEntry,
+  validatePokeManContentGraph,
 } from "../scripts/prepare-pwa-content.mjs";
 
 const root = new URL("../", import.meta.url);
@@ -106,6 +107,16 @@ test("real PokeMan FSDB produces a deterministic full-content package", async ()
     first.filter((entry) => entry.namespace === "struct.MapTransfer").length,
   );
   assert.ok(first.reduce((total, entry) => total + entry.bytes.byteLength, 0) < 256 * 1024 * 1024);
+
+  const encode = (value) => new TextEncoder().encode(JSON.stringify(value));
+  await assert.rejects(validatePokeManContentGraph([...first, {
+    kind: "record", namespace: "struct.Character", key: "unindexed-character", mime: "application/json",
+    bytes: encode({ name: "Unindexed", battleActor: { namespace: "struct.BattleActor", key: "player" } }),
+  }]), /complete Character source keys/u);
+  await assert.rejects(validatePokeManContentGraph([...first, {
+    kind: "record", namespace: "struct.Event", key: "unindexed-event", mime: "application/json",
+    bytes: encode({ states: { active: { maps: {} } } }),
+  }]), /complete Event source keys/u);
 });
 
 test("content preparation fails closed on missing references and duplicate PWA identities", () => {

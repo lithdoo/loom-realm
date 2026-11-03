@@ -51,6 +51,7 @@ async function validateCharacter(content, characterId, value, signal) {
       || value.battleActor.namespace !== "struct.BattleActor"
       || typeof value.battleActor.key !== "string" || value.battleActor.key.length === 0
       || (value.defaultScenes !== undefined && !object(value.defaultScenes))) throw new TypeError(`Invalid Character ${characterId}`);
+  await requiredRecord(content, "struct.BattleActor", value.battleActor.key, signal);
   const defaultMaps = [];
   const defaults = [];
   for (const [rawMapId, scene] of Object.entries(value.defaultScenes ?? {})) {
@@ -112,11 +113,16 @@ function assertArraySame(actual, expected, label) {
   if (actual.length !== expected.length || actual.some((entry, index) => entry !== expected[index])) throw new TypeError(`StoryIndex drift at ${label}`);
 }
 
-export async function validateStoryContent(content, { signal } = {}) {
+export async function validateStoryContent(content, { signal, sourceIds } = {}) {
   const index = await requiredRecord(content, "struct.StoryIndex", "current", signal);
   if (!exact(index, ["byMap", "byEvent", "byCharacter"]) || !object(index.byMap) || !object(index.byEvent) || !object(index.byCharacter)) throw new TypeError("Invalid StoryIndex/current");
   const characterIds = Object.keys(index.byCharacter).sort(ordinal);
   const eventIds = Object.keys(index.byEvent).sort(ordinal);
+  if (sourceIds !== undefined) {
+    if (!exact(sourceIds, ["characters", "events"])) throw new TypeError("Invalid complete Story source identity set");
+    assertArraySame(characterIds, sortedUniqueStrings(sourceIds.characters, "complete Character sources"), "complete Character source keys");
+    assertArraySame(eventIds, sortedUniqueStrings(sourceIds.events, "complete Event sources"), "complete Event source keys");
+  }
   const characters = new Map();
   for (const characterId of characterIds) characters.set(characterId, await validateCharacter(content, characterId, await requiredRecord(content, "struct.Character", characterId, signal), signal));
   const events = new Map();
@@ -181,8 +187,9 @@ export async function resolveStoryScene(content, state, mapId, { signal, staticP
   const [story, activeStates] = await Promise.all([validateStoryContent(content, { signal }), readEventStates(state, signal)]);
   const activeDirectives = [];
   const takenOver = new Set();
-  const characterPlacements = new Map();
-  for (const { eventId, stateId } of activeStates) {
+  const characterIntents = new Map();
+  const orderedStates = [...activeStates].sort((left, right) => ordinal(left.eventId, right.eventId) || ordinal(left.stateId, right.stateId));
+  for (const { eventId, stateId } of orderedStates) {
     const event = story.events.get(eventId);
     if (event === undefined) throw new TypeError(`EventStateList references unknown Event ${eventId}`);
     const directives = event.states.get(stateId);
@@ -191,13 +198,19 @@ export async function resolveStoryScene(content, state, mapId, { signal, staticP
       const characterId = source.directive.character;
       if (characterId !== undefined) {
         takenOver.add(characterId);
-        if (source.directive.absent !== true) {
-          const previous = characterPlacements.get(characterId);
-          if (previous !== undefined) throw new TypeError(`Incompatible Character takeover for ${characterId}: ${previous.eventId}/${previous.stateId}/${previous.npcId} and ${source.eventId}/${source.stateId}/${source.npcId}`);
-          characterPlacements.set(characterId, source);
-        }
+        const intents = characterIntents.get(characterId) ?? [];
+        intents.push(source);
+        characterIntents.set(characterId, intents);
       }
       if (source.mapId === mapId && source.directive.absent !== true) activeDirectives.push(source);
+    }
+  }
+  for (const [characterId, intents] of characterIntents) {
+    const absent = intents.filter((source) => source.directive.absent === true);
+    const placements = intents.filter((source) => source.directive.absent !== true);
+    if ((absent.length > 0 && placements.length > 0) || placements.length > 1) {
+      const sources = intents.map((source) => `${source.eventId}/${source.stateId}/${source.npcId}`).join(", ");
+      throw new TypeError(`Incompatible Character takeover for ${characterId}: ${sources}`);
     }
   }
 

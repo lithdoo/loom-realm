@@ -114,17 +114,36 @@ async function readRecords(state, keys, signal, phase) {
   } catch (cause) {
     fail("POKEMAN_STATE_READ_FAILED", `Shared State read failed during ${phase}`, cause);
   }
-  if (!object(snapshot) || !Array.isArray(snapshot.records) || snapshot.records.length !== keys.length) {
+  if (!object(snapshot) || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0
+      || !Array.isArray(snapshot.records) || snapshot.records.length !== keys.length) {
     fail("POKEMAN_STATE_READ_INVALID", `Shared State returned an invalid snapshot during ${phase}`);
   }
-  return keys.map((key) => {
+  const records = keys.map((key) => {
     const record = snapshot.records.find((candidate) => object(candidate.key)
       && candidate.key.namespace === key.namespace && candidate.key.key === key.key);
     if (!object(record) || !Number.isSafeInteger(record.version) || record.version < 0 || !Object.hasOwn(record, "value")) {
       fail("POKEMAN_STATE_READ_INVALID", `Shared State returned an invalid record during ${phase}`);
     }
-    return Object.freeze({ key, version: record.version, value: structuredClone(record.value) });
+    return { key, version: record.version, value: structuredClone(record.value), materialized: record.version > 0 || record.value !== null };
   });
+  const ambiguousNamespaces = [...new Set(records.filter((record) => !record.materialized).map((record) => record.key.namespace))];
+  for (const namespace of ambiguousNamespaces) {
+    let index;
+    try {
+      index = await state.list({ namespace, ...(signal === undefined ? {} : { signal }) });
+    } catch (cause) {
+      fail("POKEMAN_STATE_READ_FAILED", `Shared State list failed during ${phase}`, cause);
+    }
+    if (!object(index) || !Number.isSafeInteger(index.revision) || index.revision < snapshot.revision || !Array.isArray(index.records)
+        || index.records.some((record) => !object(record) || !object(record.key)
+          || record.key.namespace !== namespace || typeof record.key.key !== "string"
+          || !Number.isSafeInteger(record.version) || record.version < 0)) {
+      fail("POKEMAN_STATE_READ_INVALID", `Shared State returned an inconsistent materialization index during ${phase}`);
+    }
+    const materialized = new Set(index.records.map((record) => record.key.key));
+    for (const record of records) if (record.key.namespace === namespace && materialized.has(record.key.key)) record.materialized = true;
+  }
+  return records.map((record) => Object.freeze(record));
 }
 
 async function commitOrReconcile(state, records, writes, expected, phase) {
@@ -150,7 +169,7 @@ async function commitOrReconcile(state, records, writes, expected, phase) {
 export async function ensurePokeManBaseline(state, { signal } = {}) {
   const keys = [PLAYER_WORLD_KEY, EVENT_STATE_LIST_KEY];
   const records = await readRecords(state, keys, signal, "baseline read");
-  const present = records.map((record) => record.value !== null);
+  const present = records.map((record) => record.materialized);
   if (present.every(Boolean)) {
     if (!isPlayerWorld(records[0].value) || !isEventStateList(records[1].value)) fail("POKEMAN_STATE_INVALID", "Existing PokeMan baseline is malformed");
     return Object.freeze({ status: "existing", playerWorld: records[0].value, eventStates: records[1].value });
@@ -163,12 +182,43 @@ export async function ensurePokeManBaseline(state, { signal } = {}) {
   return Object.freeze({ status: "created", playerWorld: BASELINE_PLAYER_WORLD, eventStates: BASELINE_EVENT_STATES });
 }
 
-export async function applyEventStateMutation(state, mutation, { signal } = {}) {
-  if (!exact(mutation, ["from", "to"]) || !object(mutation.from) || !object(mutation.to)
-      || Reflect.ownKeys(mutation.from).some((key) => typeof mutation.from[key] !== "string" && mutation.from[key] !== null)
-      || Reflect.ownKeys(mutation.to).some((key) => typeof mutation.to[key] !== "string" && mutation.to[key] !== null)) {
+export function validateEventStateMutation(mutation) {
+  const validSide = (side) => object(side) && Reflect.ownKeys(side).every((key) => typeof key === "string" && key.length > 0
+    && ((typeof side[key] === "string" && side[key].length > 0) || side[key] === null));
+  if (!exact(mutation, ["from", "to"]) || !validSide(mutation.from) || !validSide(mutation.to)
+      || Reflect.ownKeys(mutation.to).length === 0) {
     fail("POKEMAN_EVENT_MUTATION_INVALID", "EventStateMutation is malformed");
   }
+  const fromEvents = Object.keys(mutation.from).sort(ordinalStringCompare);
+  const toEvents = Object.keys(mutation.to).sort(ordinalStringCompare);
+  if (fromEvents.length !== toEvents.length || fromEvents.some((eventId, index) => eventId !== toEvents[index])) {
+    fail("POKEMAN_EVENT_MUTATION_INVALID", "EventStateMutation must precondition every changed Event");
+  }
+  return mutation;
+}
+
+export async function validateEventStateMutationContent(content, mutation, { signal } = {}) {
+  validateEventStateMutation(mutation);
+  if (!object(content) || typeof content.record !== "function") fail("POKEMAN_EVENT_MUTATION_CONTENT_INVALID", "EventStateMutation Content authority is unavailable");
+  const eventIds = [...new Set([...Object.keys(mutation.from), ...Object.keys(mutation.to)])].sort(ordinalStringCompare);
+  for (const eventId of eventIds) {
+    let event;
+    try { event = (await content.record("struct.Event", eventId, { signal }))?.value; }
+    catch (cause) { fail("POKEMAN_EVENT_MUTATION_CONTENT_INVALID", `EventStateMutation could not resolve Event ${eventId}`, cause); }
+    if (!exact(event, ["states"]) || !object(event.states) || Object.keys(event.states).length === 0) {
+      fail("POKEMAN_EVENT_MUTATION_CONTENT_INVALID", `EventStateMutation references invalid Event ${eventId}`);
+    }
+    for (const stateId of [mutation.from[eventId], mutation.to[eventId]]) {
+      if (stateId !== undefined && stateId !== null && !Object.hasOwn(event.states, stateId)) {
+        fail("POKEMAN_EVENT_MUTATION_CONTENT_INVALID", `EventStateMutation references unknown state ${eventId}/${stateId}`);
+      }
+    }
+  }
+  return mutation;
+}
+
+export async function applyEventStateMutation(state, mutation, { signal, content } = {}) {
+  await validateEventStateMutationContent(content, mutation, { signal });
   const [record] = await readRecords(state, [EVENT_STATE_LIST_KEY], signal, "event mutation read");
   if (!isEventStateList(record.value)) fail("POKEMAN_EVENT_STATE_INVALID", "EventStateList is malformed");
   const current = new Map(record.value.map((entry) => [entry.eventId, entry.stateId]));
@@ -185,30 +235,30 @@ export async function applyEventStateMutation(state, mutation, { signal } = {}) 
   return Object.freeze({ status: evidence.status, eventStates: expected });
 }
 
-function relationshipWithContract(value, contract, label) {
-  if (value === null) return { ...RELATIONSHIP_DEFAULT, contract: structuredClone(contract) };
-  if (!isRelationship(value)) fail("POKEMAN_RELATIONSHIP_INVALID", `${label} Relationship is malformed`);
-  if (Object.hasOwn(value, "contract")) {
-    if (!equalJsonValue(value.contract, contract)) fail("POKEMAN_EXCHANGE_CONFLICT", `${label} Contract conflicts with the exchange`);
-    return structuredClone(value);
+function relationshipWithContract(record, contract, label) {
+  if (!record.materialized) return { ...RELATIONSHIP_DEFAULT, contract: structuredClone(contract) };
+  if (!isRelationship(record.value)) fail("POKEMAN_RELATIONSHIP_INVALID", `${label} Relationship is malformed`);
+  if (Object.hasOwn(record.value, "contract")) {
+    if (!equalJsonValue(record.value.contract, contract)) fail("POKEMAN_EXCHANGE_CONFLICT", `${label} Contract conflicts with the exchange`);
+    return structuredClone(record.value);
   }
-  return { affinity: value.affinity, hostile: value.hostile, relationshipText: value.relationshipText, contract: structuredClone(contract) };
+  return { affinity: record.value.affinity, hostile: record.value.hostile, relationshipText: record.value.relationshipText, contract: structuredClone(contract) };
 }
 
-function exactCards(value, expected, label) {
-  if (value === null || equalJsonValue(value, [])) return structuredClone(expected);
-  if (!isCarriedCards(value) || !equalJsonValue(value, expected)) fail("POKEMAN_EXCHANGE_CONFLICT", `${label} CarriedCards conflicts with slot 0`);
-  return structuredClone(value);
+function exactCards(record, expected, label) {
+  if (!record.materialized || equalJsonValue(record.value, [])) return structuredClone(expected);
+  if (!isCarriedCards(record.value) || !equalJsonValue(record.value, expected)) fail("POKEMAN_EXCHANGE_CONFLICT", `${label} CarriedCards conflicts with slot 0`);
+  return structuredClone(record.value);
 }
 
 export async function exchangeRivalCards(state, { signal } = {}) {
   const keys = [PLAYER_TO_RIVAL_KEY, RIVAL_TO_PLAYER_KEY, PLAYER_CARDS_KEY, RIVAL_CARDS_KEY];
   const records = await readRecords(state, keys, signal, "bilateral exchange read");
   const expected = [
-    relationshipWithContract(records[0].value, PLAYER_TO_RIVAL_CONTRACT, "player:rival"),
-    relationshipWithContract(records[1].value, RIVAL_TO_PLAYER_CONTRACT, "rival:player"),
-    exactCards(records[2].value, PLAYER_CARDS, "player"),
-    exactCards(records[3].value, RIVAL_CARDS, "rival"),
+    relationshipWithContract(records[0], PLAYER_TO_RIVAL_CONTRACT, "player:rival"),
+    relationshipWithContract(records[1], RIVAL_TO_PLAYER_CONTRACT, "rival:player"),
+    exactCards(records[2], PLAYER_CARDS, "player"),
+    exactCards(records[3], RIVAL_CARDS, "rival"),
   ];
   if (records.every((record, index) => equalJsonValue(record.value, expected[index]))) return Object.freeze({ status: "existing" });
   const evidence = await commitOrReconcile(state, records, keys.map((key, index) => ({ key, value: expected[index] })), expected, "bilateral exchange");

@@ -568,6 +568,8 @@ empty CarriedCards
 
 Shared State 底层 contract 可以允许 record value `null`，但 PokeMan 这四类 canonical value 不使用它。
 
+物理 absence 不能只看 `value`。`read()` 对 never-materialized Record 与显式初始 `null` 都可能返回 `value=null, version=0`；Runtime 必须结合相同或更新 revision 的 `list(namespace)` membership 判定。只有 identity 不在 materialized index 中时才是业务 absence；identity 已 materialize 而 value 为 `null` 时一律是非法 PokeMan State，不得被 baseline 或按需初始化覆盖。
+
 Record 本身从未 materialize 时的 PokeMan 业务语义固定如下：
 
 ```text
@@ -591,6 +593,8 @@ pokeman.CarriedCards / A
 因此 singleton 基础 Record 使用“必须存在”的编码；按 holder / relationship 按需产生的 Record 可以让 absence 具有领域语义。
 
 `CarriedCards/A` 的 absent 与 materialized `[]` 在 Shared State 物理历史上仍然不同，但在 PokeMan 当前编队业务读取上等价，都表示“当前没有随身 Card”。不要求为每个 Character 预先 materialize 一个空 `CarriedCards` Record。
+
+相反，materialized `null` 不等价于上述任何一种合法空值：Relationship 必须使用 field absence 表达 no Contract，CarriedCards 必须使用 `[]`，两个 baseline singleton 必须使用各自 canonical value。
 
 # 完整示例
 

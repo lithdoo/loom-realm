@@ -8,7 +8,10 @@
     "first-route": { "maps": [], "characters": [] }
   },
   "byCharacter": {
+    "center-servant": { "events": [], "defaultMaps": [] },
+    "player": { "events": [], "defaultMaps": [] },
     "professor": { "events": ["prologue"], "defaultMaps": [] },
-    "rival": { "events": ["prologue"], "defaultMaps": [8] }
+    "rival": { "events": ["prologue"], "defaultMaps": [8] },
+    "route-trainee": { "events": [], "defaultMaps": [] }
   }
 }

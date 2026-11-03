@@ -473,6 +473,8 @@ struct.StoryIndex/current
 - 合并所有 source 后，同一 Map 的最终 npcId 必须唯一；冲突 deterministic reject，不做 last-wins。
 - StoryIndex 是 Builder 派生 Content，不是 Shared State authority。
 - Runtime 会加载并交叉验证 StoryIndex 与 Event / Character 源 Content；坏 Event/state/Map/Character/NPC/Dialogue 引用与 derived drift 都显式失败，不由 Map fallback 掩盖。
+- PWA Content preparation 会完整枚举 `struct.Character` 与 `struct.Event` identity，再用同一 validator 对比 StoryIndex；遗漏整个 source record 也会阻止构建。Runtime 不获得 namespace 枚举 authority。
+- Character 的所有 active directive 先合并为 `absent | placement` intent：兼容的全 absent 表示不出现；absent 与 placement 或多个 placement 同时存在时 deterministic reject。
 - 多 source 的 duplicate `npcId`、duplicate `instanceId`、occupied cell 与不兼容 Character takeover 都 deterministic reject，不存在 last-wins。
 
 Runtime NPC identity 也已冻结：当前 MVP 每张 Map 的最终 `npcId` 唯一，因此 Story Resolver 输出 placement 时固定 `instanceId = npcId`；不得自行拼接 Event id、Map id 或随机后缀。
@@ -516,6 +518,8 @@ Story Resolver 已成为生产 authority；map.mjs 中 Map 4 的 professor / riv
 - interaction 中的 Dialogue key 必须存在。
 - professor-tutorial-ready、prologue-battle-resolved、prologue-to-route 的 Mutation key 必须存在。
 - Mutation 的非空 stateId 必须属于对应 Event；null 必须按 62 解释。
+- Mutation 的 `from` 与 `to` 必须覆盖相同 Event identity；每个写入都必须有明确前置条件，禁止无条件覆盖剧情状态。
+- Dialogue Runtime 在读取 Mutation 后先验证 schema、全部 Event 引用与非空 stateId，再读取前置状态并执行 OCC；坏目标 Content 不得污染 EventStateList。
 - first-route Event 在 prologue-to-route 被引用时必须存在，并有 active state。
 - Dialogue Choice target 必须存在；choices 与 mutation 互斥。
 - lab-rival-intro 不得有指向自身的无意义 Choice，除非内容明确设计为循环复习。
@@ -524,7 +528,7 @@ Story Resolver 已成为生产 authority；map.mjs 中 Map 4 的 professor / riv
 
 ### Runtime / E2E 验收
 
-1. Base 在首次启动 Map 前原子 materialize `PlayerWorld/current={mapId:3,x:3,y:8,direction:2}` 与 `EventStateList/current=[{prologue,lab-tutorial}]`；已存在合法 baseline 时不覆盖。
+1. Base 在首次启动 Map 前原子 materialize `PlayerWorld/current={mapId:3,x:3,y:8,direction:2}` 与 `EventStateList/current=[{prologue,lab-tutorial}]`；已存在合法 baseline 时不覆盖，已 materialize 的 `null` 必须失败且不得自动修复。
 2. 进入 Map 4，博士在 (10,6)，劲敌在 (8,5)；只有博士可交互。
 3. 博士选择重听可循环；选择暂缓不改变 EventStateList。
 4. 博士选择准备好后，Dialogue mutation 将 prologue 推进到 rival-ready。

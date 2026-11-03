@@ -485,6 +485,8 @@ Battle 可以被 LoomRealm Frame/Subsystem 组合使用，但 `game-libs/battle`
 
 业务 composition 负责把 Frame/Host 生命周期映射给 Battle Runtime，例如 `frame.signal` abort → `battle.cancel()`、background → `battle.pause("host-background")`、Frame/session 离开 → `battle.close()`。**foreground 不映射成自动 `battle.resume()`**；它只允许产品层显示暂停 Message，玩家显式选择继续/重试后才调用 `battle.resume()`。真正的 Battle 内部终止/冻结语义仍由 Runtime 执行。
 
+PokeMan composition 在 Battle Frame 异步读取 Shared State / Content 之前即订阅 `host.lifecycle`。Runtime 尚未构造或仍处于 CREATED / INITIALIZING 时收到 background，只记录 `pendingHostPause`；进入 RUNNING 后再合法 pause。readiness 检查只在确有 pending background 时短暂运行，正常 foreground 初始化不做 0 ms 无条件轮询。
+
 Frame abort / Battle cancel 遵循 `CTRL-001`：
 
 ```text
