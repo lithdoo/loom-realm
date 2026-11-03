@@ -1,7 +1,7 @@
 import { preparePwaGame } from "@loomrealm/game-launcher-pwa";
 import { runMain } from "@loomrealm/main";
 import { createSharedStateAuthority } from "@loomrealm/shared-state";
-import { createSessionEventFatalLatch, createSessionEventHub } from "@loomrealm/session-events";
+import { createHostLifecyclePublisher, createSessionEventFatalLatch, createSessionEventHub, type HostLifecycleState } from "@loomrealm/session-events";
 import { moduleDirectoryPath, pwaPath } from "./base-path.js";
 import { parsePwaRuntimeInfoV1, parsePwaSessionBootstrapV1, sameServiceWorkerGeneration } from "./bootstrap-protocol.js";
 import { getInstallation, readInstallationObject } from "./installation-store.js";
@@ -10,6 +10,20 @@ import { PwaPlatform } from "./pwa-platform.js";
 const decoder = new TextDecoder("utf-8", { fatal: true });
 let consumed = false;
 const session = self as unknown as DedicatedWorkerGlobalScope;
+let latestHostLifecycle: Readonly<{ sessionEpoch: string; state: HostLifecycleState }> | null = null;
+let activeSessionEpoch: string | null = null;
+let acceptHostLifecycle: ((state: HostLifecycleState) => void) | null = null;
+
+session.addEventListener("message", (event: MessageEvent<unknown>) => {
+  const value = event.data as Record<string, unknown> | null;
+  if (value === null || typeof value !== "object" || Object.keys(value).length !== 4
+      || value.type !== "loomrealm.pwa.host-lifecycle" || value.version !== 1
+      || typeof value.sessionEpoch !== "string"
+      || (value.lifecycle !== "background" && value.lifecycle !== "foreground")) return;
+  if (activeSessionEpoch !== null && value.sessionEpoch !== activeSessionEpoch) return;
+  latestHostLifecycle = Object.freeze({ sessionEpoch: value.sessionEpoch, state: value.lifecycle });
+  acceptHostLifecycle?.(value.lifecycle);
+});
 
 session.addEventListener("message", (event: MessageEvent<unknown>) => {
   if (consumed) return;
@@ -65,6 +79,13 @@ async function start(raw: unknown): Promise<void> {
   const sharedStateFatal = Object.freeze({ subscribe(listener: () => void) { fatalListener = listener; if (fatal) queueMicrotask(listener); return () => { if (fatalListener === listener) fatalListener = null; }; } });
   const sessionEventsFatal = createSessionEventFatalLatch();
   const sessionEventHub = createSessionEventHub({ onFatal: () => sessionEventsFatal.report() });
+  const hostLifecycle = createHostLifecyclePublisher(sessionEventHub);
+  const publishHostLifecycle = (state: HostLifecycleState) => {
+    void hostLifecycle.publish(state).catch(() => sessionEventsFatal.report());
+  };
+  activeSessionEpoch = bootstrap.sessionEpoch;
+  acceptHostLifecycle = publishHostLifecycle;
+  if (latestHostLifecycle?.sessionEpoch === bootstrap.sessionEpoch) publishHostLifecycle(latestHostLifecycle.state);
   const controller = new AbortController();
   const platform = new PwaPlatform({
     launchPlan: prepared.launchPlan,
@@ -91,6 +112,10 @@ async function start(raw: unknown): Promise<void> {
     });
     session.postMessage(Object.freeze({ type: "loomrealm.pwa.session-status", version: 1, status: "settled", sessionEpoch: bootstrap.sessionEpoch, result }));
   } finally {
+    acceptHostLifecycle = null;
+    activeSessionEpoch = null;
+    latestHostLifecycle = null;
+    hostLifecycle.close();
     session.removeEventListener("message", onShutdown);
     await platform.close();
     authority.terminate();

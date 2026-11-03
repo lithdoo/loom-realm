@@ -60,6 +60,22 @@ let stopping: Promise<void> = Promise.resolve();
 let transitioning: Promise<void> = Promise.resolve();
 let lifecycleRevision = 0;
 
+function publishPhysicalLifecycle(): void {
+  const active = current;
+  if (active === null) return;
+  const lifecycle = document.visibilityState === "hidden" ? "background" : "foreground";
+  try {
+    active.worker.postMessage(Object.freeze({
+      type: "loomrealm.pwa.host-lifecycle",
+      version: 1,
+      sessionEpoch: active.epoch,
+      lifecycle,
+    }));
+  } catch (cause) {
+    console.warn("PWA Host lifecycle was not delivered", cause);
+  }
+}
+
 class StaleWindowLaunch extends Error {
   constructor() { super("PWA Window launch was superseded"); }
 }
@@ -198,6 +214,7 @@ async function startFreshSession(selection: PwaProductLaunchSelection | null, re
       expectedServiceWorker,
       windowBridgePort: bridge.port2,
     }), [bridge.port2]);
+    publishPhysicalLifecycle();
   } catch (cause) {
     if (current === ownedCurrent) current = null;
     const cleanupFailures: unknown[] = [];
@@ -257,6 +274,7 @@ export function startPwaProduct(prepare?: () => Promise<PwaProductLaunchSelectio
   if (started) throw new Error("PWA product already started");
   started = true;
   window.__loomrealmPwa = state;
+  document.addEventListener("visibilitychange", publishPhysicalLifecycle);
   window.addEventListener("pagehide", () => {
     lifecycleRevision += 1;
     void stopCurrent().catch((cause) => console.error("PWA pagehide cleanup failed", cause));

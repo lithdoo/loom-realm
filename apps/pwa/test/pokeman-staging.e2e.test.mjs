@@ -432,6 +432,7 @@ test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, an
     await assertDialogueNeverHidden(page, "Conversation B → READY → C");
     await revealAndConfirm(page);
     await page.locator("lr-dialogue-view").waitFor({ state: "detached", timeout: 25_000 });
+    planner.setEventStates([{ eventId: "prologue", stateId: "rival-ready" }]);
     await waitForMap(page, state);
     await page.waitForTimeout(500);
     assert.equal(await page.evaluate(() => document.querySelector("lr-map-view") === window.__stagingMapBeforeDialogue), true,

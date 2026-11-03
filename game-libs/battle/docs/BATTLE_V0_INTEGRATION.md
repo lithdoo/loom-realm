@@ -691,4 +691,4 @@ Presentation blocking integration OPEN 已清零。仍未冻结的集成项只�
 
 `@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation、Simulation baseline（含 Decision availability circuit）、DeepSeekDecision、BATTLE-003 initialHp 与 BATTLE-004 BattleArena amendments 已完成 qualification；configured DeepSeekTransport 与 PokeMan product/Host composition 已集成并完成 credential-free E2E。
 
-Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。
+Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。PokeMan 产品的物理 PWA `visibilitychange` 与 Desktop renderer visibility 已通过 host-owned adapter、`SessionEventHub.createDelegatedPublisher("host")`、`host.lifecycle` 接入 Battle；foreground 仍只开放 Message 手动恢复，不自动 resume。pagehide / navigation 保持 terminal path，不伪装为可恢复 background。

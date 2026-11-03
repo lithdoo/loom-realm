@@ -106,7 +106,8 @@ export function createPokeManBattleSubsystem(scope, dependencies = {}) {
       let lifecycle;
       let removePauseListener;
       let childFailure;
-      let foreground = true;
+      let hostForeground = true;
+      let pendingHostPause = false;
       let pendingPause;
       let promptInFlight = false;
       try {
@@ -120,7 +121,7 @@ export function createPokeManBattleSubsystem(scope, dependencies = {}) {
         }).build(definition);
 
         const showPendingPrompt = async () => {
-          if (!foreground || promptInFlight || pendingPause === undefined) return;
+          if (!hostForeground || promptInFlight || pendingPause === undefined) return;
           promptInFlight = true;
           const reason = pendingPause;
           pendingPause = undefined;
@@ -145,17 +146,42 @@ export function createPokeManBattleSubsystem(scope, dependencies = {}) {
           pendingPause ??= reason;
           void showPendingPrompt();
         });
+        const applyPendingHostPause = () => {
+          if (!pendingHostPause || hostForeground) return;
+          const status = runtime.getSnapshot().status;
+          if (status === "running") {
+            pendingHostPause = false;
+            runtime.pause("host-background");
+          } else if (status === "paused" || status === "settled" || status === "cancelled" || status === "failed") {
+            pendingHostPause = false;
+          }
+        };
         lifecycle = await subscribeLifecycle(scope, (state) => {
           if (state === "background") {
-            foreground = false;
-            if (runtime.getSnapshot().status !== "paused") runtime.pause("host-background");
+            hostForeground = false;
+            pendingHostPause = true;
+            applyPendingHostPause();
           } else {
-            foreground = true;
+            hostForeground = true;
+            pendingHostPause = false;
             void showPendingPrompt();
           }
         });
 
-        const result = await runtime.run();
+        let monitorStopped = false;
+        let monitorTimer;
+        const monitorRunning = () => {
+          if (monitorStopped) return;
+          applyPendingHostPause();
+          const status = runtime.getSnapshot().status;
+          if (status === "created" || status === "initializing") monitorTimer = setTimeout(monitorRunning, 0);
+        };
+        const run = runtime.run();
+        monitorRunning();
+        const result = await run.finally(() => {
+          monitorStopped = true;
+          if (monitorTimer !== undefined) clearTimeout(monitorTimer);
+        });
         if (result.type === "cancelled") {
           return childFailure === undefined ? cancelled() : failed({ code: childFailure });
         }

@@ -57,33 +57,33 @@ Map Frame Handler 是 Map Subsystem 中已经存在的 Frame Handler。它在自
 
 **第一条产品纵向切片仍是 Map 4 的双向卡片交换与教学 Battle。** Map 5 的 road-bandit 保留为后续普通 Encounter / 本体参战验证，不再作为第一次 Battle 的入口。
 
-当前 Core baseline 尚未实现显式 `initialHp` 输入；本设计要求在 PokeMan 连续战斗验收前完成该窄范围 amendment。正常 Battle 退出时还必须把 final HP = 0 的 Contract-backed 卡片以 1 Integrity 保存，BattleResult 仍按归一化前的 final Snapshot 判定。
+Core 已实现并 qualification 显式 `initialHp` 输入。正常 Battle 退出把 final HP = 0 的 Contract-backed 卡片以 1 Integrity 保存，BattleResult 仍按归一化前的 final Snapshot 判定。
 
-## 2. 当前仓库基线
+## 2. 设计基线与当前闭环
 
-以下是本设计依据的当前 main 状态；它们是实现前提，不代表 Battle 已经接入：
+以下表格保留设计时的集成基线，并记录当前闭环结果；不再表示未完成工作：
 
-| 位置 | 当前事实 | 对集成的影响 |
+| 位置 | 设计时事实 | 当前闭环结果 |
 | --- | --- | --- |
-| PokeMan game.json | 当前注册 base / map / dialogue | 需要注册 battle |
-| launch.hostra.json | 当前显式绑定 base / map / dialogue | 需要加入 battle module |
-| package.json | 当前没有 Battle package dependency | 需要添加 workspace dependency 并更新 lockfile |
-| presentation.json | 当前只有 Schema Form / controls / Map / Dialogue assets | 需要加入 Battle browser JS/CSS |
-| map.mjs / Map 4 | 已有 professor 与 rival-lab 两个静态 placement；Professor 可交互，rival-lab 目前不可交互 | 可直接以 Professor interaction 启动序章链；rival-lab 作为劲敌对话 / 战斗场景定位 |
-| map.mjs | 当前只等待 Professor interaction 并调用 professor-vertical-slice Dialogue | 需要扩展为多个 child Frame 的顺序编排 |
-| Dialogue/lab-rival-intro.json | 已有劲敌开场对白与「接受挑战 / 再等等」选项，但两个 choice 当前都指向自身 | 需要把 choice 结果接入 accepted-challenge / deferred 分支 |
+| PokeMan game.json | 只注册 base / map / dialogue | 已注册 battle 与 message |
+| launch.hostra.json | 只显式绑定 base / map / dialogue | 已加入 battle / message module |
+| package.json | 没有 Battle package dependency | 已加入 workspace dependency 并锁定 lockfile |
+| presentation.json | 只有 Schema Form / controls / Map / Dialogue assets | 已加入 Battle / Message browser assets |
+| Story Resolver / Map 4 | professor 与 rival-lab 完全由 prologue Event state 解析；Map 无剧情 NPC fallback | Professor / Rival 交互随 EventStateList 切换并 live refresh |
+| map.mjs | 只等待 Professor interaction 并调用 professor-vertical-slice Dialogue | 已按 EventStateList 编排多个 sibling child Frame，并在 mutation 后 live refresh |
+| Dialogue/lab-rival-intro.json | 两个 choice 都指向自身 | 已分别接入 accepted-challenge / deferred 分支 |
 | BattleActor/player | 已有主角本体基础定义：max_hp 20、firebolt | 作为劲敌调用的主角 Battle Manifestation 基础定义 |
 | BattleActor/rival | 已有宿敌本体基础定义：max_hp 18、firebolt / grab | 作为玩家调用的宿敌 Battle Manifestation 基础定义 |
 | BattleActor/road-bandit | 已有路霸基础定义 | 后续 Map 5 Encounter 验证再使用 |
 | BattleSkill | 已有 firebolt、grab | 可复用现有 skill Content |
-| BattleEffect | 当前 PokeMan Record 与 Battle v0 contract 不一致 | Presentation 初始化前必须修复 |
+| BattleEffect | PokeMan Record 与 Battle v0 contract 不一致 | 已修正并通过 browser qualification |
 | DeepSeek Gate | Base 已把验证后的 key 写入 Session-only Shared State | Battle 可以在同一 Session 中读取并构造 PokeMan-private Transport |
 | PokeMan prologue design | 已定义玩家与宿敌建立双向 Contract，双方互持对方 Card，教学 Battle 为双方 Battle Manifestation 对战 | 本集成必须按双向 Relationship / Contract 解析，不得再把 road-bandit 当成第一场对手 |
 
 当前已有的关键内容：
 
-- Map 4 的 Professor placement：instanceId = professor，位置 (10, 6)，当前可交互。
-- Map 4 的 rival-lab placement：instanceId = rival-lab，位置 (8, 5)，当前尚未接入 Dialogue / Battle 流程。
+- Map 4 的 Professor placement：instanceId = professor，位置 (10, 6)，交互由当前 prologue state 决定。
+- Map 4 的 rival-lab placement：instanceId = rival-lab，位置 (8, 5)，在 rival-ready state 接入 Dialogue / Battle 流程。
 - Dialogue/lab-rival-intro 已存在，但当前 choice target 还没有表达 Battle 接受 / 延后语义。
 - BattleActor/player：max_hp 20，skills 为 firebolt，角色资源 Characters/Player。
 - BattleActor/rival：max_hp 18，skills 为 firebolt / grab，角色资源 Characters/RivalCasual。
@@ -180,7 +180,7 @@ type PokeManDialogueFrameInputV1 = {
 
 terminalDialogueId 是 Dialogue graph 的 terminal identity，不是 Event state，也不是通用业务 action。Dialogue Subsystem 在 terminal Dialogue 声明 mutation 时，必须先成功提交 EventStateList，再以成功 terminal result 返回；Map 不重复提交 mutation。
 
-73 中的 `dialogueKey / conclusion` 是 professor-only hard-coded validation slice 的专用返回值，不是正式 Dialogue Graph Runner 的生产 contract。真实 child Frame failed 或 lifecycle cancelled 不能映射成任何正常剧情结论。
+73 中的 `dialogueKey / conclusion` 是已退役 professor-only validation slice 的历史专用返回值，不是正式 Dialogue Graph Runner 的生产 contract；该 hard-coded Runtime 已删除。真实 child Frame failed 或 lifecycle cancelled 不能映射成任何正常剧情结论。
 
 ### 3.3 第一场 Battle：双方互相调用对方的 Battle Manifestation
 

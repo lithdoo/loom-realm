@@ -13,9 +13,7 @@ export async function runBaseFrame(scope, frame, {
       ? reason
       : new DOMException("Base Frame aborted", "AbortError");
   }
-  const baseline = scope.state === undefined
-    ? null
-    : await ensureBaseline(scope.state, { signal: frame.signal });
+  if (scope.state !== undefined) await ensureBaseline(scope.state, { signal: frame.signal });
   if (frame.signal.aborted) {
     const reason = frame.signal.reason;
     throw reason instanceof Error && reason.name === "AbortError"
@@ -33,11 +31,7 @@ export async function runBaseFrame(scope, frame, {
     }],
   });
   try {
-    const mapInput = baseline === null ? frame.params : {
-      ...baseline.playerWorld,
-      characterName: "Player",
-    };
-    return await frame.call("map", mapInput);
+    return await frame.call("map", frame.params);
   } finally {
     inputHost.close();
   }

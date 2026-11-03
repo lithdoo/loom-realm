@@ -125,7 +125,7 @@ test("Map-only NPC placements stay in bounds and resolve NPC sprites", async () 
   for (const mapId of requiredMapIds) {
     const map = await json(`[FSDB]PokeMan/[struct]Map/${mapId}.json`);
     const placements = placementsForMap(mapId);
-    assert.equal(placements, MAP_ONLY_NPC_PLACEMENTS[mapId]);
+    assert.deepEqual(placements, MAP_ONLY_NPC_PLACEMENTS[mapId] ?? []);
     for (const placement of placements) {
       assert.ok(placement.x >= 0 && placement.x < map.width, `${placement.instanceId} x is outside Map ${mapId}`);
       assert.ok(placement.y >= 0 && placement.y < map.height, `${placement.instanceId} y is outside Map ${mapId}`);

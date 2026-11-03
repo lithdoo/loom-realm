@@ -7,6 +7,7 @@ export interface DesktopRendererBootstrapEnvelope {
   readonly controlEndpoint: string;
   readonly dataSettlementEndpoint: string;
   readonly presentationEventsEndpoint: string;
+  readonly hostLifecycleEndpoint: string;
   readonly content: {
     readonly origin: string;
     readonly installationId: string;

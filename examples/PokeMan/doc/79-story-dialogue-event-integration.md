@@ -1,6 +1,6 @@
 # PokeMan Story / Dialogue / Event 集成设计
 
-> 状态：**Implemented + Tested + Map 4 Closed-loop Qualified**
+> 状态：**Implemented + Tested + Story Authority / Map 4 Browser Closed-loop Qualified**
 > 范围：固定 Dialogue、Event state、Map 场景解析、业务 Runtime 与 Battle 的协作
 > 关联：[62-event.md](./62-event.md)、[64-dialogue.md](./64-dialogue.md)、[73-dialogue-gameplay-vertical-slice.md](./73-dialogue-gameplay-vertical-slice.md)、[78-prologue-dialogue-content.md](./78-prologue-dialogue-content.md)、[50-mvp-prologue.md](./50-mvp-prologue.md)、[67-shared-state-records.md](./67-shared-state-records.md)
 
@@ -457,7 +457,7 @@ Battle child Frame cancelled / failed 时：
 
 ## 9. Story Resolver 与 Map 场景刷新
 
-Story Resolver 的场景输入：
+Story Resolver 的已实现场景输入：
 
 ~~~text
 struct.StoryIndex/current
@@ -472,6 +472,8 @@ struct.StoryIndex/current
 - 没有 active Event directive 提到该 Character 时，使用 Character.defaultScenes。
 - 合并所有 source 后，同一 Map 的最终 npcId 必须唯一；冲突 deterministic reject，不做 last-wins。
 - StoryIndex 是 Builder 派生 Content，不是 Shared State authority。
+- Runtime 会加载并交叉验证 StoryIndex 与 Event / Character 源 Content；坏 Event/state/Map/Character/NPC/Dialogue 引用与 derived drift 都显式失败，不由 Map fallback 掩盖。
+- 多 source 的 duplicate `npcId`、duplicate `instanceId`、occupied cell 与不兼容 Character takeover 都 deterministic reject，不存在 last-wins。
 
 Runtime NPC identity 也已冻结：当前 MVP 每张 Map 的最终 `npcId` 唯一，因此 Story Resolver 输出 placement 时固定 `instanceId = npcId`；不得自行拼接 Event id、Map id 或随机后缀。
 
@@ -484,11 +486,11 @@ Resolver 需要在两个时机执行：
 
 场景刷新必须保留当前 Map Frame、RenderDomain 和场景生命周期；不能为了刷新剧情而重启整张 Map 或创建第二个 Map Frame。当前 `RPGMapHandler.setNPC()` 已支持 live NPC replacement，Story Resolver 解析出完整 NPCPlacement[] 后直接调用该 public API；无需扩展 Map package。
 
-Story Resolver 成为 authority 后，map.mjs 中 Map 4 的 professor / rival-lab 硬编码 placement 必须退出生产场景来源，避免与 Event directive 重复生成 NPC。Map-only placement 仅能保留给明确不受 Story Content 管理的临时 fixture。
+Story Resolver 已成为生产 authority；map.mjs 中 Map 4 的 professor / rival-lab 与 Map 8 的 rival-casual 硬编码 placement 已移除。前两者来自 active Event，后者来自 Character.defaultScenes；Map-only placement 只保留明确不受 Story Content 管理的静态 NPC。
 
-## 10. 当前仓库与目标设计的差异
+## 10. 实现闭环记录
 
-以下是本设计编写时对分支 docs/pokeman-battle-integration-v1 的检查结果。它们是后续 Content / Runtime 落地任务，不表示本文已经修改了 FSDB JSON 或 Subsystem 代码。
+以下表格保留设计时发现的问题与当前闭环结果；不再表示未完成工作。
 
 | 当前文件 / 实现 | 当前问题 | 目标修正 |
 | --- | --- | --- |
@@ -496,14 +498,14 @@ Story Resolver 成为 authority 后，map.mjs 中 Map 4 的 professor / rival-la
 | struct.EventStateMutation/prologue-to-route | from 使用 prologue.lab-complete | 改为 prologue.after-battle + first-route absent |
 | struct.Event/first-route | 当前缺少该 Event | 在启用 prologue-to-route 前创建 active state 与实际道路场景 |
 | struct.StoryIndex/current | 仍索引 Map 1 | 从更新后的 Character / Event source 重新生成 |
-| struct.Character/rival.defaultScenes | 当前使用 Map 1 | 与 Map 8 宿敌家场景对齐；不要把 Map 4 Event placement 写入 Character default |
+| struct.Character/rival.defaultScenes | 曾使用 Map 1 | 已改为 Map 8 宿敌家场景；Map 4 placement 只属于 Event |
 | struct.Dialogue/lab-rival-intro | 两个 Choice 都指向自身 | 分别指向 lab-rival-exchange-accept 与 lab-rival-defer |
 | struct.Dialogue/route-bandit-threat | 当前引用 prologue-to-route | 移除该 mutation；first-route 应由 professor-first-journey-accept 推进 |
 | struct.Dialogue | 当前 FSDB 文件还缺少博士教学 / 战后等目标 Dialogue | 按 78 完成对应 Content records |
-| subsystems/map.mjs | Map 4 NPC placement 仍为硬编码 | Story Resolver 接入后改由 Event 场景解析提供 |
+| subsystems/map.mjs | 曾硬编码 Map 4 NPC placement | 已由 Story Resolver / Event 场景解析提供，Resolver failure 显式失败 |
 | Dialogue / Event / Mutation .info.meta | 嵌套结构 schema 较宽 | Builder 必须完成 62 / 64 规定的深层引用和结构校验 |
 
-注意：Map 4 的目标坐标来自当前 map.mjs placement；Map 8 的目标场景应与现有 map-only rival-casual placement 核对后再写入 Character.defaultScenes。不要把旧 Map 1 示例当成当前 MVP 地图绑定。
+闭环事实：Map 4 的目标坐标由 prologue Event Content 持有；Map 8 的 rival-casual 已写入 `Character/rival.defaultScenes`，并由 StoryIndex/current 派生索引。旧 Map 1 示例与 Map-only rival fallback 均已退出生产 authority。
 
 ## 11. Builder 与 Runtime 验收
 

@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { completed } from "@loomrealm/subsystem";
+import { createHostLifecyclePublisher, createSessionEventHub } from "@loomrealm/session-events";
 import {
-  BASELINE_EVENT_STATES, BASELINE_PLAYER_WORLD, EVENT_STATE_LIST_KEY, PLAYER_CARDS_KEY,
+  BASELINE_EVENT_STATES, BASELINE_PLAYER_WORLD, EVENT_STATE_LIST_KEY, PLAYER_CARDS_KEY, PLAYER_WORLD_KEY,
   PLAYER_TO_RIVAL_KEY, RIVAL_CARDS_KEY, RIVAL_TO_PLAYER_KEY, applyEventStateMutation,
   ensurePokeManBaseline, exchangeRivalCards, readBattleContracts, settleBattleContracts,
+  equalJsonValue,
 } from "../subsystems/business-state.mjs";
+import { runBaseFrame } from "../subsystems/base.mjs";
 import { resolveLabTutorialBattle } from "../subsystems/battle-content.mjs";
 import { createDeepSeekTransport, createPokeManBattleSubsystem, DEEPSEEK_RESPONSES_ENDPOINT } from "../subsystems/battle.mjs";
 import { createPokeManMessageSubsystem, validateMessageInput } from "../subsystems/message.mjs";
@@ -49,6 +52,36 @@ test("baseline bootstrap is one two-record transaction and preserves an existing
   assert.deepEqual(state.commits[0].writes.map(({ value }) => value), [BASELINE_PLAYER_WORLD, BASELINE_EVENT_STATES]);
   assert.equal((await ensurePokeManBaseline(state)).status, "existing");
   assert.equal(state.commits.length, 1);
+});
+
+test("baseline bootstrap rejects a single missing record and structural equality ignores object key order", async () => {
+  const partial = new FakeState({ [id(PLAYER_WORLD_KEY)]: BASELINE_PLAYER_WORLD });
+  await assert.rejects(() => ensurePokeManBaseline(partial), { code: "POKEMAN_STATE_INVALID" });
+  assert.equal(partial.commits.length, 0);
+  assert.equal(equalJsonValue({ a: 1, nested: { x: true, y: null } }, { nested: { y: null, x: true }, a: 1 }), true);
+  assert.equal(equalJsonValue([1, 2], [2, 1]), false);
+});
+
+test("Base validates the durable checkpoint but launches Map from frame params", async () => {
+  const checkpoint = { mapId: 7, x: 20, y: 18, direction: 4 };
+  const state = new FakeState({
+    [id(PLAYER_WORLD_KEY)]: checkpoint,
+    [id(EVENT_STATE_LIST_KEY)]: BASELINE_EVENT_STATES,
+  });
+  const params = Object.freeze({ mapId: 3, x: 3, y: 8, direction: 2, characterName: "Player" });
+  let childInput;
+  const result = await runBaseFrame({
+    state,
+    createRenderDomain() { return { close() {} }; },
+  }, {
+    params,
+    signal: new AbortController().signal,
+    async call(name, input) { assert.equal(name, "map"); childInput = input; return "map"; },
+  }, { ensureConfiguration: async () => {} });
+  assert.equal(result, "map");
+  assert.equal(childInput, params);
+  assert.deepEqual(state.values.get(id(PLAYER_WORLD_KEY)).value, checkpoint);
+  assert.equal(state.commits.length, 0);
 });
 
 test("bilateral exchange atomically preserves relationship facts and is idempotent", async () => {
@@ -261,6 +294,111 @@ test("host background freezes Battle and foreground waits for an explicit Messag
   resolveMessage(completed({ messageKey: prompt.value.messageKey, actionId: "continue" }));
   assert.equal((await pending).type, "cancelled");
   assert.equal(resumeCount, 1); assert.equal(settlementCount, 0); assert.equal(lifecycleClosed, 1);
+});
+
+test("background during Battle initialization is remembered and pauses only after RUNNING", async () => {
+  let lifecycleListener; let pauseListener; let resolveRun; let status = "created"; let pauseCalls = 0; let resolveMessage;
+  const runResult = new Promise((resolve) => { resolveRun = resolve; });
+  const messageResult = new Promise((resolve) => { resolveMessage = resolve; });
+  const runtime = {
+    onPause(listener) { pauseListener = listener; return () => {}; },
+    run() { status = "initializing"; return runResult; },
+    getSnapshot() { return { battleId: "battle-initializing", status, ...(status === "paused" ? { pauseReason: "host-background" } : {}), actors: [] }; },
+    pause(reason) { assert.equal(status, "running"); assert.equal(reason, "host-background"); pauseCalls += 1; status = "paused"; pauseListener({ reason }); },
+    resume() { status = "running"; resolveRun({ type: "cancelled" }); },
+    cancel() { resolveRun({ type: "cancelled" }); }, close() {},
+  };
+  let prompt;
+  const subsystem = createPokeManBattleSubsystem({ state: {}, content: {}, events: {} }, {
+    readBattleContracts: async () => ({}), resolveLabTutorialBattle: async () => ({}), readDeepSeekConfiguration: async () => ({ apiKey: "x" }),
+    decision: {}, presentation: {}, runtime, settleBattleContracts: async () => {},
+    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; return { close() {} }; },
+  });
+  const pending = subsystem.frame({
+    params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },
+    signal: new AbortController().signal,
+    async call(key, value) { prompt = { key, value }; return messageResult; },
+  });
+  while (lifecycleListener === undefined || status === "created") await new Promise((resolve) => setImmediate(resolve));
+  lifecycleListener("background");
+  assert.equal(status, "initializing");
+  assert.equal(pauseCalls, 0);
+  status = "running";
+  while (status !== "paused") await new Promise((resolve) => setTimeout(resolve, 1));
+  assert.equal(pauseCalls, 1);
+  assert.equal(prompt, undefined);
+  lifecycleListener("foreground");
+  while (prompt === undefined) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(prompt.value.messageKey, "battle-host-background-paused");
+  resolveMessage(completed({ messageKey: prompt.value.messageKey, actionId: "continue" }));
+  assert.equal((await pending).type, "cancelled");
+});
+
+test("production Host publisher reaches Battle through Session Events without duplicate prompts", async () => {
+  const hub = createSessionEventHub();
+  const binding = hub.createBinding("battle");
+  const host = createHostLifecyclePublisher(hub);
+  let pauseListener; let status = "running"; let reason; let resolveRun; let resolveMessage; let messageCalls = 0;
+  const runtime = {
+    onPause(listener) { pauseListener = listener; return () => {}; },
+    run() { return new Promise((resolve) => { resolveRun = resolve; }); },
+    getSnapshot() { return { battleId: "battle-real-events", status, ...(reason === undefined ? {} : { pauseReason: reason }), actors: [] }; },
+    pause(nextReason) { if (status === "paused") return; status = "paused"; reason = nextReason; pauseListener({ reason }); },
+    resume() { status = "running"; reason = undefined; resolveRun({ type: "cancelled" }); },
+    cancel() { resolveRun({ type: "cancelled" }); }, close() {},
+  };
+  const subsystem = createPokeManBattleSubsystem({ state: {}, content: {}, events: binding }, {
+    readBattleContracts: async () => ({}), resolveLabTutorialBattle: async () => ({}), readDeepSeekConfiguration: async () => ({ apiKey: "x" }),
+    decision: {}, presentation: {}, runtime, settleBattleContracts: async () => {},
+  });
+  const pending = subsystem.frame({
+    params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },
+    signal: new AbortController().signal,
+    async call(_key, value) { messageCalls += 1; return new Promise((resolve) => { resolveMessage = () => resolve(completed({ messageKey: value.messageKey, actionId: "continue" })); }); },
+  });
+  while (pauseListener === undefined) await new Promise((resolve) => setImmediate(resolve));
+  await host.publish("background");
+  while (status !== "paused") await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reason, "host-background");
+  await host.publish("background");
+  await host.publish("foreground");
+  while (resolveMessage === undefined) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(status, "paused");
+  assert.equal(messageCalls, 1);
+  resolveMessage();
+  assert.equal((await pending).type, "cancelled");
+  host.close(); binding.close(); hub.terminate();
+});
+
+test("decision-circuit remains the pause reason across background and foreground with one Message", async () => {
+  let pauseListener; let lifecycleListener; let resolveRun; let resolveMessage; let messageCalls = 0;
+  const runtime = {
+    onPause(listener) { pauseListener = listener; return () => {}; },
+    run() { return new Promise((resolve) => { resolveRun = resolve; }); },
+    getSnapshot() { return { battleId: "battle-precedence", status: "paused", pauseReason: "decision-circuit", actors: [] }; },
+    pause() { throw new Error("paused decision-circuit must not be overwritten"); },
+    resume() { resolveRun({ type: "cancelled" }); }, cancel() { resolveRun({ type: "cancelled" }); }, close() {},
+  };
+  const subsystem = createPokeManBattleSubsystem({ state: {}, content: {}, events: {} }, {
+    readBattleContracts: async () => ({}), resolveLabTutorialBattle: async () => ({}), readDeepSeekConfiguration: async () => ({ apiKey: "x" }),
+    decision: {}, presentation: {}, runtime, settleBattleContracts: async () => {},
+    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; return { close() {} }; },
+  });
+  const pending = subsystem.frame({
+    params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },
+    signal: new AbortController().signal,
+    async call(_key, value) { messageCalls += 1; return new Promise((resolve) => { resolveMessage = () => resolve(completed({ messageKey: value.messageKey, actionId: "retry" })); }); },
+  });
+  while (pauseListener === undefined || lifecycleListener === undefined) await new Promise((resolve) => setImmediate(resolve));
+  pauseListener({ reason: "decision-circuit" });
+  while (resolveMessage === undefined) await new Promise((resolve) => setImmediate(resolve));
+  lifecycleListener("background");
+  lifecycleListener("foreground");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtime.getSnapshot().pauseReason, "decision-circuit");
+  assert.equal(messageCalls, 1);
+  resolveMessage();
+  assert.equal((await pending).type, "cancelled");
 });
 
 test("pause Message exit cancels without settling Contract HP", async () => {

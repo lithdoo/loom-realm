@@ -35,6 +35,40 @@ export function createPokeManRoutePlanner(fixture) {
     if (value === undefined) throw new Error(`Missing planner record ${namespace}/${key}`);
     return value;
   };
+  const storyIndex = read("struct.StoryIndex", "current");
+  let currentEventStates = new Map([["prologue", "lab-tutorial"]]);
+  const storyPlacements = (mapId) => {
+    const takenOver = new Set();
+    const placements = [];
+    for (const [eventId, stateId] of currentEventStates) {
+      const event = read("struct.Event", eventId);
+      const state = event.states?.[stateId];
+      if (state === undefined) throw new Error(`Planner Event state is invalid: ${eventId}/${stateId}`);
+      for (const [rawMapId, scene] of Object.entries(state.maps)) {
+        for (const [npcId, directive] of Object.entries(scene.npcs)) {
+          if (directive.character !== undefined) takenOver.add(directive.character);
+          if (Number(rawMapId) !== mapId || directive.absent === true) continue;
+          placements.push(Object.freeze({ instanceId: npcId, npcId, ...directive.placement }));
+        }
+      }
+    }
+    for (const characterId of Object.keys(storyIndex.byCharacter)) {
+      if (takenOver.has(characterId)) continue;
+      const scene = read("struct.Character", characterId).defaultScenes?.[String(mapId)] ?? {};
+      for (const [npcId, directive] of Object.entries(scene)) placements.push(Object.freeze({ instanceId: npcId, npcId, ...directive.placement }));
+    }
+    const result = [...(MAP_ONLY_NPC_PLACEMENTS[mapId] ?? []), ...placements];
+    const npcIds = new Set();
+    const cells = new Set();
+    for (const placement of result) {
+      if (npcIds.has(placement.npcId)) throw new Error(`Planner scene has duplicate npcId ${placement.npcId}`);
+      const cell = `${placement.x},${placement.y}`;
+      if (cells.has(cell)) throw new Error(`Planner scene has occupied cell ${cell}`);
+      npcIds.add(placement.npcId);
+      cells.add(cell);
+    }
+    return result;
+  };
   for (const entry of fixture.content) {
     if (entry.kind !== "record" || entry.namespace !== "struct.Map") continue;
     const mapId = Number(entry.key);
@@ -74,7 +108,7 @@ export function createPokeManRoutePlanner(fixture) {
       }
       return Object.freeze({ ...state, direction: movement.direction });
     }
-    const npcs = MAP_ONLY_NPC_PLACEMENTS[state.mapId] ?? [];
+    const npcs = storyPlacements(state.mapId);
     if (npcs.some((npc) => npc.x === plan.toX && npc.y === plan.toY)) {
       return Object.freeze({ ...state, direction: movement.direction });
     }
@@ -105,6 +139,11 @@ export function createPokeManRoutePlanner(fixture) {
   };
 
   return Object.freeze({
+    placementsForMap(mapId) { return storyPlacements(mapId).map((placement) => Object.freeze({ ...placement })); },
+    setEventStates(entries) {
+      if (!Array.isArray(entries)) throw new TypeError("Planner Event states must be an array");
+      currentEventStates = new Map(entries.map(({ eventId, stateId }) => [eventId, stateId]));
+    },
     transition,
     planToMap(start, targetMapId) {
       return plan(start, (state) => state.mapId === targetMapId, new Set([start.mapId, targetMapId]));
@@ -118,7 +157,7 @@ export function createPokeManRoutePlanner(fixture) {
       );
     },
     planNpcCollision(start, instanceId) {
-      const placements = (MAP_ONLY_NPC_PLACEMENTS[start.mapId] ?? [])
+      const placements = storyPlacements(start.mapId)
         .filter((npc) => instanceId === undefined || npc.instanceId === instanceId);
       for (const npc of placements) {
         for (const movement of directions) {

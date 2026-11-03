@@ -34,8 +34,22 @@ function exact(value, keys) {
   return object(value) && Reflect.ownKeys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
-function same(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
+export function equalJsonValue(left, right) {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right)
+      && left.length === right.length
+      && left.every((entry, index) => equalJsonValue(entry, right[index]));
+  }
+  if (!object(left) || !object(right)) return false;
+  const leftKeys = Object.keys(left).sort(ordinalStringCompare);
+  const rightKeys = Object.keys(right).sort(ordinalStringCompare);
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => key === rightKeys[index] && equalJsonValue(left[key], right[key]));
+}
+
+export function ordinalStringCompare(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function stateCode(error) {
@@ -126,7 +140,7 @@ async function commitOrReconcile(state, records, writes, expected, phase) {
       fail("POKEMAN_STATE_COMMIT_FAILED", `Shared State commit failed during ${phase}`, cause);
     }
     const current = await readRecords(state, records.map((record) => record.key), undefined, `${phase} reconciliation`);
-    if (current.every((record, index) => same(record.value, expected[index]))) {
+    if (current.every((record, index) => equalJsonValue(record.value, expected[index]))) {
       return Object.freeze({ status: "reconciled", cause: code });
     }
     fail("POKEMAN_STATE_CONFLICT", `Shared State ${code} did not reconcile during ${phase}`, cause);
@@ -164,9 +178,9 @@ export async function applyEventStateMutation(state, mutation, { signal } = {}) 
   for (const [eventId, next] of Object.entries(mutation.to)) {
     if (next === null) current.delete(eventId); else current.set(eventId, next);
   }
-  const expected = [...current.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([eventId, stateId]) => ({ eventId, stateId }));
+  const expected = [...current.entries()].sort(([left], [right]) => ordinalStringCompare(left, right)).map(([eventId, stateId]) => ({ eventId, stateId }));
   if (!isEventStateList(expected)) fail("POKEMAN_EVENT_MUTATION_INVALID", "EventStateMutation produced an invalid EventStateList");
-  if (same(record.value, expected)) return Object.freeze({ status: "existing", eventStates: expected });
+  if (equalJsonValue(record.value, expected)) return Object.freeze({ status: "existing", eventStates: expected });
   const evidence = await commitOrReconcile(state, [record], [{ key: EVENT_STATE_LIST_KEY, value: expected }], [expected], "event mutation");
   return Object.freeze({ status: evidence.status, eventStates: expected });
 }
@@ -175,15 +189,15 @@ function relationshipWithContract(value, contract, label) {
   if (value === null) return { ...RELATIONSHIP_DEFAULT, contract: structuredClone(contract) };
   if (!isRelationship(value)) fail("POKEMAN_RELATIONSHIP_INVALID", `${label} Relationship is malformed`);
   if (Object.hasOwn(value, "contract")) {
-    if (!same(value.contract, contract)) fail("POKEMAN_EXCHANGE_CONFLICT", `${label} Contract conflicts with the exchange`);
+    if (!equalJsonValue(value.contract, contract)) fail("POKEMAN_EXCHANGE_CONFLICT", `${label} Contract conflicts with the exchange`);
     return structuredClone(value);
   }
   return { affinity: value.affinity, hostile: value.hostile, relationshipText: value.relationshipText, contract: structuredClone(contract) };
 }
 
 function exactCards(value, expected, label) {
-  if (value === null || same(value, [])) return structuredClone(expected);
-  if (!isCarriedCards(value) || !same(value, expected)) fail("POKEMAN_EXCHANGE_CONFLICT", `${label} CarriedCards conflicts with slot 0`);
+  if (value === null || equalJsonValue(value, [])) return structuredClone(expected);
+  if (!isCarriedCards(value) || !equalJsonValue(value, expected)) fail("POKEMAN_EXCHANGE_CONFLICT", `${label} CarriedCards conflicts with slot 0`);
   return structuredClone(value);
 }
 
@@ -196,7 +210,7 @@ export async function exchangeRivalCards(state, { signal } = {}) {
     exactCards(records[2].value, PLAYER_CARDS, "player"),
     exactCards(records[3].value, RIVAL_CARDS, "rival"),
   ];
-  if (records.every((record, index) => same(record.value, expected[index]))) return Object.freeze({ status: "existing" });
+  if (records.every((record, index) => equalJsonValue(record.value, expected[index]))) return Object.freeze({ status: "existing" });
   const evidence = await commitOrReconcile(state, records, keys.map((key, index) => ({ key, value: expected[index] })), expected, "bilateral exchange");
   return Object.freeze({ status: evidence.status });
 }
@@ -205,8 +219,8 @@ export async function readBattleContracts(state, { signal } = {}) {
   const records = await readRecords(state, [PLAYER_TO_RIVAL_KEY, RIVAL_TO_PLAYER_KEY, PLAYER_CARDS_KEY, RIVAL_CARDS_KEY], signal, "battle contract read");
   if (!isRelationship(records[0].value) || !isRelationship(records[1].value)
       || !Object.hasOwn(records[0].value, "contract") || !Object.hasOwn(records[1].value, "contract")
-      || !isCarriedCards(records[2].value) || !same(records[2].value, PLAYER_CARDS)
-      || !isCarriedCards(records[3].value) || !same(records[3].value, RIVAL_CARDS)) {
+      || !isCarriedCards(records[2].value) || !equalJsonValue(records[2].value, PLAYER_CARDS)
+      || !isCarriedCards(records[3].value) || !equalJsonValue(records[3].value, RIVAL_CARDS)) {
     fail("POKEMAN_BATTLE_PRECONDITION_FAILED", "Bilateral Contract/Card state is not ready for Battle");
   }
   return Object.freeze({

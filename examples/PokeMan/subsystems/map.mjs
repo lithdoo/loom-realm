@@ -1,4 +1,4 @@
-import { defineSubsystem, failed, FrameCallRejectedError } from "@loomrealm/subsystem";
+import { defineSubsystem, failed } from "@loomrealm/subsystem";
 import { RPGMapBuilder } from "@loomrealm-game/map";
 import { createControlsConsumer, createDirectionalControlsTracker } from "@loomrealm-game/common-controls/subsystem";
 import { exchangeRivalCards } from "./business-state.mjs";
@@ -16,243 +16,21 @@ function toMapDirection(direction) {
 }
 
 export const MAP_ONLY_NPC_PLACEMENTS = Object.freeze({
-  2: Object.freeze([
-    Object.freeze({
-      instanceId: "town-resident",
-      npcId: "town-resident",
-      x: 12,
-      y: 10,
-      direction: 2,
-    }),
-  ]),
-  3: Object.freeze([
-    Object.freeze({
-      instanceId: "home-family",
-      npcId: "home-family",
-      x: 6,
-      y: 8,
-      direction: 4,
-    }),
-  ]),
-  4: Object.freeze([
-    Object.freeze({
-      instanceId: "professor",
-      npcId: "professor",
-      x: 10,
-      y: 6,
-      direction: 2,
-      interactable: true,
-    }),
-    Object.freeze({
-      instanceId: "rival-lab",
-      npcId: "rival-lab",
-      x: 8,
-      y: 5,
-      direction: 2,
-    }),
-  ]),
+  2: Object.freeze([Object.freeze({ instanceId: "town-resident", npcId: "town-resident", x: 12, y: 10, direction: 2 })]),
+  3: Object.freeze([Object.freeze({ instanceId: "home-family", npcId: "home-family", x: 6, y: 8, direction: 4 })]),
   5: Object.freeze([
-    Object.freeze({
-      instanceId: "road-bandit",
-      npcId: "road-bandit",
-      x: 20,
-      y: 12,
-      direction: 4,
-    }),
-    Object.freeze({
-      instanceId: "route-trainee",
-      npcId: "route-trainee",
-      x: 24,
-      y: 15,
-      direction: 4,
-    }),
+    Object.freeze({ instanceId: "road-bandit", npcId: "road-bandit", x: 20, y: 12, direction: 4 }),
+    Object.freeze({ instanceId: "route-trainee", npcId: "route-trainee", x: 24, y: 15, direction: 4 }),
   ]),
   7: Object.freeze([
-    Object.freeze({
-      instanceId: "town-resident",
-      npcId: "town-resident",
-      x: 20,
-      y: 20,
-      direction: 2,
-    }),
-    Object.freeze({
-      instanceId: "center-servant",
-      npcId: "center-servant",
-      x: 22,
-      y: 20,
-      direction: 4,
-    }),
-  ]),
-  8: Object.freeze([
-    Object.freeze({
-      instanceId: "rival-casual",
-      npcId: "rival-casual",
-      x: 8,
-      y: 6,
-      direction: 2,
-    }),
+    Object.freeze({ instanceId: "town-resident", npcId: "town-resident", x: 20, y: 20, direction: 2 }),
+    Object.freeze({ instanceId: "center-servant", npcId: "center-servant", x: 22, y: 20, direction: 4 }),
   ]),
 });
 
+const EMPTY_PLACEMENTS = Object.freeze([]);
 export function placementsForMap(mapId, placements = MAP_ONLY_NPC_PLACEMENTS) {
-  return placements[String(mapId)] ?? Object.freeze([]);
-}
-
-function isProfessorInteraction(event) {
-  return event?.npc?.instanceId === "professor" && event.npc.npcId === "professor";
-}
-
-function validDialogueResult(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const keys = Object.keys(value);
-  return keys.length === 2
-    && keys.includes("dialogueKey")
-    && keys.includes("conclusion")
-    && value.dialogueKey === "professor-vertical-slice"
-    && (value.conclusion === "ready" || value.conclusion === "not-yet" || value.conclusion === "cancelled");
-}
-
-function createLegacyPokeManMapSubsystem(scope, dependencies = {}) {
-  const MapBuilder = dependencies.RPGMapBuilder ?? RPGMapBuilder;
-  const createConsumer = dependencies.createControlsConsumer ?? createControlsConsumer;
-  const createDirections = dependencies.createDirectionalControlsTracker ?? createDirectionalControlsTracker;
-  const RejectedError = dependencies.FrameCallRejectedError ?? FrameCallRejectedError;
-
-  return {
-    async frame(frame) {
-    const input = frame.params;
-    const handler = new MapBuilder(scope, frame).build({
-      player: { characterName: input.characterName },
-    });
-
-    handler.onMapEntering((context) => {
-      context.setNPC(placementsForMap(context.mapId));
-    });
-
-    let interactionWaiter;
-    handler.onNPCInteract((event) => {
-      if (interactionWaiter !== undefined && isProfessorInteraction(event)) interactionWaiter.accept(event);
-    });
-
-    let activation;
-    const startMapControlsActivation = () => {
-      const directions = createDirections();
-      const applyMoveIntent = () => handler.controls.setMoveIntent(toMapDirection(directions.direction));
-      const consumer = createConsumer(scope.presentationEvents, frame, {
-        onState(state) {
-          directions.acceptState(state);
-          applyMoveIntent();
-        },
-        onEvent(event) {
-          directions.acceptEvent(event);
-          applyMoveIntent();
-          if (event.action === "down" && !event.repeat && (event.button === "south" || event.button === "start")) {
-            handler.controls.confirm();
-          }
-        },
-      });
-      activation = { directions, consumer };
-    };
-    const stopMapControlsActivation = () => {
-      if (activation === undefined) return;
-      const current = activation;
-      activation = undefined;
-      handler.controls.setMoveIntent(null);
-      current.directions.reset();
-      current.consumer.close();
-    };
-
-    const armProfessorInteraction = () => {
-      let settled = false;
-      let resolve;
-      const promise = new Promise((accept) => { resolve = accept; });
-      const waiter = {
-        promise,
-        accept(event) {
-          if (settled) return;
-          settled = true;
-          if (interactionWaiter === waiter) interactionWaiter = undefined;
-          resolve(event);
-        },
-        disarm() {
-          settled = true;
-          if (interactionWaiter === waiter) interactionWaiter = undefined;
-        },
-      };
-      interactionWaiter = waiter;
-      return waiter;
-    };
-
-    const mapRun = handler.run({
-      mapId: input.mapId,
-      x: input.x,
-      y: input.y,
-    });
-    let mapTerminal;
-    const terminal = mapRun.then((outcome) => {
-      mapTerminal = outcome;
-      return { kind: "map", outcome };
-    });
-
-    try {
-      while (true) {
-        const waiter = armProfessorInteraction();
-        startMapControlsActivation();
-        const next = await Promise.race([
-          terminal,
-          waiter.promise.then((event) => ({ kind: "professor", event })),
-        ]);
-        waiter.disarm();
-        stopMapControlsActivation();
-
-        if (next.kind === "map") return next.outcome;
-        if (mapTerminal !== undefined) return mapTerminal;
-
-        let childOutcome;
-        try {
-          childOutcome = await frame.call("dialogue", {
-            dialogueKey: "professor-vertical-slice",
-            source: {
-              mapId: next.event.mapId,
-              npc: {
-                instanceId: next.event.npc.instanceId,
-                npcId: next.event.npc.npcId,
-              },
-            },
-          });
-        } catch (cause) {
-          if (mapTerminal !== undefined) return mapTerminal;
-          if (cause instanceof RejectedError &&
-              (cause.code === "FRAME_CALL_TARGET_NOT_FOUND" || cause.code === "FRAME_CALL_TARGET_UNAVAILABLE")) {
-            return failed({
-              code: "POKEMAN_DIALOGUE_CALL_REJECTED",
-              data: { callCode: cause.code },
-            });
-          }
-          return failed({ code: "POKEMAN_DIALOGUE_MAP_INVARIANT_FAILED" });
-        }
-
-        if (mapTerminal !== undefined) return mapTerminal;
-        if (childOutcome.type === "completed") {
-          if (!validDialogueResult(childOutcome.value)) {
-            return failed({ code: "POKEMAN_DIALOGUE_RESULT_INVALID" });
-          }
-          continue;
-        }
-        if (childOutcome.type === "failed") {
-          return failed({
-            code: "POKEMAN_DIALOGUE_CHILD_FAILED",
-            data: { childCode: childOutcome.error.code },
-          });
-        }
-        return failed({ code: "POKEMAN_DIALOGUE_CHILD_CANCELLED" });
-      }
-    } finally {
-      interactionWaiter?.disarm();
-      stopMapControlsActivation();
-    }
-    },
-  };
+  return placements[String(mapId)] ?? EMPTY_PLACEMENTS;
 }
 
 const RESULT_DIALOGUE = Object.freeze({
@@ -267,7 +45,7 @@ function validBattleOutcome(value) {
     && Object.hasOwn(RESULT_DIALOGUE, value.result) && value.settlement === "committed";
 }
 
-function createStoryPokeManMapSubsystem(scope, dependencies = {}) {
+export function createPokeManMapSubsystem(scope, dependencies = {}) {
   const MapBuilder = dependencies.RPGMapBuilder ?? RPGMapBuilder;
   const createConsumer = dependencies.createControlsConsumer ?? createControlsConsumer;
   const createDirections = dependencies.createDirectionalControlsTracker ?? createDirectionalControlsTracker;
@@ -278,9 +56,9 @@ function createStoryPokeManMapSubsystem(scope, dependencies = {}) {
       const input = frame.params;
       const handler = new MapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
       let currentMapId = input.mapId;
-      let currentScene = { placements: placementsForMap(input.mapId), interactions: new Map() };
+      let currentScene = { placements: EMPTY_PLACEMENTS, interactions: new Map() };
       const loadScene = async (mapId, signal = frame.signal) => {
-        const scene = await resolveScene(scope.content, scope.state, mapId, { signal, fallback: placementsForMap(mapId) });
+        const scene = await resolveScene(scope.content, scope.state, mapId, { signal, staticPlacements: placementsForMap(mapId) });
         if (mapId === currentMapId) currentScene = scene;
         return scene;
       };
@@ -311,13 +89,22 @@ function createStoryPokeManMapSubsystem(scope, dependencies = {}) {
       };
       const stopControls = () => {
         if (activation === undefined) return;
-        handler.controls.setMoveIntent(null); activation.directions.reset(); activation.consumer.close(); activation = undefined;
+        handler.controls.setMoveIntent(null);
+        activation.directions.reset();
+        activation.consumer.close();
+        activation = undefined;
       };
       const arm = () => {
-        let active = true; let resolve;
+        let active = true;
+        let resolve;
         const promise = new Promise((accept) => { resolve = accept; });
-        const waiter = { promise, accept(value) { if (active) { active = false; interactionWaiter = undefined; resolve(value); } }, disarm() { active = false; if (interactionWaiter === waiter) interactionWaiter = undefined; } };
-        interactionWaiter = waiter; return waiter;
+        const waiter = {
+          promise,
+          accept(value) { if (active) { active = false; interactionWaiter = undefined; resolve(value); } },
+          disarm() { active = false; if (interactionWaiter === waiter) interactionWaiter = undefined; },
+        };
+        interactionWaiter = waiter;
+        return waiter;
       };
       const callChild = async (key, params) => {
         try { return await frame.call(key, params); }
@@ -337,9 +124,11 @@ function createStoryPokeManMapSubsystem(scope, dependencies = {}) {
       const terminal = mapRun.then((outcome) => { mapTerminal = outcome; return { kind: "map", outcome }; });
       try {
         while (true) {
-          const waiter = arm(); startControls();
+          const waiter = arm();
+          startControls();
           const next = await Promise.race([terminal, waiter.promise.then((interaction) => ({ kind: "interaction", interaction }))]);
-          waiter.disarm(); stopControls();
+          waiter.disarm();
+          stopControls();
           if (next.kind === "map") return next.outcome;
           if (mapTerminal !== undefined) return mapTerminal;
           const { event, dialogueKey } = next.interaction;
@@ -350,10 +139,7 @@ function createStoryPokeManMapSubsystem(scope, dependencies = {}) {
           if (dialogue.value === "lab-rival-exchange-accept") {
             try { await exchange(scope.state, { signal: frame.signal }); }
             catch { return failed({ code: "POKEMAN_EXCHANGE_FAILED" }); }
-            const battle = await callChild("battle", {
-              scenarioId: "lab-rival-tutorial",
-              source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } },
-            });
+            const battle = await callChild("battle", { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } });
             if (battle.type !== "completed") return battle;
             if (!validBattleOutcome(battle.value)) return failed({ code: "POKEMAN_BATTLE_RESULT_INVALID" });
             const resultDialogue = await callChild("dialogue", dialogueInput(RESULT_DIALOGUE[battle.value.result], event));
@@ -364,15 +150,11 @@ function createStoryPokeManMapSubsystem(scope, dependencies = {}) {
           catch { return failed({ code: "POKEMAN_STORY_REFRESH_FAILED" }); }
         }
       } finally {
-        interactionWaiter?.disarm(); stopControls();
+        interactionWaiter?.disarm();
+        stopControls();
       }
     },
   };
-}
-
-export function createPokeManMapSubsystem(scope, dependencies = {}) {
-  if (scope.state === undefined || dependencies.RPGMapBuilder !== undefined) return createLegacyPokeManMapSubsystem(scope, dependencies);
-  return createStoryPokeManMapSubsystem(scope, dependencies);
 }
 
 export default defineSubsystem((scope) => createPokeManMapSubsystem(scope));

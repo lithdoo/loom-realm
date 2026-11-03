@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { MAP_ONLY_NPC_PLACEMENTS } from "../../../examples/PokeMan/subsystems/map.mjs";
 import { createPokeManPwaFixture } from "../../../examples/PokeMan/scripts/prepare-pwa-content.mjs";
 import { openProduct } from "./helpers/browser.mjs";
 import { createPokeManRoutePlanner } from "./helpers/pokeman.mjs";
@@ -97,6 +96,24 @@ async function waitForState(page, expected, timeout = 20_000) {
       && document.documentElement.dataset.loomrealmProduct === "ready"
       && window.__loomrealmPwa.failure === null;
   }, expected, { timeout });
+}
+
+async function setQualifiedBrowserVisibility(page, visibilityState) {
+  await page.evaluate((next) => {
+    window.__qualifiedVisibilityState ??= document.visibilityState;
+    if (!Object.hasOwn(document, "visibilityState")) {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => window.__qualifiedVisibilityState,
+      });
+    }
+    window.__qualifiedVisibilityState = next;
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, visibilityState);
+}
+
+async function waitForPauseMessage(page, messageKey) {
+  await page.waitForFunction((expected) => document.querySelector("pokeman-message")?._data?.messageKey === expected, messageKey, { timeout: 20_000 });
 }
 
 async function pressUntilState(page, action) {
@@ -402,8 +419,8 @@ async function qualifyResponsiveFacing(page, planner, state, history) {
   return plan.afterSecond;
 }
 
-async function assertNpcProjection(page, mapId) {
-  const expected = (MAP_ONLY_NPC_PLACEMENTS[mapId] ?? [])
+async function assertNpcProjection(page, planner, mapId) {
+  const expected = planner.placementsForMap(mapId)
     .map(({ x, y, direction }) => ({ x, y, direction }))
     .sort((left, right) => left.x - right.x || left.y - right.y || left.direction - right.direction);
   const observed = (await mapSnapshot(page)).npcs
@@ -615,6 +632,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     const firstProbeObserved = new Promise((resolve) => { observeFirstProbe = resolve; });
     const probeAuthorizations = [];
     const battleDecisionCalls = [];
+    let decisionFailuresRemaining = 0;
     await context.route("https://api.deepseek.com/models", async (route) => {
       probeAuthorizations.push(route.request().headers().authorization ?? null);
       if (probeAuthorizations.length === 1) {
@@ -638,7 +656,16 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
         }),
       });
     });
-    await context.route("https://api.deepseek.com/responses", (route) => fulfillDeterministicBattleDecision(route, battleDecisionCalls));
+    await context.route("https://api.deepseek.com/responses", async (route) => {
+      if (decisionFailuresRemaining > 0) {
+        decisionFailuresRemaining -= 1;
+        const request = route.request();
+        battleDecisionCalls.push({ authorization: request.headers().authorization ?? null, body: JSON.parse(request.postData() ?? "null"), syntheticFailure: true });
+        await route.fulfill({ status: 503, contentType: "text/plain", headers: { "access-control-allow-origin": "*" }, body: "synthetic unavailable" });
+        return;
+      }
+      await fulfillDeterministicBattleDecision(route, battleDecisionCalls);
+    });
     const installationId = await page.evaluate(async (value) => {
       const decode = (entry) => Uint8Array.from(atob(entry.body), (character) => character.charCodeAt(0));
       const installed = await window.__loomrealmPwaQualification.install({
@@ -713,7 +740,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
       failure: null,
       sessionEpoch: (await mapSnapshot(page)).sessionEpoch,
     });
-    await assertNpcProjection(page, 3);
+    await assertNpcProjection(page, planner, 3);
 
     await installMapContinuityProbe(page);
     let state = await qualifyResponsiveFacing(page, planner, initial, history);
@@ -727,7 +754,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     await page.waitForTimeout(500);
     let observed = await mapSnapshot(page);
     assert.deepEqual({ mapId: observed.mapId, x: observed.player.x, y: observed.player.y }, { mapId: 2, x: 8, y: 7 });
-    await assertNpcProjection(page, 2);
+    await assertNpcProjection(page, planner, 2);
 
     // Reach an adjacent tile and prove the rendered Map runtime rejects a
     // movement into the static NPC, without substituting an input-event count.
@@ -747,7 +774,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     const toProfessorMap = planner.planToMap(state, 4);
     assert.ok(toProfessorMap.length > 0);
     state = await runActions(page, toProfessorMap, history);
-    await assertNpcProjection(page, 4);
+    await assertNpcProjection(page, planner, 4);
     const professor = planner.planNpcCollision(state);
     assert.equal(professor.npc.instanceId, "professor");
     if (professor.travel.length > 0) state = await runActions(page, professor.travel, history);
@@ -775,6 +802,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
       "a fresh Dialogue session must be created from the initial hidden READY baseline");
     await page.evaluate(() => { window.__pokemanDialogueBeforeRepeat = document.querySelector("lr-dialogue-view"); });
     await completeProfessorDialogue(page);
+    planner.setEventStates([{ eventId: "prologue", stateId: "rival-ready" }]);
     await waitForState(page, state);
     assert.equal(await page.evaluate(() => document.querySelector("lr-map-view") === window.__pokemanMapBeforeDialogue), true);
 
@@ -801,6 +829,25 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     assert.equal(await page.locator("lr-dialogue-history-entry").count(), 0, "Rival Dialogue must start with fresh History");
     await acceptRivalBattle(page);
     await page.locator("lr-battle-view").waitFor({ state: "attached", timeout: 20_000 });
+    await setQualifiedBrowserVisibility(page, "hidden");
+    await page.waitForTimeout(50);
+    assert.equal(await page.locator("pokeman-message").count(), 0, "background pause waits for foreground before opening Message");
+    await setQualifiedBrowserVisibility(page, "visible");
+    await waitForPauseMessage(page, "battle-host-background-paused");
+    assert.equal(await page.locator("pokeman-message").count(), 1);
+    decisionFailuresRemaining = 3;
+    await page.keyboard.press("KeyZ");
+    await page.locator("pokeman-message").waitFor({ state: "detached", timeout: 20_000 });
+    await waitForPauseMessage(page, "battle-decision-circuit-paused");
+    await page.evaluate(() => { document.querySelector("pokeman-message").dataset.qualificationActivation = "decision-circuit"; });
+    await setQualifiedBrowserVisibility(page, "hidden");
+    await setQualifiedBrowserVisibility(page, "visible");
+    await page.waitForTimeout(50);
+    assert.equal(await page.locator("pokeman-message").count(), 1, "background must not stack a second Message over decision-circuit");
+    assert.equal(await page.locator('pokeman-message[data-qualification-activation="decision-circuit"]').count(), 1, "decision-circuit Message activation remains current");
+    assert.equal(await page.evaluate(() => document.querySelector("pokeman-message")?._data?.messageKey), "battle-decision-circuit-paused");
+    await page.keyboard.press("KeyZ");
+    await page.locator("pokeman-message").waitFor({ state: "detached", timeout: 20_000 });
     try {
       await page.locator("lr-battle-view").waitFor({ state: "detached", timeout: 25_000 });
     } catch (cause) {
@@ -816,6 +863,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     assert.equal(battleDecisionCalls.every((call) => call.authorization === `Bearer ${acceptedDraft}`), true,
       "the private transport must keep the configured credential in Authorization only");
     await completeAllyWinDialogue(page);
+    planner.setEventStates([{ eventId: "prologue", stateId: "after-battle" }]);
     await waitForState(page, state);
 
     const afterBattleProfessor = planner.planNpcCollision(state, "professor");
@@ -827,6 +875,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     state = await runActions(page, [afterBattleProfessor.collision], history);
     await page.keyboard.press("KeyZ");
     await completeFirstJourneyDialogue(page);
+    planner.setEventStates([{ eventId: "first-route", stateId: "active" }]);
     await waitForState(page, state);
 
     let needsChildFrameResumeProbe = true;
@@ -844,7 +893,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
       assert.equal(observed.mapId, targetMapId);
       assert.equal(observed.visual, "ready");
       assert.equal(observed.failure, null);
-      if ([4, 5, 7, 8].includes(targetMapId)) await assertNpcProjection(page, targetMapId);
+      if ([4, 5, 7, 8].includes(targetMapId)) await assertNpcProjection(page, planner, targetMapId);
     }
 
     const longTraversal = planner.planDistance(state, renderDataDiagnostic ? 70 : 20);
@@ -962,7 +1011,9 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     assert.equal(routes.dialogueExecutable.status, 200);
     assert.match(routes.dialogueExecutable.mime, /^text\/javascript/);
     assert.match(routes.dialogueExecutable.version, /^sha256:[0-9a-f]{64}$/);
-    assert.match(routes.dialogueExecutable.body, /professor-vertical-slice/);
+    assert.match(routes.dialogueExecutable.body, /struct\.Dialogue/);
+    assert.match(routes.dialogueExecutable.body, /Dialogue graph contains a runtime cycle/);
+    assert.doesNotMatch(routes.dialogueExecutable.body, /CONTENT_VERSION/);
     assert.doesNotMatch(routes.mapExecutable.body, /from\s*["']@loomrealm/u);
 
     await context.setOffline(true);
@@ -999,7 +1050,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     await waitForState(page, initial);
     assert.equal(await page.locator("game-controls-input").count(), 1);
     assert.equal(await page.locator('game-controls-input[data-input-disabled="duplicate"]').count(), 0);
-    await assertNpcProjection(page, 3);
+    await assertNpcProjection(page, planner, 3);
     const restarted = await mapSnapshot(page);
     assert.notEqual(restarted.sessionEpoch, previousEpoch);
     assert.equal(restarted.failure, null);
