@@ -1012,7 +1012,7 @@ test("PokeMan installs and runs its Map plus child-Frame Dialogue route in real 
     assert.match(routes.dialogueExecutable.mime, /^text\/javascript/);
     assert.match(routes.dialogueExecutable.version, /^sha256:[0-9a-f]{64}$/);
     assert.match(routes.dialogueExecutable.body, /struct\.Dialogue/);
-    assert.match(routes.dialogueExecutable.body, /Dialogue graph contains a runtime cycle/);
+    assert.doesNotMatch(routes.dialogueExecutable.body, /Dialogue graph contains a runtime cycle/);
     assert.doesNotMatch(routes.dialogueExecutable.body, /CONTENT_VERSION/);
     assert.doesNotMatch(routes.mapExecutable.body, /from\s*["']@loomrealm/u);
 

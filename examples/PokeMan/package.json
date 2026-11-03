@@ -9,6 +9,7 @@
     "@loomrealm-game/map": "0.1.0-alpha.0",
     "@loomrealm-game/rpg-dialogue": "0.1.0-alpha.0",
     "@loomrealm-game/schema-form": "0.1.0-alpha.0",
+    "@loomrealm/session-events": "0.1.0-alpha.0",
     "@loomrealm/subsystem": "0.1.0-alpha.0"
   },
   "devDependencies": {

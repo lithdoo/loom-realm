@@ -113,8 +113,20 @@ function assertArraySame(actual, expected, label) {
   if (actual.length !== expected.length || actual.some((entry, index) => entry !== expected[index])) throw new TypeError(`StoryIndex drift at ${label}`);
 }
 
-export async function validateStoryContent(content, { signal, sourceIds } = {}) {
-  const index = await requiredRecord(content, "struct.StoryIndex", "current", signal);
+export async function qualifyStoryContent(content, { signal, sourceIds } = {}) {
+  const cache = new Map();
+  const qualifiedReader = Object.freeze({
+    record(namespace, key) {
+      const identity = `${namespace}\0${key}`;
+      let pending = cache.get(identity);
+      if (pending === undefined) {
+        pending = Promise.resolve(content.record(namespace, key, { signal }));
+        cache.set(identity, pending);
+      }
+      return pending;
+    },
+  });
+  const index = await requiredRecord(qualifiedReader, "struct.StoryIndex", "current", signal);
   if (!exact(index, ["byMap", "byEvent", "byCharacter"]) || !object(index.byMap) || !object(index.byEvent) || !object(index.byCharacter)) throw new TypeError("Invalid StoryIndex/current");
   const characterIds = Object.keys(index.byCharacter).sort(ordinal);
   const eventIds = Object.keys(index.byEvent).sort(ordinal);
@@ -124,9 +136,9 @@ export async function validateStoryContent(content, { signal, sourceIds } = {}) 
     assertArraySame(eventIds, sortedUniqueStrings(sourceIds.events, "complete Event sources"), "complete Event source keys");
   }
   const characters = new Map();
-  for (const characterId of characterIds) characters.set(characterId, await validateCharacter(content, characterId, await requiredRecord(content, "struct.Character", characterId, signal), signal));
+  for (const characterId of characterIds) characters.set(characterId, await validateCharacter(qualifiedReader, characterId, await requiredRecord(qualifiedReader, "struct.Character", characterId, signal), signal));
   const events = new Map();
-  for (const eventId of eventIds) events.set(eventId, await validateEvent(content, eventId, await requiredRecord(content, "struct.Event", eventId, signal), characters, signal));
+  for (const eventId of eventIds) events.set(eventId, await validateEvent(qualifiedReader, eventId, await requiredRecord(qualifiedReader, "struct.Event", eventId, signal), characters, signal));
 
   const characterEvents = new Map(characterIds.map((id) => [id, []]));
   const expectedByMap = new Map();
@@ -181,10 +193,11 @@ function runtimePlacement(npcId, directive) {
     ...(directive.interaction === undefined ? {} : { interactable: true }) });
 }
 
-export async function resolveStoryScene(content, state, mapId, { signal, staticPlacements = [] } = {}) {
+export async function resolveStoryScene(story, state, mapId, { signal, staticPlacements = [] } = {}) {
   if (!Number.isSafeInteger(mapId) || mapId <= 0) throw new TypeError("Invalid mapId");
   if (!Array.isArray(staticPlacements)) throw new TypeError("Invalid static placements");
-  const [story, activeStates] = await Promise.all([validateStoryContent(content, { signal }), readEventStates(state, signal)]);
+  if (!object(story) || !(story.characters instanceof Map) || !(story.events instanceof Map)) throw new TypeError("Invalid qualified Story content");
+  const activeStates = await readEventStates(state, signal);
   const activeDirectives = [];
   const takenOver = new Set();
   const characterIntents = new Map();
@@ -218,7 +231,6 @@ export async function resolveStoryScene(content, state, mapId, { signal, staticP
   for (const placement of staticPlacements) {
     if (!object(placement) || placement.instanceId !== placement.npcId || typeof placement.npcId !== "string" || placement.npcId.length === 0) throw new TypeError("Invalid static NPC placement");
     validPlacement(placement, `static NPC ${placement.npcId}`);
-    await requiredRecord(content, "struct.NPC", placement.npcId, signal);
     contributions.push(Object.freeze({ source: "static", placement: Object.freeze(structuredClone(placement)) }));
   }
   for (const [characterId, character] of story.characters) {

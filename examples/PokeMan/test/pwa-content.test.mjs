@@ -117,6 +117,23 @@ test("real PokeMan FSDB produces a deterministic full-content package", async ()
     kind: "record", namespace: "struct.Event", key: "unindexed-event", mime: "application/json",
     bytes: encode({ states: { active: { maps: {} } } }),
   }]), /complete Event source keys/u);
+
+  const dialogue = (key, value) => ({
+    kind: "record", namespace: "struct.Dialogue", key, mime: "application/json", bytes: encode(value),
+  });
+  await assert.doesNotReject(validatePokeManContentGraph([...first,
+    dialogue("cycle-a", { lines: [{ speaker: "professor", text: "A" }], choices: [{ text: "next", target: "cycle-b" }] }),
+    dialogue("cycle-b", { lines: [{ speaker: "rival", text: "B" }], choices: [{ text: "next", target: "cycle-a" }] }),
+  ]));
+  await assert.rejects(validatePokeManContentGraph([...first,
+    dialogue("broken-target", { lines: [{ text: "broken" }], choices: [{ text: "next", target: "missing" }] }),
+  ]), /missing target missing/u);
+  await assert.rejects(validatePokeManContentGraph([...first,
+    dialogue("broken-speaker", { lines: [{ speaker: "ghost", text: "broken" }] }),
+  ]), /missing Character ghost/u);
+  await assert.rejects(validatePokeManContentGraph([...first,
+    dialogue("broken-mutation", { lines: [{ text: "broken" }], mutation: "missing" }),
+  ]), /missing mutation missing/u);
 });
 
 test("content preparation fails closed on missing references and duplicate PWA identities", () => {

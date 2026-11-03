@@ -14,6 +14,8 @@ export interface PwaSessionBootstrapV1 {
   readonly installationId: string;
   readonly expectedServiceWorker: PwaServiceWorkerGenerationV1;
   readonly windowBridgePort: MessagePort;
+  readonly hostLifecyclePort: MessagePort;
+  readonly hostLifecycleState: "background" | "foreground";
 }
 
 export interface PwaInstallRendererControlV1 {
@@ -164,9 +166,10 @@ export function sameServiceWorkerGeneration(left: PwaServiceWorkerGenerationV1, 
 }
 
 export function parsePwaSessionBootstrapV1(value: unknown): PwaSessionBootstrapV1 {
-  const item = object(value, ["formatVersion", "sessionEpoch", "installationId", "expectedServiceWorker", "windowBridgePort"], "Session bootstrap");
+  const item = object(value, ["formatVersion", "sessionEpoch", "installationId", "expectedServiceWorker", "windowBridgePort", "hostLifecyclePort", "hostLifecycleState"], "Session bootstrap");
   if (item.formatVersion !== 1) throw new TypeError("Invalid Session bootstrap version");
-  return Object.freeze({ formatVersion: 1, sessionEpoch: text(item.sessionEpoch, "sessionEpoch"), installationId: text(item.installationId, "installationId"), expectedServiceWorker: parseGeneration(item.expectedServiceWorker), windowBridgePort: port(item.windowBridgePort) });
+  if (item.hostLifecycleState !== "background" && item.hostLifecycleState !== "foreground") throw new TypeError("Invalid initial Host lifecycle state");
+  return Object.freeze({ formatVersion: 1, sessionEpoch: text(item.sessionEpoch, "sessionEpoch"), installationId: text(item.installationId, "installationId"), expectedServiceWorker: parseGeneration(item.expectedServiceWorker), windowBridgePort: port(item.windowBridgePort), hostLifecyclePort: port(item.hostLifecyclePort), hostLifecycleState: item.hostLifecycleState });
 }
 
 export function parsePwaRuntimeInfoV1(value: unknown): PwaRuntimeInfoV1 {

@@ -161,7 +161,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
     });
     const sessionEventsFatal = createSessionEventFatalLatch();
     sessionEvents = createSessionEventHub({ onFatal: () => sessionEventsFatal.report() });
-    hostLifecycle = createHostLifecyclePublisher(sessionEvents);
+    hostLifecycle = createHostLifecyclePublisher(sessionEvents, { sessionEpoch: randomBytes(24).toString("hex") });
     observe({ type: "startup-stage", stage: "session-events" });
     const view = await prepareDesktopContentView(prepared);
     preparedView = view;

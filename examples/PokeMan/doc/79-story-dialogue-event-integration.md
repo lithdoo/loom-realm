@@ -472,8 +472,9 @@ struct.StoryIndex/current
 - 没有 active Event directive 提到该 Character 时，使用 Character.defaultScenes。
 - 合并所有 source 后，同一 Map 的最终 npcId 必须唯一；冲突 deterministic reject，不做 last-wins。
 - StoryIndex 是 Builder 派生 Content，不是 Shared State authority。
-- Runtime 会加载并交叉验证 StoryIndex 与 Event / Character 源 Content；坏 Event/state/Map/Character/NPC/Dialogue 引用与 derived drift 都显式失败，不由 Map fallback 掩盖。
+- Runtime 在 Map Frame 建立时完成一次 operation-scoped Content qualification，并交叉验证 StoryIndex 与 Event / Character 源 Content；同一次 qualification 中每个 immutable record 最多读取一次。后续 Map refresh 只重读 EventStateList，不重复验证整张 Content graph。坏 Event/state/Map/Character/NPC/Dialogue 引用与 derived drift 都显式失败，不由 Map fallback 掩盖。
 - PWA Content preparation 会完整枚举 `struct.Character` 与 `struct.Event` identity，再用同一 validator 对比 StoryIndex；遗漏整个 source record 也会阻止构建。Runtime 不获得 namespace 枚举 authority。
+- Builder 同时枚举并验证全部 Dialogue、Choice target、Character speaker 与 EventStateMutation 引用；合法 Dialogue cycle 不被拒绝。Runtime 仍在实际消费 record 与 mutation 时执行 trust-boundary shape/target validation。
 - Character 的所有 active directive 先合并为 `absent | placement` intent：兼容的全 absent 表示不出现；absent 与 placement 或多个 placement 同时存在时 deterministic reject。
 - 多 source 的 duplicate `npcId`、duplicate `instanceId`、occupied cell 与不兼容 Character takeover 都 deterministic reject，不存在 last-wins。
 

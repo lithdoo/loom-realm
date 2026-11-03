@@ -282,6 +282,11 @@ export type BattleResult =
 
 export type BattleStatus = "created" | "initializing" | "running" | "paused" | "settled" | "closed";
 
+export interface BattleTransition {
+  readonly from: BattleStatus;
+  readonly to: BattleStatus;
+}
+
 export type BattlePauseReason = "host-background" | "decision-circuit";
 
 export interface BattlePauseEvent {

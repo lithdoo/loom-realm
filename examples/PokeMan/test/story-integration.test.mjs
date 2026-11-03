@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { EVENT_STATE_LIST_KEY } from "../subsystems/business-state.mjs";
-import { resolveStoryScene, validateStoryContent } from "../subsystems/story.mjs";
+import { qualifyStoryContent, resolveStoryScene as resolveQualifiedStoryScene } from "../subsystems/story.mjs";
 
 const fsdb = new URL("../[FSDB]PokeMan/", import.meta.url);
 const recordPath = (namespace, key) => new URL(`[struct]${namespace.slice("struct.".length)}/${key}.json`, fsdb);
@@ -24,6 +24,11 @@ function contentWith(overrides = new Map()) {
 
 function stateFor(eventStates) {
   return { async read() { return { records: [{ key: EVENT_STATE_LIST_KEY, version: 1, value: structuredClone(eventStates) }] }; } };
+}
+
+const validateStoryContent = qualifyStoryContent;
+async function resolveStoryScene(content, state, mapId, options) {
+  return resolveQualifiedStoryScene(await qualifyStoryContent(content), state, mapId, options);
 }
 
 test("default Character scene appears and active Event takeover suppresses it globally", async () => {
@@ -85,6 +90,17 @@ test("StoryIndex drift and broken Character/Event references fail qualification"
     characters: ["center-servant", "ghost", "player", "professor", "rival", "route-trainee"],
     events: ["first-route", "prologue"],
   } }), /complete Character source keys/u);
+});
+
+test("Story qualification reads each immutable Content identity at most once", async () => {
+  const reads = new Map();
+  const content = contentWith();
+  await qualifyStoryContent({ async record(namespace, key, options) {
+    const identity = `${namespace}/${key}`;
+    reads.set(identity, (reads.get(identity) ?? 0) + 1);
+    return content.record(namespace, key, options);
+  } });
+  assert.equal(Math.max(...reads.values()), 1);
 });
 
 test("two active Events producing the same Map npcId fail deterministically instead of last-wins", async () => {
