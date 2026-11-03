@@ -13,7 +13,7 @@ import { runBaseFrame } from "../subsystems/base.mjs";
 import { resolveLabTutorialBattle } from "../subsystems/battle-content.mjs";
 import { createDeepSeekTransport, createPokeManBattleSubsystem, DEEPSEEK_RESPONSES_ENDPOINT } from "../subsystems/battle.mjs";
 import { createPokeManMessageSubsystem, validateMessageInput } from "../subsystems/message.mjs";
-import { resolveStoryScene } from "../subsystems/story.mjs";
+import { qualifyStoryContent, resolveStoryScene } from "../subsystems/story.mjs";
 
 const id = (key) => `${key.namespace}/${key.key}`;
 const clone = (value) => structuredClone(value);
@@ -205,7 +205,7 @@ test("Story Resolver makes exactly the Event-state owner interactable on Map 4",
     return { value: JSON.parse(await readFile(new URL(`[struct]${namespace.slice(7)}/${key}.json`, fsdb), "utf8")) };
   } };
   const state = new FakeState({ [id(EVENT_STATE_LIST_KEY)]: [{ eventId: "prologue", stateId: "rival-ready" }] });
-  const scene = await resolveStoryScene(content, state, 4);
+  const scene = await resolveStoryScene(await qualifyStoryContent(content), state, 4);
   assert.equal(scene.interactions.get("rival-lab"), "lab-rival-intro");
   assert.equal(scene.interactions.has("professor"), false);
   assert.deepEqual(scene.placements.find(({ instanceId }) => instanceId === "rival-lab"), {
@@ -265,6 +265,7 @@ test("Battle Frame settles the raw final snapshot before returning a normal busi
   let closed = 0; let settlement;
   const runtime = {
     onPause() { return () => {}; },
+    onTransition() { return () => {}; },
     async run() { return { type: "ally_win" }; },
     getSnapshot() { return { battleId: "battle-1", status: "settled", actors: [{ actorId: "rival", hp: 8 }, { actorId: "player", hp: 0 }] }; },
     close() { closed += 1; }, pause() {}, resume() {}, cancel() {},
@@ -273,7 +274,7 @@ test("Battle Frame settles the raw final snapshot before returning a normal busi
     readBattleContracts: async () => ({ authority: true }), resolveLabTutorialBattle: async () => ({}),
     readDeepSeekConfiguration: async () => ({ apiKey: "secret" }), decision: {}, presentation: {}, runtime,
     settleBattleContracts: async (_state, _authority, hp) => { settlement = hp; return { status: "committed" }; },
-    subscribeLifecycle: async () => ({ close() {} }),
+    subscribeLifecycle: async (_scope, listener) => { listener("foreground"); return { close() {} }; },
   });
   const outcome = await subsystem.frame({
     params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },
@@ -289,6 +290,7 @@ test("decision-circuit pause opens one Message and resumes only after explicit r
   const runResult = new Promise((resolve) => { resolveRun = resolve; });
   const runtime = {
     onPause(listener) { pauseListener = listener; return () => {}; },
+    onTransition() { return () => {}; },
     run() { return runResult; },
     getSnapshot() { return { battleId: "battle-pause", status: "paused", pauseReason: "decision-circuit", actors: [] }; },
     close() { closeCount += 1; }, pause() {}, cancel() {},
@@ -298,7 +300,7 @@ test("decision-circuit pause opens one Message and resumes only after explicit r
   const subsystem = createPokeManBattleSubsystem({ state: {}, content: {}, events: {} }, {
     readBattleContracts: async () => ({}), resolveLabTutorialBattle: async () => ({}), readDeepSeekConfiguration: async () => ({ apiKey: "x" }),
     decision: {}, presentation: {}, runtime, settleBattleContracts: async () => { throw new Error("must not settle"); },
-    subscribeLifecycle: async () => ({ close() {} }),
+    subscribeLifecycle: async (_scope, listener) => { listener("foreground"); return { close() {} }; },
   });
   const pending = subsystem.frame({
     params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },
@@ -320,6 +322,7 @@ test("host background freezes Battle and foreground waits for an explicit Messag
   const messageResult = new Promise((resolve) => { resolveMessage = resolve; });
   const runtime = {
     onPause(listener) { pauseListener = listener; return () => {}; },
+    onTransition() { return () => {}; },
     run() { return runResult; },
     getSnapshot() { return { battleId: "battle-background", status, ...(pauseReason === undefined ? {} : { pauseReason }), actors: [] }; },
     pause(reason = "host-background") {
@@ -334,7 +337,7 @@ test("host background freezes Battle and foreground waits for an explicit Messag
     readBattleContracts: async () => ({}), resolveLabTutorialBattle: async () => ({}), readDeepSeekConfiguration: async () => ({ apiKey: "x" }),
     decision: {}, presentation: {}, runtime,
     settleBattleContracts: async () => { settlementCount += 1; throw new Error("cancelled Battle must not settle"); },
-    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; return { close() { lifecycleClosed += 1; } }; },
+    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; listener("foreground"); return { close() { lifecycleClosed += 1; } }; },
   });
   const pending = subsystem.frame({
     params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },
@@ -354,11 +357,12 @@ test("host background freezes Battle and foreground waits for an explicit Messag
 });
 
 test("background during Battle initialization is remembered and pauses only after RUNNING", async () => {
-  let lifecycleListener; let pauseListener; let resolveRun; let status = "created"; let pauseCalls = 0; let resolveMessage;
+  let lifecycleListener; let pauseListener; let transitionListener; let resolveRun; let status = "created"; let pauseCalls = 0; let resolveMessage;
   const runResult = new Promise((resolve) => { resolveRun = resolve; });
   const messageResult = new Promise((resolve) => { resolveMessage = resolve; });
   const runtime = {
     onPause(listener) { pauseListener = listener; return () => {}; },
+    onTransition(listener) { transitionListener = listener; return () => {}; },
     run() { status = "initializing"; return runResult; },
     getSnapshot() { return { battleId: "battle-initializing", status, ...(status === "paused" ? { pauseReason: "host-background" } : {}), actors: [] }; },
     pause(reason) { assert.equal(status, "running"); assert.equal(reason, "host-background"); pauseCalls += 1; status = "paused"; pauseListener({ reason }); },
@@ -369,7 +373,7 @@ test("background during Battle initialization is remembered and pauses only afte
   const subsystem = createPokeManBattleSubsystem({ state: {}, content: {}, events: {} }, {
     readBattleContracts: async () => ({}), resolveLabTutorialBattle: async () => ({}), readDeepSeekConfiguration: async () => ({ apiKey: "x" }),
     decision: {}, presentation: {}, runtime, settleBattleContracts: async () => {},
-    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; return { close() {} }; },
+    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; listener("foreground"); return { close() {} }; },
   });
   const pending = subsystem.frame({
     params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },
@@ -381,6 +385,7 @@ test("background during Battle initialization is remembered and pauses only afte
   assert.equal(status, "initializing");
   assert.equal(pauseCalls, 0);
   status = "running";
+  transitionListener({ from: "initializing", to: "running" });
   while (status !== "paused") await new Promise((resolve) => setTimeout(resolve, 1));
   assert.equal(pauseCalls, 1);
   assert.equal(prompt, undefined);
@@ -392,13 +397,14 @@ test("background during Battle initialization is remembered and pauses only afte
 });
 
 test("Battle subscribes before asynchronous business and Content initialization", async () => {
-  let lifecycleListener; let pauseListener; let releaseContracts; let resolveRun; let resolveMessage;
+  let lifecycleListener; let pauseListener; let transitionListener; let releaseContracts; let resolveRun; let resolveMessage;
   let contractsStarted = false; let status = "created"; let runCalls = 0;
   const contractsReady = new Promise((resolve) => { releaseContracts = resolve; });
   const runResult = new Promise((resolve) => { resolveRun = resolve; });
   const messageResult = new Promise((resolve) => { resolveMessage = resolve; });
   const runtime = {
     onPause(listener) { pauseListener = listener; return () => {}; },
+    onTransition(listener) { transitionListener = listener; return () => {}; },
     run() { runCalls += 1; status = "initializing"; return runResult; },
     getSnapshot() { return { battleId: "battle-early-background", status, ...(status === "paused" ? { pauseReason: "host-background" } : {}), actors: [] }; },
     pause(reason) { assert.equal(reason, "host-background"); assert.equal(status, "running"); status = "paused"; pauseListener({ reason }); },
@@ -410,7 +416,7 @@ test("Battle subscribes before asynchronous business and Content initialization"
     async readBattleContracts() { contractsStarted = true; await contractsReady; return {}; },
     resolveLabTutorialBattle: async () => ({}), readDeepSeekConfiguration: async () => ({ apiKey: "x" }),
     decision: {}, presentation: {}, runtime, settleBattleContracts: async () => {},
-    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; return { close() {} }; },
+    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; listener("foreground"); return { close() {} }; },
   });
   const pending = subsystem.frame({
     params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },
@@ -423,6 +429,7 @@ test("Battle subscribes before asynchronous business and Content initialization"
   releaseContracts();
   while (status !== "initializing") await new Promise((resolve) => setImmediate(resolve));
   status = "running";
+  transitionListener({ from: "initializing", to: "running" });
   while (status !== "paused") await new Promise((resolve) => setTimeout(resolve, 1));
   assert.equal(prompt, undefined);
   lifecycleListener("foreground");
@@ -435,10 +442,11 @@ test("Battle subscribes before asynchronous business and Content initialization"
 test("production Host publisher reaches Battle through Session Events without duplicate prompts", async () => {
   const hub = createSessionEventHub();
   const binding = hub.createBinding("battle");
-  const host = createHostLifecyclePublisher(hub);
+  const host = createHostLifecyclePublisher(hub, { sessionEpoch: "battle-test", initialState: "foreground" });
   let pauseListener; let status = "running"; let reason; let resolveRun; let resolveMessage; let messageCalls = 0;
   const runtime = {
     onPause(listener) { pauseListener = listener; return () => {}; },
+    onTransition() { return () => {}; },
     run() { return new Promise((resolve) => { resolveRun = resolve; }); },
     getSnapshot() { return { battleId: "battle-real-events", status, ...(reason === undefined ? {} : { pauseReason: reason }), actors: [] }; },
     pause(nextReason) { if (status === "paused") return; status = "paused"; reason = nextReason; pauseListener({ reason }); },
@@ -472,6 +480,7 @@ test("decision-circuit remains the pause reason across background and foreground
   let pauseListener; let lifecycleListener; let resolveRun; let resolveMessage; let messageCalls = 0;
   const runtime = {
     onPause(listener) { pauseListener = listener; return () => {}; },
+    onTransition() { return () => {}; },
     run() { return new Promise((resolve) => { resolveRun = resolve; }); },
     getSnapshot() { return { battleId: "battle-precedence", status: "paused", pauseReason: "decision-circuit", actors: [] }; },
     pause() { throw new Error("paused decision-circuit must not be overwritten"); },
@@ -480,7 +489,7 @@ test("decision-circuit remains the pause reason across background and foreground
   const subsystem = createPokeManBattleSubsystem({ state: {}, content: {}, events: {} }, {
     readBattleContracts: async () => ({}), resolveLabTutorialBattle: async () => ({}), readDeepSeekConfiguration: async () => ({ apiKey: "x" }),
     decision: {}, presentation: {}, runtime, settleBattleContracts: async () => {},
-    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; return { close() {} }; },
+    subscribeLifecycle: async (_scope, listener) => { lifecycleListener = listener; listener("foreground"); return { close() {} }; },
   });
   const pending = subsystem.frame({
     params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },
@@ -503,6 +512,7 @@ test("pause Message exit cancels without settling Contract HP", async () => {
   let pauseListener; let resolveRun; let cancelCount = 0; let settlementCount = 0;
   const runtime = {
     onPause(listener) { pauseListener = listener; return () => {}; },
+    onTransition() { return () => {}; },
     run() { return new Promise((resolve) => { resolveRun = resolve; }); },
     getSnapshot() { return { battleId: "battle-exit", status: "paused", pauseReason: "decision-circuit", actors: [] }; },
     pause() {}, resume() {}, close() {},
@@ -512,7 +522,7 @@ test("pause Message exit cancels without settling Contract HP", async () => {
     readBattleContracts: async () => ({}), resolveLabTutorialBattle: async () => ({}), readDeepSeekConfiguration: async () => ({ apiKey: "x" }),
     decision: {}, presentation: {}, runtime,
     settleBattleContracts: async () => { settlementCount += 1; throw new Error("exit must not settle"); },
-    subscribeLifecycle: async () => ({ close() {} }),
+    subscribeLifecycle: async (_scope, listener) => { listener("foreground"); return { close() {} }; },
   });
   const pending = subsystem.frame({
     params: { scenarioId: "lab-rival-tutorial", source: { mapId: 4, rival: { instanceId: "rival-lab", npcId: "rival-lab" } } },

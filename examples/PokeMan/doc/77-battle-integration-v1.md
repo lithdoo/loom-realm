@@ -714,6 +714,10 @@ Map controls 在整个 Rival accepted → Battle → result Dialogue 连续序�
 
 当前只区分两种产品需要处理的 Battle pause：
 
+Host lifecycle 的当前状态由现有 `SessionEventHub` 持有，不由 Battle Frame 或平台 adapter 复制。每个 session 使用独立 epoch，快照带单调 sequence；`subscribeHostLifecycle()` 原子安装订阅并交付 retained initial snapshot，消除“先读当前状态、再订阅更新”的丢失窗口。PWA Window 与 Desktop Renderer 只负责把物理可见性事实送入该 authority。
+
+Battle Runtime 的合法迁移为 `created → initializing → running ↔ paused → settled → closed`，取消或失败可从活动状态进入 `closed`。`onTransition()` 是初始化期间 background 与 `running` 建立之间的同步点；产品层不得使用 readiness polling 或 pending-pause timer。
+
 | pauseReason | 触发 | 提示 | 玩家动作 |
 | --- | --- | --- | --- |
 | `host-background` | App / Host 进入后台，product composition 调用 `battle.pause("host-background")` | `战斗已暂停。游戏曾进入后台。` | `继续战斗` / `退出战斗` |
@@ -729,7 +733,7 @@ Battle Frame 使用现有产品设计中的模态 Message Frame 显示暂停窗�
 runtime onPause(reason)
 → Battle Frame 保持 runtime PAUSED
 → 若当前 Host 在 foreground：frame.call("message", pause prompt)
-→ 若当前 Host 在 background：只记住 pending prompt，等 foreground 后再 call Message
+→ 若当前 Host 在 background：Snapshot 保持 paused；foreground snapshot 到达后再 call Message
 → 玩家选择 continue / retry
 → Battle Frame 显式 battle.resume()
 → 玩家选择 exit

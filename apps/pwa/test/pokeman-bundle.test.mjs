@@ -51,7 +51,7 @@ test("PokeMan qualification bundle uses full Content and the five-subsystem brow
   assert.match(map, /createControlsConsumer/);
   assert.match(dialogue, /RPGDialogue/);
   assert.match(dialogue, /struct\.Dialogue/);
-  assert.match(dialogue, /Dialogue graph contains a runtime cycle/);
+  assert.doesNotMatch(dialogue, /Dialogue graph contains a runtime cycle/);
   assert.doesNotMatch(dialogue, /CONTENT_VERSION/);
   assert.match(battle, /DeepSeekDecision/);
   assert.match(battle, /BattleSimulationBuilder/);

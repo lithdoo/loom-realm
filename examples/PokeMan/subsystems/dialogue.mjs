@@ -17,9 +17,10 @@ function validGraphInput(input) {
     && typeof input.source.npc.npcId === "string" && input.source.npc.npcId.length > 0;
 }
 
-function validateGraphRecord(value) {
+export function validateDialogueContent(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)
       || Object.keys(value).some((key) => !["lines", "choices", "mutation", "speakerName"].includes(key))
+      || (value.speakerName !== undefined && (typeof value.speakerName !== "string" || value.speakerName.length === 0))
       || !Array.isArray(value.lines) || value.lines.length === 0
       || value.lines.some((line) => line === null || typeof line !== "object" || Array.isArray(line)
         || Object.keys(line).some((key) => !["speaker", "text"].includes(key))
@@ -29,7 +30,8 @@ function validateGraphRecord(value) {
   const choices = value.choices ?? [];
   if (!Array.isArray(choices) || choices.some((choice) => !exactObject(choice, ["text", "target"])
       || typeof choice.text !== "string" || choice.text.length === 0 || typeof choice.target !== "string" || choice.target.length === 0)) throw new TypeError("Invalid Dialogue choices");
-  return { ...value, choices };
+  if (choices.length > 0 && value.mutation !== undefined) throw new TypeError("Dialogue choices and mutation are mutually exclusive");
+  return Object.freeze({ ...value, choices: Object.freeze(choices.map((choice) => Object.freeze({ ...choice }))) });
 }
 
 export function createPokeManDialogueGraphSubsystem(scope, dependencies = {}) {
@@ -54,11 +56,13 @@ export function createPokeManDialogueGraphSubsystem(scope, dependencies = {}) {
           },
         });
         let currentId = frame.params.dialogueKey;
-        const visited = new Set();
+        const records = new Map();
         while (true) {
-          if (visited.has(currentId)) throw new TypeError("Dialogue graph contains a runtime cycle");
-          visited.add(currentId);
-          const record = validateGraphRecord((await scope.content.record("struct.Dialogue", currentId, { signal: frame.signal }))?.value);
+          let record = records.get(currentId);
+          if (record === undefined) {
+            record = validateDialogueContent((await scope.content.record("struct.Dialogue", currentId, { signal: frame.signal }))?.value);
+            records.set(currentId, record);
+          }
           let selectedTarget;
           for (const [index, line] of record.lines.entries()) {
             const final = index === record.lines.length - 1;

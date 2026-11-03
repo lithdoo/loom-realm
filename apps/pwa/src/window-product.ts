@@ -51,6 +51,8 @@ let current: {
   readonly epoch: string;
   readonly worker: Worker;
   readonly bridge: MessagePort;
+  readonly lifecycle: MessagePort;
+  lifecycleState: "background" | "foreground";
   readonly controller: AbortController;
   readonly renderer: PwaRendererHost;
   readonly closed: Promise<void>;
@@ -64,13 +66,10 @@ function publishPhysicalLifecycle(): void {
   const active = current;
   if (active === null) return;
   const lifecycle = document.visibilityState === "hidden" ? "background" : "foreground";
+  if (lifecycle === active.lifecycleState) return;
+  active.lifecycleState = lifecycle;
   try {
-    active.worker.postMessage(Object.freeze({
-      type: "loomrealm.pwa.host-lifecycle",
-      version: 1,
-      sessionEpoch: active.epoch,
-      lifecycle,
-    }));
+    active.lifecycle.postMessage(lifecycle);
   } catch (cause) {
     console.warn("PWA Host lifecycle was not delivered", cause);
   }
@@ -127,11 +126,13 @@ async function startFreshSession(selection: PwaProductLaunchSelection | null, re
   let renderer: PwaRendererHost | null = null;
   let bridge: MessageChannel | null = null;
   let worker: Worker | null = null;
+  let lifecycle: MessageChannel | null = null;
   let ownedCurrent: typeof current = null;
   try {
     renderer = await createPwaRendererHost(installation.installationId, presentation, controller.signal);
     assertCurrentRevision(revision);
     bridge = new MessageChannel();
+    lifecycle = new MessageChannel();
     let markClosed!: () => void;
     const closed = new Promise<void>((resolve) => { markClosed = resolve; });
     const seen = new Set<string>();
@@ -201,7 +202,7 @@ async function startFreshSession(selection: PwaProductLaunchSelection | null, re
       document.documentElement.dataset.loomrealmProduct = "failed";
       void stopCurrent().catch((cause) => console.error("PWA crashed Session cleanup failed", cause));
     });
-    ownedCurrent = Object.freeze({ epoch, worker, bridge: bridge.port1, controller, renderer, closed, markClosed });
+    ownedCurrent = { epoch, worker, bridge: bridge.port1, lifecycle: lifecycle.port1, lifecycleState: document.visibilityState === "hidden" ? "background" : "foreground", controller, renderer, closed, markClosed };
     current = ownedCurrent;
     state.sessionEpoch = epoch;
     state.serviceWorkerGeneration = expectedServiceWorker.generation;
@@ -213,8 +214,9 @@ async function startFreshSession(selection: PwaProductLaunchSelection | null, re
       installationId: installation.installationId,
       expectedServiceWorker,
       windowBridgePort: bridge.port2,
-    }), [bridge.port2]);
-    publishPhysicalLifecycle();
+      hostLifecyclePort: lifecycle.port2,
+      hostLifecycleState: ownedCurrent.lifecycleState,
+    }), [bridge.port2, lifecycle.port2]);
   } catch (cause) {
     if (current === ownedCurrent) current = null;
     const cleanupFailures: unknown[] = [];
@@ -222,6 +224,8 @@ async function startFreshSession(selection: PwaProductLaunchSelection | null, re
     try { renderer?.close(); } catch (cleanupCause) { cleanupFailures.push(cleanupCause); }
     try { bridge?.port1.close(); } catch (cleanupCause) { cleanupFailures.push(cleanupCause); }
     try { bridge?.port2.close(); } catch (cleanupCause) { cleanupFailures.push(cleanupCause); }
+    try { lifecycle?.port1.close(); } catch (cleanupCause) { cleanupFailures.push(cleanupCause); }
+    try { lifecycle?.port2.close(); } catch (cleanupCause) { cleanupFailures.push(cleanupCause); }
     try { worker?.terminate(); } catch (cleanupCause) { cleanupFailures.push(cleanupCause); }
     if (cleanupFailures.length > 0) throw new AggregateError([cause, ...cleanupFailures], "PWA Window launch and cleanup failed");
     throw cause;
@@ -257,6 +261,7 @@ async function stopCurrent(): Promise<void> {
     try { active.controller.abort(); } catch (cause) { failures.push(cause); }
     try { active.renderer.close(); } catch (cause) { failures.push(cause); }
     try { active.bridge.close(); } catch (cause) { failures.push(cause); }
+    try { active.lifecycle.close(); } catch (cause) { failures.push(cause); }
     try { active.worker.terminate(); } catch (cause) { failures.push(cause); }
     if (failures.length > 0) throw new AggregateError(failures, "PWA Window Session cleanup failed");
   };

@@ -40,6 +40,7 @@ export async function createDesktopHostLifecycleEndpoint(
     if (closed) { connected.close(1008); return; }
     socket = connected;
     connected.on("message", (raw, isBinary) => {
+      if (closed || socket !== connected) return;
       if (isBinary) { connected.close(1003); return; }
       let value: unknown;
       try { value = JSON.parse(raw.toString("utf8")); } catch { connected.close(1007); return; }

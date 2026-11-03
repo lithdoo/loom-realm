@@ -2,6 +2,7 @@ import { cancelled, completed, defineSubsystem, failed } from "@loomrealm/subsys
 import { BattlePresentationBuilder } from "@loomrealm-game/battle/presentation";
 import { BattleSimulationBuilder } from "@loomrealm-game/battle/simulation";
 import { DeepSeekDecision } from "@loomrealm-game/battle/decision";
+import { subscribeHostLifecycle } from "@loomrealm/session-events";
 import { DEEPSEEK_SESSION_CONFIG_KEY, isExactDeepSeekSessionConfig } from "./deepseek-config.mjs";
 import { readBattleContracts, settleBattleContracts } from "./business-state.mjs";
 import { resolveLabTutorialBattle } from "./battle-content.mjs";
@@ -82,9 +83,7 @@ function validMessageResult(value, prompt) {
 }
 
 async function defaultSubscribeLifecycle(scope, listener) {
-  return scope.events.subscribe(["host.lifecycle"], (event) => {
-    if (event.channel === "host.lifecycle" && (event.type === "background" || event.type === "foreground")) listener(event.type);
-  });
+  return subscribeHostLifecycle(scope.events, ({ state }) => listener(state));
 }
 
 export function createPokeManBattleSubsystem(scope, dependencies = {}) {
@@ -105,72 +104,34 @@ export function createPokeManBattleSubsystem(scope, dependencies = {}) {
       let runtime;
       let lifecycle;
       let removePauseListener;
+      let removeTransitionListener;
       let childFailure;
-      let hostForeground = true;
-      let pendingHostPause = false;
-      let pendingPause;
+      let hostLifecycleState;
       let promptInFlight = false;
-      let pendingHostPauseTimer;
-      let frameActive = true;
-      const stopPendingHostPauseMonitor = () => {
-        if (pendingHostPauseTimer === undefined) return;
-        clearTimeout(pendingHostPauseTimer);
-        pendingHostPauseTimer = undefined;
-      };
       const showPendingPrompt = async () => {
-        if (runtime === undefined || !hostForeground || promptInFlight || pendingPause === undefined) return;
+        if (runtime === undefined || hostLifecycleState !== "foreground" || promptInFlight) return;
+        const snapshot = runtime.getSnapshot();
+        if (snapshot.status !== "paused" || snapshot.pauseReason === undefined) return;
         promptInFlight = true;
-        const reason = pendingPause;
-        pendingPause = undefined;
-        const prompt = PAUSE_PROMPTS[reason];
+        const prompt = PAUSE_PROMPTS[snapshot.pauseReason];
         try {
           const outcome = await frame.call("message", prompt);
           if (outcome.type === "cancelled") { runtime.cancel(); return; }
           if (outcome.type === "failed") { childFailure = outcome.error.code; runtime.cancel(); return; }
           if (!validMessageResult(outcome.value, prompt)) { childFailure = "POKEMAN_MESSAGE_RESULT_INVALID"; runtime.cancel(); return; }
           if (outcome.value.actionId === "exit") runtime.cancel();
-          else runtime.resume();
+          else if (hostLifecycleState === "foreground") runtime.resume();
         } catch {
           childFailure = "POKEMAN_MESSAGE_CALL_FAILED";
           runtime.cancel();
         } finally {
           promptInFlight = false;
-          if (pendingPause !== undefined) void showPendingPrompt();
-        }
-      };
-      const applyPendingHostPause = () => {
-        if (!frameActive || !pendingHostPause || hostForeground || runtime === undefined) {
-          if (!pendingHostPause || hostForeground) stopPendingHostPauseMonitor();
-          return;
-        }
-        const status = runtime.getSnapshot().status;
-        if (status === "running") {
-          pendingHostPause = false;
-          stopPendingHostPauseMonitor();
-          runtime.pause("host-background");
-        } else if (status === "created" || status === "initializing") {
-          if (pendingHostPauseTimer === undefined) {
-            pendingHostPauseTimer = setTimeout(() => {
-              pendingHostPauseTimer = undefined;
-              applyPendingHostPause();
-            }, 1);
-          }
-        } else {
-          pendingHostPause = false;
-          stopPendingHostPauseMonitor();
         }
       };
       const acceptLifecycle = (state) => {
-        if (state === "background") {
-          hostForeground = false;
-          pendingHostPause = true;
-          applyPendingHostPause();
-        } else {
-          hostForeground = true;
-          pendingHostPause = false;
-          stopPendingHostPauseMonitor();
-          void showPendingPrompt();
-        }
+        hostLifecycleState = state;
+        if (state === "background" && runtime?.getSnapshot().status === "running") runtime.pause("host-background");
+        if (state === "foreground") void showPendingPrompt();
       };
       try {
         lifecycle = await subscribeLifecycle(scope, acceptLifecycle);
@@ -183,12 +144,13 @@ export function createPokeManBattleSubsystem(scope, dependencies = {}) {
           clock: dependencies.clock ?? clockFactory(), signal: frame.signal, decision, presentation,
         }).build(definition);
 
-        removePauseListener = runtime.onPause(({ reason }) => {
-          pendingPause ??= reason;
+        removePauseListener = runtime.onPause(() => {
           void showPendingPrompt();
         });
+        removeTransitionListener = runtime.onTransition(({ to }) => {
+          if (to === "running" && hostLifecycleState === "background") runtime.pause("host-background");
+        });
         const run = runtime.run();
-        applyPendingHostPause();
         const result = await run;
         if (result.type === "cancelled") {
           return childFailure === undefined ? cancelled() : failed({ code: childFailure });
@@ -204,10 +166,9 @@ export function createPokeManBattleSubsystem(scope, dependencies = {}) {
         if (frame.signal.aborted) return cancelled();
         return failed({ code: "POKEMAN_BATTLE_INTEGRATION_FAILED", message: cause instanceof Error ? cause.message.slice(0, 512) : undefined });
       } finally {
-        frameActive = false;
-        stopPendingHostPauseMonitor();
-        removePauseListener?.();
         lifecycle?.close();
+        removeTransitionListener?.();
+        removePauseListener?.();
         runtime?.close();
       }
     },

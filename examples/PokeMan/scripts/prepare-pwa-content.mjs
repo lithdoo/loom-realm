@@ -4,7 +4,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listFsdbEntries, openFsdb, openFsdbObject } from "@loomrealm/fsdb";
 import { validateEventStateMutationContent } from "../subsystems/business-state.mjs";
-import { validateStoryContent } from "../subsystems/story.mjs";
+import { qualifyStoryContent } from "../subsystems/story.mjs";
+import { validateDialogueContent } from "../subsystems/dialogue.mjs";
+import { MAP_ONLY_NPC_PLACEMENTS } from "../subsystems/map.mjs";
 
 const exampleRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const defaultFsdbRoot = join(exampleRoot, "[FSDB]PokeMan");
@@ -77,9 +79,24 @@ export async function validatePokeManContentGraph(entries) {
     characters: Object.freeze(entries.filter((entry) => entry.kind === "record" && entry.namespace === "struct.Character").map((entry) => entry.key).sort(codePointCompare)),
     events: Object.freeze(entries.filter((entry) => entry.kind === "record" && entry.namespace === "struct.Event").map((entry) => entry.key).sort(codePointCompare)),
   });
-  await validateStoryContent(content, { sourceIds });
+  await qualifyStoryContent(content, { sourceIds });
   const mutations = entries.filter((entry) => entry.kind === "record" && entry.namespace === "struct.EventStateMutation").sort((left, right) => codePointCompare(left.key, right.key));
   for (const mutation of mutations) await validateEventStateMutationContent(content, records.get(`${mutation.namespace}\0${mutation.key}`));
+  const dialogues = entries.filter((entry) => entry.kind === "record" && entry.namespace === "struct.Dialogue").sort((left, right) => codePointCompare(left.key, right.key));
+  const dialogueIds = new Set(dialogues.map((entry) => entry.key));
+  const characterIds = new Set(sourceIds.characters);
+  const mutationIds = new Set(mutations.map((entry) => entry.key));
+  for (const dialogue of dialogues) {
+    const value = validateDialogueContent(records.get(`${dialogue.namespace}\0${dialogue.key}`));
+    for (const line of value.lines) if (line.speaker !== undefined && !characterIds.has(line.speaker)) throw new TypeError(`Dialogue ${dialogue.key} references missing Character ${line.speaker}`);
+    for (const choice of value.choices) if (!dialogueIds.has(choice.target)) throw new TypeError(`Dialogue ${dialogue.key} references missing target ${choice.target}`);
+    if (value.mutation !== undefined && !mutationIds.has(value.mutation)) throw new TypeError(`Dialogue ${dialogue.key} references missing mutation ${value.mutation}`);
+  }
+  for (const placements of Object.values(MAP_ONLY_NPC_PLACEMENTS)) {
+    for (const placement of placements) {
+      if (!records.has(`struct.NPC\0${placement.npcId}`)) throw new TypeError(`Map placement references missing NPC ${placement.npcId}`);
+    }
+  }
 }
 
 async function readFsdbEntry(db, entry) {

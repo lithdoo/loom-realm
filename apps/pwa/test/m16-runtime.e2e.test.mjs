@@ -98,6 +98,7 @@ test("generation mismatch, PREPARE rejection, module ABI failure, and unexpected
       const runSession = (installationId, expectedServiceWorker) => new Promise((resolve) => {
         const worker = new Worker("/session-worker.js", { type: "module" });
         const bridge = new MessageChannel();
+        const lifecycle = new MessageChannel();
         const statuses = [];
         bridge.port1.onmessage = (event) => {
           const message = event.data;
@@ -109,7 +110,7 @@ test("generation mismatch, PREPARE rejection, module ABI failure, and unexpected
           if (event.data?.status === "failed" || event.data?.status === "settled") { worker.terminate(); bridge.port1.close(); resolve(statuses); }
         };
         setTimeout(() => { worker.terminate(); bridge.port1.close(); resolve([...statuses, { timeout: true }]); }, 15_000);
-        worker.postMessage({ formatVersion: 1, sessionEpoch: "isolated-epoch", installationId, expectedServiceWorker, windowBridgePort: bridge.port2 }, [bridge.port2]);
+        worker.postMessage({ formatVersion: 1, sessionEpoch: "isolated-epoch", installationId, expectedServiceWorker, windowBridgePort: bridge.port2, hostLifecyclePort: lifecycle.port2, hostLifecycleState: "foreground" }, [bridge.port2, lifecycle.port2]);
       });
       const generation = window.__loomrealmPwa.serviceWorkerGeneration;
       const currentInstallation = window.__loomrealmPwa.installationId;

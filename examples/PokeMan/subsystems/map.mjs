@@ -2,7 +2,7 @@ import { defineSubsystem, failed } from "@loomrealm/subsystem";
 import { RPGMapBuilder } from "@loomrealm-game/map";
 import { createControlsConsumer, createDirectionalControlsTracker } from "@loomrealm-game/common-controls/subsystem";
 import { exchangeRivalCards } from "./business-state.mjs";
-import { resolveStoryScene } from "./story.mjs";
+import { qualifyStoryContent, resolveStoryScene } from "./story.mjs";
 
 function toMapDirection(direction) {
   switch (direction) {
@@ -50,15 +50,17 @@ export function createPokeManMapSubsystem(scope, dependencies = {}) {
   const createConsumer = dependencies.createControlsConsumer ?? createControlsConsumer;
   const createDirections = dependencies.createDirectionalControlsTracker ?? createDirectionalControlsTracker;
   const resolveScene = dependencies.resolveStoryScene ?? resolveStoryScene;
+  const qualifyStory = dependencies.qualifyStoryContent ?? (dependencies.resolveStoryScene === undefined ? qualifyStoryContent : async (content) => content);
   const exchange = dependencies.exchangeRivalCards ?? exchangeRivalCards;
   return {
     async frame(frame) {
       const input = frame.params;
+      const story = await qualifyStory(scope.content, { signal: frame.signal });
       const handler = new MapBuilder(scope, frame).build({ player: { characterName: input.characterName } });
       let currentMapId = input.mapId;
       let currentScene = { placements: EMPTY_PLACEMENTS, interactions: new Map() };
       const loadScene = async (mapId, signal = frame.signal) => {
-        const scene = await resolveScene(scope.content, scope.state, mapId, { signal, staticPlacements: placementsForMap(mapId) });
+        const scene = await resolveScene(story, scope.state, mapId, { signal, staticPlacements: placementsForMap(mapId) });
         if (mapId === currentMapId) currentScene = scene;
         return scene;
       };
