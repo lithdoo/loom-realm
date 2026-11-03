@@ -131,7 +131,7 @@ function launchHostra(userData) {
   child.once("exit", (code, signal) => {
     readyReject(new Error(`Hostra exited before ready (${code ?? signal})`));
   });
-  return { child, ready };
+  return { child, ready, output: () => output };
 }
 
 async function createProbeObserver() {
@@ -338,6 +338,9 @@ async function runHostraQualification(mode, body) {
     const opened = await openPokeManWindow(ready);
     browser = opened.browser;
     await body({ page: opened.page, observer });
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.stack ?? cause.message : String(cause);
+    throw new Error(`${detail}\nHostra diagnostics:\n${hostra.output()}`, { cause });
   } finally {
     try {
       await browser?.close().catch(() => {});
