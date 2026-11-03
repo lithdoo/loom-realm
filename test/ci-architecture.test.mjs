@@ -17,50 +17,19 @@ test("active workflow surface is compact and milestone-free", async () => {
   assert.ok(files.every((name) => !/^m\d+/i.test(name)));
 });
 
-test("self-hosted diagnostics remain manual, main-only and without repository token permissions", async () => {
-  const files = await readdir(new URL(".github/workflows/", root));
-  if (!files.includes("runner-diagnostics.yml")) return;
-  const workflow = await read(".github/workflows/runner-diagnostics.yml");
-  assert.match(workflow, /^on:\n  workflow_dispatch:/m);
-  assert.doesNotMatch(workflow, /^\s*(?:push|pull_request|pull_request_target):/m);
-  assert.match(workflow, /^permissions: \{\}$/m);
-  assert.match(workflow, /runs-on: \[self-hosted, pwa\]/);
-  assert.match(workflow, /if: github.ref == 'refs\/heads\/main'/);
-  assert.match(workflow, /Scope: the \*\*Runner container\*\*/);
-  assert.doesNotMatch(workflow, /systemctl --user|loginctl show-user|ss -H -ltn/);
-});
-
-test("PokeMan staging deploy only follows successful trusted main PokeMan qualification", async () => {
-  const workflow = await read(".github/workflows/deploy-pokeman-staging.yml");
-  assert.match(workflow, /workflows: \["PokeMan Staging Qualification"\]/);
-  assert.match(workflow, /types: \[completed\]/);
-  assert.match(workflow, /branches: \[main\]/);
-  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/);
-  assert.match(workflow, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
-  assert.match(workflow, /runs-on: \[self-hosted, pwa\]/);
-  assert.match(workflow, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
-  assert.match(workflow, /GITHUB_SHA: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
-  assert.match(workflow, /git ls-remote origin refs\/heads\/main/g);
-  assert.match(workflow, /steps\.freshness\.outputs\.current == 'true'/);
-  assert.match(workflow, /steps\.publishability\.outputs\.current == 'true'/);
-  assert.doesNotMatch(workflow, /^\s+pull_request:/m);
-});
-
-test("PokeMan staging qualification is hosted-only and runs the real browser vertical", async () => {
-  const workflow = await read(".github/workflows/pokeman-staging-qualification.yml");
-  assert.match(workflow, /^on:\n  push:\n    branches: \[main\]/m);
-  assert.doesNotMatch(workflow, /^\s+pull_request:/m);
-  assert.match(workflow, /permissions:\n  contents: read/);
-  assert.match(workflow, /runs-on: ubuntu-latest/);
-  assert.doesNotMatch(workflow, /self-hosted|pull_request_target|secrets\./);
-  assert.match(workflow, /playwright install --with-deps chromium/);
-  assert.match(workflow, /npm run build:staging -w @loomrealm\/pwa/);
-  assert.match(workflow, /npm run build:qualification -w @loomrealm\/pwa/);
-  assert.match(workflow, /npm run test:unit -w @loomrealm\/pwa/);
-  assert.match(workflow, /node --test game-libs\/map\/test\/\*\.test\.mjs/);
-  assert.match(workflow, /node --test examples\/PokeMan\/test\/\*\.test\.mjs/);
-  assert.match(workflow, /run-e2e\.mjs staging/);
+test("PokeMan staging and repo-level Docker Runner workflows have migrated out", async () => {
+  const workflows = await readdir(new URL(".github/workflows/", root));
+  for (const former of [
+    "runner-diagnostics.yml",
+    "deploy-pokeman-staging.yml",
+    "pokeman-staging-qualification.yml",
+  ]) {
+    assert.ok(!workflows.includes(former), "LoomRealm must not schedule obsolete PokeMan workflow " + former);
+  }
+  const migration = await read("doc/30-implementation/pokeman-pwa-migration.md");
+  assert.match(migration, /lithdoo-labs\/pokeman/);
+  assert.match(migration, /pwa-staging\.yml/);
+  assert.match(migration, /lab-server\/projects\/pwa-runner/);
 });
 
 test("impact routing is selective for docs, routes Battle to Browser, and fails closed for unknown code", () => {
