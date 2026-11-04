@@ -77,7 +77,7 @@ async function containerSmoke(project, releaseDir, port) {
     "/pwa/pokeman/",
     "/pwa/pokeman/window.js",
     "/pwa/pokeman/service-worker.js",
-    "/pwa/pokeman/pokeman-bundle.json",
+    "/pwa/pokeman/installation-bundle.json",
   ]) {
     await compose(project, releaseDir, port, ["exec", "-T", "web", "wget", "-q", "-O", "/dev/null", `${origin}${path}`]);
   }
