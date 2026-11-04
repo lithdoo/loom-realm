@@ -1,5 +1,18 @@
-import { MAP_ONLY_NPC_PLACEMENTS } from "../../../../examples/PokeMan/subsystems/map.mjs";
-import { planMovement, validateMapRecord, validateMapTransferRecord, validateTilesetRecord } from "../../../../game-libs/map/dist/semantics.js";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const externalProductRoot = process.env.POKEMAN_ROOT ? resolve(process.env.POKEMAN_ROOT) : null;
+const productRoot = externalProductRoot ?? fileURLToPath(new URL("../../../../examples/PokeMan", import.meta.url));
+const mapSemanticsPath = externalProductRoot
+  ? join(externalProductRoot, "game-libs", "map", "dist", "semantics.js")
+  : fileURLToPath(new URL("../../../../game-libs/map/dist/semantics.js", import.meta.url));
+
+const [productMap, mapSemantics] = await Promise.all([
+  import(pathToFileURL(join(productRoot, "subsystems", "map.mjs")).href),
+  import(pathToFileURL(mapSemanticsPath).href),
+]);
+const { MAP_ONLY_NPC_PLACEMENTS } = productMap;
+const { planMovement, validateMapRecord, validateMapTransferRecord, validateTilesetRecord } = mapSemantics;
 
 const directions = Object.freeze([
   Object.freeze({ direction: 2, code: "ArrowDown", dx: 0, dy: 1 }),
@@ -16,13 +29,13 @@ function recordIndex(fixture) {
   const records = new Map();
   for (const entry of fixture.content) {
     if (entry.kind !== "record") continue;
-    records.set(`${entry.namespace}\0${entry.key}`, JSON.parse(decode(entry).toString("utf8")));
+    records.set(`${entry.namespace}\\0${entry.key}`, JSON.parse(decode(entry).toString("utf8")));
   }
   return records;
 }
 
 function stateKey(state) {
-  return `${state.mapId}\0${state.x}\0${state.y}`;
+  return `${state.mapId}\\0${state.x}\\0${state.y}`;
 }
 
 export function createPokeManRoutePlanner(fixture) {
@@ -31,7 +44,7 @@ export function createPokeManRoutePlanner(fixture) {
   const transfers = new Map();
   const tilesets = new Map();
   const read = (namespace, key) => {
-    const value = records.get(`${namespace}\0${key}`);
+    const value = records.get(`${namespace}\\0${key}`);
     if (value === undefined) throw new Error(`Missing planner record ${namespace}/${key}`);
     return value;
   };
