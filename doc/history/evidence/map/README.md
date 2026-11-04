@@ -42,9 +42,6 @@ This report rechecked the same official archive/local-FSDB identity and investig
 
 The original reports were written inside `game-libs/map/todo_docs/` and contain historical relative links to documents that have since been retired or moved. The reports are therefore preserved byte-for-byte as text archives. Keeping them out of the VitePress Markdown graph prevents stale historical links from becoming a second Current navigation tree while retaining the complete evidence for audit.
 
-Current Map documentation is:
-
-- [Map module](../../../20-modules/loom-map/README.md)
-- [RPGMap API](../../../20-modules/loom-map/api.md)
-- [Runtime / data / presentation](../../../20-modules/loom-map/runtime-and-presentation.md)
-- [Terrain Behavior Contract v1](../../../../game-libs/map/TERRAIN_BEHAVIOR_CONTRACT_V1.md)
+Current Map implementation and product evidence are owned by the
+[PokeMan repository](https://github.com/lithdoo-labs/pokeman). LoomRealm keeps
+these files only as historical provenance for its generic importer work.

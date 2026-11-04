@@ -73,7 +73,6 @@ export default defineConfig({
         { text: 'Main / Runtime', link: '/20-modules/main-system/README' },
         { text: 'Renderer / Presentation', link: '/20-modules/web-renderer/README' },
         { text: 'Content / FSDB', link: '/20-modules/fsdb-content-service/README' },
-        { text: 'Map / Terrain', link: '/20-modules/loom-map/README' },
         { text: 'Desktop / Hostra', link: '/20-modules/desktop-host/README' },
         { text: 'PWA', link: '/20-modules/pwa-host/README' },
       ] },

@@ -8,3 +8,7 @@ doc/.vitepress/.temp/
 .DS_Store
 .local/
 tools/fixtures/essentials-v21.1/*.zip
+# Local importer output is intentionally retained outside source control.  The
+# former consumer example owned the ignore rule; keep the data private after
+# that example is removed.
+examples/essentials-v21.1-local/\[FSDB\]*/

@@ -7,10 +7,8 @@ const ALL = {
   core: true,
   content: true,
   presentation: true,
-  map: true,
   schema: true,
   pwa: true,
-  battle: true,
   dialogue: true,
   desktop: true,
   windows: true,
@@ -20,7 +18,7 @@ const ALL = {
 const FALSE = Object.fromEntries(Object.keys(ALL).map((key) => [key, false]));
 
 const setAllCode = (impact) => {
-  for (const key of ["code", "core", "content", "presentation", "map", "schema", "pwa", "battle", "dialogue", "desktop", "windows"]) {
+  for (const key of ["code", "core", "content", "presentation", "schema", "pwa", "dialogue", "desktop", "windows"]) {
     impact[key] = true;
   }
 };
@@ -30,7 +28,7 @@ const sourcePath = (path) =>
   path.endsWith(".npmrc");
 
 export function requiresBrowser(impact) {
-  return impact.presentation || impact.map || impact.schema || impact.pwa || impact.battle || impact.dialogue;
+  return impact.presentation || impact.schema || impact.pwa || impact.dialogue;
 }
 
 export function classifyPaths(paths) {
@@ -60,12 +58,6 @@ export function classifyPaths(paths) {
 
     if (path.endsWith(".md")) {
       impact.docs = true;
-      if (path.startsWith("game-libs/map/") && /CONTRACT|TERRAIN_BEHAVIOR/i.test(path)) {
-        impact.code = true;
-        impact.map = true;
-        impact.presentation = true;
-        impact.pwa = true;
-      }
       continue;
     }
 
@@ -82,7 +74,6 @@ export function classifyPaths(paths) {
       impact.code = true;
       impact.core = true;
       impact.presentation = true;
-      impact.map = true;
       impact.pwa = true;
       impact.desktop = true;
       impact.windows = true;
@@ -101,7 +92,6 @@ export function classifyPaths(paths) {
       impact.code = true;
       impact.core = true;
       impact.presentation = true;
-      impact.map = true;
       impact.schema = true;
       impact.pwa = true;
       impact.desktop = true;
@@ -115,7 +105,6 @@ export function classifyPaths(paths) {
       impact.code = true;
       impact.core = true;
       impact.content = true;
-      impact.map = true;
       continue;
     }
 
@@ -148,19 +137,10 @@ export function classifyPaths(paths) {
       continue;
     }
 
-    if (
-      path.startsWith("game-libs/map/") ||
-      path.startsWith("game-libs/tile-presentation/") ||
-      path.startsWith("examples/essentials-v21.1/") ||
-      path.startsWith("examples/essentials-v21.1-local/") ||
-      path.startsWith("examples/PokeMan/") ||
-      path.startsWith("tools/fixtures/essentials-v21.1/")
-    ) {
+    if (path.startsWith("tools/fixtures/essentials-v21.1/")) {
       impact.code = true;
+      impact.core = true;
       impact.content = true;
-      impact.presentation = true;
-      impact.map = true;
-      impact.pwa = true;
       continue;
     }
 
@@ -168,12 +148,6 @@ export function classifyPaths(paths) {
       impact.code = true;
       impact.presentation = true;
       impact.schema = true;
-      continue;
-    }
-
-    if (path.startsWith("game-libs/battle/")) {
-      impact.code = true;
-      impact.battle = true;
       continue;
     }
 
@@ -191,7 +165,6 @@ export function classifyPaths(paths) {
     if (path.startsWith("test/game-control-ports-v1/")) {
       impact.code = true;
       impact.presentation = true;
-      impact.map = true;
       impact.pwa = true;
       impact.dialogue = true;
       continue;
@@ -200,13 +173,6 @@ export function classifyPaths(paths) {
     if (path.startsWith("test/game-common-controls-input-v1/") || path.startsWith("test/render-update-v1/")) {
       impact.code = true;
       impact.core = true;
-      continue;
-    }
-
-    if (path.startsWith("test/rpgmap-") || path === "test/map-layering-browser.test.mjs") {
-      impact.code = true;
-      impact.map = true;
-      impact.presentation = true;
       continue;
     }
 

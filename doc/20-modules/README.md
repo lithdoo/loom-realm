@@ -10,7 +10,6 @@
 | Session Events | [Session Events module](./session-events/README.md) | `packages/session-events` + Subsystem/Main/Hostra/PWA integration |
 | Renderer / Input / Web Presentation | [Web Renderer](./web-renderer/README.md) · [渲染架构](../10-architecture/rendering-system.md) | `packages/renderer` 与相关 control/data packages |
 | FSDB / Content | [Content / FSDB](./fsdb-content-service/README.md) | `packages/fsdb`、`packages/fsdb-http`、平台 Content realization |
-| Map Game Library | [Map / Terrain](./loom-map/README.md) | `game-libs/map` + concrete examples |
 | Hostra Desktop | [Desktop composition](./desktop-host/README.md) | `apps/desktop`；Electron/Window 属 Hostra |
 | PWA | [PWA product composition](./pwa-host/README.md) | `apps/pwa`、`packages/game-launcher-pwa` |
 

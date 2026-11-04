@@ -16,13 +16,6 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 RETIRED_RELATIVE = (
-    "game-libs/map/LEDGE_BRIDGE_PASSABILITY_ANALYSIS.md",
-    "game-libs/map/TERRAIN_BEHAVIOR_AGENT_TASK_CARDS.md",
-    "game-libs/map/TERRAIN_BEHAVIOR_DESIGN_DRAFT.md",
-    "game-libs/map/TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md",
-    "game-libs/map/TERRAIN_BEHAVIOR_FREEZE_EXECUTION.md",
-    "game-libs/map/TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md",
-    "examples/essentials-v21.1-local/MAP_BEHAVIOR_REQUIREMENTS.md",
     "packages/data/IMPLEMENTATION-REVIEW.md",
     "packages/subsystem/IMPLEMENTATION-REVIEW.md",
 )

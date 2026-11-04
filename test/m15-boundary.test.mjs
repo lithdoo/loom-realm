@@ -83,15 +83,12 @@ test("Desktop termination budgets preserve the frozen nested deadline order", as
   assert.equal(mainDeadline < 1_000, true, `${mainDeadline} must fit inside Hostra's frozen 1000 ms grace`);
 });
 
-test("Desktop capability preserves frozen Hostra identity, sandboxing and full-qualification evidence", async () => {
+test("Desktop capability preserves frozen Hostra identity, sandboxing and framework-only evidence", async () => {
   const runner = await read("scripts/ci/run-capability.mjs");
   const workflow = await read(".github/workflows/ci.yml");
   const full = await read(".github/workflows/full-qualification.yml");
-  assert.match(
-    runner,
-    /function buildMapStack\(\) \{[\s\S]*"@loomrealm-game\/common-controls"[\s\S]*"@loomrealm-game\/tile-presentation"[\s\S]*"@loomrealm-game\/map"/u,
-  );
-  assert.match(runner, /desktop\(\) \{[\s\S]*buildMapStack\(\)[\s\S]*runDesktopTests\(\)/u);
+  assert.doesNotMatch(runner, /buildMapStack|@loomrealm-game\/(?:map|battle|tile-presentation)/u);
+  assert.match(runner, /desktop\(\) \{[\s\S]*build:desktop-stack[\s\S]*runDesktopTests\(\)/u);
   assert.doesNotMatch(runner, /npm\("run", "(?:test|build):m15/u);
   for (const source of [workflow, full]) {
     assert.match(source, /lithdoo\/hostra/u);

@@ -1,7 +1,0 @@
-{
-    "sprite":  {
-                   "namespace":  "resource.Graphics",
-                   "key":  "Characters/RoadBandit"
-               },
-    "name":  "路霸"
-}
