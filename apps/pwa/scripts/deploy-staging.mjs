@@ -77,9 +77,18 @@ async function containerSmoke(project, releaseDir, port) {
     "/pwa/pokeman/",
     "/pwa/pokeman/window.js",
     "/pwa/pokeman/service-worker.js",
-    "/pwa/pokeman/pokeman-bundle.json",
   ]) {
     await compose(project, releaseDir, port, ["exec", "-T", "web", "wget", "-q", "-O", "/dev/null", `${origin}${path}`]);
+  }
+  try {
+    await compose(project, releaseDir, port, ["exec", "-T", "web", "wget", "-q", "-O", "/dev/null", `${origin}/pwa/pokeman/installation-bundle.json`]);
+  } catch (genericBundleError) {
+    // Keep old releases verifiable until the PokeMan consumer switches builders.
+    try {
+      await compose(project, releaseDir, port, ["exec", "-T", "web", "wget", "-q", "-O", "/dev/null", `${origin}/pwa/pokeman/pokeman-bundle.json`]);
+    } catch {
+      throw genericBundleError;
+    }
   }
   const rootWorker = await run("docker", [
     "compose", "-p", project, "-f", composeFile,

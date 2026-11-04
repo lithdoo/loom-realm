@@ -246,7 +246,11 @@ async function assertDialogueNeverHidden(page, stage) {
 }
 
 test("staging PokeMan boots, runs continuous Professor Dialogue, resumes Map, and reloads", { timeout: 180_000 }, async () => {
-  const fixture = JSON.parse(await readFile(new URL("../dist/staging/pwa/pokeman/pokeman-bundle.json", import.meta.url), "utf8"));
+  const fixtureDirectory = new URL("../dist/staging/pwa/pokeman/", import.meta.url);
+  const fixture = JSON.parse(await readFile(new URL("installation-bundle.json", fixtureDirectory), "utf8")
+    .catch((error) => error.code === "ENOENT"
+      ? readFile(new URL("pokeman-bundle.json", fixtureDirectory), "utf8")
+      : Promise.reject(error)));
   const planner = createPokeManRoutePlanner(fixture);
   const draft = "synthetic-staging-key";
   const probeAuthorizations = [];
