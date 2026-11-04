@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain, type MainSessionResult } from "@loomrealm/main";
 import { createSharedStateAuthority, type SharedStateAuthority } from "@loomrealm/shared-state";
@@ -39,12 +38,12 @@ export interface DesktopProduct {
 }
 
 export interface DesktopProductOptions {
-  readonly installationRoot?: string;
+  readonly installationRoot: string;
   readonly signal?: AbortSignal;
   readonly observe?: (event: Readonly<Record<string, unknown> & { type: string }>) => void;
 }
 
-export async function startDesktopProduct(options: DesktopProductOptions = {}): Promise<DesktopProduct> {
+export async function startDesktopProduct(options: DesktopProductOptions): Promise<DesktopProduct> {
   const observe = (event: Readonly<Record<string, unknown> & { type: string }>) => { try { options.observe?.(Object.freeze(event)); } catch {} };
   let hostra: HostraRpc | null = null;
   let content: Awaited<ReturnType<typeof createDesktopContentService>> | null = null;
@@ -141,7 +140,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
     hostra = await connectHostraRpc();
     assertStarting();
     observe({ type: "startup-stage", stage: "prepare" });
-    const installationRoot = options.installationRoot ?? fileURLToPath(new URL("../../../examples/essentials-v21.1/", import.meta.url));
+    const installationRoot = options.installationRoot;
     const prepared = await prepareHostraGame({ source: { installationRoot }, runnerPolicy });
     let fatalListener: (() => void) | null = null;
     let fatalLatched = false;

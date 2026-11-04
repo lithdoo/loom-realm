@@ -5,7 +5,7 @@
 > 目标：把“物理输入 / unified controls”与 Map、Dialogue 业务 Runtime 解耦，同时不新增独立 binding package
 > 上游输入：[统一操控输入 Web Component](../../game-libs/game-common-controls/game-controls-input.md)
 > Frame 投递：[Frame-targeted Presentation Event v1](../15-contracts/frame-targeted-presentation-event-v1.md)
-> Map Control Port：[RPGMap Control Port v1](../20-modules/loom-map/control-port-v1.md)
+> Map Control Port：migrated with the [PokeMan-owned Map product](../20-modules/loom-map/README.md)
 > Dialogue Control Port：[RPG Dialogue v1 API](../../game-libs/rpg-dialogue/RPG_DIALOGUE_V1_API.md)
 > Qualification 规则：[Qualification 与 Subject](../30-development/qualification.md)
 > Qualification evidence：[Game Control Ports v1](../30-implementation/game-control-ports-v1-qualification.md)

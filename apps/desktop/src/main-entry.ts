@@ -9,6 +9,8 @@ const observe = eventLog === undefined ? undefined : (event: Readonly<Record<str
 let product: Awaited<ReturnType<typeof startDesktopProduct>> | null = null;
 let signalTermination: Promise<void> | null = null;
 const entryLifetime = new AbortController();
+const installationRoot = process.env.LOOMREALM_DESKTOP_INSTALLATION_ROOT;
+if (installationRoot === undefined) throw new Error("LOOMREALM_DESKTOP_INSTALLATION_ROOT is required");
 const terminate = (signal: NodeJS.Signals) => {
   entryLifetime.abort(new Error(`Desktop received ${signal}`));
   signalTermination ??= (product === null ? Promise.resolve() : product.close()).catch((cause) => {
@@ -20,8 +22,8 @@ process.once("SIGTERM", () => terminate("SIGTERM"));
 process.once("SIGINT", () => terminate("SIGINT"));
 
 void startDesktopProduct({
+  installationRoot,
   signal: entryLifetime.signal,
-  ...(process.env.LOOMREALM_DESKTOP_INSTALLATION_ROOT === undefined ? {} : { installationRoot: process.env.LOOMREALM_DESKTOP_INSTALLATION_ROOT }),
   ...(observe === undefined ? {} : { observe }),
 }).then((started) => { product = started; }, (cause) => {
   observe?.({ type: "startup-failed", cause: cause instanceof Error ? cause.stack ?? cause.message : String(cause) });

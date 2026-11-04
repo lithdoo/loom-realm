@@ -15,7 +15,6 @@ LoomRealm 分为 **framework/runtime (`packages/`) → reusable game business (`
 | Subsystem | Domain execution、local business state、Input Interest、Render Domains、Content author API | `packages/subsystem`、[Subsystem](../../10-architecture/subsystem-model.md) | subsystem/render/content tests |
 | Renderer / Web Presentation | current replica、input producer gate、resource client、Web Projector 与 DOM projection | `packages/renderer` 与 related packages、[Renderer](../web-renderer/README.md) | render/input/presentation + Chromium |
 | Content / FSDB | readonly FSDB core、HTTP projection、platform Content service、Subsystem ContentClient | `packages/fsdb`、`packages/fsdb-http`、[Content](../fsdb-content-service/README.md) | content/FSDB/importer suites |
-| Map game library | Map/Tileset/MapAction、passability、movement、Bridge/Ledge、browser presentation | `game-libs/map`、[Map](../loom-map/README.md) | map package + real consumer/product E2E |
 | Desktop / Hostra | Hostra owns Electron/BrowserWindow；LoomRealm Desktop plain Node child composes runtime/data/content | `apps/desktop`、[Desktop](../desktop-host/README.md) | Hostra/Desktop E2E |
 | PWA | Window + Session Worker + Subsystem Workers + Service Worker product composition | `apps/pwa`、[`game-launcher-pwa`](../../../packages/game-launcher-pwa)、[PWA](../pwa-host/README.md) | PWA browser/product qualification |
 

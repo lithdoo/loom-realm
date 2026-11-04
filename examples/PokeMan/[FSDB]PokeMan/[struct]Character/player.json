@@ -1,8 +1,0 @@
-{
-    "battleActor":  {
-                        "namespace":  "struct.BattleActor",
-                        "key":  "player"
-                    },
-    "description":  "MVP 玩家身份。",
-    "name":  "主公"
-}

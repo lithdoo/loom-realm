@@ -6,16 +6,20 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 const mode = process.argv[2] ?? "all";
-if (!new Set(["m16", "m17", "all", "staging"]).has(mode)) throw new Error("Invalid PWA E2E mode");
+if (!new Set(["m16", "m17", "all", "bundle", "staging"]).has(mode)) throw new Error("Invalid PWA E2E mode");
 const requestedTest = process.argv[3];
+const productBundle = mode === "bundle" || mode === "staging";
+if (productBundle && !requestedTest) throw new Error("Bundle E2E mode requires an explicit product-owned test file");
 const root = fileURLToPath(new URL("..", import.meta.url));
-const dist = join(root, "dist", ...(mode === "staging" ? ["staging"] : []));
+const dist = join(root, "dist", ...(productBundle ? ["staging"] : []));
+const bundleBasePath = process.env.LOOMREALM_PWA_BASE_PATH ?? "/";
+if (!bundleBasePath.startsWith("/") || !bundleBasePath.endsWith("/")) throw new Error("LOOMREALM_PWA_BASE_PATH must start and end with /");
 const mime = new Map([[".html", "text/html; charset=utf-8"], [".js", "text/javascript; charset=utf-8"], [".json", "application/json; charset=utf-8"]]);
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
-  const requested = mode === "staging"
-    ? url.pathname === "/pwa/pokeman/" ? "pwa/pokeman/index.html" : url.pathname.slice(1)
+  const requested = productBundle
+    ? url.pathname === bundleBasePath ? `${bundleBasePath.slice(1)}index.html` : url.pathname.slice(1)
     : url.pathname === "/" || !extname(url.pathname) ? "index.html" : url.pathname.slice(1);
   const file = normalize(join(dist, requested));
   if (!file.startsWith(normalize(dist))) { response.writeHead(403).end(); return; }
@@ -34,16 +38,15 @@ const server = createServer(async (request, response) => {
 await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
 const address = server.address();
 if (address === null || typeof address === "string") throw new Error("PWA test server unavailable");
-const patterns = requestedTest ? [requestedTest] : process.env.LOOMREALM_PWA_TEST_FILE ? [process.env.LOOMREALM_PWA_TEST_FILE] : mode === "staging"
-  ? ["test/pokeman-staging.e2e.test.mjs"] : mode === "m16"
+const patterns = requestedTest ? [requestedTest] : process.env.LOOMREALM_PWA_TEST_FILE ? [process.env.LOOMREALM_PWA_TEST_FILE] : mode === "m16"
   ? ["test/m16-runtime.e2e.test.mjs", "test/installation-content.e2e.test.mjs"]
   : mode === "m17"
-    ? ["test/m16-runtime.e2e.test.mjs", "test/installation-content.e2e.test.mjs", "test/lifecycle.e2e.test.mjs", "test/m17-product.e2e.test.mjs", "test/frame-targeted-presentation.e2e.test.mjs", "test/pokeman-map.e2e.test.mjs"]
-    : ["test/m16-runtime.e2e.test.mjs", "test/installation-content.e2e.test.mjs", "test/lifecycle.e2e.test.mjs", "test/m17-product.e2e.test.mjs", "test/frame-targeted-presentation.e2e.test.mjs", "test/pokeman-map.e2e.test.mjs"];
+    ? ["test/m16-runtime.e2e.test.mjs", "test/installation-content.e2e.test.mjs", "test/lifecycle.e2e.test.mjs", "test/frame-targeted-presentation.e2e.test.mjs"]
+    : ["test/m16-runtime.e2e.test.mjs", "test/installation-content.e2e.test.mjs", "test/lifecycle.e2e.test.mjs", "test/frame-targeted-presentation.e2e.test.mjs"];
 const child = spawn(process.execPath, ["--test", "--test-concurrency=1", ...patterns], {
   cwd: root,
   stdio: "inherit",
-  env: { ...process.env, LOOMREALM_PWA_URL: `http://127.0.0.1:${address.port}${mode === "staging" ? "/pwa/pokeman/" : "/"}` },
+  env: { ...process.env, LOOMREALM_PWA_URL: `http://127.0.0.1:${address.port}${productBundle ? bundleBasePath : "/"}` },
   shell: false,
 });
 const exitCode = await new Promise((resolve) => child.once("exit", (code) => resolve(code ?? 1)));

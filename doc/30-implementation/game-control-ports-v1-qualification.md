@@ -5,7 +5,7 @@
 > Executable / qualification-input subject：`5017fde181f8c8f3abe2b0c6d65edb2d6e4bced1`
 > Frozen contract deviations：**None**
 
-本记录验证 [Game Control Ports](../10-architecture/game-control-ports.md)、[RPGMap Control Port v1](../20-modules/loom-map/control-port-v1.md) 和 product-private `base + map` composition。后续 docs-only evidence commit 不改变上述 executable subject。
+本记录是迁移前的历史证据，验证 [Game Control Ports](../10-architecture/game-control-ports.md) 和当时的 product-private `base + map` composition。Map Control Port 与产品资格现由 [PokeMan](../20-modules/loom-map/README.md) 维护。
 
 ## Environment
 

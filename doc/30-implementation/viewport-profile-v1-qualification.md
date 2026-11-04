@@ -3,7 +3,7 @@
 > 层级：Implementation / Qualification Ledger（**唯一 Core live status**）  
 > 状态：**Core Docs Frozen / Core Implemented / Core Qualified (Desktop + shared `/1` contracts)**；2026-09-16。PWA / M16 / M17 = **OUT OF SCOPE**（不是 PASS，也不是本次失败）。项目负责人已确认 npm 无消费者，并在同一日确认非 npm 无混配义务与统一修正后 `/1` cohort；npm consumer 验证不再构成 Freeze gate。  
 > Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；Contract：[Viewport v1](../15-contracts/viewport-state-v1.md) · [corrected Profile `/1`](../15-contracts/renderer-data-profile-v1.md)；Conformance：[Viewport](../15-contracts/viewport-state-conformance-v1.md) · [Profile `/1` fixture revision3](../15-contracts/renderer-data-profile-conformance-v1.md)。  
-> Reviews：[独立 Docs Freeze 签署](./viewport-core-docs-freeze-independent-review-2026-09-16.md) · [本轮 Core 技术终审与修复逐项证据](./viewport-core-final-review-2026-09-16.md) · [历史 Core review](./viewport-core-docs-freeze-review-2026-09-16.md) · [业务归属](./viewport-business-boundary-review-2026-09-16.md) · [整改历史](./viewport-v1-final-freeze-closure-2026-09-16.md) · [范围收缩及完整原文 crosswalk](./viewport-scope-repair-2026-09-16.md)。Map [实施主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)和[PR0 evidence](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PR0_EVIDENCE.md)单独拥有状态。
+> Reviews：[独立 Docs Freeze 签署](./viewport-core-docs-freeze-independent-review-2026-09-16.md) · [本轮 Core 技术终审与修复逐项证据](./viewport-core-final-review-2026-09-16.md) · [历史 Core review](./viewport-core-docs-freeze-review-2026-09-16.md) · [业务归属](./viewport-business-boundary-review-2026-09-16.md) · [整改历史](./viewport-v1-final-freeze-closure-2026-09-16.md) · [范围收缩及完整原文 crosswalk](./viewport-scope-repair-2026-09-16.md)。Map [实施主合同](https://github.com/lithdoo-labs/pokeman/blob/main/doc/map-performance/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)和[PR0 evidence](https://github.com/lithdoo-labs/pokeman/blob/main/doc/map-performance/MAP_VIEWPORT_PR0_EVIDENCE.md)已迁移到 PokeMan。
 
 **Docs Frozen ≠ implemented ≠ qualified/closed。** `/2`由ADR0037取消；旧三-child`/1` executable PASS不可转给新四-child`/1`。正式冻结只覆盖 docs-only subject `4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9`。记录该批准的 commit 不是新的规范 subject。C1 production executable 与本页证据 commit 也不是新的 Frozen docs subject。不查询 npm，不以 npm 消费者核查阻塞。
 
@@ -103,7 +103,7 @@ Desktop physical composition指定document layout viewport，采用`Window.inner
 
 ## 5. Docs Freeze后实施与资格路线
 
-Current plan：[phase plan ADR0037 route](./phase-1-delivery-plan.md)；[independent freeze review](./viewport-core-docs-freeze-independent-review-2026-09-16.md)与[technical review](./viewport-core-final-review-2026-09-16.md)与[scope repair](./viewport-scope-repair-2026-09-16.md)存放设计验收；Map每刀/性能精确规范只看[Map主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。
+Current plan：[phase plan ADR0037 route](./phase-1-delivery-plan.md)；[independent freeze review](./viewport-core-docs-freeze-independent-review-2026-09-16.md)与[technical review](./viewport-core-final-review-2026-09-16.md)与[scope repair](./viewport-scope-repair-2026-09-16.md)存放设计验收；Map每刀/性能精确规范由 [PokeMan Map 主合同](https://github.com/lithdoo-labs/pokeman/blob/main/doc/map-performance/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)拥有。
 
 ```text
 C0 bounded non-npm owner decision + independent docs approval → Core Docs Freeze SHA 4cbf620

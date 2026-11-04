@@ -426,7 +426,7 @@ Tests
     apps/pwa/test/pokeman-staging.e2e.test.mjs
 
 Generated installed resources
-    examples/PokeMan/[FSDB]PokeMan/[resource]Presentation/controls/device-input.browser.js.js
+    PokeMan consumer checkout/[FSDB]PokeMan/[resource]Presentation/controls/device-input.browser.js.js
     examples/essentials-v21.1/[FSDB]essentials-v21.1/[resource]Presentation/controls/device-input.browser.js.js
 
 Documentation closure
@@ -527,7 +527,7 @@ device-input.browser.ts
 2. 将生成的
    `game-libs/game-common-controls/dist/browser/device-input.browser.js`
    **字节级复制**到：
-   - `examples/PokeMan/[FSDB]PokeMan/[resource]Presentation/controls/device-input.browser.js.js`
+   - PokeMan consumer checkout: `[FSDB]PokeMan/[resource]Presentation/controls/device-input.browser.js.js`
    - `examples/essentials-v21.1/[FSDB]essentials-v21.1/[resource]Presentation/controls/device-input.browser.js.js`
 3. 不手工编辑两份 bundle copy。
 4. 现有 `apps/pwa/test/presentation-controls-identity.test.mjs` 必须继续证明两份安装资源与 built bundle SHA-256 相同。

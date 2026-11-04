@@ -73,6 +73,7 @@ test("package root ABI stays exact and subsystem is a separate exact public surf
   });
   assert.equal(metadata.dependencies["@loomrealm/subsystem"], "0.1.0-alpha.0");
   assert.equal(metadata.dependencies["@loomrealm-game/map"], undefined);
+  assert.equal(metadata.dependencies["@pokeman/game-map"], undefined);
   assert.equal(metadata.dependencies["@loomrealm-game/rpg-dialogue"], undefined);
 });
 

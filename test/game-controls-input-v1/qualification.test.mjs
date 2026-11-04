@@ -269,17 +269,3 @@ test("precise and product qualification gates stay separate and complete", async
   assert.equal(precise.includes("test:m17"), false);
   assert.equal(product.includes("test:game-controls-input:qualification"), false);
 });
-
-test("installed presentation fixtures carry the controls browser bundle", async () => {
-  const bundle = await source("game-libs/game-common-controls/dist/browser/device-input.browser.js");
-  assert.equal(bundle.includes("game-controls-input"), true);
-  const fixtures = [
-    "examples/essentials-v21.1/[FSDB]essentials-v21.1/[resource]Presentation/controls/device-input.browser.js.js",
-    "examples/PokeMan/[FSDB]PokeMan/[resource]Presentation/controls/device-input.browser.js.js",
-  ];
-  for (const fixture of fixtures) {
-    const installed = await source(fixture);
-    assert.equal(installed.includes("customElements.define(\"game-controls-input\""), true, fixture);
-    assert.equal(sha256(installed), sha256(bundle), fixture);
-  }
-});
