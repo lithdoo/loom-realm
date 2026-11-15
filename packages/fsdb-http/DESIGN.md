@@ -159,8 +159,8 @@ ResourceKey = NameSegment ("/" NameSegment)*
 因此：
 
 ```text
-[struct]角色
-[resource]角色
+[STRUCT]角色
+[RESOURCE]角色
 ```
 
 可以共存；同一 `(TableKind, TableName)` duplicate 必须使 `openFsdb()` 失败。
@@ -208,6 +208,8 @@ relative path
 ```text
 [FSDB]<DatabaseName>
 ```
+
+以上 `[FSDB]` 为推荐全大写写法。根据 FSDB format authority，物理目录方括号内的 `FSDB` / 表类型标记以 ASCII case-insensitive 方式识别；逻辑名称仍区分大小写。该规则不改变 `/fsdb/v1` 的小写 HTTP kind 与路由语法。
 
 调用方通过 symlink/junction 指向 FSDB root 是允许的；解析后的实际目录成为本次 snapshot 的 physical root。之后不得通过请求路径重新解释调用方原始 root spelling。
 

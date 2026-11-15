@@ -611,11 +611,11 @@ explicitly excluded by frozen policy
 第一版至少保留：
 
 ```text
-[resource]Graphics
-[resource]Audio
-[resource]Fonts
-[resource]Data
-[resource]PBS
+[RESOURCE]Graphics
+[RESOURCE]Audio
+[RESOURCE]Fonts
+[RESOURCE]Data
+[RESOURCE]PBS
 ```
 
 如果完整 distribution 存在：
@@ -627,7 +627,7 @@ Plugins/
 则保留：
 
 ```text
-[resource]Plugins
+[RESOURCE]Plugins
 ```
 
 其他 root-level project files 必须由 Source Manifest 分类；不因为“完整”而无设计地把 executable/tooling 全部塞进 FSDB。
@@ -895,15 +895,15 @@ CanonicalDataset
 FSDB mapper SHOULD 对具有稳定业务 identity 的 hardcoded domain 生成结构化表，例如：
 
 ```text
-[struct]GrowthRate
-[struct]GenderRatio
-[struct]EggGroup
-[struct]BodyShape
-[struct]BodyColor
-[struct]Habitat
-[struct]EvolutionMethod
-[struct]Stat
-[struct]Nature
+[STRUCT]GrowthRate
+[STRUCT]GenderRatio
+[STRUCT]EggGroup
+[STRUCT]BodyShape
+[STRUCT]BodyColor
+[STRUCT]Habitat
+[STRUCT]EvolutionMethod
+[STRUCT]Stat
+[STRUCT]Nature
 ```
 
 这样 `Pokemon.growthRate`、`Pokemon.evolutions[].method` 等引用可以真正闭合在 FSDB 内，而不是依赖 importer 外部隐式知识。

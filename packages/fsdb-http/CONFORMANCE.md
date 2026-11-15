@@ -82,7 +82,7 @@ client-abort large resource
 合法 NFC Unicode `DatabaseName` / `TableName` / `Key` MUST 成功 open，例如：
 
 ```text
-[FSDB]游戏数据/[struct]角色/皮卡丘.json
+[FSDB]游戏数据/[STRUCT]角色/皮卡丘.json
 ```
 
 ### FDB-002 — physical spelling canonicalizes to NFC
@@ -100,8 +100,8 @@ client-abort large resource
 ### FDB-005 — TableIdentity includes kind
 
 ```text
-[struct]角色
-[resource]角色
+[STRUCT]角色
+[RESOURCE]角色
 ```
 
 MUST 可以共存；同一 `(TableKind, TableName)` duplicate MUST fail open。
@@ -109,7 +109,7 @@ MUST 可以共存；同一 `(TableKind, TableName)` duplicate MUST fail open。
 ### FDB-006 — hierarchical ResourceKey
 
 ```text
-[resource]图片/关都地区/真新镇.png
+[RESOURCE]图片/关都地区/真新镇.png
 ```
 
 MUST index 为：
@@ -146,6 +146,10 @@ Resource 即使 extension 为 `txt/json/html`，scanner 不得因为内容不是
 ### FDB-012 — auxiliary object ignored
 
 不属于 recognized candidate 的辅助对象 MUST NOT 被 index/serve。
+
+### FDB-013 — physical directory type marker is ASCII case-insensitive
+
+FSDB root 和四类表目录的方括号内类型标记 MUST 接受任意 ASCII 大小写组合。大小写不同的相同标记归一化为同一 logical kind；`TableName` / `DatabaseName` 不因此改变大小写。由此产生的同一 `TableIdentity` 重复定义 MUST fail open。已存在的小写目录必须继续兼容；新 Writer SHOULD 输出全大写。FSDB HTTP v1 路由中的 `struct` / `extend` / `group` / `resource` 保持原有小写协议形式。
 
 ---
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -33,6 +33,74 @@ async function bytes(stream) {
   await once(stream, "end");
   return Buffer.concat(chunks);
 }
+
+test("directory type markers accept mixed ASCII case and retain lowercase logical kinds", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.parent, "[fSdB]游戏数据");
+    await rename(f.root, root);
+    await rename(join(root, "[struct]角色"), join(root, "[StRuCt]角色"));
+    await rename(join(root, "[resource]图片"), join(root, "[RESOURCE]图片"));
+    const extend = join(root, "[ExTeNd]角色");
+    const group = join(root, "[GrOuP]队伍");
+    await Promise.all([mkdir(extend), mkdir(group)]);
+    await Promise.all([
+      writeFile(join(extend, ".info.meta"), '{"type":"object"}'),
+      writeFile(join(extend, ".extend.meta"), '{"field":"id","struct":"角色"}\n'),
+      writeFile(join(extend, "皮卡丘.json"), '{"id":"皮卡丘"}'),
+      writeFile(join(group, ".info.meta"), '{"type":"object"}'),
+      writeFile(join(group, ".desc.meta"), "队伍说明"),
+      writeFile(join(group, "主力.jsonl"), '{"name":"皮卡丘"}\n'),
+    ]);
+    const db = await openFsdb({ root });
+    try {
+      assert.deepEqual(JSON.parse(Buffer.from(describeFsdb(db))), {
+        name: "游戏数据",
+        tables: [
+          { kind: "extend", name: "角色" },
+          { kind: "group", name: "队伍" },
+          { kind: "resource", name: "图片" },
+          { kind: "struct", name: "角色" },
+        ],
+      });
+      assert.equal(listFsdbEntries(db).length, 4);
+      const entry = await openFsdbObject(db, {
+        type: "entry", kind: "struct", table: "角色", key: "皮卡丘",
+      }, new AbortController().signal);
+      assert.deepEqual(JSON.parse(await bytes(entry.stream)), { name: "皮卡丘" });
+      await entry.close();
+    } finally { await db.close(); }
+  } finally { await f.cleanup(); }
+});
+
+test("case variants of the same type marker collide as one TableIdentity", async (t) => {
+  const f = await fixture();
+  try {
+    const duplicate = join(f.root, "[STRUCT]角色");
+    let separate = false;
+    try {
+      await mkdir(duplicate);
+      const names = await readdir(f.root);
+      separate = names.includes("[struct]角色") && names.includes("[STRUCT]角色");
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    if (!separate) { t.skip("Filesystem does not distinguish ASCII case"); return; }
+    await writeFile(join(duplicate, ".info.meta"), '{"type":"object"}');
+    await assert.rejects(openFsdb({ root: f.root }), /Duplicate table identity/);
+  } finally { await f.cleanup(); }
+});
+
+test("recognized mixed-case malformed tables fail while similar auxiliary prefixes remain ignored", async () => {
+  const f = await fixture();
+  try {
+    await mkdir(join(f.root, "[StRuCtural]notes"));
+    const db = await openFsdb({ root: f.root });
+    await db.close();
+    await mkdir(join(f.root, "[StRuCt]"));
+    await assert.rejects(openFsdb({ root: f.root }), /Invalid FSDB name/);
+  } finally { await f.cleanup(); }
+});
 
 test("core exposes a detached deterministic descriptor and fresh snapshot identity", async () => {
   const f = await fixture();

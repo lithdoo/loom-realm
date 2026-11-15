@@ -17,11 +17,22 @@ FSDB 数据库目录使用：
 数据库下只识别以下四种表目录：
 
 ```text
-[struct]<TableName>
-[extend]<TableName>
-[group]<TableName>
-[resource]<TableName>
+[STRUCT]<TableName>
+[EXTEND]<TableName>
+[GROUP]<TableName>
+[RESOURCE]<TableName>
 ```
+
+**目录类型标记的大小写规则（规范性）**
+
+- 方括号内的 `TYPE` 仅使用 ASCII 类型标记：`FSDB`、`STRUCT`、`EXTEND`、`GROUP`、`RESOURCE`。
+- Reader **MUST** 以 ASCII case-insensitive 方式识别这些物理目录类型标记，例如 `[FSDB]`、`[fsdb]`、`[FsDb]` 等价；`[STRUCT]`、`[struct]`、`[StRuCt]` 等价。
+- Writer **SHOULD** 统一生成全大写类型标记。全大写仅是规范推荐写法，不影响已有小写目录的可读性。
+- 大小写折叠**仅作用于方括号内的 TYPE**；其后的 `DatabaseName` / `TableName`、数据 `Key`、ResourceKey 及元数据文件名仍适用各自既有规则。API 中的 `TableKind` 规范值继续使用小写。
+- 同一数据库下 `[STRUCT]角色` 与 `[struct]角色` 映射为相同 `(TableKind, TableName)`，若两者作为独立物理目录同时存在，**MUST** 拒绝打开，不能静默选取其中之一。
+- 只有类型标记完全匹配（忽略 ASCII 大小写）时才是 recognized candidate；`[STRUCTURE]角色` 不是 `STRUCT` 类型。
+
+本次大小写修订**不定义嵌套子 FSDB**。当前版本仅将 `[FSDB]` 识别为根数据库目录；根目录下仍只识别四类表，嵌套子数据库的身份、作用域和生命周期另行规范。
 
 统一定义：
 
@@ -35,13 +46,13 @@ TableIdentity = (TableKind, TableName)
 因此同一个数据库中：
 
 ```text
-[struct]角色
-[resource]角色
+[STRUCT]角色
+[RESOURCE]角色
 ```
 
 可以共存，因为它们的 `TableKind` 不同；同一 `(TableKind, TableName)` 不得出现两个 logical table。
 
-以上四类表目录均可包含 `.desc.meta`；其中 `[resource]` 与 `[group]` 必填，`[struct]` 与 `[extend]` 可选。
+以上四类表目录均可包含 `.desc.meta`；其中 `[RESOURCE]` 与 `[GROUP]` 必填，`[STRUCT]` 与 `[EXTEND]` 可选。
 
 FSDB 根目录下未被上述规则识别的其他目录或文件不会进入 FSDB logical namespace。
 
@@ -95,7 +106,7 @@ foo?bar          # non-portable filename character
 CON              # Windows reserved device basename
 ```
 
-FSDB logical identity **区分大小写**。实现不得自动 lowercase/uppercase、trim、collapse whitespace 或改变合法 NFC logical name。为了跨大小写不敏感文件系统迁移，作者 SHOULD 避免只通过大小写区分两个名称，例如 `Hero` 与 `hero`。
+FSDB logical identity **区分大小写**（仅物理目录的方括号内类型标记例外）。实现不得自动 lowercase/uppercase、trim、collapse whitespace 或改变合法 NFC logical name。为了跨大小写不敏感文件系统迁移，作者 SHOULD 避免只通过大小写区分两个名称，例如 `Hero` 与 `hero`。
 
 统一 logical type：
 
@@ -109,7 +120,7 @@ ResourceKey = NameSegment ("/" NameSegment)*
 
 `/` 只用于 ResourceKey 的逻辑层级分隔，不属于任何单个 `NameSegment`。
 
-普通 `[struct]`、`[extend]`、`[group]` key 都是单个 `NameSegment`。ResourceKey 可以由多个 `NameSegment` 组成。
+普通 `[STRUCT]`、`[EXTEND]`、`[GROUP]` key 都是单个 `NameSegment`。ResourceKey 可以由多个 `NameSegment` 组成。
 
 同一 logical namespace 内，NFC 后的完整 logical identity必须唯一。
 
@@ -126,9 +137,9 @@ $foo   → logical protocol / service namespace
 
 表目录中的识别规则：
 
-- `[struct]` / `[extend]`：非 dot-prefixed regular file 以 `.json` 结尾时是 data entry candidate；去掉固定末尾 `.json` 后，经 NFC canonicalization 必须得到合法 `Key`；
-- `[group]`：非 dot-prefixed regular file 以 `.jsonl` 结尾时是 data entry candidate；去掉固定末尾 `.jsonl` 后，经 NFC canonicalization 必须得到合法 `Key`；
-- `[resource]`：递归扫描非 dot-prefixed directory；目录名 canonicalize 为 NFC 后必须是合法 `NameSegment`。非 dot-prefixed regular file 是 resource candidate，必须具有非空最后扩展名并满足 5.3；
+- `[STRUCT]` / `[EXTEND]`：非 dot-prefixed regular file 以 `.json` 结尾时是 data entry candidate；去掉固定末尾 `.json` 后，经 NFC canonicalization 必须得到合法 `Key`；
+- `[GROUP]`：非 dot-prefixed regular file 以 `.jsonl` 结尾时是 data entry candidate；去掉固定末尾 `.jsonl` 后，经 NFC canonicalization 必须得到合法 `Key`；
+- `[RESOURCE]`：递归扫描非 dot-prefixed directory；目录名 canonicalize 为 NFC 后必须是合法 `NameSegment`。非 dot-prefixed regular file 是 resource candidate，必须具有非空最后扩展名并满足 5.3；
 - recognized candidate 若命名、类型或内容 malformed，应使 FSDB validation 失败，而不是静默忽略；
 - 不属于 candidate 的普通辅助对象可以忽略；
 - dot-prefixed 文件/目录默认不进入普通 data namespace；只有本规范明确声明的 `.info.meta`、`.extend.meta`、`.desc.meta` 具有 FSDB metadata 语义。
@@ -179,7 +190,7 @@ FSDB 的结构化文本文件采用统一编码：
 
 UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务 schema validation 仍属于后文定义的 Integrity-valid 层。
 
-## 2. 基础表数据目录（[struct]）
+## 2. 基础表数据目录（[STRUCT]）
 
 ### 2.1 定义与用途
 
@@ -188,7 +199,7 @@ UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务
 ### 2.2 目录结构
 
 ```text
-[struct]<TableName>/
+[STRUCT]<TableName>/
 ├── {Key1}.json
 ├── {Key2}.json
 ├── .info.meta
@@ -205,14 +216,14 @@ UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务
 例如：
 
 ```text
-[struct]角色/皮卡丘.json
+[STRUCT]角色/皮卡丘.json
 → TableName = 角色
 → Key = 皮卡丘
 ```
 
 ### 2.4 元数据文件（.info.meta）
 
-每个 `[struct]` 目录必须包含 `.info.meta`，采用 JSON Schema 描述该目录下 JSON object 的结构。
+每个 `[STRUCT]` 目录必须包含 `.info.meta`，采用 JSON Schema 描述该目录下 JSON object 的结构。
 
 `.info.meta` 通常包含：
 
@@ -223,7 +234,7 @@ UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务
 
 如果需要执行完整 schema integrity validation，应优先遵循 `.info.meta` 中显式声明的 JSON Schema `$schema` dialect；未声明 dialect 时，不能假定不同实现会使用同一默认 draft。
 
-## 3. 拓展表数据目录（[extend]）
+## 3. 拓展表数据目录（[EXTEND]）
 
 ### 3.1 定义与用途
 
@@ -232,7 +243,7 @@ UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务
 ### 3.2 目录结构
 
 ```text
-[extend]<TableName>/
+[EXTEND]<TableName>/
 ├── {Key1}.json
 ├── {Key2}.json
 ├── .info.meta
@@ -251,13 +262,13 @@ UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务
 
 #### 3.4.1 .info.meta 文件
 
-与 `[struct]` 相同，每个 `[extend]` 必须包含 `.info.meta`。
+与 `[STRUCT]` 相同，每个 `[EXTEND]` 必须包含 `.info.meta`。
 
 如果某字段在 `.extend.meta` 中被声明为基础表引用，则该字段在 `.info.meta` 中定义的数据类型必须为 `string`。
 
 #### 3.4.2 .extend.meta 文件
 
-每个 `[extend]` 必须包含 `.extend.meta`。文件采用 UTF-8 JSONL，每个非空 record 为一个 JSON object：
+每个 `[EXTEND]` 必须包含 `.extend.meta`。文件采用 UTF-8 JSONL，每个非空 record 为一个 JSON object：
 
 ```json
 {"field": "<字段名>", "struct": "<引用的基础表名>", "desc": "<引用关系描述>"}
@@ -273,16 +284,16 @@ UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务
 
 `struct` 的值必须满足 `TableName` 规则。
 
-## 4. 分组数组表数据目录（[group]）
+## 4. 分组数组表数据目录（[GROUP]）
 
 ### 4.1 定义与用途
 
-分组数组表按 key 保存一组结构一致的数据对象。与 `[struct]` 每条记录一个 JSON 文件不同，`[group]` 每个 key 对应一个 JSONL 文件。
+分组数组表按 key 保存一组结构一致的数据对象。与 `[STRUCT]` 每条记录一个 JSON 文件不同，`[GROUP]` 每个 key 对应一个 JSONL 文件。
 
 ### 4.2 目录结构
 
 ```text
-[group]<TableName>/
+[GROUP]<TableName>/
 ├── {Key1}.jsonl
 ├── {Key2}.jsonl
 ├── .info.meta
@@ -301,11 +312,11 @@ UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务
 
 #### 4.4.1 .info.meta 文件
 
-每个 `[group]` 必须包含 `.info.meta`，采用 JSON Schema 描述每条 JSONL object 的结构。
+每个 `[GROUP]` 必须包含 `.info.meta`，采用 JSON Schema 描述每条 JSONL object 的结构。
 
 #### 4.4.2 .desc.meta 文件
 
-每个 `[group]` 必须包含 `.desc.meta`，采用 Markdown 描述：
+每个 `[GROUP]` 必须包含 `.desc.meta`，采用 Markdown 描述：
 
 - `{Key}.jsonl` 的分组依据；
 - 对象序列业务含义；
@@ -313,11 +324,11 @@ UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务
 
 #### 4.4.3 .extend.meta 文件（可选）
 
-`[group]` 可选包含 `.extend.meta`，格式与 `[extend]` 相同。
+`[GROUP]` 可选包含 `.extend.meta`，格式与 `[EXTEND]` 相同。
 
 其 `field` 只针对每条 JSONL object 的字段，不描述整文件级元数据。若某字段被声明为引用字段，则 `.info.meta` 中该字段的数据类型必须为 `string`。
 
-## 5. 资源表数据目录（[resource]）
+## 5. 资源表数据目录（[RESOURCE]）
 
 ### 5.1 定义与用途
 
@@ -328,7 +339,7 @@ UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务
 Resource 表允许使用子目录组织资源。子目录只参与 ResourceKey，不形成新的 FSDB 表或独立 metadata scope。
 
 ```text
-[resource]<TableName>/
+[RESOURCE]<TableName>/
 ├── {LeafKey1}.{ext1}
 ├── {Segment1}/
 │   ├── {LeafKey2}.{ext2}
@@ -337,7 +348,7 @@ Resource 表允许使用子目录组织资源。子目录只参与 ResourceKey�
 └── .desc.meta
 ```
 
-表级 `.desc.meta` 始终位于 `[resource]<TableName>` 根目录。
+表级 `.desc.meta` 始终位于 `[RESOURCE]<TableName>` 根目录。
 
 ### 5.3 数据文件与 ResourceKey 规范
 
@@ -366,15 +377,15 @@ logical ResourceKey:
 示例：
 
 ```text
-[resource]图片/皮卡丘.png
+[RESOURCE]图片/皮卡丘.png
 → key = 皮卡丘
 → ext = png
 
-[resource]图片/关都地区/真新镇.png
+[RESOURCE]图片/关都地区/真新镇.png
 → key = 关都地区/真新镇
 → ext = png
 
-[resource]图片/UI/道具.large.webp
+[RESOURCE]图片/UI/道具.large.webp
 → key = UI/道具.large
 → ext = webp
 ```
@@ -401,7 +412,7 @@ Resource 子目录中的 dot-prefixed 文件或目录不进入 Resource namespac
 
 ### 5.4 元数据文件（.desc.meta）
 
-`.desc.meta` 为 UTF-8 Markdown。对于 `[resource]` 和 `[group]` 必填；对于 `[struct]` 和 `[extend]` 可选。
+`.desc.meta` 为 UTF-8 Markdown。对于 `[RESOURCE]` 和 `[GROUP]` 必填；对于 `[STRUCT]` 和 `[EXTEND]` 可选。
 
 Resource 表只有根目录 `.desc.meta` 具有表级 metadata 语义；子目录不创建新的 metadata scope。
 
@@ -409,21 +420,21 @@ Resource 表只有根目录 `.desc.meta` 具有表级 metadata 语义；子目�
 
 ```text
 [FSDB]<DatabaseName>/
-├── [struct]<TableName>/
+├── [STRUCT]<TableName>/
 │   ├── {Key}.json
 │   ├── .info.meta
 │   └── .desc.meta (可选)
-├── [extend]<TableName>/
+├── [EXTEND]<TableName>/
 │   ├── {Key}.json
 │   ├── .info.meta
 │   ├── .extend.meta
 │   └── .desc.meta (可选)
-├── [group]<TableName>/
+├── [GROUP]<TableName>/
 │   ├── {Key}.jsonl
 │   ├── .info.meta
 │   ├── .desc.meta
 │   └── .extend.meta (可选)
-└── [resource]<TableName>/
+└── [RESOURCE]<TableName>/
     ├── {LeafKey}.{ext}
     ├── {NameSegment}/
     │   └── {LeafKey}.{ext}
@@ -434,11 +445,11 @@ Resource 表只有根目录 `.desc.meta` 具有表级 metadata 语义；子目�
 
 ### 7.1 引用规则
 
-`[extend]` 与 `[group]` 通过 `.extend.meta` 声明对 `[struct]` 的引用：
+`[EXTEND]` 与 `[GROUP]` 通过 `.extend.meta` 声明对 `[STRUCT]` 的引用：
 
 1. `.extend.meta` 声明引用字段与目标基础表；
 2. 数据中的引用字段存储目标基础表的 `Key`；
-3. `[group]` 的引用字段作用于每条 JSONL object；
+3. `[GROUP]` 的引用字段作用于每条 JSONL object；
 4. 一个表可以声明多个基础表引用。
 
 ### 7.2 引用完整性
@@ -492,7 +503,7 @@ other explicitly declared business integrity constraints hold
 ### 8.1 命名规范
 
 - 名称优先服务于人和 AI 的直接理解，不需要为了数据库习惯强制转换成 ASCII；
-- 中文等 Unicode 名称是正常用法，例如 `[struct]角色/皮卡丘.json`；
+- 中文等 Unicode 名称是正常用法，例如 `[STRUCT]角色/皮卡丘.json`；
 - 写入器应请求创建 NFC 名称；读取器以 NFC canonical logical identity 进行索引，并拒绝 normalization collision；
 - 避免只通过大小写区分同一 namespace 中的名称；
 - `$` 前缀属于 logical reserved namespace；`.` 前缀属于 physical reserved/auxiliary namespace；
@@ -505,8 +516,8 @@ other explicitly declared business integrity constraints hold
 - `.info.meta` 应完整描述字段、类型和约束；
 - 需要跨实现 schema validation 时，应显式声明 `$schema`；
 - `.extend.meta` 的 `desc` 应说明引用业务含义；
-- `[group]` `.desc.meta` 应说明分组依据；
-- `[resource]` `.desc.meta` 应说明资源用途和命名约定。
+- `[GROUP]` `.desc.meta` 应说明分组依据；
+- `[RESOURCE]` `.desc.meta` 应说明资源用途和命名约定。
 
 ### 8.3 数据组织
 

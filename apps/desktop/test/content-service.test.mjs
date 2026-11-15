@@ -11,12 +11,12 @@ import { createDesktopContentService, prepareDesktopContentView } from "../dist/
 
 const runnerPolicy = Object.freeze({ helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 1_000, terminationGraceMs: 100 });
 
-async function fixture(resourceBytes = Buffer.from([0, 255, 1, 2])) {
+async function fixture(resourceBytes = Buffer.from([0, 255, 1, 2]), { rootMarker = "[FSDB]", structMarker = "[struct]" } = {}) {
   const parent = await mkdtemp(join(tmpdir(), "desktop-content-"));
   const installationRoot = join(parent, "game");
   const subsystems = join(installationRoot, "subsystems");
-  const fsdbRoot = join(installationRoot, "[FSDB]内容");
-  const struct = join(fsdbRoot, "[struct]角色");
+  const fsdbRoot = join(installationRoot, `${rootMarker}内容`);
+  const struct = join(fsdbRoot, `${structMarker}角色`);
   const extend = join(fsdbRoot, "[extend]角色");
   const group = join(fsdbRoot, "[group]队伍");
   const mapStruct = join(fsdbRoot, "[struct]地图");
@@ -121,6 +121,19 @@ async function assertProblem(response, status, code) {
     code,
   });
 }
+
+test("prepared content discovery accepts mixed-case FSDB and table markers", async (t) => {
+  const f = await fixture(undefined, { rootMarker: "[fSdB]", structMarker: "[STRUCT]" });
+  t.after(() => f.cleanup());
+  const view = await prepareDesktopContentView(f.prepared);
+  const service = await createDesktopContentService({ view }); t.after(() => service.close());
+  const access = service.access(service.createGrant({
+    permissions: ["records"], expiresAtUnixMs: Date.now() + 60_000,
+  }));
+  const record = await request(access, "/records/struct.%E8%A7%92%E8%89%B2/hero");
+  assert.equal(record.status, 200);
+  assert.deepEqual(await record.json(), { name: "Hero" });
+});
 
 test("prepared view serves deterministic manifest and the complete logical FSDB projection", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());

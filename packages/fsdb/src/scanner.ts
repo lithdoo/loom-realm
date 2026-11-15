@@ -6,7 +6,7 @@ import { canonicalName, resourceExtension } from "./names.js";
 import { JSONL_TYPE, JSON_TYPE, MARKDOWN_TYPE, SCHEMA_TYPE, resourceMime } from "./mime.js";
 import { tableId, type FileEntry, type Fingerprint, type FsdbMetadataName, type Snapshot, type TableIndex, type FsdbTableKind } from "./model.js";
 
-const TABLE = /^\[(struct|extend|group|resource)\](.*)$/;
+const TABLE_KINDS = ["struct", "extend", "group", "resource"] as const;
 const PATH_SEPARATOR = Buffer.from(sep);
 
 function childPath(parent: Buffer, name: Buffer | string): Buffer {
@@ -18,9 +18,17 @@ function baseName(path: Buffer): Buffer {
   return index < 0 ? path : path.subarray(index + 1);
 }
 
-function startsWithAscii(name: Buffer, prefix: string): boolean {
-  const bytes = Buffer.from(prefix);
-  return name.length >= bytes.length && name.subarray(0, bytes.length).equals(bytes);
+function startsWithAsciiCaseInsensitive(name: Buffer, prefix: string): boolean {
+  const bytes = Buffer.from(prefix, "ascii");
+  if (name.length < bytes.length) return false;
+  for (let index = 0; index < bytes.length; index++) {
+    const actual = name[index]!;
+    const expected = bytes[index]!;
+    const foldedActual = actual >= 0x41 && actual <= 0x5a ? actual + 0x20 : actual;
+    const foldedExpected = expected >= 0x41 && expected <= 0x5a ? expected + 0x20 : expected;
+    if (foldedActual !== foldedExpected) return false;
+  }
+  return true;
 }
 
 function endsWithAscii(name: Buffer, suffix: string): boolean {
@@ -181,17 +189,16 @@ export async function scanFsdb(rootInput: string): Promise<Snapshot> {
   const root = await realpath(supplied, { encoding: "buffer" });
   const rootStat = await lstat(root);
   if (!rootStat.isDirectory()) throw new Error("FSDB root must be a directory");
-  const rootName = decodePhysicalName(baseName(root));
-  if (!rootName.startsWith("[FSDB]")) throw new Error("Invalid FSDB root name");
-  const name = canonicalName(rootName.slice(6));
+  const rootNameBytes = baseName(root);
+  if (!startsWithAsciiCaseInsensitive(rootNameBytes, "[FSDB]")) throw new Error("Invalid FSDB root name");
+  const rootName = decodePhysicalName(rootNameBytes);
+  const name = canonicalName(rootName.slice("[FSDB]".length));
   const tables = new Map<string, TableIndex>();
   for (const item of await readdir(root, { withFileTypes: true, encoding: "buffer" })) {
-    if (!startsWithAscii(item.name, "[struct]") && !startsWithAscii(item.name, "[extend]") && !startsWithAscii(item.name, "[group]") && !startsWithAscii(item.name, "[resource]")) continue;
+    const kind = TABLE_KINDS.find((candidate) => startsWithAsciiCaseInsensitive(item.name, `[${candidate}]`));
+    if (!kind) continue;
     const physicalName = decodePhysicalName(item.name);
-    const match = TABLE.exec(physicalName);
-    if (!match) continue;
-    const kind = match[1] as FsdbTableKind;
-    const tableName = canonicalName(match[2]!);
+    const tableName = canonicalName(physicalName.slice(kind.length + 2));
     const path = childPath(root, item.name);
     const stat = await lstat(path);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Table candidate must be a real directory");

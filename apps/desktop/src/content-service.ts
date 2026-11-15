@@ -190,7 +190,7 @@ function publicManifest(installation: HostraPreparedInstallation): Uint8Array {
 async function preparedFsdbRoot(canonicalRoot: string): Promise<string> {
   const entries = await readdir(canonicalRoot, { withFileTypes: true });
   const candidates = entries.filter((entry) =>
-    entry.isDirectory() && !entry.isSymbolicLink() && /^\[FSDB\].+$/u.test(entry.name),
+    entry.isDirectory() && !entry.isSymbolicLink() && /^\[[Ff][Ss][Dd][Bb]\].+$/u.test(entry.name),
   );
   if (candidates.length !== 1) throw new TypeError("Prepared installation must contain exactly one FSDB root");
   const candidate = join(canonicalRoot, candidates[0]!.name);

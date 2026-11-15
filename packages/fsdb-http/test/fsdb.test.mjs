@@ -22,6 +22,20 @@ conformance(["API-001", "API-002", "API-003", "FDB-001", "FDB-005", "FDB-006", "
   assert.throws(() => createFsdbHttpHandler({ name: db.name, state: "open", close: db.close }));
 });
 
+conformance(["FDB-013"], "directory marker casing does not affect the lowercase HTTP route", async (t) => {
+  const f = await fixture(); t.after(() => f.cleanup());
+  const root = join(f.parent, "[FsDb]游戏数据");
+  await rename(f.root, root);
+  await rename(join(root, "[struct]角色"), join(root, "[STRUCT]角色");
+  const service = await serveFsdb({ root }); t.after(() => service.close());
+  const response = await request(service.origin, "/fsdb/v1/struct/角色/皮卡丘");
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { name: "皮卡丘" });
+  const descriptor = await request(service.origin, "/fsdb/v1");
+  assert.equal(descriptor.status, 200);
+  assert.ok((await descriptor.json()).tables.some((item) => item.kind === "struct" && item.name === "角色"));
+});
+
 conformance(["FDB-003", "FDB-007", "FDB-011"], "rejects normalization, ResourceKey, and structured-content ambiguity", async (t) => {
   const a = await fixture(); t.after(() => a.cleanup());
   await writeFile(join(a.struct, "e\u0301.json"), "{}");
