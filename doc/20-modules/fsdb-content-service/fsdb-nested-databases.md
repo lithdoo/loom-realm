@@ -107,7 +107,7 @@ No installation-level file selects one FSDB. No databasePath is added to GameEnt
 - One FSDB HTTP Server per database.
 - Making Node-only @loomrealm/fsdb a browser/PWA storage abstraction.
 - A configuration file or manifest field selecting one database for an installation.
-- A compatibility overload for the old root-only openFsdb() API or positional ContentClient methods.
+- A compatibility overload for the old root-only openFsdb() API or old ContentClient calls that omit databasePath.
 - Database writes, transactions, or cross-database publication.
 - An FSDB on-disk format-version marker.
 
@@ -689,16 +689,19 @@ Route rules:
 - Manifest has no database path.
 - There is no database catalog route and no default database route.
 
-Status mapping for database-backed Content reads:
+Status mapping for database-backed Content reads follows the existing Content API contract:
 
-| Condition | HTTP status / Content result |
+| Condition | HTTP status / stable problem code |
 |---|---|
-| Invalid route or databasePath syntax | 400 / CONTENT_REQUEST_INVALID |
+| Invalid route, encoding, or request syntax | 400 / CONTENT_REQUEST_INVALID |
+| Invalid logical databasePath | 400 / DATABASE_PATH_INVALID |
 | Missing database path or content entry | 404 / CONTENT_NOT_FOUND |
-| Ambiguous physical database path | 409 / CONTENT_CONFLICT |
-| Selected database fails FSDB validation | 422 / CONTENT_INVALID |
-| Selected database is STALE or temporarily unavailable | 503 / CONTENT_UNAVAILABLE |
-| Unexpected internal failure | 500 / CONTENT_UNAVAILABLE |
+| Ambiguous physical databasePath resolution | 409 / DATABASE_PATH_AMBIGUOUS |
+| Selected database fails FSDB Well-formed validation | 422 / DATABASE_INVALID |
+| Selected database is STALE or temporarily unavailable | 503 / DATABASE_UNAVAILABLE |
+| Unexpected internal service failure | 500 / existing internal-failure handling |
+
+The stable codes and status categories are owned by `content-api-v1.md`; this architecture document does not introduce alternate Content error names.
 
 Existing authentication, permission, installation-state, size-limit, and integrity semantics remain in force. Manifest remains installation-scoped.
 
@@ -961,20 +964,22 @@ The project has not been externally released. Evolve the existing contracts dire
 | Missing database path | Open fails | 404 | 404 / CONTENT_NOT_FOUND | 404 / CONTENT_NOT_FOUND |
 | Missing content entry | null lease | 404 | 404 / CONTENT_NOT_FOUND | 404 / CONTENT_NOT_FOUND |
 | Empty database | Opens successfully | Descriptor has no tables/entries | Content read returns not found | Emits no entries; reads return not found |
-| Malformed selected database | That open fails | 422 | 422 / CONTENT_INVALID for that path; siblings remain usable | Whole Bundle build fails atomically |
-| Duplicate physical candidates | Resolution/discovery fails | 409 | 409 / CONTENT_CONFLICT for that path; siblings remain usable | Bundle build fails if discovery is ambiguous |
-| Database becomes stale after open | That handle becomes STALE | 503 for that path | 503 / CONTENT_UNAVAILABLE for that path | Installed immutable bytes are unaffected |
+| Malformed selected database | That open fails | 422 | 422 / DATABASE_INVALID for that path; siblings remain usable | Whole Bundle build fails atomically |
+| Duplicate physical candidates | Resolution/discovery fails | 409 | 409 / DATABASE_PATH_AMBIGUOUS for that path; siblings remain usable | Bundle build fails if discovery is ambiguous |
+| Database becomes stale after open | That handle becomes STALE | 503 for that path | 503 / DATABASE_UNAVAILABLE for that path | Installed immutable bytes are unaffected |
 | Malformed sibling not selected | Does not affect direct open of valid DB | Does not affect requests to valid DB | Does not affect requests to valid DB | Whole source Bundle build fails because packaging includes all discovered DBs |
 
 The PWA row is intentionally different at build time: a Bundle is one atomic installation artifact. This does not create a runtime dependency between databases or merge their identities.
 
 ### 10.3 Error and lifecycle rules
 
-- Invalid URL/path syntax is a client error.
-- Missing database or content is not found.
-- Ambiguous physical resolution is a conflict, never an arbitrary selection.
-- A stale database is unavailable; it is not transparently reopened.
-- Filesystem paths and raw OS errors are not exposed to clients.
+- Invalid Content route/encoding syntax maps to 400 / CONTENT_REQUEST_INVALID; an invalid logical databasePath maps to 400 / DATABASE_PATH_INVALID.
+- Missing database or content maps to 404 / CONTENT_NOT_FOUND.
+- Ambiguous physical databasePath resolution maps to 409 / DATABASE_PATH_AMBIGUOUS, never an arbitrary selection.
+- A selected database that fails FSDB validation maps to 422 / DATABASE_INVALID.
+- A stale or temporarily unavailable database maps to 503 / DATABASE_UNAVAILABLE; it is not transparently reopened.
+- Unexpected service failures use the existing Content API internal-failure handling.
+- FSDB HTTP uses its own existing status mapping; neither service exposes filesystem paths or raw OS errors.
 - A failure in one database MUST NOT mark the whole Desktop installation unavailable.
 - A failure in one PWA source database prevents publication of the incomplete installation Bundle.
 - Read leases are always closed, including abort and error paths.
