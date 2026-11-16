@@ -26,4 +26,8 @@ Content capability != executable resolver，URL != filesystem path。Content fai
 
 ## Proposed next evolution
 
-The next proposed FSDB format / API evolution is documented in [FSDB Nested Databases and Explicit Database Selection](./fsdb-nested-database-v2.md). It covers recursive physical nesting, independent database boundaries, explicit `root + path` selection, and the required Core / HTTP / Desktop / PWA migration. The proposal is not yet implemented; the current format remains defined by [FSDB layout](./fsdb-layout.md).
+The next proposed FSDB directory-layout / API evolution is documented in [FSDB Nested and Multi-Database Architecture](./fsdb-nested-databases.md). It covers recursive physical nesting, independent database boundaries, explicit `root + path` selection, and the required Core / HTTP / Desktop / PWA migration. The proposal is not yet implemented; the current format remains defined by [FSDB layout](./fsdb-layout.md).
+
+## Multi-database target architecture
+
+An installation exposes all top-level and nested FSDBs as independent databases. The [nested database design](./fsdb-nested-databases.md) is the target architecture: recursive discovery, required `root + path` opening, database-scoped Content identities, and Desktop/PWA support for multiple databases in one installation. Do not introduce a single-database selection manifest or flatten database namespaces together. This remains a design proposal until the implementation and normative contracts are updated.

@@ -1,5 +1,7 @@
 # 只读 Content API v1
 
+> **Target architecture notice:** the active implementation described here is the current single-database baseline. The agreed breaking target is documented in [FSDB Nested and Multi-Database Architecture](../20-modules/fsdb-content-service/fsdb-nested-databases.md): one installation may expose multiple independent FSDBs, and record/group/resource Content identities must include `databasePath`. Do not preserve the single-database Content View or merge namespaces when implementing that design. This notice does not claim the target is already implemented.
+
 > 层级：正式契约  
 > 状态：Active / Normative / Evolving  
 > 主要定义：跨 Desktop/PWA 的逻辑只读内容访问、路由、缓存、错误、完整性与 request authorization semantics  
