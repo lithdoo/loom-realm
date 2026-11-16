@@ -6,7 +6,7 @@
 > 状态：Active / Normative / Evolving  
 > 主要定义：跨 Desktop/PWA 的逻辑只读内容访问、路由、缓存、错误、完整性与 request authorization semantics  
 > 依赖：[存储与内容系统](../10-architecture/storage-system.md)、[FSDB 目录结构](../20-modules/fsdb-content-service/fsdb-layout.md)、[Game Package v1](./game-package-v1.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
-> 最近复核：2026-09-08
+> 最近复核：2026-11-16
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
