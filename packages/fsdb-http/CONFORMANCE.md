@@ -185,6 +185,14 @@ Two direct child directories whose type markers differ only in ASCII case but wh
 
 A selected or discovered `[FSDB]` directory that is a symlink/junction MUST fail resolution/discovery; it MUST NOT be followed.
 
+### FDB-019 — discovery does not scan table contents
+
+`listFsdbPaths({ root })` MUST discover physical database boundaries without parsing table metadata or record/resource bodies. A malformed table body does not prevent path discovery; opening that database may fail independently.
+
+### FDB-020 — opening a parent does not open child databases
+
+`openFsdb({ root, path: "GameData" })` MUST scan only GameData's own tables and MUST NOT scan/validate `GameData/World` or any other child database. The child is only a direct child directory entry at the parent boundary.
+
 ---
 
 ## 4. Root / Physical Safety
