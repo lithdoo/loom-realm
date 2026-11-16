@@ -93,22 +93,24 @@ Node.js stdlib
 
 v1 保持 **0 runtime dependencies**。
 
-本包负责：
+本组包的职责分工：
 
 ```text
-在 Container Root 下解析并打开一个指定 FSDB
-递归发现逻辑 databasePath（供 build/tooling 使用）
-验证 Well-formed FSDB
-构建 immutable logical index
-按 FSDB logical identity lookup
-GET / HEAD raw content serving
-Unicode logical name ↔ HTTP path 映射
-Content-Type / Content-Length
-ETag / conditional request / cache policy
-path traversal / symlink escape 防护
-static-source snapshot / stale fail-closed
-Node RequestListener
-standalone node:http service convenience
+@loomrealm/fsdb (Core)
+  Container Root / databasePath resolution
+  recursive listFsdbPaths() discovery for build/tooling
+  one-database Well-formed validation + immutable snapshot
+  database-local logical identity / read lease / stale lifecycle
+
+@loomrealm/fsdb-http (HTTP)
+  GET / HEAD raw content serving
+  single-handle RequestListener embedding
+  Root-scoped standalone node:http service
+  Unicode logical name ↔ HTTP path mapping
+  Content-Type / Content-Length
+  ETag / conditional request / cache policy
+  route-level databasePath resolution and lazy handle ownership
+  path traversal / symlink escape defense
 ```
 
 本包不负责：
@@ -346,13 +348,19 @@ export function serveFsdb(
 ): Promise<FsdbHttpService>;
 ```
 
-Primary exports：
+Public exports：
 
 ```text
-openFsdb
-createFsdbHttpHandler
-serveFsdb
-以及上述 public types
+@loomrealm/fsdb:
+  openFsdb
+  listFsdbPaths
+  FsdbDatabase / OpenFsdbOptions / Core types
+
+@loomrealm/fsdb-http:
+  openFsdb (existing Core re-export)
+  createFsdbHttpHandler
+  serveFsdb
+  FsdbHttpService / ServeFsdbOptions
 ```
 
 ### 4.1 JavaScript failure shape
