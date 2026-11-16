@@ -1,6 +1,6 @@
 # FSDB Nested and Multi-Database Architecture
 
-> Status: **Design proposal — revised and design-reviewed; implementation is not yet complete or normative.**
+> Status: **Cross-layer design proposal — reviewed; implementation is incomplete. Layer-specific normative contracts are updated in place and remain authoritative for their respective boundaries.**
 > Scope: nested FSDB layout, explicit database addressing, Root-scoped FSDB HTTP, and database-aware LoomRealm Content API.
 > Implementation baseline: `feat/fsdb-case-insensitive-directory-types`.
 > Change policy: update the current pre-release contracts in place; keep the existing `/fsdb/v1`, `/_lr/v1`, and PWA `formatVersion: 1` surfaces. Do not introduce a parallel protocol or compatibility layer.
@@ -1028,13 +1028,14 @@ The existing FSDB HTTP design and conformance documents are the active contract 
 
 ### 11.5 Normative documents
 
-Before implementation is described as complete:
+The current implementation target is defined across these existing documents:
 
-- Update fsdb-layout.md to define nested database nodes, marker casing, path grammar, and database independence.
-- Update the existing FSDB HTTP DESIGN.md and CONFORMANCE.md in place.
-- Update the existing Content API contract in place, keeping `/_lr/v1`.
-- Document the in-place PWA Bundle shape change while keeping `formatVersion: 1` and the existing IndexedDB schema.
-- Keep this document as the cross-layer architecture proposal and implementation map.
+- fsdb-layout.md: nested database nodes, marker casing, path grammar, and database independence.
+- packages/fsdb-http/DESIGN.md and CONFORMANCE.md: current `/fsdb/v1` behavior, Root service routes, ownership, status, and conformance.
+- content-api-v1.md: current `/_lr/v1` database-scoped identity and route semantics.
+- This document: cross-layer architecture, Desktop/PWA composition, implementation map, and end-to-end acceptance gates.
+
+The PWA Bundle remains `formatVersion: 1`; its existing content entry shape is extended in place. Keep all normative documents aligned as implementation proceeds.
 
 ### 11.6 Required implementation gates
 
