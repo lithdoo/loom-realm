@@ -14,7 +14,10 @@ FSDB 数据库目录使用：
 [FSDB]<DatabaseName>
 ```
 
-数据库下只识别以下四种表目录：
+一个 Container Root 可以包含多个顶层 FSDB。每个 FSDB 的直接子目录可以是：
+
+- 另一个嵌套的 `[FSDB]<DatabaseName>`，表示一个新的、独立的数据库；
+- 以下四种表目录之一：
 
 ```text
 [STRUCT]<TableName>
@@ -22,6 +25,15 @@ FSDB 数据库目录使用：
 [GROUP]<TableName>
 [RESOURCE]<TableName>
 ```
+
+嵌套数据库可以递归包含同样的数据库/表节点。物理嵌套只用于组织和定位，不建立父子数据库继承、共享 namespace 或跨库引用。
+
+数据库边界只在 FSDB 根目录的直接子目录处识别：
+
+- 只递归进入直接子目录中被识别为 `[FSDB]` 的目录；
+- 不递归扫描表目录以寻找数据库；
+- `[RESOURCE]` 表下的所有子目录都是 ResourceKey 层级，即使名称看起来像 `[FSDB]Something`，也不是数据库；
+- 表目录本身不是数据库容器。
 
 **目录类型标记的大小写规则（规范性）**
 
@@ -32,7 +44,7 @@ FSDB 数据库目录使用：
 - 同一数据库下 `[STRUCT]角色` 与 `[struct]角色` 映射为相同 `(TableKind, TableName)`，若两者作为独立物理目录同时存在，**MUST** 拒绝打开，不能静默选取其中之一。
 - 只有类型标记完全匹配（忽略 ASCII 大小写）时才是 recognized candidate；`[STRUCTURE]角色` 不是 `STRUCT` 类型。
 
-本次大小写修订**不定义嵌套子 FSDB**。当前版本仅将 `[FSDB]` 识别为根数据库目录；根目录下仍只识别四类表，嵌套子数据库的身份、作用域和生命周期另行规范。
+嵌套 `[FSDB]` 目录在本规范中具有与顶层 FSDB 完全相同的数据库身份和独立生命周期。每个数据库的表、schema、record、resource、snapshot 与 validation 均局限于该数据库。父库、子库和兄弟库之间不继承、不合并、不解析跨库引用。
 
 统一定义：
 
@@ -116,7 +128,19 @@ TableName    = NameSegment
 Key          = NameSegment
 
 ResourceKey = NameSegment ("/" NameSegment)*
+
+DatabasePath = DatabaseName ("/" DatabaseName)*
 ```
+
+`DatabasePath` 是相对于 Container Root 的逻辑路径，不包含物理类型标记 `[FSDB]`。每个 segment 都独立遵守 NameSegment 规则，使用字面 `/` 分隔；不得有空 segment、前导/尾随斜杠、重复斜杠、`.` 或 `..`。例如：
+
+```text
+GameData
+GameData/World
+GameData/World/Region
+```
+
+`DatabasePath` 不是操作系统路径，不能未经逐段验证直接传给 filesystem join。
 
 `/` 只用于 ResourceKey 的逻辑层级分隔，不属于任何单个 `NameSegment`。
 
