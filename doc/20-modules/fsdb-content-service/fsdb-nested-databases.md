@@ -631,16 +631,10 @@ If startup/listen fails, the service closes its Server and every resource it has
 The current Content contract is extended in place so databasePath is part of every database-backed record/group/resource identity:
 
 ~~~ts
-export interface ContentObjectIdentity {
-  readonly databasePath: string;
-  readonly namespace: string;
-  readonly key: string;
-}
-
 export interface ContentClient {
-  record(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentRecord>;
-  group(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentGroup>;
-  resource(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentResource>;
+  record(databasePath: string, namespace: string, key: string, options?: ContentReadOptions): Promise<ContentRecord>;
+  group(databasePath: string, namespace: string, key: string, options?: ContentReadOptions): Promise<ContentGroup>;
+  resource(databasePath: string, namespace: string, key: string, options?: ContentReadOptions): Promise<ContentResource>;
 }
 ~~~
 
