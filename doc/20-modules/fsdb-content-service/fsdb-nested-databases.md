@@ -1128,6 +1128,7 @@ Game/
 │   └── [STRUCT]Config/
 │       └── common.json
 └── [FSDB]Empty/
+~~~
 
 The fixture MUST prove:
 
