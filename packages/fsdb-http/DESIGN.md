@@ -87,11 +87,12 @@ Node.js http.RequestListener
 
 ```text
 Node.js stdlib
+@loomrealm/fsdb
     ↓
 @loomrealm/fsdb-http
 ```
 
-v1 保持 **0 runtime dependencies**。
+本包只依赖 Node.js stdlib 与 `@loomrealm/fsdb`；不引入 Express/Koa/Fastify/Hono 等 HTTP framework。
 
 本组包的职责分工：
 
