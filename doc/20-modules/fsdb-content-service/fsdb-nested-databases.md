@@ -483,7 +483,7 @@ Rules:
 - Default host remains 127.0.0.1; default port remains 0.
 - The service does not expose a filesystem path or database handle to the client.
 
-The existing createFsdbHttpHandler(db) remains a low-level borrowed, single-handle handler for callers that explicitly need to embed a single database handler. It is not used by the Root-scoped serveFsdb service and is not a substitute for the multi-database Root service. The old serveFsdb({ root, path }) single-database service signature is removed rather than overloaded.
+The existing createFsdbHttpHandler(db) remains a low-level borrowed, single-handle handler for callers that explicitly need to embed a single database handler. It is not used by the Root-scoped serveFsdb service and is not a substitute for the multi-database Root service. The public serveFsdb({ root, host?, port? }) shape is retained; only the meaning of root changes to the Container Root.
 
 The borrowed `createFsdbHttpHandler(db)` remains a single-database handler with its existing `/fsdb/v1` descriptor and entry routes. The Root-scoped `serveFsdb({ root })` uses additional database-prefixed routes under the same `/fsdb/v1` namespace. These route shapes are disjoint: the borrowed handler starts with a kind segment; the Root-scoped service starts with one or more database path segments and the literal `$db` delimiter. No default-database route is introduced.
 
@@ -628,7 +628,7 @@ If startup/listen fails, the service closes its Server and every resource it has
 
 ### 8.1 Content identity
 
-The breaking Content contract adds databasePath to every database-backed record/group/resource identity:
+The current Content contract is extended in place so databasePath is part of every database-backed record/group/resource identity:
 
 ~~~ts
 export interface ContentObjectIdentity {
@@ -721,7 +721,7 @@ This is a deliberate trade-off:
 - It avoids synchronizing a catalog between Desktop, PWA Bundle, IndexedDB, and Service Worker.
 - It means Content API callers cannot distinguish an empty database from a missing database using a catalog query. Both produce CONTENT_NOT_FOUND for a read of a nonexistent entry.
 
-If a future product requirement needs dynamic Runtime enumeration or empty-database existence queries, that is a separate Content API capability and must be designed explicitly in a later contract version. It MUST NOT be approximated by inferring databases from content entries.
+If a future product requirement needs dynamic Runtime enumeration or empty-database existence queries, that is a separate capability requiring an explicit design decision. It MUST NOT be approximated by inferring databases from content entries.
 
 ### 8.4 Cache and version identity
 
@@ -813,7 +813,7 @@ Desktop Content Service remains one service per prepared installation. It uses F
 
 PWA remains browser-native in its storage and Content realization. Node-only @loomrealm/fsdb is not imported into the browser runtime.
 
-The breaking Bundle shape is:
+The existing Bundle shape is extended in place:
 
 ~~~ts
 export interface PwaBundleContentEntryV1 {
@@ -1015,7 +1015,7 @@ The existing FSDB HTTP design and conformance documents are the active contract 
 
 | Hotspot | Required change |
 |---|---|
-| packages/subsystem/src/content.ts | Add ContentObjectIdentity and object-shaped ContentClient methods |
+| packages/subsystem/src/content.ts | Add required databasePath as the first argument to existing positional record/group/resource methods |
 | packages/subsystem/src/host/content-client.ts | Validate databasePath and construct `/_lr/v1` database-scoped URLs |
 | ContentClient call sites and demos | Migrate every record/group/resource call to explicit databasePath |
 | apps/desktop/src/content-service.ts | Replace single db with lazy databasePath-keyed per-database views; keep one installation Content Server |
