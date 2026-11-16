@@ -867,7 +867,21 @@ Installer requirements:
 - Allow the same kind/namespace/key in different databases.
 - Reject duplicates only when the full database-scoped identity is equal.
 - Persist databasePath in every database-backed StoredContentIndexEntry.
-- Keep manifest entries installation-level and without databasePath.
+- Keep manifest entries installation-level and without databasePath. The persisted index should make this distinction explicit with a discriminated union:
+
+~~~ts
+type StoredContentIndexEntry =
+  | (StoredObjectRef & {
+      readonly kind: "manifest";
+    })
+  | (StoredObjectRef & {
+      readonly kind: "record" | "group" | "resource";
+      readonly databasePath: string;
+      readonly namespace: string;
+      readonly key: string;
+    });
+~~~
+
 - Keep OPFS object storage content-addressed by bytes; do not use the content hash as a substitute for logical identity.
 - Keep installation publication atomic. If any source database fails to open or package, the Bundle build fails and no incomplete Bundle is published.
 
@@ -1094,9 +1108,10 @@ The following are explicit product/design constraints, not unresolved gaps:
 1. **No Runtime enumeration.** A caller must know databasePath. Dynamic discovery is not part of ContentClient.
 2. **Empty vs absent is not observable through Content.** Both return not found for a read. FSDB Core and FSDB HTTP can still open an empty database and return its Descriptor.
 3. **PWA packaging is all-or-nothing.** A malformed source database prevents publication of the complete Bundle. Desktop can still serve healthy databases independently because it opens them lazily.
-4. **Static snapshots do not auto-recover.** A STALE handle is not silently replaced by a newly opened snapshot.
-5. **The source installation tree is trusted against concurrent hostile mutation during resolution.** Stronger descriptor-relative race protection is a separate platform-specific security requirement, not something path-string validation alone can promise.
-6. **The FSDB HTTP Root service and Desktop Content Service are distinct servers/contracts.** The former exposes low-level FSDB data; the latter provides authorized Runtime Content. Desktop does not proxy through FSDB HTTP.
+4. **First access has a per-database preparation cost.** Desktop's first request for a database performs one Core scan and builds/hashes that database's Content Index. Later requests reuse the index. This trades first-read latency for lower installation startup work and avoids opening unused databases.
+5. **Static snapshots do not auto-recover.** A STALE handle is not silently replaced by a newly opened snapshot.
+6. **The source installation tree is trusted against concurrent hostile mutation during resolution.** Stronger descriptor-relative race protection is a separate platform-specific security requirement, not something path-string validation alone can promise.
+7. **The FSDB HTTP Root service and Desktop Content Service are distinct servers/contracts.** The former exposes low-level FSDB data; the latter provides authorized Runtime Content. Desktop does not proxy through FSDB HTTP.
 
 These constraints avoid a runtime catalog, a second selection manifest, availability bookkeeping, per-database servers, cross-database storage providers, and duplicated database lifecycle managers.
 
