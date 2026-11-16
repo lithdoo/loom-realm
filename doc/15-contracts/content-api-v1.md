@@ -1,6 +1,6 @@
 # 只读 Content API v1
 
-> **Current in-place evolution:** this existing Content API contract is being extended before external release to address multiple independent FSDBs per installation. Keep the `/_lr/v1` route namespace and update these routes and identities directly; do not create a parallel protocol version or compatibility adapter. The target architecture is documented in [FSDB Nested and Multi-Database Architecture](../20-modules/fsdb-content-service/fsdb-nested-databases.md).
+> **Current in-place evolution:** this existing Content API contract is being extended before external release to address multiple independent FSDBs per installation. Keep the `/_lr/v1` route namespace and update these routes and identities directly; do not create a parallel protocol version or compatibility adapter. The cross-layer architecture is documented in [FSDB Nested and Multi-Database Architecture](../20-modules/fsdb-content-service/fsdb-nested-databases.md).
 
 > 层级：正式契约  
 > 状态：Active / Normative / Evolving  
@@ -591,7 +591,7 @@ Content `contentVersion` 的 SHA-256 可以与 Package Index integrity hash 共�
 
 ## 14. Resource Reference Boundary
 
-业务/Render data只携 logical resource reference，例如：
+业务/Render data 里的 `ResourceReferenceV1` 是当前作用域内的局部引用，不是完整 Content identity：
 
 ```ts
 interface ResourceReferenceV1 {
@@ -600,9 +600,11 @@ interface ResourceReferenceV1 {
 }
 ```
 
-`resourceKey` MAY 是 `/` 分隔的 hierarchical logical ResourceKey；它不是 filesystem path。
+`resourceKey` MAY 是 `/` 分隔的 hierarchical logical ResourceKey；它不是 filesystem path，也不得把 databasePath 编码进 resourceKey 或 namespace。`contentVersion` 只校验响应字节，不是数据库标识。
 
-具体 Renderer Resource Client再根据 installation/namespace context 解析 Content API。
+真正读取 Content 时，调用方必须另外持有显式 databasePath。该路径来自已经声明的安装/数据库作用域，例如 Web Presentation 的 `WebPresentationResourceRefV1`（`databasePath` + `namespace` + `key`）。不得因为本引用没有 databasePath 就选择第一个数据库或默认数据库。
+
+Renderer-private Resource Client 仍是唯一被授权读取 Content 的 Renderer 边界。它按显式 databasePath、namespace 和 key 解析，不向业务暴露 bearer、FSDB handle、物理路径或特权 URL。
 
 不得在 Render/Frame/business payload中携带：
 
@@ -610,7 +612,9 @@ interface ResourceReferenceV1 {
 Content token
 absolute Content URL
 local filesystem path
+FSDB handle
 resource bytes
+databasePath disguised as a namespace or resourceKey
 ```
 
 Resource identity 不绑定 Frame/Activation。

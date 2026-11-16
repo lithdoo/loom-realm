@@ -24,10 +24,20 @@ Content capability != executable resolver，URL != filesystem path。Content fai
 
 现有 `test:m12` 等名字是历史兼容的 command alias。资格 currentness 由[subject/staleness](../../30-development/qualification.md)判断，而不是由阶段编号决定。Historical ownership decision 见 [ADR0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)。
 
-## Proposed next evolution
+## Multi-database implementation
 
-The pre-release multi-database contract evolution is documented in [FSDB Nested and Multi-Database Architecture](./fsdb-nested-databases.md). The existing FSDB layout, FSDB HTTP, and Content API contracts have been updated in place: `/fsdb/v1`, `/_lr/v1`, and PWA `formatVersion: 1` remain the current identifiers. Recursive physical nesting, explicit `root + path` selection, and database-scoped Content identities are normative design targets; implementation is still pending.
+The pre-release multi-database contract is documented in [FSDB Nested and Multi-Database Architecture](./fsdb-nested-databases.md). `/fsdb/v1`, `/_lr/v1`, and PWA `formatVersion: 1` remain the current identifiers.
 
-## Multi-database target architecture
+This repository implements that contract in place:
 
-An installation exposes all top-level and nested FSDBs as independent databases. The [nested database design](./fsdb-nested-databases.md) defines recursive discovery, required `root + path` opening, database-scoped Content identities, and Desktop/PWA support for multiple databases in one installation. Do not introduce a single-database selection manifest or flatten database namespaces together. The normative contracts are updated; the remaining work is implementation and conformance.
+```text
+FSDB Core → FSDB HTTP Root service
+FSDB Core → Desktop Content
+Consumer JSON Bundle → PWA generic builder → Installer → Service Worker
+Subsystem ContentClient
+Renderer ResourceClient
+```
+
+An installation exposes top-level and nested FSDBs as independent databases. Callers pass an explicit databasePath. There is no default database and no installation-level database selector.
+
+The main qualification tests and cross-platform CI cover this in-repository path. A consumer-owned Source Packager's production integration belongs to that consumer repository. `test/fsdb-multi-database/pack-source.mjs` is the reference packager used by this repository's parity tests; it is not the external consumer's production integration.

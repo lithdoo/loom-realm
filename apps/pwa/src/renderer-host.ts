@@ -6,7 +6,7 @@ import {
   type PresentationEventPublication,
   type RendererPresentationEventBinding,
 } from "@loomrealm/renderer";
-import type { RendererResourceClient } from "@loomrealm/renderer/resource-client";
+import { RendererResourceError, type RendererResourceClient } from "@loomrealm/renderer/resource-client";
 import {
   attachRendererPresentation,
   bootstrapWebPresentation,
@@ -38,10 +38,44 @@ function preparedBootstrapKey(kind: "script" | "style", resource: PreparedBootst
   return JSON.stringify([kind, resource.databasePath, resource.namespace, resource.key, resource.contentVersion]);
 }
 
+const CONTENT_VERSION = /^sha256:[0-9a-f]{64}$/;
+
 function contentResourcePath(installationId: string, databasePath: string, namespace: string, key: string): string {
   const database = databasePath.split("/").map(encodeURIComponent).join("/");
   const resourceKey = key.split("/").map(encodeURIComponent).join("/");
   return `/_lr/v1/games/${encodeURIComponent(installationId)}/databases/${database}/$db/resources/${encodeURIComponent(namespace)}/${resourceKey}`;
+}
+
+function presentationStatus(status: number): RendererResourceError {
+  if (status === 404) return new RendererResourceError("not-found");
+  if (status === 409) return new RendererResourceError("conflict");
+  if (status === 422) return new RendererResourceError("invalid");
+  return new RendererResourceError("unavailable");
+}
+
+/** Same-origin Presentation resource reader. Errors are RendererResourceError so the Presentation façade keeps the Content problem mapping. */
+export function createPwaRendererResourceClient(installationId: string, lifetimeSignal: AbortSignal): RendererResourceClient {
+  return Object.freeze({
+    async resource(databasePath: string, namespace: string, key: string, expectedContentVersion: string, localSignal?: AbortSignal) {
+      if (lifetimeSignal.aborted || localSignal?.aborted) throw new RendererResourceError("cancelled");
+      const fetchSignal = localSignal === undefined ? lifetimeSignal : AbortSignal.any([lifetimeSignal, localSignal]);
+      try {
+        const response = await fetch(pwaPath(contentResourcePath(installationId, databasePath, namespace, key)), { signal: fetchSignal });
+        if (!response.ok) throw presentationStatus(response.status);
+        const contentVersion = response.headers.get("x-loom-content-version");
+        const mime = response.headers.get("content-type");
+        if (!contentVersion || !CONTENT_VERSION.test(contentVersion) || response.headers.get("etag") !== `"${contentVersion}"` || !mime) {
+          throw new RendererResourceError("invalid");
+        }
+        if (contentVersion !== expectedContentVersion) throw new RendererResourceError("conflict");
+        return Object.freeze({ bytes: Uint8Array.from(new Uint8Array(await response.arrayBuffer())), mime, contentVersion });
+      } catch (error) {
+        if (error instanceof RendererResourceError) throw error;
+        if (fetchSignal.aborted) throw new RendererResourceError("cancelled");
+        throw new RendererResourceError("unavailable");
+      }
+    },
+  });
 }
 
 function observeCarrierClose(carrier: MessageCarrier): void {
@@ -223,17 +257,7 @@ export async function createPwaRendererHost(installationId: string, presentation
     }
     throw cause;
   }
-  const resourceClient: RendererResourceClient = Object.freeze({
-    async resource(databasePath: string, namespace: string, key: string, expectedContentVersion: string, localSignal?: AbortSignal) {
-      const fetchSignal = localSignal === undefined ? signal : AbortSignal.any([signal, localSignal]);
-      const response = await fetch(pwaPath(contentResourcePath(installationId, databasePath, namespace, key)), { signal: fetchSignal });
-      if (!response.ok) throw new Error("PWA presentation resource unavailable");
-      const contentVersion = response.headers.get("x-loom-content-version");
-      const mime = response.headers.get("content-type");
-      if (contentVersion !== expectedContentVersion || mime === null) throw new Error("PWA presentation resource mismatch");
-      return Object.freeze({ bytes: new Uint8Array(await response.arrayBuffer()), mime, contentVersion });
-    },
-  });
+  const resourceClient = createPwaRendererResourceClient(installationId, signal);
   const projector = new WebProjector({ document, resourceClient, reportFailure: (cause) => { console.error("LoomRealm presentation failed", cause); document.documentElement.dataset.loomrealmPresentation = "failed"; document.documentElement.dataset.loomrealmPresentationError = cause instanceof Error ? cause.message : String(cause); } });
   const detach = attachRendererPresentation(holder, projector);
   document.documentElement.dataset.loomrealmPresentation = "ready";

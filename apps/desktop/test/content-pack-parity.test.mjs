@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ import { prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { serveFsdb } from "@loomrealm/fsdb-http";
 import { createDesktopContentService, prepareDesktopContentView } from "../dist/index.js";
 import { packFsdbRoot } from "../../../test/fsdb-multi-database/pack-source.mjs";
+import { writeContentParityFixture } from "../../../test/fsdb-multi-database/parity-fixture.mjs";
 
 const runnerPolicy = Object.freeze({ helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 1_000, terminationGraceMs: 100 });
 
@@ -23,14 +25,7 @@ test("source packager and Desktop Content return the same database bytes", async
   const root = join(parent, "game");
   const subsystems = join(root, "subsystems");
   await mkdir(subsystems, { recursive: true });
-  await writeStruct(join(root, "[FSDB]GameData"), "{\"owner\":\"parent\"}");
-  await writeStruct(join(root, "[FSDB]GameData", "[FSDB]World"), "{\"owner\":\"world\"}");
-  await writeStruct(join(root, "[FSDB]ModData"), "{\"owner\":\"mod\"}");
-  await mkdir(join(root, "[FSDB]Empty"));
-  const hidden = join(root, "[FSDB]GameData", "[RESOURCE]NotADatabase", "[FSDB]Something");
-  await mkdir(hidden, { recursive: true });
-  await writeFile(join(root, "[FSDB]GameData", "[RESOURCE]NotADatabase", ".desc.meta"), "hidden");
-  await writeFile(join(hidden, "ordinary.txt"), "not-a-database");
+  await writeContentParityFixture(root);
   await Promise.all([
     writeFile(join(root, "game.json"), JSON.stringify({ formatVersion: 1, initial: { subsystem: "world", input: null }, subsystems: [{ key: "world" }] })),
     writeFile(join(root, "launch.hostra.json"), JSON.stringify({ formatVersion: 1, subsystems: [{ key: "world", module: "subsystems/world.mjs" }] })),
@@ -39,9 +34,20 @@ test("source packager and Desktop Content return the same database bytes", async
   const packed = await packFsdbRoot(root);
   assert.deepEqual([...new Set(packed.map((entry) => entry.databasePath))].sort(), ["GameData", "GameData/World", "ModData"]);
   assert.deepEqual(packed.filter((entry) => entry.databasePath === "GameData").map((entry) => `${entry.kind}:${entry.namespace}:${entry.key}`).sort(), [
+    "group:group.Party:common",
     "record:struct.Config:common",
+    "resource:resource.Assets:logo",
     "resource:resource.NotADatabase:[FSDB]Something/ordinary",
   ]);
+  const logos = packed.filter((entry) => entry.key === "logo");
+  assert.deepEqual(logos.map((entry) => entry.databasePath).sort(), ["GameData", "ModData"]);
+  assert.equal(logos[0].contentVersion, logos[1].contentVersion);
+  assert.equal(logos[0].bytes.equals(logos[1].bytes), true);
+  assert.equal(packed.some((entry) => entry.databasePath === "Empty"), false);
+  for (const entry of packed) {
+    assert.match(entry.contentVersion, /^sha256:[0-9a-f]{64}$/);
+    assert.equal(entry.contentVersion, `sha256:${createHash("sha256").update(entry.bytes).digest("hex")}`);
+  }
   assert.equal(packed.some((entry) => entry.databasePath.includes("Something")), false);
   const http = await serveFsdb({ root });
   t.after(() => http.close());
@@ -65,9 +71,9 @@ test("source packager and Desktop Content return the same database bytes", async
   const view = await prepareDesktopContentView(prepared);
   const service = await createDesktopContentService({ view });
   t.after(() => service.close());
-  const access = service.access(service.createGrant({ permissions: ["records", "resources"], expiresAtUnixMs: Date.now() + 60_000 }));
-  for (const entry of packed.filter((item) => item.kind === "record" || item.kind === "resource")) {
-    const collection = entry.kind === "record" ? "records" : "resources";
+  const access = service.access(service.createGrant({ permissions: ["records", "groups", "resources"], expiresAtUnixMs: Date.now() + 60_000 }));
+  for (const entry of packed) {
+    const collection = entry.kind === "record" ? "records" : entry.kind === "group" ? "groups" : "resources";
     const database = entry.databasePath.split("/").map(encodeURIComponent).join("/");
     const key = entry.key.split("/").map(encodeURIComponent).join("/");
     const target = new URL(`/_lr/v1/games/${encodeURIComponent(access.installationId)}/databases/${database}/$db/${collection}/${encodeURIComponent(entry.namespace)}/${key}`, access.origin);
@@ -82,6 +88,9 @@ test("source packager and Desktop Content return the same database bytes", async
     assert.equal(head.headers.get("x-loom-content-version"), entry.contentVersion);
     assert.equal(await head.text(), "");
   }
+  const empty = await fetch(new URL(`/_lr/v1/games/${encodeURIComponent(access.installationId)}/databases/Empty/$db/records/struct.Config/common`, access.origin), { headers: { Authorization: `Bearer ${access.token}` } });
+  assert.equal(empty.status, 404);
+  assert.equal((await empty.json()).code, "CONTENT_NOT_FOUND");
 });
 
 test("a source database that fails to open does not yield a bundle", async (t) => {

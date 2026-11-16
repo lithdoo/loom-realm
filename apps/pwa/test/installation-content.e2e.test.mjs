@@ -1,5 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { validatePwaBundlePayload } from "../scripts/build-bundle.mjs";
+import { packFsdbRoot } from "../../../test/fsdb-multi-database/pack-source.mjs";
+import { writeContentParityFixture } from "../../../test/fsdb-multi-database/parity-fixture.mjs";
 import { openProduct, waitForDemo } from "./helpers/browser.mjs";
 
 test("installation publishes atomically and Content/Executable routes preserve v1 HTTP semantics offline", async () => {
@@ -513,4 +520,116 @@ test("database path problem codes stay distinct from ordinary Content names", as
     assert.equal(result.missing.status, 404);
     assert.equal(result.missing.code, "CONTENT_NOT_FOUND");
   } finally { await product.close(); }
+});
+
+test("the same source fixture matches Desktop packager bytes on the PWA Content path", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "pwa-parity-"));
+  const root = join(parent, "game");
+  const product = await openProduct();
+  try {
+    await waitForDemo(product.page);
+    await writeContentParityFixture(root);
+    const packed = await packFsdbRoot(root);
+    assert.deepEqual([...new Set(packed.map((entry) => entry.databasePath))].sort(), ["GameData", "GameData/World", "ModData"]);
+    assert.equal(packed.some((entry) => entry.databasePath === "Empty" || entry.databasePath.includes("Something")), false);
+    const logos = packed.filter((entry) => entry.key === "logo");
+    assert.equal(logos.length, 2);
+    assert.equal(logos[0].contentVersion, logos[1].contentVersion);
+    const records = packed.filter((entry) => entry.kind === "record" && entry.key === "common");
+    assert.equal(new Set(records.map((entry) => entry.contentVersion)).size, records.length);
+    const source = "export default () => ({ frame: async () => ({ type: 'completed', value: null }) });";
+    const payload = {
+      formatVersion: 1,
+      gameEntryText: JSON.stringify({ formatVersion: 1, initial: { subsystem: "content", input: null }, subsystems: [{ key: "content" }] }),
+      launchManifestText: JSON.stringify({ formatVersion: 1, subsystems: [{ key: "content", module: "content.mjs" }] }),
+      presentation: {},
+      executables: [{ logicalModule: "content.mjs", mime: "text/javascript", source, contentVersion: `sha256:${"c".repeat(64)}` }],
+      content: packed.map((entry) => ({
+        databasePath: entry.databasePath,
+        kind: entry.kind,
+        namespace: entry.namespace,
+        key: entry.key,
+        mime: entry.mime,
+        encoding: "base64",
+        body: Buffer.from(entry.bytes).toString("base64"),
+      })),
+    };
+    validatePwaBundlePayload(payload);
+    const expected = packed.map((entry) => ({
+      databasePath: entry.databasePath,
+      kind: entry.kind,
+      namespace: entry.namespace,
+      key: entry.key,
+      mime: entry.mime,
+      body: Buffer.from(entry.bytes).toString("base64"),
+      contentVersion: entry.contentVersion,
+    }));
+    const observed = await product.page.evaluate(async (entries) => {
+      const sourceText = "export default () => ({ frame: async () => ({ type: 'completed', value: null }) });";
+      const decode = (value) => Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+      const installed = await window.__loomrealmPwaQualification.install({
+        formatVersion: 1,
+        gameEntryText: JSON.stringify({ formatVersion: 1, initial: { subsystem: "content", input: null }, subsystems: [{ key: "content" }] }),
+        launchManifestText: JSON.stringify({ formatVersion: 1, subsystems: [{ key: "content", module: "content.mjs" }] }),
+        content: entries.map((entry) => ({
+          databasePath: entry.databasePath,
+          kind: entry.kind,
+          namespace: entry.namespace,
+          key: entry.key,
+          mime: entry.mime,
+          body: new Blob([decode(entry.body)], { type: entry.mime }),
+        })),
+        executables: [{ logicalModule: "content.mjs", mime: "text/javascript", body: new Blob([sourceText], { type: "text/javascript" }) }],
+      });
+      const base = `/_lr/v1/games/${encodeURIComponent(installed.installationId)}`;
+      const read = async (entry) => {
+        const database = entry.databasePath.split("/").map(encodeURIComponent).join("/");
+        const key = entry.key.split("/").map(encodeURIComponent).join("/");
+        const collection = entry.kind === "record" ? "records" : entry.kind === "group" ? "groups" : "resources";
+        const url = `${base}/databases/${database}/$db/${collection}/${encodeURIComponent(entry.namespace)}/${key}`;
+        const response = await fetch(url);
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        let body = "";
+        for (const byte of bytes) body += String.fromCharCode(byte);
+        const head = await fetch(url, { method: "HEAD" });
+        return {
+          status: response.status,
+          body: btoa(body),
+          mime: response.headers.get("content-type"),
+          version: response.headers.get("x-loom-content-version"),
+          etag: response.headers.get("etag"),
+          head: head.status,
+          headBody: await head.text(),
+          headVersion: head.headers.get("x-loom-content-version"),
+          headEtag: head.headers.get("etag"),
+        };
+      };
+      const reads = [];
+      for (const entry of entries) reads.push(await read(entry));
+      const empty = await fetch(`${base}/databases/Empty/$db/records/struct.Config/common`);
+      const emptyBody = await empty.text();
+      await window.__loomrealmPwaQualification.uninstall(installed.installationId);
+      return { reads, empty: { status: empty.status, code: JSON.parse(emptyBody).code } };
+    }, expected);
+    assert.equal(observed.reads.length, expected.length);
+    for (let index = 0; index < expected.length; index += 1) {
+      const entry = expected[index];
+      const actual = observed.reads[index];
+      assert.equal(actual.status, 200, `${entry.databasePath} ${entry.kind} ${entry.key}`);
+      assert.equal(actual.body, entry.body);
+      assert.equal(actual.mime, entry.mime);
+      assert.equal(actual.version, entry.contentVersion);
+      assert.equal(actual.version, `sha256:${createHash("sha256").update(Buffer.from(entry.body, "base64")).digest("hex")}`);
+      assert.equal(actual.etag, `"${entry.contentVersion}"`);
+      assert.equal(actual.head, 200);
+      assert.equal(actual.headBody, "");
+      assert.equal(actual.headVersion, entry.contentVersion);
+      assert.equal(actual.headEtag, `"${entry.contentVersion}"`);
+    }
+    assert.equal(observed.empty.status, 404);
+    assert.equal(observed.empty.code, "CONTENT_NOT_FOUND");
+  } finally {
+    await product.close();
+    await rm(parent, { recursive: true, force: true });
+  }
 });

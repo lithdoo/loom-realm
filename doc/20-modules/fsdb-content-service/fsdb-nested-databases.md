@@ -680,11 +680,11 @@ GET /_lr/v1/games/{id}/databases/ModData/$db/resources/resource.Assets/logo
 
 Route rules:
 
-- databasePath consists of one or more canonical NameSegment values.
-- $db is the literal raw delimiter; it cannot be a valid database name.
-- Encode each database path segment independently. Do not encode the whole path into one segment.
-- Decode each ordinary segment exactly once, then validate it using the shared FSDB name rules.
-- A decoded slash or backslash inside one segment is invalid.
+- databasePath consists of one or more canonical FSDB NameSegment values: NFC, case-sensitive, and subject to the FSDB reserved-character and device-name limits. It is not a filesystem path.
+- namespace, key, and resourceKey use Content API logical segments. They are not rejected merely because an FSDB filename would reject them. `CON`, `icon*`, and `$meta` are valid Content segments.
+- $db is the literal raw delimiter. `%24db` is an ordinary encoded segment, not the delimiter. A missing `$db` delimiter is an ordinary route error, not `DATABASE_PATH_INVALID`.
+- Encode each database path segment and each Content segment independently. Do not encode the whole path into one segment.
+- Decode each segment exactly once. A decoded slash or backslash inside one segment is invalid. Illegal percent-encoding is an ordinary route error.
 - record/group keys remain one logical segment; resource keys remain slash-separated hierarchical segments.
 - Manifest has no database path.
 - There is no database catalog route and no default database route.
@@ -693,13 +693,16 @@ Status mapping for database-backed Content reads follows the existing Content AP
 
 | Condition | HTTP status / stable problem code |
 |---|---|
-| Invalid route, encoding, or request syntax | 400 / CONTENT_REQUEST_INVALID |
-| Invalid logical databasePath | 400 / DATABASE_PATH_INVALID |
-| Missing database path or content entry | 404 / CONTENT_NOT_FOUND |
-| Ambiguous physical databasePath resolution | 409 / DATABASE_PATH_AMBIGUOUS |
-| Selected database fails FSDB Well-formed validation | 422 / DATABASE_INVALID |
-| Selected database is STALE or temporarily unavailable | 503 / DATABASE_UNAVAILABLE |
+| Ordinary route or percent-encoding error, including a missing `$db` delimiter | 400 / Desktop `CONTENT_REQUEST_INVALID`, PWA `INVALID_CONTENT_ROUTE` |
+| Empty or illegal databasePath | 400 / `DATABASE_PATH_INVALID` |
+| Legal databasePath that does not exist | 404 / `CONTENT_NOT_FOUND` |
+| Database exists but the content entry does not | 404 / `CONTENT_NOT_FOUND` |
+| Ambiguous physical databasePath resolution | 409 / `DATABASE_PATH_AMBIGUOUS` |
+| Selected database fails FSDB Well-formed validation | 422 / `DATABASE_INVALID` |
+| Desktop database is STALE or temporarily unavailable | 503 / `DATABASE_UNAVAILABLE` |
 | Unexpected internal service failure | 500 / existing internal-failure handling |
+
+PWA installations do not have a Desktop STALE handle. An unavailable PWA read uses the Content API unavailable mapping for that request; it does not invent a database catalog.
 
 The stable codes and status categories are owned by `content-api-v1.md`; this architecture document does not introduce alternate Content error names.
 
@@ -951,7 +954,7 @@ The project has not been externally released. Evolve the existing contracts dire
 
 - Core receives logical paths and never URL-decodes them.
 - HTTP parsers split raw paths before decoding ordinary segments.
-- Each segment is decoded exactly once and then validated.
+- Each segment is decoded exactly once and then validated. databasePath segments use FSDB NameSegment rules. Ordinary Content namespace, key, and resourceKey segments use Content API logical segment rules.
 - A decoded slash or backslash cannot create a new path segment.
 - Database path resolution walks one [FSDB] child at a time.
 - The Root is canonicalized once; all selected database components must remain beneath it.
@@ -963,7 +966,8 @@ The project has not been externally released. Evolve the existing contracts dire
 
 | Condition | Core | FSDB HTTP | Desktop Content | PWA |
 |---|---|---|---|---|
-| Missing database path | Open fails | 404 | 404 / CONTENT_NOT_FOUND | 404 / CONTENT_NOT_FOUND |
+| Empty or illegal databasePath | Open fails | 400 | 400 / DATABASE_PATH_INVALID | 400 / DATABASE_PATH_INVALID |
+| Legal databasePath does not exist | Open fails | 404 | 404 / CONTENT_NOT_FOUND | 404 / CONTENT_NOT_FOUND |
 | Missing content entry | null lease | 404 | 404 / CONTENT_NOT_FOUND | 404 / CONTENT_NOT_FOUND |
 | Empty database | Opens successfully | Descriptor has no tables/entries | Content read returns not found | Emits no entries; reads return not found |
 | Malformed selected database | That open fails | 422 | 422 / DATABASE_INVALID for that path; siblings remain usable | Whole Bundle build fails atomically |
@@ -975,11 +979,11 @@ The PWA row is intentionally different at build time: a Bundle is one atomic ins
 
 ### 10.3 Error and lifecycle rules
 
-- Invalid Content route/encoding syntax maps to 400 / CONTENT_REQUEST_INVALID; an invalid logical databasePath maps to 400 / DATABASE_PATH_INVALID.
-- Missing database or content maps to 404 / CONTENT_NOT_FOUND.
+- Invalid Content route or percent-encoding, including a missing `$db` delimiter or a `%24db` segment, maps to 400. Desktop reports `CONTENT_REQUEST_INVALID`; PWA reports `INVALID_CONTENT_ROUTE`. An empty or illegal logical databasePath maps to 400 / `DATABASE_PATH_INVALID`.
+- A legal databasePath that does not exist, and a database that exists without the requested content, both map to 404 / `CONTENT_NOT_FOUND`. Neither response enumerates databases.
 - Ambiguous physical databasePath resolution maps to 409 / DATABASE_PATH_AMBIGUOUS, never an arbitrary selection.
 - A selected database that fails FSDB validation maps to 422 / DATABASE_INVALID.
-- A stale or temporarily unavailable database maps to 503 / DATABASE_UNAVAILABLE; it is not transparently reopened.
+- A stale or temporarily unavailable Desktop database maps to 503 / DATABASE_UNAVAILABLE and is not transparently reopened. FSDB HTTP maps that handle to 503. PWA has no STALE database handle; installed bytes stay immutable.
 - Unexpected service failures use the existing Content API internal-failure handling.
 - FSDB HTTP uses its own existing status mapping; neither service exposes filesystem paths or raw OS errors.
 - A failure in one database MUST NOT mark the whole Desktop installation unavailable.
@@ -994,6 +998,8 @@ Exact HTTP status codes, problem payloads, headers, and conditional-request prec
 ### Phase 0 — Documentation Alignment
 
 Before code changes, the repository documents that define this multi-database contract are aligned to it. This is synchronization of decisions already made in this document, not a new architecture pass.
+
+The hotspots below are the in-repository implementation map. `packages/fsdb/src/names.ts` exports FSDB NameSegment and databasePath rules, and `contentLogicalSegment` for ordinary Content namespace, key, and resourceKey segments. The consumer-owned Source Packager production integration stays in the consumer repository. `test/fsdb-multi-database/pack-source.mjs` is this repository's reference packager, not that production integration.
 
 Aligned surfaces:
 
@@ -1010,7 +1016,7 @@ Aligned surfaces:
 |---|---|
 | packages/fsdb/src/index.ts | Require root + path; export listFsdbPaths(); keep handle identities local |
 | packages/fsdb/src/scanner.ts | Separate container Root resolution, selected database resolution, recursive discovery, and single-database scan |
-| packages/fsdb/src/names.ts | Extract browser-safe canonical NameSegment/databasePath rules; no Node-only dependency in the shared subpath |
+| packages/fsdb/src/names.ts | Browser-safe NameSegment and databasePath rules, plus contentLogicalSegment for ordinary Content identity; no Node-only dependency in the shared subpath |
 | packages/fsdb/test/fsdb.test.mjs | Add nested discovery, explicit path, duplicate marker, no-symlink, and independent lifecycle tests |
 
 ### 11.2 FSDB HTTP
@@ -1049,14 +1055,14 @@ The existing FSDB HTTP design and conformance documents are the active contract 
 
 ### 11.5 Normative documents
 
-The current implementation target is defined across these existing documents:
+The current implementation is defined across these existing documents:
 
 - fsdb-layout.md: nested database nodes, marker casing, path grammar, and database independence.
 - packages/fsdb-http/DESIGN.md and CONFORMANCE.md: current `/fsdb/v1` behavior, Root service routes, ownership, status, and conformance.
 - content-api-v1.md: current `/_lr/v1` database-scoped identity and route semantics.
 - This document: cross-layer architecture, Desktop/PWA composition, implementation map, and end-to-end acceptance gates.
 
-The PWA Bundle remains `formatVersion: 1`; its existing content entry shape is extended in place. Keep all normative documents aligned as implementation proceeds.
+The PWA Bundle remains `formatVersion: 1`; its existing content entry shape carries databasePath. Keep these normative documents aligned with the implementation.
 
 ### 11.6 Required implementation gates
 
@@ -1065,7 +1071,7 @@ The PWA Bundle remains `formatVersion: 1`; its existing content entry shape is e
 3. **Content API gate:** every database-backed read requires databasePath; current Content routes parse unambiguously; no namespace prefix trick or default fallback exists.
 4. **Desktop gate:** one installation Content View lazily serves at least two databases with identical local identities; a broken database does not block healthy siblings.
 5. **PWA gate:** Bundle, IndexedDB, and Service Worker preserve databasePath; duplicate detection is database-scoped; publication remains atomic.
-6. **Parity gate:** for a shared fixture, Desktop and PWA return the same bytes, MIME, contentVersion, and logical identity for each database-backed Content request.
+6. **Parity gate:** for a shared fixture, Desktop and PWA return the same bytes, MIME, contentVersion, and logical identity for each database-backed Content request. The in-repository evidence is `test/fsdb-multi-database/parity-fixture.mjs`, packed by `test/fsdb-multi-database/pack-source.mjs`, then compared by `apps/desktop/test/content-pack-parity.test.mjs` and `apps/pwa/test/installation-content.e2e.test.mjs`. The PWA side validates the consumer JSON with the generic builder, then installs it and reads it through the Service Worker. The builder does not scan the source tree.
 7. **Lifecycle gate:** all pending opens, active read leases, and owned handles are accounted for during close; stale handles are not silently replaced.
 8. **Documentation gate:** FSDB layout, current FSDB HTTP, current Content API, and PWA Bundle contracts agree with this architecture before release.
 
@@ -1131,7 +1137,7 @@ A database-backed Content read has a complete path:
 
 1. The caller supplies canonical databasePath, namespace, and key.
 2. ContentClient validates the databasePath and builds a current-protocol URL with per-segment encoding.
-3. The server parses raw path segments, recognizes the literal $db delimiter, decodes each ordinary segment once, and validates the canonical path.
+3. The server parses raw path segments, recognizes the literal `$db` delimiter, decodes each segment once, validates databasePath with FSDB NameSegment rules, and validates namespace, key, and resourceKey with Content logical segment rules.
 4. Desktop resolves exactly that database through Core; PWA matches the same databasePath in its persisted Content Index.
 5. The selected database's local kind/namespace/key identity is resolved without cross-database fallback.
 6. The selected bytes are read or loaded, schema/MIME rules are applied, and contentVersion is verified.
@@ -1202,4 +1208,4 @@ The fixture MUST prove:
 - This is an in-place pre-release API/protocol change; no old single-database fallback or compatibility layer is retained.
 - No FSDB on-disk format-version marker or installation-level database selector is introduced.
 
-**Design review verdict:** the cross-layer architecture is coherent and closed at the identity, routing, ownership, failure-isolation, packaging, and lifecycle boundaries. The explicit trade-offs above are accepted. Implementation is not complete until every gate in 11.6 passes and the current `/fsdb/v1` and `/_lr/v1` contracts and their conformance suites agree with this document.
+**Design review verdict:** the cross-layer architecture is coherent and closed at the identity, routing, ownership, failure-isolation, packaging, and lifecycle boundaries. The explicit trade-offs above are accepted. The in-repository Core, HTTP, Desktop, PWA, ContentClient, and Renderer paths implement this architecture. The gates in 11.6, including the shared-fixture Desktop/PWA parity gate, remain the acceptance check that `/fsdb/v1` and `/_lr/v1` agree with this document. Consumer production packaging stays outside this repository.
