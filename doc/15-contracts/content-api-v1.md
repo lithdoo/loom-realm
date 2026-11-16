@@ -117,6 +117,8 @@ contain no Drive/UNC/URL semantics
 
 `installationId`、`namespace`、record/group `key` 都是单个 logical segment。`databasePath` 是多个独立 NameSegment 组成的逻辑路径；每段单独 percent-encode/decode，`/` 只作为段分隔符。
 
+在 record/group/resource 路由中，`databases` 是固定字面 segment，紧随其后的一个或多个 path segment 是 databasePath；原始 URL 中的字面 `$db` segment 终止 databasePath。服务端必须先按原始 `/` 拆分路径并识别字面 `$db`，再对普通 segment 逐段 percent-decode 一次。编码形式 `%24db` 不是 delimiter。解码后包含 `/` 或 `\\` 的单个 segment 必须拒绝，不能借 percent-decoding 制造层级。
+
 Resource `key` MAY 是 hierarchical logical key：
 
 ```text
@@ -497,6 +499,7 @@ interface ContentProblemV1 {
   readonly code: string;
   readonly detail?: string;
   readonly installationId?: string;
+  readonly databasePath?: string;
   readonly namespace?: string;
   readonly key?: string;
 }
