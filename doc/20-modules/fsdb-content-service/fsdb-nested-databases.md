@@ -756,10 +756,18 @@ interface PreparedDatabaseContent {
   readonly index: ReadonlyMap<string, ContentIndexEntry>;
 }
 
+interface PreparedDatabaseSlot {
+  /** Resolves when the owned Core handle has opened. */
+  readonly open: Promise<FsdbDatabase>;
+  /** Resolves when the local Content Index has been built. */
+  readonly prepared: Promise<PreparedDatabaseContent>;
+}
+
 interface PreparedDesktopContentViewState {
   readonly installationId: string;
   readonly installationRoot: string;
-  readonly databases: Map<string, Promise<PreparedDatabaseContent>>;
+  readonly databases: Map<string, PreparedDatabaseSlot>;
+  readonly ownedDatabases: Set<FsdbDatabase>;
 }
 ~~~
 
@@ -795,10 +803,11 @@ Rules:
 - Concurrent first requests for the same path share one preparation Promise.
 - Index construction is owned by the Content View, not by an individual request AbortSignal. A disconnected first requester MUST NOT cancel shared preparation needed by other requests.
 - A failed database open MUST NOT prevent healthy siblings from being opened or served.
-- If openFsdb rejects before returning a handle, remove that rejected opening Promise so a later request can retry.
-- Once a handle has been acquired, the Content View retains ownership of it even if index construction fails; the handle is included in shutdown cleanup.
+- The per-path slot separates the open Promise from the Content-index preparation Promise.
+- If openFsdb rejects before returning a handle, remove that slot so a later request can retry.
+- Once a handle has been acquired, add it to ownedDatabases immediately. If index construction then fails, retain the slot's rejected prepared Promise and retain the handle for shutdown; do not open a replacement snapshot under the same view.
 - If the acquired handle is STALE, retain that failed state for the lifetime of the view and do not silently reopen a new snapshot. A later request MUST NOT turn a stale snapshot into a different snapshot under the same view.
-- If index construction fails after a handle has been acquired, the view retains that handle in its owned-handle set so shutdown can close it even though no usable index was published.
+- Shutdown snapshots and awaits all still-pending slot.open Promises, then closes every handle in ownedDatabases after active read leases have drained.
 - Closing the installation Content View stops new reads, waits for pending opens and active leases, then closes all successfully opened handles.
 - Do not call listFsdbPaths() at Desktop Runtime startup; a known Content databasePath is resolved directly by Core.
 - Do not create a database availability catalog or installation-wide failure state.
