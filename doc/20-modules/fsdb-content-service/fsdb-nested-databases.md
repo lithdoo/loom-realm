@@ -1,40 +1,37 @@
 # FSDB Nested and Multi-Database Architecture
 
-> Status: **Design proposal** — agreed direction; not yet implemented or normative.
-> Scope: FSDB directory layout, recursive database discovery, independent database identity, Core / HTTP API changes, and multi-database LoomRealm Content integration.
-> Implementation baseline: `feat/fsdb-case-insensitive-directory-types` (case-insensitive directory type markers).
-> This proposal requires a breaking, database-aware Content API contract. The low-level FSDB HTTP adapter remains one database per service; its open options change, while its existing route shape can remain.
+> Status: **Design proposal — revised and design-reviewed; implementation is not yet complete or normative.**
+> Scope: nested FSDB layout, explicit database addressing, Root-scoped FSDB HTTP v2, and database-aware LoomRealm Content API v2.
+> Implementation baseline: \`feat/fsdb-case-insensitive-directory-types\`.
+> Breaking contracts: FSDB Core API, FSDB HTTP service API / v2 routes, Content API v2, and PWA installation bundle v2.
+> Storage compatibility: no FSDB on-disk format-version marker is introduced.
 
 ## 1. Summary
 
-LoomRealm installations may contain **multiple top-level FSDBs and arbitrarily nested FSDBs**. Every discovered FSDB is a first-class, independently addressable database. Nesting describes physical organization only; it never creates logical ownership, inheritance, or a reference relationship.
+One installation/container root may contain multiple top-level FSDBs and arbitrarily nested FSDBs. Every FSDB is an independently addressable database. Physical nesting is organizational only; it does not create logical ownership, inheritance, or cross-database references.
 
-This is not a design for selecting one database for an installation. It is a design for making **all databases in one installation available together**, while preserving each database's independent identity and lifecycle.
+The architecture has four distinct responsibilities:
 
-There are two distinct operations:
+1. **Core resolution and opening:** discover logical paths when needed, then open exactly one database by explicit path.
+2. **FSDB HTTP v2:** expose every database below one filesystem Root through one HTTP Server. Resolve and open a database lazily from each request path; do not start one server per database.
+3. **LoomRealm Content API v2:** make databasePath part of every record/group/resource identity. Desktop and PWA expose the same logical contract through different storage implementations.
+4. **Packaging:** enumerate and package every database at build time. Preserve databasePath in every packaged content entry; do not introduce a runtime database catalog.
 
-1. **Discover** all FSDB logical paths beneath an installation/container root.
-2. **Open** one exact database by supplying its path.
+The Core API is deliberately breaking:
 
-The proposed Core API is deliberately breaking:
-
-```ts
+~~~ts
 export interface OpenFsdbOptions {
-  /** Filesystem container root containing top-level [FSDB] directories. */
+  /** Filesystem container root, not an individual FSDB directory. */
   readonly root: string;
 
-  /** Required logical path to exactly one FSDB, e.g. "GameData/World". */
+  /** Required logical path to exactly one FSDB. */
   readonly path: string;
 }
 
 export function openFsdb(
   options: OpenFsdbOptions,
 ): Promise<FsdbDatabase>;
-```
 
-A separate discovery operation is required for installation-level consumers:
-
-```ts
 export interface ListFsdbPathsOptions {
   readonly root: string;
 }
@@ -42,50 +39,92 @@ export interface ListFsdbPathsOptions {
 export function listFsdbPaths(
   options: ListFsdbPathsOptions,
 ): Promise<readonly string[]>;
-```
+~~~
 
-`listFsdbPaths` discovers paths; it does not choose a default, open databases, or merge their contents. Consumers open each returned path independently with `openFsdb({ root, path })`.
+The Root-scoped FSDB HTTP service is:
 
-At the LoomRealm Content boundary, `databasePath` becomes part of every database-backed Content identity. A single installation Content View can expose many FSDBs without merging their namespaces. Desktop and PWA MUST preserve this database dimension.
+~~~ts
+export interface ServeFsdbOptions {
+  readonly root: string;
+  readonly host?: string;
+  readonly port?: number;
+}
 
-No installation-level file is introduced to select one database. No FSDB on-disk format-version marker is introduced. This is an intentional breaking change: consumers are migrated to the new contracts rather than supported through compatibility shims.
+export function serveFsdb(
+  options: ServeFsdbOptions,
+): Promise<FsdbHttpService>;
+~~~
+
+One call to serveFsdb creates one Server for one canonical filesystem Root. It does not enumerate or open every database at startup. The first request for a database opens that database; subsequent requests reuse its handle.
+
+At the LoomRealm Content boundary, databasePath is explicit:
+
+~~~ts
+export interface ContentObjectIdentity {
+  readonly databasePath: string;
+  readonly namespace: string;
+  readonly key: string;
+}
+
+export interface ContentClient {
+  record(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentRecord>;
+  group(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentGroup>;
+  resource(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentResource>;
+}
+~~~
+
+There is deliberately no Runtime database catalog, no ContentClient.databases(), no /databases endpoint, no per-database availability state, and no default database. A caller must already know the logical databasePath it wants to read.
+
+Desktop uses FSDB Core directly and lazily creates a per-database Content index inside one installation-level Content View. PWA packages all database content at build time and persists databasePath in its Content Index. Neither platform merges database namespaces.
+
+The following distinctions are intentional:
+
+- listFsdbPaths() is a build-time / tooling discovery primitive, not a Runtime catalog.
+- FSDB HTTP v2 is a Root-level filesystem service, not the LoomRealm Content API.
+- Desktop Content Service is a separate installation-level service; it does not call the FSDB HTTP service over loopback.
+- PWA does not promote Node-only FSDB Core into a browser storage abstraction.
+- Empty databases are valid FSDBs. They produce no PWA content entries and cannot be distinguished from absent databases through the Content API because no database-listing API exists.
+
+No installation-level file selects one FSDB. No databasePath is added to GameEntryV1 or launcher manifests. No FSDB disk-format marker is introduced. Old single-database Core and Content call signatures are not retained as compatibility overloads.
 
 ## 2. Goals and non-goals
 
-### Goals
+### 2.1 Goals
 
-1. Allow any number of top-level `[FSDB]` directories under one installation/container root.
-2. Allow an FSDB directory to contain child `[FSDB]` directories recursively.
-3. Discover every FSDB path deterministically without scanning table or resource contents.
-4. Open any one discovered database explicitly with required `root + path`.
-5. Make all discovered databases independently addressable from one LoomRealm installation and one Runtime.
-6. Keep every FSDB self-contained, with local tables, references, resources, validation, snapshot, and lifecycle.
-7. Preserve the existing table and object identity model inside each opened database.
-8. Add database identity at the LoomRealm Content boundary without modifying `TableIdentity` or `FsdbObjectIdentity`.
-9. Keep Runtime consumers independent of physical filesystem paths.
-10. Keep Desktop and PWA logically equivalent while allowing their storage implementations to differ.
+1. Allow multiple top-level FSDBs under one installation/container Root.
+2. Allow an FSDB directory to contain child FSDB directories recursively.
+3. Discover all database paths deterministically without scanning table or resource contents.
+4. Open exactly one database through required root + path.
+5. Serve all databases below one Root through one FSDB HTTP Server.
+6. Make each database independently addressable through LoomRealm Content.
+7. Keep tables, references, resources, snapshots, validation, read leases, and lifecycle local to one database.
+8. Preserve the existing TableIdentity and FsdbObjectIdentity model inside a database.
+9. Keep Desktop and PWA logically equivalent while allowing their storage implementations to differ.
+10. Keep installation/game/launcher manifests independent of database selection.
 
-### Non-goals
+### 2.2 Non-goals
 
 - Merging tables from different databases into one namespace.
-- Parent/child inheritance, overlays, joins, or cross-database foreign keys.
-- Resolving a database's references against its parent, children, or siblings.
-- Automatically opening a database as a side effect of opening another database.
-- Making Node-only `@loomrealm/fsdb` a browser/PWA storage abstraction.
-- Introducing a configuration file or manifest field that selects one database for the installation.
-- Adding a compatibility layer for the old root-only `openFsdb()` API or old single-database Content calls.
-- Adding a FSDB on-disk format-version marker.
-- Adding database writes, transactions, or cross-database publication.
+- Parent/child inheritance, overlays, joins, cross-database foreign keys, or cross-database resource resolution.
+- Opening a database as a side effect of opening its parent, child, or sibling.
+- A Runtime database catalog, database-list endpoint, availability map, or database enumeration API.
+- A default database or first-discovered-database fallback.
+- One FSDB HTTP Server per database.
+- Making Node-only @loomrealm/fsdb a browser/PWA storage abstraction.
+- A configuration file or manifest field selecting one database for an installation.
+- A compatibility overload for the old root-only openFsdb() API or positional ContentClient methods.
+- Database writes, transactions, or cross-database publication.
+- An FSDB on-disk format-version marker.
 
-The installation-level Content View is an aggregate access surface, not an aggregate database: it MUST retain database identity and independent handles rather than flattening databases into one logical namespace.
+The installation-level Desktop Content View is an access surface, not an aggregate database. It retains database identity and independent handles rather than flattening namespaces.
 
 ## 3. Directory model
 
 ### 3.1 Database and table nodes
 
-A container root may contain multiple top-level FSDB directories. Each FSDB directory may contain child FSDB directories and its own four table types:
+A container Root may contain multiple top-level FSDB directories. Each FSDB directory may contain child FSDB directories and its own four table types:
 
-```text
+~~~text
 Game/
 ├── [FSDB]GameData/
 │   ├── [STRUCT]GlobalConfig/
@@ -96,18 +135,16 @@ Game/
 │   └── [FSDB]Characters/
 │       ├── [STRUCT]Attributes/
 │       └── [RESOURCE]Portraits/
-│
 ├── [FSDB]ModData/
 │   ├── [STRUCT]Settings/
 │   └── [RESOURCE]Assets/
-│
 └── [FSDB]Cache/
     └── [STRUCT]Entries/
-```
+~~~
 
 The logical grammar is:
 
-```text
+~~~text
 ContainerRoot
 └── FSDB(DatabaseName)
     ├── FSDB(DatabaseName)       zero or more; recursive
@@ -115,38 +152,46 @@ ContainerRoot
     ├── EXTEND(TableName)        zero or more
     ├── GROUP(TableName)         zero or more
     └── RESOURCE(TableName)      zero or more
-```
+~~~
 
-Each `[FSDB]` directory starts a new database scope. Each nested database follows the same directory rules recursively.
+Each [FSDB] directory starts a new database scope. Each nested database follows the same directory rules recursively.
 
 ### 3.2 Database boundaries are recognized only at database-root level
 
 The type marker is interpreted according to the current directory's role:
 
-- Direct children of an FSDB root may be `[FSDB]` child databases or one of the four table types.
+- Direct children of an FSDB root may be child [FSDB] databases or one of the four table types.
 - A table is not a container for another database.
-- Directories below a `[RESOURCE]` table are resource-key path segments, not FSDB/table nodes.
-- Therefore a resource directory literally named `[FSDB]World` is still an ordinary ResourceKey segment. The `[FSDB]` prefix has database meaning only when it appears as a direct child of an FSDB root.
-- Resource subdirectories never create a new database or metadata scope.
+- Directories below a [RESOURCE] table are resource-key path segments, not FSDB/table nodes.
+- A resource directory literally named [FSDB]World is still ordinary resource content. The [FSDB] prefix has database meaning only when it appears as a direct child of an FSDB root.
+- Resource subdirectories never create a database or metadata scope.
 
-This prevents a recursive filesystem walk from accidentally interpreting resource folders as databases.
+A discovery walk MUST recurse only through direct [FSDB] children of an FSDB root. It MUST NOT recursively walk arbitrary directories and infer database boundaries from names found inside tables.
 
 ### 3.3 Directory type marker casing
 
-The case-insensitive type-marker rule is part of the agreed baseline on this branch and applies to all five physical type markers:
+The case-insensitive type-marker rule applies to all five physical type markers:
 
-```text
+~~~text
 [FSDB] [STRUCT] [EXTEND] [GROUP] [RESOURCE]
-```
+~~~
 
-- Readers **MUST** recognize the ASCII type marker without regard to ASCII letter case.
-- Writers **SHOULD** emit uppercase type markers.
-- Case folding applies only to the marker inside `[]`.
-- DatabaseName, TableName, Key, and ResourceKey remain case-sensitive logical names and continue to use the existing NFC / NameSegment rules.
-- Physical directories such as `[FSDB]GameData` and `[fsdb]GameData` represent the same logical child database name. If both exist as separate physical entries, resolution MUST fail as ambiguous / duplicate; the implementation must not choose one arbitrarily.
-- The same duplicate-identity rule applies to table type markers, e.g. `[STRUCT]角色` and `[struct]角色`.
+- Readers MUST recognize the ASCII type marker without regard to ASCII letter case.
+- Writers SHOULD emit uppercase type markers.
+- Case folding applies only to the marker inside brackets.
+- DatabaseName, TableName, Key, and ResourceKey remain case-sensitive logical names and use the existing NFC / NameSegment rules.
+- Physical directories such as [FSDB]GameData and [fsdb]GameData represent the same logical child database name. If both exist as separate physical entries, resolution MUST fail as ambiguous / duplicate; it MUST NOT choose one arbitrarily.
+- The same duplicate-identity rule applies to table type markers, for example [STRUCT]角色 and [struct]角色.
 
 Uppercase output is a writer convention, not a requirement to rename existing lowercase data.
+
+### 3.4 Reserved HTTP database delimiter
+
+The Root-scoped HTTP routes use the literal path segment $db to mark the end of databasePath.
+
+This delimiter is unambiguous because the existing FSDB NameSegment rule rejects names beginning with $. Therefore $db cannot be a valid DatabaseName, TableName, Key, or ResourceKey segment.
+
+The route parser recognizes the literal raw segment $db as a structural delimiter before decoding ordinary path segments. A percent-encoded spelling such as %24db is not an alternate delimiter spelling.
 
 ## 4. Database independence
 
@@ -167,35 +212,35 @@ Every FSDB is an independent data unit:
 
 ### 4.1 Reference scope
 
-Existing `.extend.meta` declarations in EXTEND and GROUP tables resolve STRUCT table names only within the same opened FSDB.
+Existing .extend.meta declarations in EXTEND and GROUP tables resolve STRUCT table names only within the same opened FSDB.
 
 For example:
 
-```text
+~~~text
 [FSDB]GameData/
 ├── [STRUCT]Character/
 └── [FSDB]World/
     ├── [STRUCT]Character/
     └── [EXTEND]CharacterSkills/
-```
+~~~
 
-The `CharacterSkills` table inside `World` resolves `struct: "Character"` to `World`'s own `[STRUCT]Character`. It cannot resolve the parent database's table.
+The CharacterSkills table inside World resolves struct: "Character" to World's own [STRUCT]Character. It cannot resolve the parent database's table.
 
 Resource keys are likewise local to the database containing the RESOURCE table. A value in one database cannot use this mechanism to resolve a resource from another database.
 
-If data needs to be shared between databases, the content must be duplicated or coordinated by a higher-level installer / packaging system. Cross-database sharing is not an FSDB feature.
+If data needs to be shared between databases, content must be duplicated or coordinated by a higher-level installer / packaging system. Cross-database sharing is not an FSDB feature.
 
 ## 5. Database path, resolution, and discovery
 
-### 5.1 Meaning of `root` and `path`
+### 5.1 Meaning of root and path
 
-`root` is the filesystem container root. It is not the selected database directory.
+root is the filesystem container Root. It is not the selected database directory.
 
-`path` is a logical database path relative to `root`. Each segment names one FSDB directory, without the physical `[FSDB]` prefix.
+path is a logical database path relative to root. Each segment names one FSDB directory, without the physical [FSDB] prefix.
 
 Example:
 
-```text
+~~~text
 root = "/games/example"
 path = "GameData/World"
 
@@ -203,34 +248,35 @@ physical target =
   /games/example/
     [FSDB]GameData/
       [FSDB]World/
-```
+~~~
 
 Other examples:
 
-| `path` | Selected physical directory |
+| path | Selected physical directory |
 |---|---|
-| `GameData` | `[FSDB]GameData` |
-| `ModData` | `[FSDB]ModData` |
-| `GameData/World` | `[FSDB]GameData/[FSDB]World` |
-| `GameData/World/Region` | `[FSDB]GameData/[FSDB]World/[FSDB]Region` |
+| GameData | [FSDB]GameData |
+| ModData | [FSDB]ModData |
+| GameData/World | [FSDB]GameData/[FSDB]World |
+| GameData/World/Region | [FSDB]GameData/[FSDB]World/[FSDB]Region |
 
-The same logical `databasePath` is used by LoomRealm Content identities. It is a stable logical path relative to the installation root, not an OS path and not a physical directory name.
+The same canonical logical databasePath is used by LoomRealm Content identities. It is relative to the installation Root, not an OS path and not a physical directory name.
 
-### 5.2 Path syntax
+### 5.2 Path syntax and canonicalization
 
-The `path` field is required and MUST be a non-empty string.
+The path field is required and MUST be a non-empty string.
 
-- `/` is the only logical separator.
-- Each segment is a DatabaseName / NameSegment, without `[FSDB]`.
-- Segments are NFC-canonicalized using the existing FSDB name rules.
+- / is the only logical separator.
+- Each segment is a DatabaseName / NameSegment without [FSDB].
+- Each segment is canonicalized to NFC and validated by the existing FSDB NameSegment rules.
 - DatabaseName matching remains case-sensitive.
-- Empty segments, leading or trailing separators, repeated separators, `.`, `..`, backslashes, absolute paths, and OS-specific path syntax are forbidden.
-- The caller passes a logical string, not a URL; URL percent-decoding is not part of the Core API.
-- The path must not be passed directly to a generic filesystem join and trusted as safe. The resolver walks and validates one database segment at a time.
+- Empty segments, leading or trailing separators, repeated separators, ., .., backslashes, absolute paths, and OS-specific path syntax are forbidden.
+- The Core API receives a logical string, not a URL. URL percent-decoding is not part of Core path handling.
+- A path MUST NOT be passed directly to a generic filesystem join and trusted as safe.
+- Canonical databasePath is the NFC-normalized segments joined with literal /.
 
 Examples:
 
-```text
+~~~text
 Valid:   GameData
 Valid:   GameData/World
 Valid:   游戏数据/世界/区域
@@ -242,28 +288,35 @@ Invalid: GameData//World
 Invalid: GameData/../World
 Invalid: GameData\\World
 Invalid: [FSDB]GameData
-```
+~~~
+
+The pure NameSegment and databasePath rules MUST have one browser-safe implementation authority. Extract the existing name/path validation into a Node-independent FSDB names subpath (for example, @loomrealm/fsdb/names) and use it from Core, HTTP, Subsystem ContentClient, and PWA installer/build code. This subpath MUST NOT import Node filesystem, stream, or crypto modules. The Node-only FSDB Core package remains Node-only; exposing pure name validation does not make its storage implementation a browser abstraction.
 
 ### 5.3 Explicit resolution rules
 
-`openFsdb({ root, path })` resolves exactly one target:
+openFsdb({ root, path }) resolves exactly one target:
 
-1. Resolve and validate the caller-supplied container root as a directory.
-2. For the first segment, locate a direct child whose physical name is `[FSDB]` plus that logical DatabaseName.
-3. For each subsequent segment, repeat the same lookup inside the previously selected FSDB directory.
-4. Match the `[FSDB]` marker case-insensitively, but match the NFC DatabaseName case-sensitively.
-5. Each selected component MUST be a real directory, not a symbolic link, junction, or other indirection.
-6. Duplicate physical candidates that canonicalize to the same logical DatabaseName MUST fail resolution; the resolver must never pick one arbitrarily.
-7. Every resolved component MUST remain beneath the supplied container root. Path traversal and symlink escape are forbidden.
-8. The final resolved directory is the only FSDB passed to the Core scanner.
+1. Resolve the caller-supplied container Root to its canonical real directory once.
+2. Validate and NFC-canonicalize the logical path segments.
+3. For the first segment, locate a direct child whose physical name is [FSDB] plus that logical DatabaseName.
+4. For every subsequent segment, repeat the same lookup inside the previously selected FSDB directory.
+5. Match the [FSDB] marker case-insensitively, but match the NFC DatabaseName case-sensitively.
+6. Each selected component MUST be a real directory, not a symbolic link, junction, or other indirection.
+7. Duplicate physical candidates that canonicalize to the same logical DatabaseName MUST fail resolution; the resolver MUST NOT pick one arbitrarily.
+8. Every resolved component MUST remain beneath the canonical container Root.
+9. The final resolved directory is the only FSDB passed to the Core single-database scanner.
 
 A missing segment, invalid segment, ambiguous match, non-directory candidate, or unsafe indirection is a resolution failure. There is no fallback to another database and no default selection.
 
+The container Root itself is caller-supplied and trusted; it may be canonicalized through a caller-intended symlink. Descendant database directories and recognized FSDB objects MUST NOT be followed through symlinks or junctions.
+
+The supported deployment threat model assumes the prepared installation tree is not concurrently modified by an untrusted actor during discovery/open. Implementations MUST perform segment-by-segment validation and physical containment checks, reject symlink/junction candidates, and revalidate the selected physical identity before scanning. If hostile concurrent directory replacement must be supported, descriptor-relative no-follow traversal is a separate platform-specific security requirement; path-string checks alone MUST NOT be described as a complete defense against that threat.
+
 ### 5.4 Recursive database discovery
 
-Installation-level consumers need to discover all available databases before opening them. The Core package SHOULD expose:
+Core exposes a deterministic discovery operation:
 
-```ts
+~~~ts
 export interface ListFsdbPathsOptions {
   readonly root: string;
 }
@@ -271,194 +324,476 @@ export interface ListFsdbPathsOptions {
 export function listFsdbPaths(
   options: ListFsdbPathsOptions,
 ): Promise<readonly string[]>;
-```
+~~~
 
 Normative behavior:
 
-- Start with direct `[FSDB]` children of `root`.
-- For each discovered FSDB directory, inspect only its direct children for further `[FSDB]` directories, and recurse only through those database directories.
-- Never interpret directories inside `[STRUCT]`, `[EXTEND]`, `[GROUP]`, or `[RESOURCE]` tables as databases. In particular, a resource key segment named `[FSDB]Something` remains ordinary resource content.
-- Return canonical logical paths relative to `root`, without type markers.
-- Return paths in deterministic Unicode code-point order; discovery order MUST NOT depend on filesystem enumeration order.
+- Resolve and validate the container Root once.
+- Start with direct [FSDB] children of the Root.
+- For each discovered FSDB directory, inspect only its direct children for further [FSDB] directories, and recurse only through those database directories.
+- Never interpret directories inside [STRUCT], [EXTEND], [GROUP], or [RESOURCE] tables as databases. A resource key segment named [FSDB]Something remains ordinary resource content.
+- Return canonical logical paths relative to Root, without type markers.
+- Return paths in deterministic Unicode code-point order.
 - Validate each database path segment, marker casing, duplicate logical child names, directory type, and no-symlink rule.
-- Discovery does not scan table contents, build snapshots, run Integrity validation, or open database handles.
-- A discovered database is opened and validated independently by a separate `openFsdb({ root, path })` call.
-- No discovered path is implicitly selected. An empty result is an empty database catalog, not an invitation to guess a default.
+- Discovery does not scan table contents, build snapshots, validate table metadata, open database handles, or calculate content hashes.
+- A discovered database is opened and validated independently by openFsdb({ root, path }).
+- An empty result is valid. It does not imply a default database.
+- Physical tree/name errors that prevent unambiguous discovery, such as duplicate logical child names or a symlinked database directory, MUST be reported rather than silently skipped.
+- A malformed table inside one discovered database is an error when that database is opened; it does not change the result of directly opening a valid sibling or parent database.
 
-Discovery must not make database contents dependent on one another. A malformed table inside one discovered database is an error when that database is opened; it must not change the result of opening a valid sibling or parent database. Physical tree/name errors that prevent unambiguous discovery (for example duplicate logical child names or a symlinked database directory) are discovery errors and MUST be reported rather than silently skipped.
+Discovery and opening are separate operations. listFsdbPaths is intended for packaging/build tooling and explicit filesystem inspection. Desktop Runtime and FSDB HTTP request handling do not need to enumerate all database paths before serving a known databasePath. No Runtime catalog is derived from this function.
 
-The Core scanner remains single-database. Recursive traversal belongs to discovery, not to table scanning.
-
-## 6. Core API: intentional breaking change
+## 6. Core API and single-database ownership
 
 ### 6.1 Required open options
 
 Replace the current root-only API:
 
-```ts
-// Current implementation
+~~~ts
+// Old API — intentionally removed.
 interface OpenFsdbOptions {
   readonly root: string;
 }
-```
+~~~
 
 with:
 
-```ts
+~~~ts
 export interface OpenFsdbOptions {
   readonly root: string;
   readonly path: string;
 }
-```
+~~~
 
 Usage:
 
-```ts
+~~~ts
 const db = await openFsdb({
   root: installationRoot,
   path: "GameData/World",
 });
-```
+~~~
 
 The following forms are deliberately unsupported:
 
-```ts
+~~~ts
 openFsdb({ root: installationRoot }); // path is required
 openFsdb({ root: installationRoot, option: { path: "GameData" } }); // no option wrapper
 openFsdb({ root: selectedFsdbDirectory, path: "" }); // empty path is invalid
-```
+~~~
 
-There is no implicit default database and no "first matching FSDB" behavior. Selection MUST be explicit.
+There is no implicit default database and no first-matching-FSDB behavior.
 
 ### 6.2 Discovery and opening are separate
 
-`listFsdbPaths({ root })` enumerates logical database paths. `openFsdb({ root, path })` opens exactly one of them. Neither operation implicitly invokes the other.
+listFsdbPaths({ root }) enumerates logical database paths. openFsdb({ root, path }) opens exactly one of them. Neither operation implicitly invokes the other.
 
-A caller that needs all databases follows this pattern:
+A caller that needs to process all databases should generally open and close them one at a time:
 
-```ts
+~~~ts
 const paths = await listFsdbPaths({ root: installationRoot });
-const databases = await Promise.all(
-  paths.map((path) => openFsdb({ root: installationRoot, path })),
-);
-```
 
-The caller owns the returned handles and MUST close every successfully opened handle. If aggregate preparation fails partway through, already-opened handles MUST be closed.
+for (const path of paths) {
+  const db = await openFsdb({ root: installationRoot, path });
+  try {
+    await packageDatabase(db, path);
+  } finally {
+    await db.close();
+  }
+}
+~~~
+
+This avoids retaining every database handle during packaging. A caller that deliberately opens several databases concurrently owns every returned handle and MUST close all successfully opened handles, including when aggregate preparation fails partway through.
 
 ### 6.3 Database-local identities remain unchanged
 
-One `FsdbDatabase` handle represents exactly one selected database. The existing local identities remain:
+One FsdbDatabase handle represents exactly one selected database. Existing identities remain local:
 
-```ts
+~~~ts
 TableIdentity = (TableKind, TableName)
 
 FsdbObjectIdentity =
   (kind, table, key)
   | (kind, table, metadataName)
-```
+~~~
 
-Do not add `databasePath` to `TableIdentity`, `FsdbObjectIdentity`, or individual FSDB entry descriptors. These identities are local to a single handle.
+Do not add databasePath to TableIdentity, FsdbObjectIdentity, or individual FSDB entry descriptors.
 
-The following APIs remain local to the supplied `FsdbDatabase` handle:
+The following APIs remain local to the supplied FsdbDatabase handle:
 
-- `describeFsdb(db)`
-- `getFsdbSnapshotId(db)`
-- `listFsdbEntries(db)`
-- `openFsdbObject(db, identity, signal)`
+- describeFsdb(db)
+- getFsdbSnapshotId(db)
+- listFsdbEntries(db)
+- openFsdbObject(db, identity, signal)
 
 Each opened database owns its own snapshot, fingerprint, read leases, and OPEN / STALE / CLOSED lifecycle. A stale or closed handle does not stale or close another database handle.
 
-### 6.4 FSDB HTTP adapter
+The caller that opened a handle owns its close lifecycle. The aggregate Content View and Root-scoped HTTP service are owners of the handles they create internally.
 
-`ServeFsdbOptions` continues to extend `OpenFsdbOptions`, so `serveFsdb()` receives the same required `root` and `path`:
+### 6.4 Scanner boundary
 
-```ts
-const service = await serveFsdb({
-  root: installationRoot,
-  path: "GameData/World",
-  host: "127.0.0.1",
-  port: 0,
-});
-```
+The Core scanner remains single-database:
 
-`createFsdbHttpHandler(db)` remains unchanged because it borrows an already selected database handle.
+~~~text
+openFsdb({ root, path })
+        |
+        v
+resolve exactly one physical [FSDB] directory
+        |
+        v
+scanFsdb(selectedPhysicalDatabaseRoot)
+        |
+        v
+one FsdbDatabase handle
+~~~
 
-One `FsdbHttpService` serves one selected FSDB. The existing `/fsdb/v1` routes and lowercase HTTP kind tokens remain unchanged. A caller that needs several FSDB HTTP endpoints creates one independently configured service per handle. LoomRealm's installation-level multi-database Content Service is a separate layer and MUST NOT be constrained to one database merely because this low-level adapter serves one handle.
+Recursive database traversal belongs to listFsdbPaths, not to scanFsdb. Opening a parent never scans a child; opening a child never scans its parent.
 
-## 7. LoomRealm multi-database integration
+## 7. FSDB HTTP v2: one Root, one Server, many databases
 
-### 7.1 Installation boundary: no single-database selector
+### 7.1 Service boundary
 
-An installation is the physical container for all its FSDBs. The directory tree itself is the source of truth.
+The Root-scoped FSDB HTTP service is a breaking service/API change and uses the v2 wire route. Its public options are:
 
-- Do not add `content.json` or another installation manifest whose purpose is selecting one FSDB.
-- Do not put a single `databasePath` selector in `GameEntryV1`, launcher manifests, or platform launch configuration.
-- Do not select a default database or the first discovered database.
-- Discover all database paths from the installation root and make every database available to the installation's Content layer.
-- Keep `GameEntryV1` and launcher manifests responsible for their existing logical game / executable contracts.
+~~~ts
+export interface ServeFsdbOptions {
+  readonly root: string;
+  readonly host?: string;
+  readonly port?: number;
+}
 
-`databasePath` is used to address one database in a Content request; it is not a configuration field selecting the installation's only database.
+export interface FsdbHttpService {
+  readonly server: Server;
+  readonly address: {
+    readonly host: string;
+    readonly port: number;
+  };
+  readonly origin?: URL;
+  close(): Promise<void>;
+}
 
-### 7.2 Desktop: one installation view, many independent handles
+export function serveFsdb(
+  options: ServeFsdbOptions,
+): Promise<FsdbHttpService>;
+~~~
 
-The current Desktop implementation has a single `db` field, discovers exactly one direct child `[FSDB]` directory, and builds an index without a database dimension. All three assumptions MUST be removed.
+Rules:
 
-Target flow:
+- One service owns one canonical filesystem Root and one Node HTTP Server.
+- One service serves any number of root-level and nested FSDBs beneath that Root.
+- The service MUST NOT start one HTTP Server per database.
+- The service validates/canonicalizes Root at startup but does not enumerate or open every database.
+- An empty Root is valid; requests for missing database paths return not found.
+- The service owns all database handles it lazily opens.
+- Default host remains 127.0.0.1; default port remains 0.
+- The service does not expose a filesystem path or database handle to the client.
 
-```text
-Prepared Installation Root
-       |
-       v
-listFsdbPaths({ root })
-       |
-       +---- GameData -----------------> openFsdb({ root, path: "GameData" })
-       |
-       +---- GameData/World -----------> openFsdb({ root, path: "GameData/World" })
-       |
-       +---- ModData ------------------> openFsdb({ root, path: "ModData" })
-       |
-       v
-Installation-level Desktop Content View
-       |
-       +---- databasePath-aware Content Index
-       |
-       v
-Desktop Content Service
-```
+The existing createFsdbHttpHandler(db) remains a low-level borrowed, single-handle handler for callers that explicitly need to embed a single database handler. It is not used by the Root-scoped serveFsdb service and is not a substitute for the multi-database Root service. The old serveFsdb({ root, path }) single-database service signature is removed rather than overloaded.
 
-The installation-level Content View owns a collection/map of independent database handles, keyed by canonical `databasePath`. It is not itself an FSDB and does not merge their table namespaces.
+The existing frozen /fsdb/v1 handler route is not silently reinterpreted. The Root-scoped service uses /fsdb/v2.
 
-Every Content index identity MUST include all of:
+### 7.2 v2 routes and database boundary
 
-```ts
-interface ContentIndexIdentity {
+The v2 route shape is:
+
+~~~http
+GET|HEAD /fsdb/v2/{databasePathSegments}/$db
+GET|HEAD /fsdb/v2/{databasePathSegments}/$db/{kind}/{table}/{entrySegments...}
+~~~
+
+Examples:
+
+~~~http
+GET /fsdb/v2/GameData/$db
+GET /fsdb/v2/GameData/$db/struct/Character/Pikachu
+GET /fsdb/v2/GameData/World/$db
+GET /fsdb/v2/GameData/World/$db/struct/Map/town
+GET /fsdb/v2/ModData/$db/resource/Assets/logo
+~~~
+
+The first route returns the selected database's existing Descriptor. The second route reads one entry or metadata object from that database.
+
+Route rules:
+
+- databasePath has one or more logical NameSegment path segments.
+- The literal raw segment $db terminates databasePath.
+- Exactly one $db delimiter is permitted, and it must occur before kind/table/key.
+- kind remains one of struct, extend, group, resource.
+- struct, extend, and group ordinary keys contain exactly one key segment.
+- resource keys contain one or more segments after the table name.
+- Metadata routes retain the existing $info, $extend, and $desc semantics.
+- There is no /fsdb/v2 default database route and no /fsdb/v2/databases catalog route.
+- A request cannot use a parent database as an implicit fallback when a child database path is missing.
+
+### 7.3 URL encoding and parsing
+
+Each database path segment is encoded independently using UTF-8 percent encoding. The slash between logical segments remains a literal URL path separator.
+
+Canonical client construction:
+
+~~~text
+logical databasePath
+→ split on logical /
+→ encode each segment independently
+→ join with literal /
+→ append literal /$db
+~~~
+
+Do not encode the entire databasePath as one segment such as GameData%2FWorld.
+
+Server parsing:
+
+~~~text
+raw origin-form request-target
+→ split raw path on literal /
+→ locate literal raw $db delimiter
+→ percent-decode each ordinary segment exactly once
+→ UTF-8 decode
+→ NFC canonicalization and NameSegment validation
+→ resolve databasePath through Core
+→ perform local FSDB identity lookup
+~~~
+
+Rules:
+
+- A decoded slash or backslash inside one segment is invalid; percent encoding cannot manufacture a path separator.
+- Malformed percent escapes, invalid UTF-8, empty segments, dot segments, forbidden NameSegment characters, and invalid route shape return 400.
+- A non-empty query string is rejected, matching the existing FSDB HTTP request contract.
+- A missing database path or missing object returns 404.
+- An ambiguous physical database path returns a conflict response; the service MUST NOT choose one candidate.
+- A database that fails FSDB Well-formed validation returns an invalid-database response; a stale source returns an unavailable response.
+- No response may disclose an absolute filesystem path or raw filesystem error message.
+
+The existing FSDB HTTP v1 MIME, ETag, conditional request, GET/HEAD, and immutable snapshot semantics are retained where they remain meaningful. The v2 conformance document must freeze the exact status mapping and response headers for the new database-resolution failure cases before implementation is declared complete.
+
+### 7.4 Lazy handle cache and concurrency
+
+The service maintains an internal single-flight cache keyed by canonical databasePath:
+
+~~~ts
+const databases = new Map<string, Promise<FsdbDatabase>>();
+~~~
+
+Request flow:
+
+~~~text
+request
+  |
+  v
+parse and canonicalize databasePath
+  |
+  v
+lookup databasePath in handle cache
+  |                         |
+  | hit                     | miss
+  v                         v
+reuse open handle       openFsdb({ root, path })
+                            |
+                            v
+                       cache Promise
+  |                         |
+  +------------+------------+
+               |
+               v
+       read selected object
+~~~
+
+Normative lifecycle:
+
+- Concurrent first requests for the same canonical path MUST share one opening Promise.
+- Different database paths MUST open independently; one slow or malformed database MUST NOT block healthy siblings.
+- A rejected open Promise is removed from the cache so a later request can retry.
+- A successfully opened handle remains cached until service shutdown. Do not use an LRU that silently closes and reopens a database: reopening would create a new snapshot identity and change the service's static-snapshot semantics.
+- If a cached database becomes STALE, requests fail for that database. The service MUST NOT silently reopen it and substitute a new snapshot.
+- A database's read leases and stale state remain local to that database.
+- The service does not eagerly open all databases and does not maintain a separate database catalog.
+
+### 7.5 Server shutdown and ownership
+
+service.close() is idempotent and returns the same in-progress shutdown operation to concurrent callers.
+
+Shutdown order:
+
+1. Transition the service to closing and stop admitting new requests.
+2. Stop accepting new HTTP connections.
+3. Abort or drain active request work so that no new read lease is admitted.
+4. Await active handlers and all database-opening Promises already admitted.
+5. Close every successfully opened database handle.
+6. Resolve close() only after owned resources are released.
+
+A database Promise that resolves while shutdown is in progress MUST still be included in cleanup. A failed opening Promise does not create a handle to close.
+
+If startup/listen fails, the service closes its Server and every resource it has already acquired before rejecting. The public Server field is an escape hatch for address inspection and Node server configuration; it does not transfer lifecycle ownership.
+
+## 8. LoomRealm Content API v2
+
+### 8.1 Content identity
+
+The breaking Content contract adds databasePath to every database-backed record/group/resource identity:
+
+~~~ts
+export interface ContentObjectIdentity {
   readonly databasePath: string;
-  readonly kind: "record" | "group" | "resource";
   readonly namespace: string;
   readonly key: string;
 }
-```
 
-Consequences:
+export interface ContentClient {
+  record(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentRecord>;
+  group(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentGroup>;
+  resource(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentResource>;
+}
+~~~
 
-- Two databases MAY contain the same `kind`, `namespace`, and `key` without collision.
-- The lookup key MUST include `databasePath`; never concatenate the database path into `namespace`.
-- A Content request resolves the selected database handle first, then resolves the local `FsdbObjectIdentity` within that handle.
-- Closing the installation view closes all owned handles.
-- A database's snapshot / stale state remains independent. The view MUST NOT share snapshots or read leases between databases.
+Example:
 
-The aggregate view is installation-scoped, while the database handles it owns remain independent. Opening or indexing one database MUST be isolated: a failed database is marked unavailable for that view, but it MUST NOT prevent healthy siblings from being opened or served, and MUST NOT stale or close their handles. The view/catalog records the per-database availability result so callers can distinguish an unavailable database from an absent one. Whether a particular game may launch without one of its databases is a higher-level game/runtime policy, not an FSDB dependency.
+~~~ts
+const result = await scope.content.record({
+  databasePath: "GameData/World",
+  namespace: "struct.Map",
+  key: "town",
+});
+~~~
 
-### 7.3 PWA: preserve database identity through bundling and storage
+Logical database-backed identity is:
 
-PWA continues to use browser-native storage and Content realization (OPFS / IndexedDB / Service Worker). Node-only `@loomrealm/fsdb` is not promoted to a browser storage abstraction.
+~~~text
+databasePath + kind + namespace + key
+~~~
 
-The PWA source/package builder MUST enumerate the same logical database paths and process every database independently. It MUST NOT choose one database, flatten all databases into one shared namespace, or discard database identity.
+Do not encode databasePath by prefixing or concatenating it into namespace. Namespace retains its existing meaning.
 
-The PWA bundle target shape is:
+Manifest remains installation-level and has no databasePath.
 
-```ts
-interface PwaBundleContentEntry {
+### 8.2 Content v2 routes
+
+The Content API uses /_lr/v2. The database path is represented as multiple URL path segments and terminated by the literal $db delimiter:
+
+~~~http
+GET /_lr/v2/games/{installationId}/manifest
+
+GET /_lr/v2/games/{installationId}/databases/{databasePathSegments}/$db/records/{namespace}/{key}
+GET /_lr/v2/games/{installationId}/databases/{databasePathSegments}/$db/groups/{namespace}/{key}
+GET /_lr/v2/games/{installationId}/databases/{databasePathSegments}/$db/resources/{namespace}/{resourceKeySegments...}
+~~~
+
+Examples:
+
+~~~http
+GET /_lr/v2/games/{id}/databases/GameData/$db/records/struct.Config/common
+GET /_lr/v2/games/{id}/databases/GameData/World/$db/records/struct.Map/town
+GET /_lr/v2/games/{id}/databases/ModData/$db/resources/resource.Assets/logo
+~~~
+
+Route rules:
+
+- databasePath consists of one or more canonical NameSegment values.
+- $db is the literal raw delimiter; it cannot be a valid database name.
+- Encode each database path segment independently. Do not encode the whole path into one segment.
+- Decode each ordinary segment exactly once, then validate it using the shared FSDB name rules.
+- A decoded slash or backslash inside one segment is invalid.
+- record/group keys remain one logical segment; resource keys remain slash-separated hierarchical segments.
+- Manifest has no database path.
+- There is no database catalog route and no default database route.
+
+### 8.3 Runtime discovery policy
+
+ContentClient requires the caller to supply databasePath. It does not expose a database-listing method.
+
+The Runtime/game code must know the logical path it intends to read, for example through its own authored content contract or code-level convention. Runtime discovery of arbitrary database names is explicitly out of scope.
+
+This is a deliberate trade-off:
+
+- It keeps Content identity explicit and small.
+- It avoids a second installation manifest or a database registry.
+- It avoids synchronizing a catalog between Desktop, PWA Bundle, IndexedDB, and Service Worker.
+- It means Content API callers cannot distinguish an empty database from a missing database using a catalog query. Both produce CONTENT_NOT_FOUND for a read of a nonexistent entry.
+
+If a future product requirement needs dynamic Runtime enumeration or empty-database existence queries, that is a separate Content API capability and must be designed explicitly in a later contract version. It MUST NOT be approximated by inferring databases from content entries.
+
+### 8.4 Cache and version identity
+
+Logical Content cache identity is:
+
+~~~text
+installationId + databasePath + kind + namespace + key
+~~~
+
+contentVersion is the representation validator for the bytes at that identity; it is not a substitute for databasePath and is not the logical identity by itself.
+
+- Desktop and PWA MUST include databasePath in every lookup and cache key for database-backed content.
+- ETag and X-Loom-Content-Version continue to describe the returned bytes.
+- Identical bytes in different databases MAY share content-addressed physical storage.
+- Such physical deduplication MUST NOT merge logical identities or cache entries.
+- Manifest cache identity remains installation-level.
+
+### 8.5 Desktop: one installation Content View, lazy per-database indexes
+
+Desktop uses the prepared installation's canonicalRoot as the container Root. It MUST remove the current exactly-one-FSDB-root assumption.
+
+The Content View owns a per-database cache:
+
+~~~ts
+interface PreparedDatabaseContent {
+  readonly db: FsdbDatabase;
+  readonly index: ReadonlyMap<string, ContentIndexEntry>;
+}
+
+interface PreparedDesktopContentViewState {
+  readonly installationId: string;
+  readonly installationRoot: string;
+  readonly databases: Map<string, Promise<PreparedDatabaseContent>>;
+}
+~~~
+
+The outer map is keyed by canonical databasePath. Each database's index remains local to that database. The aggregate logical identity is therefore still databasePath + kind + namespace + key without redundantly prefixing namespace.
+
+Request flow:
+
+~~~text
+Content request
+  |
+  v
+validate databasePath
+  |
+  v
+get or single-flight open database
+  |
+  v
+openFsdb({ root: installationRoot, path: databasePath })
+  |
+  v
+build that database's local Content Index
+  |
+  v
+resolve local FsdbObjectIdentity
+  |
+  v
+read lease, verify contentVersion, return Content response
+~~~
+
+Rules:
+
+- Database handles and indexes are created lazily on the first request for that path.
+- Concurrent first requests for the same path share one preparation Promise.
+- Index construction is owned by the Content View, not by an individual request AbortSignal. A disconnected first requester MUST NOT cancel shared preparation needed by other requests.
+- A failed database open/index MUST NOT prevent healthy siblings from being opened or served.
+- A failed preparation Promise is removed so a later request can retry.
+- A successfully opened database remains attached to its original snapshot. If it becomes STALE, do not silently reopen it.
+- Closing the installation Content View stops new reads, waits for pending opens and active leases, then closes all successfully opened handles.
+- Do not call listFsdbPaths() at Desktop Runtime startup; a known Content databasePath is resolved directly by Core.
+- Do not create a database availability catalog or installation-wide failure state.
+
+Desktop Content Service remains one service per prepared installation. It uses FSDB Core directly; it MUST NOT create one FSDB HTTP Server per database or call its own FSDB HTTP endpoint over loopback.
+
+### 8.6 PWA: preserve database identity through bundle and storage
+
+PWA remains browser-native in its storage and Content realization. Node-only @loomrealm/fsdb is not imported into the browser runtime.
+
+The breaking Bundle shape is:
+
+~~~ts
+export interface PwaBundleContentEntryV2 {
   readonly databasePath: string;
   readonly kind: "record" | "group" | "resource";
   readonly namespace: string;
@@ -467,327 +802,345 @@ interface PwaBundleContentEntry {
   readonly body: Blob;
 }
 
-interface PwaInstallationBundle {
-  readonly databases: readonly string[];
-  readonly content: readonly PwaBundleContentEntry[];
-  // Existing game entry, launch manifest, and executable fields remain.
+export interface PwaInstallationBundleV2 {
+  readonly formatVersion: 2;
+  readonly gameEntryText: string;
+  readonly launchManifestText: string;
+  readonly content: readonly PwaBundleContentEntryV2[];
+  readonly executables: readonly PwaBundleExecutableEntryV2[];
 }
-```
+~~~
 
-`databases` is the complete discovered database catalog, including an empty database that has no record/group/resource entries. Each content entry carries its owning `databasePath`.
+There is intentionally no databases catalog array in PwaInstallationBundleV2.
 
-The installer MUST:
+Build pipeline:
 
-- validate every `databasePath` using the same logical path rules;
-- validate each content entry within its owning database;
-- treat `(databasePath, kind, namespace, key)` as the content identity;
-- allow the same namespace/key in different databases;
-- reject duplicates only when the full database-scoped identity is equal;
-- preserve `databasePath` in the persisted Content Index;
-- retain content-addressed object storage / deduplication by bytes where useful, without using the content hash as a substitute for database identity.
+1. Call listFsdbPaths({ root }) against the source installation.
+2. Process the returned canonical paths in deterministic order.
+3. Open one database at a time with openFsdb({ root, path }).
+4. Extract that database's records, groups, and resources.
+5. Put the owning databasePath on every emitted content entry.
+6. Close the database before moving to the next path.
+7. Publish the completed Bundle only after all databases have been processed successfully.
 
-The Service Worker MUST parse and validate `databasePath` as part of every record/group/resource request, and match the full database-scoped identity. The manifest remains installation-wide. A database catalog endpoint exposes `databases` without requiring the browser to inspect the source filesystem.
+An empty database emits no content entries. Because the Content API has no database catalog, its existence is not observable in PWA Runtime. This matches the chosen Content contract; it is not represented by a synthetic record or empty placeholder.
 
-PWA installation remains an atomic installation publication: a bundle is validated and published as one installation generation. That does not merge its databases; each database remains independently addressable after publication.
+Installer requirements:
 
-### 7.4 Content API: database is part of logical content identity
+- Validate every databasePath using the shared canonical databasePath rules.
+- Validate each content entry's kind, namespace, key, MIME, body, and structured content as before.
+- Treat (databasePath, kind, namespace, key) as the complete logical content identity.
+- Allow the same kind/namespace/key in different databases.
+- Reject duplicates only when the full database-scoped identity is equal.
+- Persist databasePath in every database-backed StoredContentIndexEntry.
+- Keep manifest entries installation-level and without databasePath.
+- Keep OPFS object storage content-addressed by bytes; do not use the content hash as a substitute for logical identity.
+- Keep installation publication atomic. If any source database fails to open or package, the Bundle build fails and no incomplete Bundle is published.
 
-The current Content API identity has no database dimension. That is incompatible with multiple independent FSDBs because two databases may legitimately contain identical table namespaces and keys.
+Service Worker requirements:
 
-The breaking Content contract MUST add `databasePath` to every database-backed record/group/resource identity. It MUST NOT encode the database path by prefixing or concatenating it into `namespace`.
+- Parse the Content v2 route and databasePath using the same segment and delimiter rules.
+- Match the full database-scoped identity.
+- Keep manifest matching installation-level.
+- Return the same logical Content response semantics as Desktop for a given installed Bundle.
+- Do not synthesize or expose a database catalog.
 
-Target identity:
+PWA persistence migration:
 
-```ts
-interface ContentObjectIdentity {
-  readonly databasePath: string;
-  readonly namespace: string;
-  readonly key: string;
-}
-```
+- The Bundle format is version 2.
+- The IndexedDB installation schema/version MUST be advanced for the new persisted Content Index shape.
+- Existing v1 installations cannot be assigned a correct databasePath by guessing. They MUST be treated as requiring reinstall or explicit invalidation; they MUST NOT be silently served through v2 with an implicit default database.
+- OPFS content objects may continue to be deduplicated by SHA-256 and cleaned using the existing installation ownership protocol.
 
-The Runtime-facing Content client SHOULD accept this identity as one object:
+### 8.7 Game Package and launcher boundary
 
-```ts
-interface ContentDatabaseDescriptor {
-  readonly databasePath: string;
-  readonly availability: "available" | "unavailable";
-}
+GameEntryV1 remains unchanged in responsibility: it describes logical game topology / initial state. Launcher manifests remain responsible for executable bindings.
 
-interface ContentClient {
-  databases(options?: ContentReadOptions): Promise<readonly ContentDatabaseDescriptor[]>;
-  record(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentRecord>;
-  group(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentGroup>;
-  resource(identity: ContentObjectIdentity, options?: ContentReadOptions): Promise<ContentResource>;
-}
-```
+Neither contract selects one FSDB. No additional installation selection document is introduced. The installation Root is enumerated by the source packaging pipeline.
 
-This makes the database boundary explicit at every read and avoids ambiguous positional overloads. The same logical path validation applies as in the FSDB Core API.
+The Content API's databasePath is a read identity supplied by the Runtime caller, not a game-launch configuration field.
 
-Manifest is installation-level and has no `databasePath`. The installation's database catalog is also installation-level and lists all discovered canonical paths.
+## 9. Versioning and migration policy
 
-Recommended wire shape for the breaking Content API:
+This is an intentional breaking migration. The old single-database APIs are not retained through overloads or fallback behavior.
 
-```http
-GET /_lr/v2/games/{installationId}/manifest
-GET /_lr/v2/games/{installationId}/databases
+### 9.1 FSDB Core
 
-GET /_lr/v2/games/{installationId}/databases/{databasePathSegment}/records/{namespace}/{key}
-GET /_lr/v2/games/{installationId}/databases/{databasePathSegment}/groups/{namespace}/{key}
-GET /_lr/v2/games/{installationId}/databases/{databasePathSegment}/resources/{namespace}/{key...}
-```
+- openFsdb() now requires root + path.
+- listFsdbPaths() is added.
+- FsdbDatabase remains a one-database opaque handle.
+- TableIdentity and FsdbObjectIdentity remain database-local.
+- The physical FSDB layout gains nested database directories without a disk format-version marker.
 
-`databasePathSegment` is one URL path segment containing the percent-encoded complete logical database path (for example, `GameData/World` is encoded as `GameData%2FWorld`). The server decodes that one segment exactly once, then validates its slash-separated logical segments. Resource key segments remain separate trailing segments. This avoids ambiguity between variable-depth database paths and the resource-key suffix.
+### 9.2 FSDB HTTP
 
-The database catalog response MUST be deterministic and contain each canonical logical path plus its availability state (`available` / `unavailable`); it MUST NOT expose physical paths or filesystem metadata. The catalog is derived from the installation tree, not authored in a separate selection file. PWA's atomically published bundle normally reports every bundled database as available; Desktop MAY report a discovered but unopenable database as unavailable while continuing to serve healthy databases.
+- The Root-scoped multi-database service is the v2 service and uses /fsdb/v2 routes.
+- serveFsdb() accepts root rather than root + path.
+- One service owns one Root and one Server.
+- The frozen /fsdb/v1 handler route is not reinterpreted as a multi-database route.
+- createFsdbHttpHandler(db), if retained, remains an explicitly single-handle embedding primitive and is not used by the Root-scoped service.
+- The v2 package design and conformance contract must be documented separately from the frozen v1 behavior.
 
-Content cache/index identity MUST include:
+### 9.3 LoomRealm Content
 
-```text
-installationId + databasePath + kind + namespace + key + contentVersion
-```
+- ContentClient methods change from positional namespace/key arguments to ContentObjectIdentity.
+- Record/group/resource identities and routes include databasePath.
+- The new wire contract uses /_lr/v2.
+- Manifest remains installation-level.
+- No v1 route is silently reinterpreted and no v1 compatibility endpoint is required for the new Runtime.
 
-Desktop and PWA MUST expose the same database-scoped identity and response semantics. The current Content API v1 single-database routes/client are not preserved as a compatibility surface; the contract is changed as a breaking migration.
+### 9.4 PWA Bundle and persistence
 
-### 7.5 Game Package and launcher boundary
+- PwaInstallationBundleV2 uses formatVersion 2.
+- Stored database-backed Content Index entries require databasePath.
+- IndexedDB schema/version advances.
+- Existing v1 PWA installations require reinstall or explicit invalidation; no default database is inferred.
 
-`GameEntryV1` remains unchanged in responsibility: it describes logical game topology / initial state. Launcher manifests remain responsible for executable bindings.
+### 9.5 Unchanged contracts
 
-Neither contract selects one FSDB. No additional installation selection document is introduced. The installation root is enumerated directly by the preparation / packaging layer.
+- GameEntryV1 remains unchanged.
+- Launcher manifests remain unchanged.
+- FSDB table and object identity formats remain unchanged inside each database.
+- FSDB on-disk format does not gain a version marker.
+- No installation-level database-selection file is introduced.
 
-The Desktop and PWA preparation pipelines may differ physically, but they MUST produce the same canonical database catalog and database-scoped Content identities.
+## 10. Security, failure isolation, and lifecycle matrix
 
-## 8. Breaking-change and migration policy
+### 10.1 Path and URL security
 
-This is an intentional breaking change. All affected consumers are migrated together; no compatibility shim or old single-database behavior is retained.
-
-- `@loomrealm/fsdb` changes `openFsdb()` to require `root` and `path` and adds recursive database-path discovery.
-- `@loomrealm/fsdb-http` propagates the required open options. Its low-level service remains one database per service.
-- LoomRealm Content identity and wire routes gain `databasePath`; the Content client API changes accordingly.
-- Desktop and PWA Content indexes and storage records gain database-scoped identities.
-- Existing tests, fixtures, demo bundles, and consumers are migrated to the new required fields and method signatures.
-
-The FSDB directory layout gains nested database directories without adding an on-disk format-version marker. The implementation distinguishes database nodes by their position in the directory tree and the `[FSDB]` type marker.
-
-The breaking Content route shape SHOULD use `/_lr/v2` rather than silently changing the meaning of the existing `/_lr/v1` routes. This is Content wire-contract versioning, not an FSDB disk-format marker. No old Content API compatibility endpoint is required.
-
-Do not introduce:
-
-- a disk-level `formatVersion` marker for FSDB;
-- a `content.json` or equivalent single-database selection file;
-- an implicit first-database fallback;
-- compatibility wrappers for old API signatures;
-- a migration path that merges multiple databases into one namespace.
-
-The current [FSDB layout](./fsdb-layout.md) and [Content API v1](../../15-contracts/content-api-v1.md) describe the existing implementation baseline. They must be revised as part of implementation so that normative specifications match the new multi-database behavior. This proposal is the target architecture, not a claim that the implementation already supports it.
-
-## 9. Required implementation and conformance work
-
-### Core discovery and resolver
-
-- Add deterministic `listFsdbPaths({ root })` recursive discovery.
-- Require `path` at the TypeScript and runtime validation layers of `openFsdb()`.
-- Resolve each path segment through a direct `[FSDB]` child directory.
-- Apply ASCII case-insensitive matching only to the type marker.
-- Apply existing NFC / NameSegment validation to each DatabaseName.
-- Reject duplicate normalized child database names and unsafe directory indirection.
-- Keep discovery separate from database content scanning and opening.
-- Pass only the final selected directory to the existing single-database scanner.
-- Never recurse into child databases while scanning one database.
-- Keep all FSDB public object identities local to the returned handle.
-
-### Desktop multi-database Content
-
-- Replace the exactly-one-root discovery helper.
-- Discover every database path and open each independently.
-- Change the prepared Content view from one `db` field to a database-path-keyed handle collection.
-- Include `databasePath` in every Content index key.
-- Permit duplicate namespace/key identities across different database paths.
-- Close all handles and preserve independent stale/closed state.
-
-### PWA multi-database Content
-
-- Update the source/package builder to enumerate all FSDB paths.
-- Add the complete database catalog to the PWA installation bundle.
-- Add `databasePath` to every PWA content bundle entry and persisted Content Index entry.
-- Include `databasePath` in duplicate detection and Service Worker matching.
-- Keep the OPFS content-addressed object store independent from logical database identity.
-- Keep installation publication atomic and preserve each database's catalog entry, including empty databases.
-
-### Runtime Content client and protocol
-
-- Update the public `ContentClient` type and all call sites to require database-scoped identity.
-- Update Desktop and PWA URL construction and route parsing.
-- Add an installation-level database catalog endpoint.
-- Include `databasePath` in Content cache identity and any client-side cache keys.
-- Keep manifest identity installation-level.
-- Keep physical paths and host filesystem metadata private.
-
-### Integrity, validation, and lifecycle
-
-- Ensure EXTEND/GROUP references resolve only within their own database.
-- Reject any attempted cross-database STRUCT or Resource reference; do not search parent/child/sibling databases as fallback.
-- Verify that opening a parent does not scan, fingerprint, validate, or stale because of child database contents.
-- Verify that opening a child does not scan or depend on parent tables.
-- Keep snapshots, read leases, fingerprints, and close/stale state independent.
-- Keep the PWA installation publication transaction atomic; do not conflate installation atomicity with database namespace merging.
-
-### Conformance minimum
-
-1. One top-level FSDB discovered and opened.
-2. Multiple top-level FSDBs discovered and opened independently.
-3. Nested FSDB discovered and opened by a multi-segment path.
-4. Three-or-more-level nested discovery.
-5. Mixed-case `[FSDB]` markers at every selected/discovered level.
-6. Mixed-case table markers with uppercase writer output.
-7. Case-sensitive DatabaseName matching and NFC canonicalization.
-8. Duplicate physical child directories that normalize to the same logical name.
-9. Missing, empty, absolute, trailing-slash, repeated-separator, dot-segment, and backslash paths.
-10. Symlink / junction / non-directory candidates and path-escape attempts.
-11. A RESOURCE subtree containing a directory named `[FSDB]Something`; it remains a ResourceKey segment and is never discovered as a database.
-12. Parent, child, and sibling databases with identical TableIdentity values; each remains independent.
-13. A broken child database does not prevent direct opening of a valid parent or sibling.
-14. A broken parent table does not prevent direct opening of a valid child database.
-15. Cross-database STRUCT and Resource references are rejected; no fallback resolution occurs.
-16. Each independently opened database has its own snapshot, stale state, read leases, and close lifecycle.
-17. Desktop indexes two databases containing the same namespace/key without collision.
-18. PWA bundle/index/Service Worker preserve databasePath, including empty databases.
-19. Content Client addresses two databases with identical namespace/key and receives the correct distinct bytes.
-20. Content cache keys include databasePath.
-21. The database catalog is deterministic and exposes logical paths only.
-22. Desktop and PWA produce the same database catalog and Content identities.
-23. The FSDB HTTP adapter serves only its selected handle and retains its existing low-level route semantics.
-
-## 10. Remaining design gaps and recommended repairs
-
-The architecture is now fixed: an installation contains many independent FSDBs, and LoomRealm exposes all of them through one database-aware Content surface. The following details still need to be closed before or during implementation.
-
-### Gap 1 — Core recursive discovery API
-
-**Current gap:** `openFsdb({ root, path })` can open a known database, but the current Core API has no operation to enumerate all root and nested database paths. Desktop/PWA cannot reliably support all databases by guessing or duplicating ad-hoc directory walks.
-
-**Recommended repair:** add `listFsdbPaths({ root })` as specified in `5.4. It returns canonical, deterministic logical paths, recursively traversing only direct `[FSDB]` children of database roots. It does not open or validate table contents. Use this single implementation as the authority for discovery.
-
-### Gap 2 — Content API database identity and route
-
-**Current gap:** `ContentIdentityV1` and current ContentClient methods identify records/groups/resources only by installation, namespace, and key. Two databases can legally contain the same namespace/key, so current identity is ambiguous.
-
-**Recommended repair:** require `databasePath` for every record/group/resource identity; use an object-shaped identity argument for Runtime ContentClient methods; use a dedicated encoded database-path route segment; and change the breaking Content wire route to `/_lr/v2`. Keep manifest and database catalog installation-scoped. Never overload namespace with a prefixed database path.
-
-### Gap 3 — Runtime database catalog
-
-**Current gap:** even if a caller knows a `databasePath`, there is no standardized way for Runtime code to discover which database paths exist in the installation. Empty databases also cannot be inferred from record entries.
-
-**Recommended repair:** expose an installation-level `GET /databases` endpoint returning the deterministic list of canonical logical database paths. Store the same complete list in the Desktop view and PWA bundle/installation record. This is derived metadata, not a new authored configuration file.
-
-### Gap 4 — Desktop single-handle Content view
-
-**Current gap:** `PreparedDesktopContentViewState` currently owns one `db`, `preparedFsdbRoot()` requires exactly one direct child FSDB, and the Content index key omits database identity.
-
-**Recommended repair:** own a `Map<databasePath, FsdbDatabase>`, discover and open every path, key the index by `databasePath + kind + namespace + key`, and close every handle together when the installation view closes. Keep snapshot and stale state per handle.
-
-### Gap 5 — PWA bundle and persisted index lose database identity
-
-**Current gap:** `PwaBundleContentEntryV1` and `StoredContentIndexEntry` currently contain only kind/namespace/key. The installer duplicate check and Service Worker matcher use the same single-database identity.
-
-**Recommended repair:** add `databasePath` to each content entry and persisted index record, add the complete `databases` catalog to the bundle and installation record, and match requests using the full database-scoped identity. Continue to deduplicate stored bytes by content hash where useful; never deduplicate logical identities across databases.
-
-### Gap 6 — Runtime Content client signatures and call sites
-
-**Current gap:** `ContentClient.record/group/resource(namespace, key)` cannot address more than one database. Changing only the HTTP service would leave Subsystem code unable to select a database.
-
-**Recommended repair:** change the ContentClient methods to accept `ContentObjectIdentity` containing `databasePath`, `namespace`, and `key`. Update all Runtime/Subsystem consumers and demos in the same breaking change. Validate the database path before issuing a request.
-
-### Gap 7 — Per-database failure and aggregate preparation policy
-
-**Current gap:** Core database independence is specified, but the installation-level behavior when one discovered database is malformed has not been explicitly frozen.
-
-**Recommended repair:** keep Core behavior strictly isolated. Desktop should retain per-database availability: failure to open/index one path must not block healthy databases, and the catalog should report each path's availability. PWA bundle publication may remain atomic at the installation-artifact level because the bundle is one validated artifact; a failed bundle build publishes nothing, but it must never merge or cross-resolve databases. Whether a game requires every discovered database is a higher-level Runtime policy; do not add required/optional flags or a single-database selector in this change.
-
-### Gap 8 — Security and race-resistant path resolution
-
-**Current gap:** the logical path rules are clear, but the implementation must prove that path traversal, symlink/junction traversal, duplicate marker variants, and filesystem races cannot escape the supplied root.
-
-**Recommended repair:** implement one resolver with segment-by-segment validation, lstat/realpath containment checks, no-follow directory opening where supported, and post-open identity checks. Never pass untrusted `path` directly to `path.join` and trust the result. Add platform-specific symlink/junction and replacement-race tests.
-
-### Gap 9 — Fixture, demo, and package-wide breaking migration
-
-**Current gap:** current fixtures and demo PWA bundles assume one database or omit database identity. Package APIs and tests still encode old Content signatures.
-
-**Recommended repair:** create fixtures with multiple root DBs, nested DBs, duplicate namespaces across DBs, and empty DBs. Migrate FSDB Core, FSDB HTTP, Subsystem ContentClient, Desktop, PWA, demos, tests, and documentation together. Remove old overloads and fallback code rather than maintaining a compatibility layer.
-
-### Gap 10 — Normative specification alignment
-
-**Current gap:** `fsdb-layout.md` and `content-api-v1.md` describe the existing single-database behavior and will contradict the target design if implementation starts without updating them.
-
-**Recommended repair:** when implementation begins, update the FSDB layout specification to define nested database nodes and recursive discovery, and replace the Content API single-database identity/routes with the database-aware breaking contract. Do not add an FSDB disk-format marker. Keep the low-level FSDB HTTP adapter's one-handle-per-service boundary unless a separate requirement calls for a multi-database HTTP router.
-
-These are implementation closure items, not reasons to add an installation-level database selector or to weaken the multi-database architecture.
-
-## 11. Current implementation hotspots (branch baseline)
-
-The following files still encode the pre-migration single-database contract on this branch. These are the concrete starting points for implementation; the design above is the target and must take precedence over the current code shape.
-
-| Area | Current code hotspot | Required change |
-|---|---|---|
-| Core public API | `packages/fsdb/src/index.ts`: `OpenFsdbOptions`, `openFsdb()` | Require `root` + `path`; export `listFsdbPaths()`; keep the returned handle database-local |
-| Core filesystem traversal | `packages/fsdb/src/scanner.ts`: `scanFsdb(rootInput)` | Split container-root resolution, database path resolution, recursive discovery, and one-database table scanning |
-| Core names | `packages/fsdb/src/names.ts`: `canonicalName()` | Reuse existing NFC/NameSegment rules for each logical DatabaseName segment; do not lowercase names |
-| FSDB HTTP adapter | `packages/fsdb-http/src/public.ts`: `ServeFsdbOptions`, `serveFsdb()` | Inherit required `root + path`; keep one selected handle per low-level service |
-| Desktop discovery | `apps/desktop/src/content-service.ts`: `preparedFsdbRoot()` | Remove the exactly-one-root assumption; use Core discovery |
-| Desktop ownership | `apps/desktop/src/content-service.ts`: `PreparedDesktopContentViewState.db`, `prepareDesktopContentView()` | Replace the single handle with a databasePath-keyed handle/catalog collection; isolate per-database failure and lifecycle |
-| Desktop identity/routing | `apps/desktop/src/content-service.ts`: `ContentIndexEntry`, `indexKey()`, `parseRoute()`, request lookup | Add databasePath to route parsing, index keys, cache identity, and handle selection |
-| Runtime contract | `packages/subsystem/src/content.ts`, `packages/subsystem/src/host/content-client.ts` | Replace positional namespace/key identity with database-scoped `ContentObjectIdentity`; add catalog access |
-| PWA bundle | `apps/pwa/src/installation-bundle.ts`: `PwaBundleContentEntryV1`, `PwaInstallationBundleV1` | Add complete database catalog and databasePath to every database-backed entry |
-| PWA installation | `apps/pwa/src/installer.ts`: `contentBodies`, duplicate identity, persisted index creation | Validate catalog and paths; scope duplicate detection and persisted identities by databasePath |
-| PWA persistence | `apps/pwa/src/installation-store.ts`: `StoredContentIndexEntry`, `PwaInstallationRecord` | Persist the catalog and databasePath; retain empty databases |
-| PWA routing | `apps/pwa/src/service-worker-content.ts`: route parser and `matchEntry()` | Parse databasePath and match the full database-scoped identity |
-| Core conformance | `packages/fsdb/test/fsdb.test.mjs` | Migrate root-only fixtures and add discovery, nested-path, duplicate-name, no-follow, and database-isolation cases |
-| HTTP conformance | `packages/fsdb-http/test/fsdb.test.mjs` | Migrate all open/serve fixtures to root + path; assert a service serves only its selected database |
-| Desktop/PWA integration | `apps/desktop/test/content-service.test.mjs`, `apps/pwa/test/installation-content.e2e.test.mjs`, `apps/pwa/test/pwa-bundle-build.test.mjs` | Add same namespace/key in multiple databases, empty database catalog, and cross-platform identity-equivalence cases |
-
-### Recommended implementation gates
-
-Do not mark this work complete merely because nested directories can be opened.
-
-1. **Core gate:** deterministic recursive discovery and explicit path opening pass their own tests; opening a parent never scans a child; opening a child never scans its parent; sibling snapshots and lifecycle remain independent.
-2. **Desktop gate:** one installation view can serve at least two databases with identical local identities, and a broken database does not block healthy siblings.
-3. **PWA gate:** bundle, persisted index, and Service Worker preserve databasePath; empty databases survive packaging and installation.
-4. **Runtime/API gate:** Subsystem callers must explicitly identify databasePath; no namespace prefix trick or implicit default exists.
-5. **Parity gate:** Desktop and PWA expose the same logical catalog and the same database-scoped content bytes/identities for a shared fixture.
-6. **Documentation gate:** the normative FSDB layout and Content wire contract are updated before the implementation is described as complete.
-
-The branch currently has the single-database implementation at these hotspots. This inventory is a migration map, not a claim that those code paths have already been changed.
-
-## 12. Final design rules
-
-```text
-Installation Root
-  ├── [FSDB]GameData
-  │    ├── [STRUCT]Global
-  │    ├── [FSDB]World
-  │    │    └── [STRUCT]Maps
-  │    └── [FSDB]Character
-  │         └── [RESOURCE]Portraits
-  └── [FSDB]ModData
-       └── [STRUCT]Settings
-```
+- Core receives logical paths and never URL-decodes them.
+- HTTP parsers split raw paths before decoding ordinary segments.
+- Each segment is decoded exactly once and then validated.
+- A decoded slash or backslash cannot create a new path segment.
+- Database path resolution walks one [FSDB] child at a time.
+- The Root is canonicalized once; all selected database components must remain beneath it.
+- Descendant database directories and recognized FSDB objects cannot be symlinks or junctions.
+- No client-controlled physical path is returned or used as an unchecked filesystem path.
+- The prepared installation tree is assumed not to be concurrently mutated by an untrusted actor during discovery/open, as stated in 5.3.
+
+### 10.2 Failure isolation
+
+| Condition | Core | FSDB HTTP v2 | Desktop Content | PWA |
+|---|---|---|---|---|
+| Missing database path | Open fails | 404 | 404 / CONTENT_NOT_FOUND | 404 / CONTENT_NOT_FOUND |
+| Missing content entry | null lease | 404 | 404 / CONTENT_NOT_FOUND | 404 / CONTENT_NOT_FOUND |
+| Empty database | Opens successfully | Descriptor has no tables/entries | Content read returns not found | Emits no entries; reads return not found |
+| Malformed selected database | That open fails | Invalid-database response | That database request fails; siblings remain usable | Whole Bundle build fails atomically |
+| Duplicate physical candidates | Resolution/discovery fails | Conflict; never choose one | Selected path fails; siblings remain usable | Bundle build fails if discovery is ambiguous |
+| Database becomes stale after open | That handle becomes STALE | Requests to that path fail unavailable | Requests to that path fail unavailable | Installed immutable bytes are unaffected |
+| Malformed sibling not selected | Does not affect direct open of valid DB | Does not affect requests to valid DB | Does not affect requests to valid DB | Whole source Bundle build fails because packaging includes all discovered DBs |
+
+The PWA row is intentionally different at build time: a Bundle is one atomic installation artifact. This does not create a runtime dependency between databases or merge their identities.
+
+### 10.3 Error and lifecycle rules
+
+- Invalid URL/path syntax is a client error.
+- Missing database or content is not found.
+- Ambiguous physical resolution is a conflict, never an arbitrary selection.
+- A stale database is unavailable; it is not transparently reopened.
+- Filesystem paths and raw OS errors are not exposed to clients.
+- A failure in one database MUST NOT mark the whole Desktop installation unavailable.
+- A failure in one PWA source database prevents publication of the incomplete installation Bundle.
+- Read leases are always closed, including abort and error paths.
+- Server/view shutdown waits for admitted work and closes every owned handle exactly once.
+
+Exact v2 HTTP status codes, problem payloads, headers, and conditional-request precedence are frozen in the corresponding v2 conformance contract before implementation is considered complete.
+
+## 11. Implementation map and conformance gates
+
+### 11.1 Core
+
+| Hotspot | Required change |
+|---|---|
+| packages/fsdb/src/index.ts | Require root + path; export listFsdbPaths(); keep handle identities local |
+| packages/fsdb/src/scanner.ts | Separate container Root resolution, selected database resolution, recursive discovery, and single-database scan |
+| packages/fsdb/src/names.ts | Extract browser-safe canonical NameSegment/databasePath rules; no Node-only dependency in the shared subpath |
+| packages/fsdb/test/fsdb.test.mjs | Add nested discovery, explicit path, duplicate marker, no-symlink, and independent lifecycle tests |
+
+### 11.2 FSDB HTTP
+
+| Hotspot | Required change |
+|---|---|
+| packages/fsdb-http/src/public.ts | Change serveFsdb() to Root-scoped v2 service; own the Server and lazy database cache |
+| packages/fsdb-http/src/router.ts | Parse variable-depth databasePath using the literal $db delimiter |
+| packages/fsdb-http/src/http.ts | Reuse existing read/ETag/stream semantics after selecting the database handle |
+| packages/fsdb-http/DESIGN-v2.md | Freeze v2 route, status, cache, ownership, concurrency, and shutdown semantics |
+| packages/fsdb-http/CONFORMANCE-v2.md | Test multi-root-database routing, nested paths, same local identities, and service shutdown |
+
+The existing v1 design/conformance contract remains historical and is not silently rewritten to claim that v1 routes support multiple databases.
+
+### 11.3 Runtime Content and Desktop
+
+| Hotspot | Required change |
+|---|---|
+| packages/subsystem/src/content.ts | Add ContentObjectIdentity and object-shaped ContentClient methods |
+| packages/subsystem/src/host/content-client.ts | Validate databasePath and construct Content v2 URLs |
+| ContentClient call sites and demos | Migrate every record/group/resource call to explicit databasePath |
+| apps/desktop/src/content-service.ts | Replace single db with lazy databasePath-keyed per-database views; keep one installation Content Server |
+| apps/desktop/test/content-service.test.mjs | Test same local identity in different databases, lazy open, failure isolation, and close |
+
+### 11.4 PWA
+
+| Hotspot | Required change |
+|---|---|
+| apps/pwa source Bundle builder | Enumerate source database paths and package each database's entries with databasePath |
+| apps/pwa/src/installation-bundle.ts | Introduce PwaInstallationBundleV2 and PwaBundleContentEntryV2 |
+| apps/pwa/src/installer.ts | Validate databasePath and deduplicate by full logical identity |
+| apps/pwa/src/installation-store.ts | Persist databasePath and advance IndexedDB schema/version |
+| apps/pwa/src/service-worker-content.ts | Parse Content v2 routes and match database-scoped identities |
+| PWA integration tests | Test identical local identities across databases, Bundle atomicity, and v1 reinstall behavior |
+
+### 11.5 Normative documents
+
+Before implementation is described as complete:
+
+- Update fsdb-layout.md to define nested database nodes, marker casing, path grammar, and database independence.
+- Publish FSDB HTTP v2 design and conformance documents; preserve the frozen v1 contract as v1 history.
+- Publish Content API v2 as a new contract; do not silently rewrite v1 semantics.
+- Document PWA Bundle v2 and IndexedDB migration behavior.
+- Keep this document as the cross-layer architecture proposal and implementation map.
+
+### 11.6 Required implementation gates
+
+1. **Core gate:** deterministic recursive discovery and explicit path opening pass; opening a parent never scans a child; parent, child, and sibling snapshots/lifecycles remain independent.
+2. **FSDB HTTP gate:** one Server serves multiple root and nested databases; same local identities in different databases resolve independently; no database catalog or per-database Server exists.
+3. **Content API gate:** every database-backed read requires databasePath; Content v2 routes parse unambiguously; no namespace prefix trick or default fallback exists.
+4. **Desktop gate:** one installation Content View lazily serves at least two databases with identical local identities; a broken database does not block healthy siblings.
+5. **PWA gate:** Bundle, IndexedDB, and Service Worker preserve databasePath; duplicate detection is database-scoped; publication remains atomic.
+6. **Parity gate:** for a shared fixture, Desktop and PWA return the same bytes, MIME, contentVersion, and logical identity for each database-backed Content request.
+7. **Lifecycle gate:** all pending opens, active read leases, and owned handles are accounted for during close; stale handles are not silently replaced.
+8. **Documentation gate:** FSDB layout, FSDB HTTP v2, Content API v2, and PWA Bundle v2 contracts agree with this architecture before release.
+
+## 12. Design review: elegance and closure
+
+### 12.1 Why the design is coherent
+
+The design has one explicit identity boundary at each layer:
+
+~~~text
+Filesystem:
+  canonical Root + databasePath
+        |
+        v
+FSDB Core:
+  one FsdbDatabase handle
+  local TableIdentity / FsdbObjectIdentity
+        |
+        +------------------------------+
+        |                              |
+        v                              v
+FSDB HTTP v2                    LoomRealm Content v2
+one Root / one Server           one installation Content View
+databasePath in route           databasePath in Content identity
+        |                              |
+        v                              +----------------------+
+raw FSDB representation                |                      |
+                                       v                      v
+                                    Desktop                  PWA
+                                Core + local index       Bundle + OPFS
+                                lazy DB handles          DB-scoped Index
+~~~
+
+This is intentionally not one universal database manager. Core owns database resolution and one-database snapshots. The FSDB HTTP service owns its Root-scoped Server and lazy handles. Desktop Content owns its installation-scoped view and per-database indexes. PWA owns immutable installed objects and a database-scoped Content Index.
+
+The boundaries are small and composable:
+
+- Database discovery is separate from database opening.
+- A database handle represents exactly one database.
+- databasePath is added only at cross-database boundaries; it is not injected into FSDB-local identities.
+- One HTTP Server routes to many databases without opening all databases at startup.
+- Content API identity is explicit and independent of storage layout.
+- Desktop and PWA share Content semantics without sharing storage implementation.
+- Content-addressed storage deduplicates bytes without deduplicating logical identities.
+
+### 12.2 Deliberate trade-offs
+
+The following are explicit product/design constraints, not unresolved gaps:
+
+1. **No Runtime enumeration.** A caller must know databasePath. Dynamic discovery is not part of ContentClient.
+2. **Empty vs absent is not observable through Content.** Both return not found for a read. FSDB Core and FSDB HTTP can still open an empty database and return its Descriptor.
+3. **PWA packaging is all-or-nothing.** A malformed source database prevents publication of the complete Bundle. Desktop can still serve healthy databases independently because it opens them lazily.
+4. **Static snapshots do not auto-recover.** A STALE handle is not silently replaced by a newly opened snapshot.
+5. **The source installation tree is trusted against concurrent hostile mutation during resolution.** Stronger descriptor-relative race protection is a separate platform-specific security requirement, not something path-string validation alone can promise.
+6. **The FSDB HTTP Root service and Desktop Content Service are distinct servers/contracts.** The former exposes low-level FSDB data; the latter provides authorized Runtime Content. Desktop does not proxy through FSDB HTTP.
+
+These constraints avoid a runtime catalog, a second selection manifest, availability bookkeeping, per-database servers, cross-database storage providers, and duplicated database lifecycle managers.
+
+### 12.3 End-to-end closure checklist
+
+A database-backed Content read has a complete path:
+
+1. The caller supplies canonical databasePath, namespace, and key.
+2. ContentClient validates the logical identity and builds a v2 URL with per-segment encoding.
+3. The server parses raw path segments, recognizes the literal $db delimiter, decodes each ordinary segment once, and validates the canonical path.
+4. Desktop resolves exactly that database through Core; PWA matches the same databasePath in its persisted Content Index.
+5. The selected database's local kind/namespace/key identity is resolved without cross-database fallback.
+6. The selected bytes are read or loaded, schema/MIME rules are applied, and contentVersion is verified.
+7. The response uses the same logical identity and version semantics on Desktop and PWA.
+8. Read leases, pending opens, and database handles are released through their owning service's close lifecycle.
+
+No step requires a default database, a runtime database catalog, an installation selector, or a merged namespace.
+
+### 12.4 Acceptance fixture
+
+Use a shared fixture containing:
+
+~~~text
+Game/
+├── [FSDB]GameData/
+│   ├── [STRUCT]Config/
+│   │   └── common.json
+│   ├── [FSDB]World/
+│   │   └── [STRUCT]Config/
+│   │       └── common.json
+│   └── [FSDB]Character/
+│       └── [STRUCT]Config/
+│           └── common.json
+├── [FSDB]ModData/
+│   └── [STRUCT]Config/
+│       └── common.json
+├── [FSDB]Empty/
+└── [RESOURCE]NotADatabase/
+    └── [FSDB]Something/
+        └── ordinary.txt
+~~~
+
+The fixture MUST prove:
+
+- GameData, GameData/World, GameData/Character, ModData, and Empty are independent database paths.
+- The same local namespace/key can exist in every database without collision.
+- Empty opens in Core and has an empty Descriptor.
+- Empty produces no PWA Content Index entries and reads return not found.
+- [FSDB]Something below a RESOURCE table is not discovered as a database.
+- One Root-scoped FSDB HTTP Server serves descriptors and entries from all non-empty databases.
+- Desktop and PWA return the correct distinct bytes for each databasePath.
+- A malformed selected database does not affect direct opening or Desktop reads from healthy siblings.
+- PWA source Bundle publication fails atomically if any discovered database cannot be packaged.
+- Closing each service closes every handle it owns and does not close handles owned by another service.
+
+### 12.5 Final design rules
 
 - An installation may contain multiple root-level FSDBs and recursively nested FSDBs.
 - Every FSDB is a first-class, independently addressable database.
-- Physical nesting is organizational containment only; logical independence is mandatory.
-- `listFsdbPaths({ root })` discovers all databases; it never chooses a default or opens them.
-- `openFsdb({ root, path })` opens exactly one database; `path` is required.
-- No installation-level configuration file selects one database. The installation tree is the source of truth.
+- Physical nesting is organizational containment only.
+- listFsdbPaths({ root }) discovers paths for build/tooling; it does not open databases or create a Runtime catalog.
+- openFsdb({ root, path }) opens exactly one database; path is required.
+- One Root-scoped FSDB HTTP v2 service owns one Root and one Server and lazily opens databases by request path.
+- The literal $db route segment separates databasePath from the local FSDB route.
+- No per-database HTTP Server, default database, runtime database catalog, or availability map is introduced.
 - Parent, child, and sibling databases own separate tables, schemas, records, resources, references, snapshots, validation, and lifecycle.
 - References never cross database boundaries.
 - Opening one database never scans or validates another database's contents.
-- `TableIdentity` and `FsdbObjectIdentity` remain local and do not contain `databasePath`.
-- LoomRealm Content identity DOES contain `databasePath` for every record/group/resource.
-- One installation Content View exposes many databases but never merges their namespaces.
-- Desktop and PWA preserve the same database catalog and database-scoped Content identities.
-- PWA bundling may flatten physical storage but MUST preserve `databasePath` in bundle entries and indexes.
-- Empty databases remain discoverable through the database catalog.
+- TableIdentity and FsdbObjectIdentity remain local and do not contain databasePath.
+- LoomRealm Content v2 identity includes databasePath for every record/group/resource.
+- Manifest remains installation-level.
+- Desktop uses one installation Content View with lazy per-database handles and indexes.
+- PWA preserves databasePath in Bundle entries and persisted Content Index entries.
+- PWA may deduplicate physical bytes by content hash but MUST NOT merge logical identities.
+- Empty databases are valid but are not enumerable through Runtime Content.
 - Tables never contain databases; RESOURCE subdirectories remain resource paths.
 - Readers accept ASCII case-insensitive type markers; writers emit uppercase markers.
-- This is a breaking migration: no old API compatibility shim, no default-first fallback, and no FSDB disk-format version marker.
+- This is a breaking API/protocol migration; no old single-database fallback is retained.
+- No FSDB on-disk format-version marker or installation-level database selector is introduced.
+
+**Design review verdict:** the cross-layer architecture is coherent and closed at the identity, routing, ownership, failure-isolation, packaging, and lifecycle boundaries. The explicit trade-offs above are accepted. Implementation is not complete until every gate in 11.6 passes and the v2 wire/conformance contracts freeze the exact observable HTTP behavior.
