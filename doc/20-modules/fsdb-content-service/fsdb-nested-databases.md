@@ -724,6 +724,41 @@ The architecture is now fixed: an installation contains many independent FSDBs, 
 
 These are implementation closure items, not reasons to add an installation-level database selector or to weaken the multi-database architecture.
 
+## 11. Current implementation hotspots (branch baseline)
+
+The following files still encode the pre-migration single-database contract on this branch. These are the concrete starting points for implementation; the design above is the target and must take precedence over the current code shape.
+
+| Area | Current code hotspot | Required change |
+|---|---|---|
+| Core public API | `packages/fsdb/src/index.ts`: `OpenFsdbOptions`, `openFsdb()` | Require `root` + `path`; export `listFsdbPaths()`; keep the returned handle database-local |
+| Core filesystem traversal | `packages/fsdb/src/scanner.ts`: `scanFsdb(rootInput)` | Split container-root resolution, database path resolution, recursive discovery, and one-database table scanning |
+| Core names | `packages/fsdb/src/names.ts`: `canonicalName()` | Reuse existing NFC/NameSegment rules for each logical DatabaseName segment; do not lowercase names |
+| FSDB HTTP adapter | `packages/fsdb-http/src/public.ts`: `ServeFsdbOptions`, `serveFsdb()` | Inherit required `root + path`; keep one selected handle per low-level service |
+| Desktop discovery | `apps/desktop/src/content-service.ts`: `preparedFsdbRoot()` | Remove the exactly-one-root assumption; use Core discovery |
+| Desktop ownership | `apps/desktop/src/content-service.ts`: `PreparedDesktopContentViewState.db`, `prepareDesktopContentView()` | Replace the single handle with a databasePath-keyed handle/catalog collection; isolate per-database failure and lifecycle |
+| Desktop identity/routing | `apps/desktop/src/content-service.ts`: `ContentIndexEntry`, `indexKey()`, `parseRoute()`, request lookup | Add databasePath to route parsing, index keys, cache identity, and handle selection |
+| Runtime contract | `packages/subsystem/src/content.ts`, `packages/subsystem/src/host/content-client.ts` | Replace positional namespace/key identity with database-scoped `ContentObjectIdentity`; add catalog access |
+| PWA bundle | `apps/pwa/src/installation-bundle.ts`: `PwaBundleContentEntryV1`, `PwaInstallationBundleV1` | Add complete database catalog and databasePath to every database-backed entry |
+| PWA installation | `apps/pwa/src/installer.ts`: `contentBodies`, duplicate identity, persisted index creation | Validate catalog and paths; scope duplicate detection and persisted identities by databasePath |
+| PWA persistence | `apps/pwa/src/installation-store.ts`: `StoredContentIndexEntry`, `PwaInstallationRecord` | Persist the catalog and databasePath; retain empty databases |
+| PWA routing | `apps/pwa/src/service-worker-content.ts`: route parser and `matchEntry()` | Parse databasePath and match the full database-scoped identity |
+| Core conformance | `packages/fsdb/test/fsdb.test.mjs` | Migrate root-only fixtures and add discovery, nested-path, duplicate-name, no-follow, and database-isolation cases |
+| HTTP conformance | `packages/fsdb-http/test/fsdb.test.mjs` | Migrate all open/serve fixtures to root + path; assert a service serves only its selected database |
+| Desktop/PWA integration | `apps/desktop/test/content-service.test.mjs`, `apps/pwa/test/installation-content.e2e.test.mjs`, `apps/pwa/test/pwa-bundle-build.test.mjs` | Add same namespace/key in multiple databases, empty database catalog, and cross-platform identity-equivalence cases |
+
+### Recommended implementation gates
+
+Do not mark this work complete merely because nested directories can be opened.
+
+1. **Core gate:** deterministic recursive discovery and explicit path opening pass their own tests; opening a parent never scans a child; opening a child never scans its parent; sibling snapshots and lifecycle remain independent.
+2. **Desktop gate:** one installation view can serve at least two databases with identical local identities, and a broken database does not block healthy siblings.
+3. **PWA gate:** bundle, persisted index, and Service Worker preserve databasePath; empty databases survive packaging and installation.
+4. **Runtime/API gate:** Subsystem callers must explicitly identify databasePath; no namespace prefix trick or implicit default exists.
+5. **Parity gate:** Desktop and PWA expose the same logical catalog and the same database-scoped content bytes/identities for a shared fixture.
+6. **Documentation gate:** the normative FSDB layout and Content wire contract are updated before the implementation is described as complete.
+
+The branch currently has the single-database implementation at these hotspots. This inventory is a migration map, not a claim that those code paths have already been changed.
+
 ## 11. Final design rules
 
 ```text
