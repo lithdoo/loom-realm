@@ -926,7 +926,7 @@ This is an intentional breaking migration. The old single-database APIs are not 
 - serveFsdb() accepts root rather than root + path.
 - One service owns one Root and one Server.
 - The frozen /fsdb/v1 handler route is not reinterpreted as a multi-database route.
-- createFsdbHttpHandler(db), if retained, remains an explicitly single-handle embedding primitive and is not used by the Root-scoped service.
+- createFsdbHttpHandler(db) remains exported as an explicitly single-handle, borrowed v1 embedding primitive and is not used by the Root-scoped v2 service.
 - The v2 package design and conformance contract must be documented separately from the frozen v1 behavior.
 
 ### 9.3 LoomRealm Content
