@@ -22,7 +22,7 @@ Node.js stdlib
 
 ## Opaque handle
 
-唯一 valid runtime producer 是 `@loomrealm/fsdb.openFsdb()`；`@loomrealm/fsdb-http.openFsdb()` 是 source-compatible re-export/projection。Structural look-alike remains invalid。
+唯一 valid runtime producer 是 `@loomrealm/fsdb.openFsdb()`；`@loomrealm/fsdb-http.openFsdb()` 是该 Core function 的直接 re-export，其 options signature 始终跟随 Core 当前合同（Container Root + required databasePath）。Structural look-alike remains invalid。
 
 ## Compatibility
 
