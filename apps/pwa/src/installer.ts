@@ -4,12 +4,14 @@ import {
   buildPwaExecutableIndexV1,
   parsePwaLaunchManifestV1,
 } from "@loomrealm/game-launcher-pwa";
+import { canonicalDatabasePath, canonicalName } from "@loomrealm/fsdb/names";
 import { parseJsonText } from "@loomrealm/wire";
 import { serializePwaPublicManifestV1 } from "./content-manifest.js";
 import type { PwaInstallationBundleV1 } from "./installation-bundle.js";
 import {
   getInstallation,
   listInstallations,
+  markInstallationInvalid,
   publishInstallation,
   putInstallation,
   readInstallationObject,
@@ -118,6 +120,12 @@ function exact(value: unknown, fields: readonly string[], label: string): Record
   return record;
 }
 
+function contentName(value: unknown): string {
+  if (typeof value !== "string") throw new TypeError("Invalid installation segment");
+  try { return canonicalName(value); }
+  catch { throw new TypeError("Invalid installation segment"); }
+}
+
 function segment(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || value === "." || value === ".." || /[\\/\0:]|\p{Cc}|\p{Cs}/u.test(value)) throw new TypeError("Invalid installation segment");
   return value;
@@ -177,13 +185,17 @@ async function installPwaBundleRecord(bundle: PwaInstallationBundleV1, signal?: 
     return { logicalModule: entry.logicalModule, mime: entry.mime, source: await entry.body.text(), bytes, contentVersion: await hash(bytes) };
   }));
   const contentBodies = await Promise.all(value.content.map(async (candidate) => {
-    const entry = exact(candidate, ["kind", "namespace", "key", "mime", "body"], "PWA content entry");
+    const entry = exact(candidate, ["databasePath", "kind", "namespace", "key", "mime", "body"], "PWA content entry");
     if ((entry.kind !== "record" && entry.kind !== "group" && entry.kind !== "resource") || typeof entry.key !== "string") throw new TypeError("Invalid PWA content entry");
     const mime = validatedMime(entry.mime);
     if (entry.kind === "record" && mime.essence !== "application/json") throw new TypeError("Invalid PWA record MIME");
     if (entry.kind === "group" && mime.essence !== "application/x-ndjson") throw new TypeError("Invalid PWA group MIME");
-    const namespace = segment(entry.namespace);
-    const key = entry.key.split("/").map(segment).join("/");
+    if (typeof entry.databasePath !== "string") throw new TypeError("Invalid database path");
+    let databasePath: string;
+    try { databasePath = canonicalDatabasePath(entry.databasePath); }
+    catch { throw new TypeError("Invalid database path"); }
+    const namespace = contentName(entry.namespace);
+    const key = entry.key.split("/").map((part) => contentName(part)).join("/");
     if (entry.kind !== "resource" && key.includes("/")) throw new TypeError("Invalid PWA content key");
     if (!(entry.body instanceof Blob)) throw new TypeError("Invalid PWA content body");
     if (entry.body.size > MAX_OBJECT_BYTES) throw new TypeError("PWA content exceeds deployment limit");
@@ -192,11 +204,11 @@ async function installPwaBundleRecord(bundle: PwaInstallationBundleV1, signal?: 
     const servedMime = entry.kind === "record" ? "application/json; charset=utf-8"
       : entry.kind === "group" ? "application/x-ndjson; charset=utf-8"
         : mime.value;
-    return { kind: entry.kind, namespace, key, mime: servedMime, bytes } as const;
+    return { databasePath, kind: entry.kind, namespace, key, mime: servedMime, bytes } as const;
   }));
   const contentIdentities = new Set<string>();
   for (const entry of contentBodies) {
-    const identity = `${entry.kind}\u0000${entry.namespace}\u0000${entry.key}`;
+    const identity = `${entry.databasePath}\u0000${entry.kind}\u0000${entry.namespace}\u0000${entry.key}`;
     if (contentIdentities.has(identity)) throw new TypeError("Duplicate PWA content identity");
     contentIdentities.add(identity);
   }
@@ -225,7 +237,7 @@ async function installPwaBundleRecord(bundle: PwaInstallationBundleV1, signal?: 
     if (signal?.aborted) throw signal.reason;
     const contentIndex: StoredContentIndexEntry[] = [Object.freeze({ kind: "manifest", ...gameEntry })];
     for (const entry of contentBodies) {
-      contentIndex.push(Object.freeze({ kind: entry.kind, namespace: entry.namespace, key: entry.key, ...await storeObject(rootId, entry.bytes, entry.mime) }));
+      contentIndex.push(Object.freeze({ kind: entry.kind, databasePath: entry.databasePath, namespace: entry.namespace, key: entry.key, ...await storeObject(rootId, entry.bytes, entry.mime) }));
       if (signal?.aborted) throw signal.reason;
     }
     const storedExecutable = new Map<string, StoredObjectRef>();
@@ -260,10 +272,15 @@ export async function installPwaBundle(bundle: PwaInstallationBundleV1, signal?:
   return Object.freeze({ installationId: installation.installationId });
 }
 
+function contentIndexKeepsDatabaseIdentity(record: PwaInstallationRecord): boolean {
+  return record.contentIndex.every((entry) => entry.kind === "manifest" || typeof entry.databasePath === "string");
+}
+
 export async function ensurePwaBundle(bundle: PwaInstallationBundleV1, knownInstallationId?: string | null): Promise<PwaInstallationRecord> {
   if (knownInstallationId) {
     const existing = await getInstallation(knownInstallationId);
-    if (existing?.state === "complete") return existing;
+    if (existing?.state === "complete" && contentIndexKeepsDatabaseIdentity(existing)) return existing;
+    if (existing?.state === "complete") await markInstallationInvalid(existing.installationId, existing.generation, existing.rootId);
   }
   return installPwaBundleRecord(bundle);
 }

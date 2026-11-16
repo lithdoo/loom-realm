@@ -9,7 +9,7 @@ test("installation publishes atomically and Content/Executable routes preserve v
     await waitForDemo(page);
     const first = await page.evaluate(async () => {
       const installationId = window.__loomrealmPwa.installationId;
-      const url = `/_lr/v1/games/${encodeURIComponent(installationId)}/records/struct.demo/config`;
+      const url = `/_lr/v1/games/${encodeURIComponent(installationId)}/databases/Demo/$db/records/struct.demo/config`;
       const get = await fetch(url);
       const body = await get.text();
       const etag = get.headers.get("etag");
@@ -42,14 +42,14 @@ test("installation publishes atomically and Content/Executable routes preserve v
     await cdp.send("ServiceWorker.stopAllWorkers");
     const afterRestart = await page.evaluate(async () => {
       const installationId = window.__loomrealmPwa.installationId;
-      const response = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/records/struct.demo/config`);
+      const response = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/databases/Demo/$db/records/struct.demo/config`);
       return { status: response.status, body: await response.text() };
     });
     assert.deepEqual(afterRestart, { status: 200, body: '{"message":"ready"}' });
 
     await context.setOffline(true);
     const offline = await page.evaluate(async () => {
-      const response = await fetch(`/_lr/v1/games/${encodeURIComponent(window.__loomrealmPwa.installationId)}/resources/resource.demo/hello.txt`);
+      const response = await fetch(`/_lr/v1/games/${encodeURIComponent(window.__loomrealmPwa.installationId)}/databases/Demo/$db/resources/resource.demo/hello.txt`);
       return { status: response.status, body: await response.text() };
     });
     assert.deepEqual(offline, { status: 200, body: "LoomRealm PWA" });
@@ -65,9 +65,9 @@ test("Content API v1 distinguishes malformed and missing identities and preserve
       const base = `/_lr/v1/games/${encodeURIComponent(installationId)}`;
       const routes = {
         manifest: `${base}/manifest`,
-        record: `${base}/records/struct.demo/config`,
-        group: `${base}/groups/group.demo/items`,
-        resource: `${base}/resources/resource.demo/nested/hello.txt`,
+        record: `${base}/databases/Demo/$db/records/struct.demo/config`,
+        group: `${base}/databases/Demo/$db/groups/group.demo/items`,
+        resource: `${base}/databases/Demo/$db/resources/resource.demo/nested/hello.txt`,
       };
       const success = {};
       for (const [kind, url] of Object.entries(routes)) {
@@ -91,17 +91,17 @@ test("Content API v1 distinguishes malformed and missing identities and preserve
       const post = await fetch(routes.record, { method: "POST" });
       const malformed = [];
       for (const url of [
-        `${base}/records/struct.demo`,
-        `${base}/records/struct.demo/a%2Fb`,
-        `${base}/resources/resource.demo`,
-        `${base}/records/struct.demo/%ZZ`,
+        `${base}/databases/Demo/$db/records/struct.demo`,
+        `${base}/databases/Demo/$db/records/struct.demo/a%2Fb`,
+        `${base}/databases/Demo/$db/resources/resource.demo`,
+        `${base}/databases/Demo/$db/records/struct.demo/%ZZ`,
         `${base}/manifest?version=1`,
         `${base}/unknown/path`,
       ]) {
         const response = await fetch(url);
         malformed.push({ status: response.status, type: response.headers.get("content-type"), code: (await response.json()).code });
       }
-      const missing = await fetch(`${base}/records/struct.demo/missing`);
+      const missing = await fetch(`${base}/databases/Demo/$db/records/struct.demo/missing`);
       const missingInstallation = await fetch(`/_lr/v1/games/${crypto.randomUUID()}/manifest`);
       const badConditional = await fetch(routes.record, { headers: { "If-None-Match": "not-an-entity-tag" } });
       return {
@@ -174,10 +174,10 @@ test("installation validates Content MIME, UTF-8, JSON, JSON Lines, and deployme
         executables: [{ logicalModule: "content.mjs", mime: "text/javascript", body: new Blob([source], { type: "text/javascript" }) }],
       });
       const invalid = [
-        [{ kind: "resource", namespace: "resource.test", key: "bad.bin", mime: "not-a-mime", body: new Blob(["x"]) }],
-        [{ kind: "record", namespace: "struct.test", key: "bad", mime: "application/json", body: new Blob(["{"]) }],
-        [{ kind: "record", namespace: "struct.test", key: "bad-utf8", mime: "application/json", body: new Blob([new Uint8Array([0xff])]) }],
-        [{ kind: "group", namespace: "group.test", key: "bad", mime: "application/x-ndjson", body: new Blob(['{"ok":true}\nnot-json\n']) }],
+        [{ databasePath: "Demo", kind: "resource", namespace: "resource.test", key: "bad.bin", mime: "not-a-mime", body: new Blob(["x"]) }],
+        [{ databasePath: "Demo", kind: "record", namespace: "struct.test", key: "bad", mime: "application/json", body: new Blob(["{"]) }],
+        [{ databasePath: "Demo", kind: "record", namespace: "struct.test", key: "bad-utf8", mime: "application/json", body: new Blob([new Uint8Array([0xff])]) }],
+        [{ databasePath: "Demo", kind: "group", namespace: "group.test", key: "bad", mime: "application/x-ndjson", body: new Blob(['{"ok":true}\nnot-json\n']) }],
       ];
       const rejected = [];
       for (const content of invalid) {
@@ -193,9 +193,9 @@ test("installation validates Content MIME, UTF-8, JSON, JSON Lines, and deployme
         catch { bounds.push(true); }
       }
       const legal = await window.__loomrealmPwaQualification.install(bundle([
-        { kind: "resource", namespace: "resource.test", key: "legal.txt", mime: 'text/plain; note="a;b"', body: new Blob(["legal"]) },
+        { databasePath: "Demo", kind: "resource", namespace: "resource.test", key: "legal.txt", mime: 'text/plain; note="a;b"', body: new Blob(["legal"]) },
       ]));
-      const response = await fetch(`/_lr/v1/games/${encodeURIComponent(legal.installationId)}/resources/resource.test/legal.txt`);
+      const response = await fetch(`/_lr/v1/games/${encodeURIComponent(legal.installationId)}/databases/Demo/$db/resources/resource.test/legal.txt`);
       const observed = { status: response.status, mime: response.headers.get("content-type"), body: await response.text() };
       await window.__loomrealmPwaQualification.uninstall(legal.installationId);
       return { rejected, bounds, observed };
@@ -222,7 +222,7 @@ test("persistence grant, denial and quota paths are explicit; uninstall cannot b
       Object.defineProperty(storage, "persist", { configurable: true, value: original });
       const installationId = window.__loomrealmPwa.installationId;
       await window.__loomrealmPwaQualification.uninstall();
-      const after = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/records/struct.demo/config`);
+      const after = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/databases/Demo/$db/records/struct.demo/config`);
       return { granted: granted.persistence, denied: denied.persistence, quota, after: after.status };
     });
     assert.deepEqual(outcomes, { granted: "granted", denied: "denied", quota: "QuotaExceededError", after: 404 });
@@ -270,8 +270,8 @@ test("staging stays invisible, orphan GC removes it, and object corruption inval
       const objects = await directory.getDirectoryHandle("objects");
       const file = await objects.getFileHandle(entry.contentVersion.replace(":", "-"));
       const writer = await file.createWritable(); await writer.write("corrupt"); await writer.close();
-      const first = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/records/struct.demo/config`);
-      const second = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/records/struct.demo/config`);
+      const first = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/databases/Demo/$db/records/struct.demo/config`);
+      const second = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/databases/Demo/$db/records/struct.demo/config`);
       return { statuses: [first.status, second.status], installationId, rootId: installation.rootId };
     });
     assert.deepEqual(corruption.statuses, [422, 409]);
@@ -321,7 +321,7 @@ test("an installation cancelled after staging leaves neither a registry record n
         formatVersion: 1,
         gameEntryText: JSON.stringify({ formatVersion: 1, initial: { subsystem: "cancel", input: null }, subsystems: [{ key: "cancel" }] }),
         launchManifestText: JSON.stringify({ formatVersion: 1, subsystems: [{ key: "cancel", module: "cancel.mjs" }] }),
-        content: [{ kind: "resource", namespace: "cancel", key: "large.bin", mime: "application/octet-stream", body: new Blob([new Uint8Array(8 * 1024 * 1024)]) }],
+        content: [{ databasePath: "Demo", kind: "resource", namespace: "cancel", key: "large.bin", mime: "application/octet-stream", body: new Blob([new Uint8Array(8 * 1024 * 1024)]) }],
         executables: [{ logicalModule: "cancel.mjs", mime: "text/javascript", body: new Blob([source], { type: "text/javascript" }) }],
       }, controller.signal);
       const deadline = performance.now() + 10_000;
@@ -343,5 +343,121 @@ test("an installation cancelled after staging leaves neither a registry record n
     assert.equal(result.rejected, true);
     assert.deepEqual(result.afterRecords, result.beforeRecords);
     assert.deepEqual(result.afterRoots, result.beforeRoots);
+  } finally { await product.close(); }
+});
+
+test("installed databases keep identical local names and distinct bytes", async () => {
+  const product = await openProduct();
+  try {
+    const result = await product.page.evaluate(async () => {
+      const source = "export default () => ({ frame: async () => ({ type: 'completed', value: null }) });";
+      const entry = (databasePath, body) => ({
+        databasePath, kind: "record", namespace: "struct.Config", key: "common",
+        mime: "application/json; charset=utf-8", body: new Blob([body], { type: "application/json" }),
+      });
+      const bundle = (content) => ({
+        formatVersion: 1,
+        gameEntryText: JSON.stringify({ formatVersion: 1, initial: { subsystem: "content", input: null }, subsystems: [{ key: "content" }] }),
+        launchManifestText: JSON.stringify({ formatVersion: 1, subsystems: [{ key: "content", module: "content.mjs" }] }),
+        content,
+        executables: [{ logicalModule: "content.mjs", mime: "text/javascript", body: new Blob([source], { type: "text/javascript" }) }],
+      });
+      const installed = await window.__loomrealmPwaQualification.install(bundle([
+        entry("GameData", "{\"owner\":\"parent\"}"),
+        entry("GameData/World", "{\"owner\":\"world\"}"),
+        entry("ModData", "{\"owner\":\"mod\"}"),
+      ]));
+      const base = `/_lr/v1/games/${encodeURIComponent(installed.installationId)}`;
+      const read = async (databasePath) => {
+        const response = await fetch(`${base}/databases/${databasePath}/$db/records/struct.Config/common`);
+        return { status: response.status, body: await response.text(), version: response.headers.get("x-loom-content-version"), mime: response.headers.get("content-type"), head: (await fetch(`${base}/databases/${databasePath}/$db/records/struct.Config/common`, { method: "HEAD" })).status };
+      };
+      let duplicate = false;
+      try {
+        await window.__loomrealmPwaQualification.install(bundle([
+          entry("GameData", "{\"owner\":\"one\"}"),
+          entry("GameData", "{\"owner\":\"two\"}"),
+        ]));
+      } catch { duplicate = true; }
+      const parent = await read("GameData");
+      const world = await read("GameData/World");
+      const mod = await read("ModData");
+      const shared = "{\"owner\":\"shared\"}";
+      const reused = await window.__loomrealmPwaQualification.install(bundle([
+        entry("GameData", shared),
+        entry("ModData", shared),
+      ]));
+      const reusedBase = `/_lr/v1/games/${encodeURIComponent(reused.installationId)}`;
+      const sharedGame = await fetch(`${reusedBase}/databases/GameData/$db/records/struct.Config/common`);
+      const sharedMod = await fetch(`${reusedBase}/databases/ModData/$db/records/struct.Config/common`);
+      const root = await navigator.storage.getDirectory();
+      const objects = await root.getDirectoryHandle("loomrealm-pwa").then((product) => product.getDirectoryHandle("installations")).then((installations) => installations.getDirectoryHandle(reused.installationId)).then((installation) => installation.getDirectoryHandle("objects"));
+      const names = [];
+      for await (const [name] of objects.entries()) names.push(name);
+      await window.__loomrealmPwaQualification.uninstall(installed.installationId);
+      await window.__loomrealmPwaQualification.uninstall(reused.installationId);
+      return {
+        parent, world, mod, duplicate,
+        sharedGame: await sharedGame.text(), sharedMod: await sharedMod.text(),
+        sharedGameVersion: sharedGame.headers.get("x-loom-content-version"),
+        sharedModVersion: sharedMod.headers.get("x-loom-content-version"),
+        objectCount: names.length,
+      };
+    });
+    assert.equal(result.parent.status, 200);
+    assert.equal(result.parent.body, "{\"owner\":\"parent\"}");
+    assert.equal(result.world.body, "{\"owner\":\"world\"}");
+    assert.equal(result.mod.body, "{\"owner\":\"mod\"}");
+    assert.equal(result.parent.mime, "application/json; charset=utf-8");
+    assert.match(result.parent.version, /^sha256:[0-9a-f]{64}$/);
+    assert.notEqual(result.parent.version, result.world.version);
+    assert.equal(result.parent.head, 200);
+    assert.equal(result.world.head, 200);
+    assert.equal(result.duplicate, true);
+    assert.equal(result.sharedGame, "{\"owner\":\"shared\"}");
+    assert.equal(result.sharedMod, result.sharedGame);
+    assert.equal(result.sharedGameVersion, result.sharedModVersion);
+    assert.equal(result.objectCount, 4);
+  } finally { await product.close(); }
+});
+
+test("a complete installation without databasePath is not reused", async () => {
+  const product = await openProduct();
+  try {
+    const before = await product.page.evaluate(async () => window.__loomrealmPwa.installationId);
+    await product.page.evaluate(async () => {
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.open("loomrealm-pwa-installations-v1", 1);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction("installations", "readwrite");
+          const store = tx.objectStore("installations");
+          const get = store.get(window.__loomrealmPwa.installationId);
+          get.onerror = () => reject(get.error);
+          get.onsuccess = () => {
+            const record = get.result;
+            record.contentIndex = record.contentIndex.map((entry) => {
+              if (entry.kind === "manifest") return entry;
+              const { databasePath: _databasePath, ...rest } = entry;
+              return rest;
+            });
+            store.put(record);
+          };
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => reject(tx.error);
+        };
+      });
+    });
+    await product.page.reload();
+    await waitForDemo(product.page);
+    const after = await product.page.evaluate(async () => {
+      const installationId = window.__loomrealmPwa.installationId;
+      const response = await fetch(`/_lr/v1/games/${encodeURIComponent(installationId)}/databases/Demo/$db/records/struct.demo/config`);
+      return { installationId, status: response.status, body: await response.text() };
+    });
+    assert.notEqual(after.installationId, before);
+    assert.equal(after.status, 200);
+    assert.deepEqual(JSON.parse(after.body), { message: "ready" });
   } finally { await product.close(); }
 });

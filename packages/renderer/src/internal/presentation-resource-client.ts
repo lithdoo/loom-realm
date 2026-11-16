@@ -1,3 +1,4 @@
+import { canonicalDatabasePath } from "@loomrealm/fsdb/names";
 import {
   RendererResourceError,
   type RendererResourceClient,
@@ -27,6 +28,7 @@ export interface PresentationResource {
 
 export interface PresentationResourceClient {
   resource(
+    databasePath: string,
     namespace: string,
     key: string,
     expectedContentVersion: string,
@@ -88,7 +90,10 @@ export function createPresentationResourceClient(
     throw new TypeError("Invalid presentation resource binding");
   }
   return Object.freeze({
-    async resource(namespace: string, key: string, expectedContentVersion: string, options?: { readonly signal?: AbortSignal }) {
+    async resource(databasePath: string, namespace: string, key: string, expectedContentVersion: string, options?: { readonly signal?: AbortSignal }) {
+      let canonicalPath: string;
+      try { canonicalPath = canonicalDatabasePath(databasePath); }
+      catch { throw new PresentationResourceError("CONTENT_INVALID"); }
       if (!validSegment(namespace, false) || !validSegment(key, true) || !VERSION.test(expectedContentVersion)) {
         throw new PresentationResourceError("CONTENT_INVALID");
       }
@@ -100,7 +105,7 @@ export function createPresentationResourceClient(
       if (lifetimeSignal.aborted || options?.signal?.aborted) throw new PresentationResourceError("CONTENT_CANCELLED");
       const combined = abortSignal(options?.signal, lifetimeSignal);
       try {
-        const resource = await client.resource(namespace, key, expectedContentVersion, combined.signal);
+        const resource = await client.resource(canonicalPath, namespace, key, expectedContentVersion, combined.signal);
         return Object.freeze({
           bytes: new Uint8Array(resource.bytes),
           mime: resource.mime,

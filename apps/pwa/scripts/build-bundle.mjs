@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { canonicalDatabasePath, canonicalName } from "@loomrealm/fsdb/names";
 import { deriveProductGeneration, emitProductArtifacts } from "./build-identity.mjs";
 import { pwaBundleId } from "./pwa-bundle-id.mjs";
 
@@ -66,13 +67,23 @@ export function validatePwaBundlePayload(value) {
     if (!["record", "group", "resource"].includes(entry.kind)) {
       throw new TypeError("Invalid Content kind at index " + index);
     }
-    requireString(entry.namespace, "content[" + index + "].namespace");
-    requireString(entry.key, "content[" + index + "].key");
+    let databasePath;
+    try { databasePath = canonicalDatabasePath(entry.databasePath); }
+    catch { throw new TypeError("Invalid databasePath at index " + index); }
+    let namespace;
+    let key;
+    try {
+      namespace = canonicalName(entry.namespace);
+      key = String(entry.key).split("/").map((part) => canonicalName(part)).join("/");
+    } catch {
+      throw new TypeError("Invalid Content name at index " + index);
+    }
+    if (entry.kind !== "resource" && key.includes("/")) throw new TypeError("Invalid Content key at index " + index);
     requireString(entry.mime, "content[" + index + "].mime");
     if (entry.encoding !== "base64" || typeof entry.body !== "string" || !validBase64(entry.body)) {
       throw new TypeError("Content body must be canonical base64 at index " + index);
     }
-    const identity = [entry.kind, entry.namespace, entry.key].join("\0");
+    const identity = [databasePath, entry.kind, namespace, key].join("\0");
     if (identities.has(identity)) throw new TypeError("Duplicate PWA Content identity at index " + index);
     identities.add(identity);
   }

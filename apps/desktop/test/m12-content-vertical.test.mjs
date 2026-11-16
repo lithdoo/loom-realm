@@ -40,7 +40,7 @@ async function installation(t) {
         return {
           async initialize() {
             if (process.env.LOOMREALM_HOSTRA_CONTENT_ACCESS !== undefined) throw new Error("Content credential was not scrubbed");
-            observed = await scope.content.record("struct.actors", "pikachu");
+            observed = await scope.content.record("content", "struct.actors", "pikachu");
           },
           frame() { return { type: "completed", value: observed }; }
         };
@@ -84,7 +84,7 @@ test("M12 Vertical B: production prepare → FSDB → Desktop HTTP → Renderer 
   const setup = await installation(t);
   const access = setup.service.access(setup.service.createGrant({ permissions: ["resources"], expiresAtUnixMs: Date.now() + 60_000 }));
   const client = createRendererResourceClient(access, new AbortController().signal);
-  const resource = await client.resource("resource.images", "ui/icons/potion", sha256(setup.resourceBytes));
+  const resource = await client.resource("content", "resource.images", "ui/icons/potion", sha256(setup.resourceBytes));
   assert.deepEqual([...resource.bytes], [...setup.resourceBytes]);
   assert.equal(resource.mime, "image/png");
   assert.equal(resource.contentVersion, sha256(setup.resourceBytes));

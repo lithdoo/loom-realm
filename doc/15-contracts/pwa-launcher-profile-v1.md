@@ -655,8 +655,9 @@ SharedStateAuthority fatal is Session-fatal only through the existing Main/Sessi
 Subsystem author surface remains：
 
 ```text
-scope.content.record(...)
-scope.content.resource(...)
+scope.content.record(databasePath, namespace, key)
+scope.content.group(databasePath, namespace, key)
+scope.content.resource(databasePath, namespace, key)
 ```
 
 PWA Runner MUST use same-origin Content Fetch：

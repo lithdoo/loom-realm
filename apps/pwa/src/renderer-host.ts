@@ -31,11 +31,17 @@ const loadedBootstrapResources = new Set<string>();
 let documentBootstrapFailure: unknown | null = null;
 
 function bootstrapCacheKey(installationId: string, ref: WebPresentationResourceRefV1): string {
-  return JSON.stringify([installationId, ref.namespace, ref.key]);
+  return JSON.stringify([installationId, ref.databasePath, ref.namespace, ref.key]);
 }
 
 function preparedBootstrapKey(kind: "script" | "style", resource: PreparedBootstrapResource): string {
-  return JSON.stringify([kind, resource.namespace, resource.key, resource.contentVersion]);
+  return JSON.stringify([kind, resource.databasePath, resource.namespace, resource.key, resource.contentVersion]);
+}
+
+function contentResourcePath(installationId: string, databasePath: string, namespace: string, key: string): string {
+  const database = databasePath.split("/").map(encodeURIComponent).join("/");
+  const resourceKey = key.split("/").map(encodeURIComponent).join("/");
+  return `/_lr/v1/games/${encodeURIComponent(installationId)}/databases/${database}/$db/resources/${encodeURIComponent(namespace)}/${resourceKey}`;
 }
 
 function observeCarrierClose(carrier: MessageCarrier): void {
@@ -176,8 +182,7 @@ export async function createPwaRendererHost(installationId: string, presentation
     const cacheKey = bootstrapCacheKey(installationId, ref);
     const cached = bootstrapResourceCache.get(cacheKey);
     if (cached !== undefined) return cached;
-    const path = ref.key.split("/").map(encodeURIComponent).join("/");
-    const response = await fetch(pwaPath(`/_lr/v1/games/${encodeURIComponent(installationId)}/resources/${encodeURIComponent(`resource.${ref.namespace}`)}/${path}`), { signal });
+    const response = await fetch(pwaPath(contentResourcePath(installationId, ref.databasePath, `resource.${ref.namespace}`, ref.key)), { signal });
     if (!response.ok) throw new Error("PWA presentation bootstrap resource unavailable");
     const contentVersion = response.headers.get("x-loom-content-version");
     const mime = response.headers.get("content-type");
@@ -219,10 +224,9 @@ export async function createPwaRendererHost(installationId: string, presentation
     throw cause;
   }
   const resourceClient: RendererResourceClient = Object.freeze({
-    async resource(namespace: string, key: string, expectedContentVersion: string, localSignal?: AbortSignal) {
-      const path = key.split("/").map(encodeURIComponent).join("/");
+    async resource(databasePath: string, namespace: string, key: string, expectedContentVersion: string, localSignal?: AbortSignal) {
       const fetchSignal = localSignal === undefined ? signal : AbortSignal.any([signal, localSignal]);
-      const response = await fetch(pwaPath(`/_lr/v1/games/${encodeURIComponent(installationId)}/resources/${encodeURIComponent(namespace)}/${path}`), { signal: fetchSignal });
+      const response = await fetch(pwaPath(contentResourcePath(installationId, databasePath, namespace, key)), { signal: fetchSignal });
       if (!response.ok) throw new Error("PWA presentation resource unavailable");
       const contentVersion = response.headers.get("x-loom-content-version");
       const mime = response.headers.get("content-type");

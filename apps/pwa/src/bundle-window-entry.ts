@@ -16,6 +16,7 @@ interface PwaInstallationBundleFileV1 {
     readonly contentVersion: string;
   }[];
   readonly content: readonly {
+    readonly databasePath: string;
     readonly kind: "record" | "group" | "resource";
     readonly namespace: string;
     readonly key: string;
@@ -61,8 +62,9 @@ async function loadBundle(): Promise<{
       gameEntryText: value.gameEntryText,
       launchManifestText: value.launchManifestText,
       content: Object.freeze(value.content.map((entry) => {
-        if (entry.encoding !== "base64") throw new Error("Unsupported PWA Content encoding");
+        if (entry.encoding !== "base64" || typeof entry.databasePath !== "string") throw new Error("Unsupported PWA Content encoding");
         return Object.freeze({
+          databasePath: entry.databasePath,
           kind: entry.kind,
           namespace: entry.namespace,
           key: entry.key,

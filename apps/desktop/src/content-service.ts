@@ -1,15 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
-import { lstat, readdir, realpath } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
-import { isAbsolute, join, relative } from "node:path";
 import {
+  FsdbResolutionError,
+  SourceUnavailableError,
   listFsdbEntries,
   openFsdb,
   openFsdbObject,
   type FsdbDatabase,
   type FsdbObjectIdentity,
 } from "@loomrealm/fsdb";
+import { canonicalDatabasePath, canonicalName } from "@loomrealm/fsdb/names";
 import { type PreparedHostraGame } from "@loomrealm/game-launcher-hostra";
 import {
   projectHostraPreparedInstallation,
@@ -39,13 +40,25 @@ export interface PreparedDesktopContentView {
   close(): Promise<void>;
 }
 
+interface PreparedDatabaseContent {
+  readonly db: FsdbDatabase;
+  readonly index: ReadonlyMap<string, ContentIndexEntry>;
+}
+
+interface PreparedDatabaseSlot {
+  readonly open: Promise<FsdbDatabase>;
+  readonly prepared: Promise<PreparedDatabaseContent>;
+}
+
 interface PreparedDesktopContentViewState {
   readonly installationId: string;
+  readonly installationRoot: string;
   state: "open" | "closed";
-  readonly db: FsdbDatabase;
   readonly manifestBytes: Uint8Array;
   readonly manifestVersion: string;
-  readonly index: ReadonlyMap<string, ContentIndexEntry>;
+  readonly databases: Map<string, PreparedDatabaseSlot>;
+  readonly ownedDatabases: Set<FsdbDatabase>;
+  ensureSlot(databasePath: string): PreparedDatabaseSlot;
   close(): Promise<void>;
 }
 
@@ -187,23 +200,6 @@ function publicManifest(installation: HostraPreparedInstallation): Uint8Array {
   return Buffer.from(canonicalJson(projection), "utf8");
 }
 
-async function preparedFsdbRoot(canonicalRoot: string): Promise<string> {
-  const entries = await readdir(canonicalRoot, { withFileTypes: true });
-  const candidates = entries.filter((entry) =>
-    entry.isDirectory() && !entry.isSymbolicLink() && /^\[[Ff][Ss][Dd][Bb]\].+$/u.test(entry.name),
-  );
-  if (candidates.length !== 1) throw new TypeError("Prepared installation must contain exactly one FSDB root");
-  const candidate = join(canonicalRoot, candidates[0]!.name);
-  const stat = await lstat(candidate);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new TypeError("Invalid prepared installation FSDB root");
-  const canonicalFsdbRoot = await realpath(candidate);
-  const within = relative(canonicalRoot, canonicalFsdbRoot);
-  if (within === "" || isAbsolute(within) || within === ".." || within.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || within.includes("/") || within.includes("\\")) {
-    throw new TypeError("Invalid prepared installation FSDB root");
-  }
-  return canonicalFsdbRoot;
-}
-
 function version(bytes: Uint8Array): string {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
@@ -222,55 +218,79 @@ function indexKey(kind: string, namespace: string, key: string): string {
   return `${kind}\0${namespace}\0${key}`;
 }
 
+async function buildDatabaseIndex(db: FsdbDatabase): Promise<ReadonlyMap<string, ContentIndexEntry>> {
+  const mutable = new Map<string, ContentIndexEntry>();
+  for (const descriptor of listFsdbEntries(db)) {
+    const fsdbKind = descriptor.identity.kind;
+    const kind = fsdbKind === "group" ? "group" : fsdbKind === "resource" ? "resource" : "record";
+    const namespace = `${fsdbKind}.${descriptor.identity.table}`;
+    const entry: ContentIndexEntry = Object.freeze({
+      kind,
+      namespace,
+      key: descriptor.identity.key,
+      identity: descriptor.identity,
+      contentVersion: await hashLease(db, descriptor.identity),
+      length: descriptor.length,
+      mime: descriptor.contentType,
+    });
+    const lookup = indexKey(kind, namespace, entry.key);
+    if (mutable.has(lookup)) throw new Error("Duplicate Content identity");
+    mutable.set(lookup, entry);
+  }
+  return mutable;
+}
+
 export async function prepareDesktopContentView(
   prepared: PreparedHostraGame,
 ): Promise<PreparedDesktopContentView> {
   const installation = projectHostraPreparedInstallation(prepared);
-  const db = await openFsdb({ root: await preparedFsdbRoot(installation.canonicalRoot) });
-  try {
-    const mutable = new Map<string, ContentIndexEntry>();
-    for (const descriptor of listFsdbEntries(db)) {
-      const fsdbKind = descriptor.identity.kind;
-      const kind = fsdbKind === "group" ? "group" : fsdbKind === "resource" ? "resource" : "record";
-      const namespace = `${fsdbKind}.${descriptor.identity.table}`;
-      const entry: ContentIndexEntry = Object.freeze({
-        kind,
-        namespace,
-        key: descriptor.identity.key,
-        identity: descriptor.identity,
-        contentVersion: await hashLease(db, descriptor.identity),
-        length: descriptor.length,
-        mime: descriptor.contentType,
+  const manifestBytes = publicManifest(installation);
+  const databases = new Map<string, PreparedDatabaseSlot>();
+  const ownedDatabases = new Set<FsdbDatabase>();
+  let closing: Promise<void> | undefined;
+  const state: PreparedDesktopContentViewState = {
+    installationId: randomBytes(24).toString("base64url"),
+    installationRoot: installation.canonicalRoot,
+    state: "open",
+    manifestBytes: Uint8Array.from(manifestBytes),
+    manifestVersion: version(manifestBytes),
+    databases,
+    ownedDatabases,
+    ensureSlot(databasePath: string): PreparedDatabaseSlot {
+      if (state.state !== "open") throw new Error("Content view is closed");
+      const existing = databases.get(databasePath);
+      if (existing) return existing;
+      let slot!: PreparedDatabaseSlot;
+      const open = openFsdb({ root: state.installationRoot, path: databasePath }).then((db) => {
+        ownedDatabases.add(db);
+        return db;
+      }, (error: unknown) => {
+        if (databases.get(databasePath) === slot) databases.delete(databasePath);
+        throw error;
       });
-      const lookup = indexKey(kind, namespace, entry.key);
-      if (mutable.has(lookup)) throw new Error("Duplicate Content identity");
-      mutable.set(lookup, entry);
-    }
-    const manifestBytes = publicManifest(installation);
-    let closing: Promise<void> | undefined;
-    const state: PreparedDesktopContentViewState = {
-      installationId: randomBytes(24).toString("base64url"),
-      state: "open",
-      db,
-      manifestBytes: Uint8Array.from(manifestBytes),
-      manifestVersion: version(manifestBytes),
-      index: mutable as ReadonlyMap<string, ContentIndexEntry>,
-      close() {
-        state.state = "closed";
-        return closing ?? (closing = db.close());
-      },
-    };
-    const view: PreparedDesktopContentView = Object.freeze({
-      get installationId() { return state.installationId; },
-      get state() { return state.state; },
-      close: () => state.close(),
-    });
-    views.set(view, state);
-    return view;
-  } catch (error) {
-    await db.close();
-    throw error;
-  }
+      slot = {
+        open,
+        prepared: open.then(async (db) => ({ db, index: await buildDatabaseIndex(db) })),
+      };
+      databases.set(databasePath, slot);
+      return slot;
+    },
+    close() {
+      state.state = "closed";
+      closing ??= (async () => {
+        await Promise.allSettled([...databases.values()].map((slot) => slot.prepared));
+        await Promise.all([...ownedDatabases].map((db) => db.close()));
+      })();
+      return closing;
+    },
+  };
+  const view: PreparedDesktopContentView = Object.freeze({
+    get installationId() { return state.installationId; },
+    get state() { return state.state; },
+    close: () => state.close(),
+  });
+  views.set(view, state);
+  return view;
 }
 
 function validLimit(value: number | undefined, fallback: number): number {
@@ -287,15 +307,12 @@ function segment(raw: string): string {
   if (raw.length === 0) throw new TypeError("Invalid Content segment");
   let value: string;
   try { value = decodeURIComponent(raw); } catch { throw new TypeError("Invalid Content segment"); }
-  if (value.length === 0 || value === "." || value === ".." || /[\\/\0]|\p{Cc}|\p{Cs}/u.test(value) || /^[A-Za-z]:/.test(value) || value.startsWith("\\\\") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) {
-    throw new TypeError("Invalid Content segment");
-  }
-  return value;
+  try { return canonicalName(value); } catch { throw new TypeError("Invalid Content segment"); }
 }
 
 type Route =
   | { readonly kind: "manifest"; readonly installationId: string; readonly permission: "manifest" }
-  | { readonly kind: "record" | "group" | "resource"; readonly installationId: string; readonly namespace: string; readonly key: string; readonly permission: "records" | "groups" | "resources" };
+  | { readonly kind: "record" | "group" | "resource"; readonly installationId: string; readonly databasePath: string; readonly namespace: string; readonly key: string; readonly permission: "records" | "groups" | "resources" };
 
 function parseRoute(raw: string | undefined): Route | null {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("#") || raw.includes("?")) throw new TypeError("Invalid Content target");
@@ -304,18 +321,29 @@ function parseRoute(raw: string | undefined): Route | null {
   if (parts.length < 5) throw new TypeError("Invalid Content target");
   const installationId = segment(parts[3]!);
   if (parts[4] === "manifest" && parts.length === 5) return { kind: "manifest", installationId, permission: "manifest" };
-  const collection = parts[4];
-  if (parts.length < 7 || (collection !== "records" && collection !== "groups" && collection !== "resources")) throw new TypeError("Invalid Content target");
-  const namespace = segment(parts[5]!);
-  const keyParts = parts.slice(6).map(segment);
+  if (parts[4] !== "databases") throw new TypeError("Invalid Content target");
+  const marker = parts.indexOf("$db", 5);
+  if (marker <= 5 || parts.indexOf("$db", marker + 1) !== -1) throw new TypeError("Invalid Content target");
+  let databasePath: string;
+  try { databasePath = canonicalDatabasePath(parts.slice(5, marker).map(segment).join("/")); }
+  catch (error) {
+    if (error instanceof TypeError) throw error;
+    throw new FsdbResolutionError("DATABASE_PATH_INVALID", "Invalid database path");
+  }
+  const rest = parts.slice(marker + 1);
+  const collection = rest[0];
+  if (rest.length < 3 || (collection !== "records" && collection !== "groups" && collection !== "resources")) throw new TypeError("Invalid Content target");
+  const namespace = segment(rest[1]!);
+  const keyParts = rest.slice(2).map(segment);
   if (collection !== "resources" && keyParts.length !== 1) throw new TypeError("Invalid Content target");
   const kind = collection === "records" ? "record" : collection === "groups" ? "group" : "resource";
-  return { kind, installationId, namespace, key: keyParts.join("/"), permission: collection };
+  return { kind, installationId, databasePath, namespace, key: keyParts.join("/"), permission: collection };
 }
 
 type ContentProblemCode =
   | "CONTENT_REQUEST_INVALID" | "CONTENT_AUTH_REQUIRED" | "CONTENT_PERMISSION_DENIED"
   | "INSTALLATION_NOT_FOUND" | "INSTALLATION_INCOMPLETE" | "CONTENT_NOT_FOUND"
+  | "DATABASE_PATH_INVALID" | "DATABASE_PATH_AMBIGUOUS" | "DATABASE_INVALID" | "DATABASE_UNAVAILABLE"
   | "CONTENT_METHOD_NOT_ALLOWED" | "CONTENT_VERSION_MISMATCH" | "CONTENT_TOO_LARGE"
   | "CONTENT_SCHEMA_INVALID" | "CONTENT_INTEGRITY_FAILED" | "RANGE_INVALID"
   | "CONTENT_PRESSURE" | "CONTENT_UNAVAILABLE";
@@ -328,6 +356,10 @@ const PROBLEMS: Readonly<Record<ContentProblemCode, ContentProblemFact>> = Objec
   CONTENT_PERMISSION_DENIED: { status: 403, title: "Forbidden" },
   INSTALLATION_NOT_FOUND: { status: 404, title: "Installation Not Found" },
   INSTALLATION_INCOMPLETE: { status: 409, title: "Installation Incomplete" },
+  DATABASE_PATH_INVALID: { status: 400, title: "Invalid Database Path" },
+  DATABASE_PATH_AMBIGUOUS: { status: 409, title: "Ambiguous Database Path" },
+  DATABASE_INVALID: { status: 422, title: "Invalid Database" },
+  DATABASE_UNAVAILABLE: { status: 503, title: "Database Unavailable" },
   CONTENT_NOT_FOUND: { status: 404, title: "Content Not Found" },
   CONTENT_METHOD_NOT_ALLOWED: { status: 405, title: "Method Not Allowed" },
   CONTENT_VERSION_MISMATCH: { status: 409, title: "Content Version Mismatch" },
@@ -369,6 +401,18 @@ function selectedBodyHasValidSchema(kind: ContentIndexEntry["kind"], body: Uint8
     }
     return true;
   } catch { return false; }
+}
+
+function databaseProblem(error: unknown): ContentProblemCode {
+  if (error instanceof FsdbResolutionError) {
+    if (error.code === "DATABASE_NOT_FOUND") return "CONTENT_NOT_FOUND";
+    if (error.code === "DATABASE_PATH_INVALID") return "DATABASE_PATH_INVALID";
+    if (error.code === "DATABASE_PATH_AMBIGUOUS") return "DATABASE_PATH_AMBIGUOUS";
+    if (error.code === "DATABASE_INVALID") return "DATABASE_INVALID";
+    return "DATABASE_UNAVAILABLE";
+  }
+  if (error instanceof SourceUnavailableError) return "DATABASE_UNAVAILABLE";
+  return "CONTENT_UNAVAILABLE";
 }
 
 function bearer(req: IncomingMessage): string | null {
@@ -433,7 +477,9 @@ export async function createDesktopContentService(options: DesktopContentService
     void (async () => {
       if (req.method !== "GET" && req.method !== "HEAD") return problem(res, "CONTENT_METHOD_NOT_ALLOWED", true);
       let route: Route | null;
-      try { route = parseRoute(req.url); } catch { return problem(res, "CONTENT_REQUEST_INVALID"); }
+      try { route = parseRoute(req.url); } catch (error) {
+        return problem(res, error instanceof FsdbResolutionError ? databaseProblem(error) : "CONTENT_REQUEST_INVALID");
+      }
       if (!route) return problem(res, "CONTENT_NOT_FOUND");
       const token = bearer(req);
       const grant = token ? grants.get(token) : undefined;
@@ -443,7 +489,7 @@ export async function createDesktopContentService(options: DesktopContentService
       if (active >= maxConcurrentRequests) return problem(res, "CONTENT_PRESSURE");
       active++;
       try {
-        if (view.state !== "open" || view.db.state !== "open") return problem(res, "INSTALLATION_INCOMPLETE");
+        if (view.state !== "open") return problem(res, "INSTALLATION_INCOMPLETE");
         if (route.kind === "manifest") {
           if (view.manifestBytes.byteLength > maxBodyBytes) return problem(res, "CONTENT_TOO_LARGE");
           successHeaders(res, "application/json; charset=utf-8", view.manifestVersion, view.manifestBytes.byteLength, false);
@@ -451,17 +497,21 @@ export async function createDesktopContentService(options: DesktopContentService
           res.statusCode = 200;
           return res.end(req.method === "HEAD" ? undefined : view.manifestBytes);
         }
-        const entry = view.index.get(indexKey(route.kind, route.namespace, route.key));
+        let prepared;
+        try { prepared = await view.ensureSlot(route.databasePath).prepared; }
+        catch (error) { return problem(res, databaseProblem(error)); }
+        if (prepared.db.state !== "open") return problem(res, "DATABASE_UNAVAILABLE");
+        const entry = prepared.index.get(indexKey(route.kind, route.namespace, route.key));
         if (!entry) return problem(res, "CONTENT_NOT_FOUND");
         if (entry.length > BigInt(maxBodyBytes)) return problem(res, "CONTENT_TOO_LARGE");
         const controller = new AbortController();
         const cancel = () => controller.abort();
         req.once("aborted", cancel);
         res.once("close", cancel);
-        const lease = await openFsdbObject(view.db, entry.identity, controller.signal).catch(() => null);
+        const lease = await openFsdbObject(prepared.db, entry.identity, controller.signal).catch(() => null);
         req.off("aborted", cancel);
         res.off("close", cancel);
-        if (!lease) return problem(res, view.db.state === "open" ? "CONTENT_NOT_FOUND" : "INSTALLATION_INCOMPLETE");
+        if (!lease) return problem(res, prepared.db.state === "open" ? "CONTENT_NOT_FOUND" : "DATABASE_UNAVAILABLE");
         try {
           const unchanged = notModified(req, entry.contentVersion);
           const chunks: Buffer[] = [];

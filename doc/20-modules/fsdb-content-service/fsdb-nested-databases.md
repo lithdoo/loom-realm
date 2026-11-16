@@ -1,6 +1,6 @@
 # FSDB Nested and Multi-Database Architecture
 
-> Status: **Cross-layer design proposal — reviewed; implementation is incomplete. Layer-specific normative contracts are updated in place and remain authoritative for their respective boundaries.**
+> Status: **Implemented in the working tree of `feat/fsdb-case-insensitive-directory-types`. Layer-specific normative contracts remain authoritative for their respective boundaries.**
 > Scope: nested FSDB layout, explicit database addressing, Root-scoped FSDB HTTP, and database-aware LoomRealm Content API.
 > Implementation baseline: `feat/fsdb-case-insensitive-directory-types`.
 > Change policy: update the current pre-release contracts in place; keep the existing `/fsdb/v1`, `/_lr/v1`, and PWA `formatVersion: 1` surfaces. Do not introduce a parallel protocol or compatibility layer.
@@ -808,7 +808,7 @@ Desktop Content Service remains one service per prepared installation. It uses F
 
 ### 8.6 PWA: preserve database identity through bundle and storage
 
-PWA remains browser-native in its storage and Content realization. Node-only @loomrealm/fsdb is not imported into the browser runtime.
+PWA remains browser-native in its storage and Content realization. The browser bundle may import `@loomrealm/fsdb/names` for shared path checks. It does not import the Node FSDB core, open a database handle, or scan a game source tree.
 
 The existing Bundle shape is extended in place:
 
@@ -839,7 +839,7 @@ export interface PwaInstallationBundleV1 {
 
 There is intentionally no databases catalog array in PwaInstallationBundleV1.
 
-Build pipeline:
+Consumer-owned Source Packager, outside the generic PWA builder:
 
 1. Call listFsdbPaths({ root }) against the source installation.
 2. Process the returned canonical paths in deterministic order.
@@ -847,7 +847,9 @@ Build pipeline:
 4. Extract that database's records, groups, and resources.
 5. Put the owning databasePath on every emitted content entry.
 6. Close the database before moving to the next path.
-7. Publish the completed Bundle only after all databases have been processed successfully.
+7. Emit the JSON Installation Bundle only after all databases have been processed successfully. A failure in any database produces no bundle that can be mistaken for a complete package.
+
+The LoomRealm generic PWA builder receives that JSON bundle. It validates `databasePath`, full identity uniqueness, and the bundle ID, then emits install assets. It does not scan the game source directory or call FSDB Core. The installer remains responsible for staging and publication.
 
 An empty database emits no content entries. Because the Content API has no database catalog, its existence is not observable in PWA Runtime. This matches the chosen Content contract; it is not represented by a synthetic record or empty placeholder.
 
@@ -989,6 +991,19 @@ Exact HTTP status codes, problem payloads, headers, and conditional-request prec
 
 ## 11. Implementation map and conformance gates
 
+### Phase 0 — Documentation Alignment
+
+Before code changes, the repository documents that define this multi-database contract are aligned to it. This is synchronization of decisions already made in this document, not a new architecture pass.
+
+Aligned surfaces:
+
+- ContentClient `record`, `group`, and `resource` take `databasePath` first in the subsystem model and the PWA host design freeze.
+- Content logical identity and both Desktop and PWA Content Indexes include `databasePath`. `contentVersion` stays a byte validator.
+- PWA bundle examples and the generic builder description match `PwaBundleContentEntryV1`.
+- The consumer-owned Source Packager discovers and reads source databases. The LoomRealm generic builder only accepts the resulting JSON bundle.
+- Desktop authorization and PWA same-origin storage duties stay unchanged.
+- No still-current document freezes the old single-database ContentClient or an implicit first-FSDB default.
+
 ### 11.1 Core
 
 | Hotspot | Required change |
@@ -1024,7 +1039,8 @@ The existing FSDB HTTP design and conformance documents are the active contract 
 
 | Hotspot | Required change |
 |---|---|
-| apps/pwa source Bundle builder | Enumerate source database paths and package each database's entries with databasePath |
+| Consumer-owned Source Packager | Enumerate source database paths and package each database's entries with databasePath; this code is not the generic builder |
+| apps/pwa/scripts/build-bundle.mjs | Validate the supplied JSON bundle, including databasePath and full identity uniqueness |
 | apps/pwa/src/installation-bundle.ts | Add databasePath to the existing PwaInstallationBundleV1 / PwaBundleContentEntryV1 shape |
 | apps/pwa/src/installer.ts | Validate databasePath and deduplicate by full logical identity |
 | apps/pwa/src/installation-store.ts | Persist databasePath in StoredContentIndexEntry without changing the object-store schema/version |

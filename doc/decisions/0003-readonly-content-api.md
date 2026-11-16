@@ -39,14 +39,14 @@ FSDB 运行时访问主要发生在初始化、地图切换和资源加载，不
 
 ```text
 manifest
-record(namespace, key)
-group(namespace, key)
-resource(namespace, key)
+record(databasePath, namespace, key)
+group(databasePath, namespace, key)
+resource(databasePath, namespace, key)
 ```
 
 桌面由 localhost HTTP Content Service 实现；PWA 由 same-origin Fetch / Service Worker 映射到其 persistent installation/content storage。
 
-运行时请求使用 logical installation/namespace/key identity，不提交物理路径。
+运行时请求使用 logical installation/databasePath/namespace/key identity，不提交物理路径。`databasePath` 是逻辑数据库路径，例如 `GameData/World`。Manifest 没有 databasePath。
 
 ## 结果 — Current Meaning
 

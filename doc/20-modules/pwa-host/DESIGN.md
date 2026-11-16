@@ -237,6 +237,7 @@ interface PwaInstallationBundleV1 {
 }
 
 interface PwaBundleContentEntryV1 {
+  readonly databasePath: string;
   readonly kind: "record" | "group" | "resource";
   readonly namespace: string;
   readonly key: string;
@@ -660,12 +661,15 @@ Existing Shared State replacement fencing、OCC、`OUTCOME_UNKNOWN` semantics st
 
 ## 14. ContentClient Implementation Freeze
 
-Business API remains unchanged：
+Business read methods require an explicit logical databasePath：
 
 ```text
-scope.content.record(namespace, key)
-scope.content.resource(namespace, key)
+scope.content.record(databasePath, namespace, key)
+scope.content.group(databasePath, namespace, key)
+scope.content.resource(databasePath, namespace, key)
 ```
+
+Content Index identity for those reads is `databasePath + kind + namespace + key`. `contentVersion` remains the byte validator. A complete installation whose content entries omit databasePath is not reused.
 
 Current Desktop Host implementation has mandatory Bearer authorization。PWA MUST NOT weaken that invariant by changing the existing token to optional。
 

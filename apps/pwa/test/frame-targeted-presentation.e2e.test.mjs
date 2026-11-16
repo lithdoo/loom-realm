@@ -30,6 +30,7 @@ test("a real PWA World Custom Element delivers top-frame through Workers only to
         gameEntryText: value.gameEntryText,
         launchManifestText: value.launchManifestText,
         content: [{
+          databasePath: "Demo",
           kind: "resource",
           namespace: "resource.Presentation",
           key: "frame-event-probe.browser.js",

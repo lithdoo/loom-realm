@@ -350,15 +350,17 @@ readonly content: ContentClient;
 author root暴露：
 
 ```text
-ContentClient.record(namespace,key,{signal?})
-ContentClient.group(namespace,key,{signal?})
-ContentClient.resource(namespace,hierarchicalResourceKey,{signal?})
+ContentClient.record(databasePath,namespace,key,{signal?})
+ContentClient.group(databasePath,namespace,key,{signal?})
+ContentClient.resource(databasePath,namespace,hierarchicalResourceKey,{signal?})
 ContentRecord / ContentGroup / ContentResource
 ContentReadOptions
 ContentReadError / ContentReadErrorCode
 ```
 
 `group()` 是 2026-10 对 M12 冻结面的唯一增补（见 [ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md) 更新记录）：真实分组读取 consumer 出现后，Subsystem 通过标准 Content capability 读取 `[group]` JSONL。`namespace/key` 均为单 logical segment；`rows` 按响应 JSONL 行序返回，`contentVersion` 仍为 full-body bytes 的 `sha256:<64 lowercase hex>`。非 NDJSON MIME、非法 JSON 行或不一致 version metadata → `CONTENT_INVALID`。
+
+多数据库改造直接更新这三个方法：第一个参数是逻辑 `databasePath`，例如 `GameData/World`。它不是操作系统路径，也不进入 FSDB 内部的 TableIdentity。Manifest 仍然没有 databasePath。
 
 Author不提供：
 

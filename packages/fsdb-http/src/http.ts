@@ -12,7 +12,7 @@ import { BadTargetError, parseTarget, type Route } from "./router.js";
 
 const JSON_TYPE = "application/json; charset=utf-8";
 
-function errorResponse(res: ServerResponse, status: number, allow = false): void {
+export function errorResponse(res: ServerResponse, status: number, allow = false): void {
   res.statusCode = status;
   res.setHeader("Cache-Control", "no-store");
   if (allow) res.setHeader("Allow", "GET, HEAD");
@@ -114,6 +114,14 @@ async function sendObject(req: IncomingMessage, res: ServerResponse, db: FsdbDat
   }
 }
 
+export async function dispatchFsdb(req: IncomingMessage, res: ServerResponse, db: FsdbDatabase, route: Route): Promise<void> {
+  if (route.type === "outside") return errorResponse(res, 404);
+  if (req.method !== "GET" && req.method !== "HEAD") return errorResponse(res, 405, true);
+  if (db.state !== "open") return errorResponse(res, 503);
+  if (route.type === "descriptor") return sendBuffer(req, res, db, describeFsdb(db));
+  await sendObject(req, res, db, route);
+}
+
 export function makeHandler(db: FsdbDatabase): RequestListener {
   // Core validates the opaque brand synchronously here without exposing internals.
   getFsdbSnapshotId(db);
@@ -123,10 +131,7 @@ export function makeHandler(db: FsdbDatabase): RequestListener {
       let route: Route;
       try { route = parseTarget(req.url); }
       catch (error) { return errorResponse(res, error instanceof BadTargetError ? 400 : 500); }
-      if (route.type === "outside") return errorResponse(res, 404);
-      if (req.method !== "GET" && req.method !== "HEAD") return errorResponse(res, 405, true);
-      if (route.type === "descriptor") return sendBuffer(req, res, db, describeFsdb(db));
-      await sendObject(req, res, db, route);
+      await dispatchFsdb(req, res, db, route);
     })().catch(() => {
       if (!res.headersSent) errorResponse(res, 500);
       else res.destroy();

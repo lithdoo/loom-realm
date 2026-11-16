@@ -215,7 +215,7 @@ initial characterName
 Current author API has no metadata/HEAD seam。M14 uses：
 
 ```text
-ContentClient.resource(namespace,key)
+ContentClient.resource(databasePath,namespace,key)
 → bytes + mime + contentVersion
 ```
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { serveFsdb } from "../../../packages/fsdb-http/dist/index.js";
 import { ImportFailure, parseArguments, run, validateArchivePath } from "./import.mjs";
@@ -59,9 +59,10 @@ test("local directory import is byte-preserving and never overwrites", async (t)
   const provenance = JSON.parse(await readFile(join(first, "[STRUCT]测试信息", "来源.json"), "utf8"));
   assert.equal(provenance.acquisition, "local-directory");
 
-  const service = await serveFsdb({ root: first, host: "127.0.0.1", port: 0 });
+  const logicalName = basename(first).slice("[FSDB]".length);
+  const service = await serveFsdb({ root: dirname(first), host: "127.0.0.1", port: 0 });
   t.after(() => service.close());
-  const endpoint = new URL("/fsdb/v1/resource/Graphics/nested/sample", service.origin);
+  const endpoint = new URL(`/fsdb/v1/${encodeURIComponent(logicalName)}/$db/resource/Graphics/nested/sample`, service.origin);
   const get = await fetch(endpoint);
   assert.equal(get.status, 200);
   assert.equal(Number(get.headers.get("content-length")), 16);

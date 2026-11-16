@@ -38,7 +38,7 @@ export class ContentReadError extends Error {
 }
 
 export interface ContentClient {
-  record(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentRecord>;
-  group(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentGroup>;
-  resource(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentResource>;
+  record(databasePath: string, namespace: string, key: string, options?: ContentReadOptions): Promise<ContentRecord>;
+  group(databasePath: string, namespace: string, key: string, options?: ContentReadOptions): Promise<ContentGroup>;
+  resource(databasePath: string, namespace: string, key: string, options?: ContentReadOptions): Promise<ContentResource>;
 }

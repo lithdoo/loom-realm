@@ -11,8 +11,8 @@ test("root bundles keep site-root URLs and a subpath bundle stays inside its dir
   assert.equal(pwaPath("/service-worker.js", "https://game.test/pwa/pokeman/service-worker.js"), "/pwa/pokeman/service-worker.js");
   assert.equal(pwaPath("/", "https://game.test/pwa/pokeman/window.js"), "/pwa/pokeman/");
   assert.equal(
-    pwaPath("/_lr/v1/games/abc/records/struct.Map/3", "https://game.test/pwa/pokeman/window.js"),
-    "/pwa/pokeman/_lr/v1/games/abc/records/struct.Map/3",
+    pwaPath("/_lr/v1/games/abc/databases/GameData/$db/records/struct.Map/3", "https://game.test/pwa/pokeman/window.js"),
+    "/pwa/pokeman/_lr/v1/games/abc/databases/GameData/$db/records/struct.Map/3",
   );
   assert.equal(moduleDirectoryPath("file:///C:/loom/window.js"), "");
 });

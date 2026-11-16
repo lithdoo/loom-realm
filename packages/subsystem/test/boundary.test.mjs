@@ -50,6 +50,7 @@ test("trusted host keeps the exact M8 protocol and port dependency direction", a
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), [
     "@loomrealm/data",
+    "@loomrealm/fsdb",
     "@loomrealm/platform-ports",
     "@loomrealm/runtime-control",
     "@loomrealm/session-events",

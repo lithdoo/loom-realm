@@ -1,4 +1,7 @@
+import { canonicalDatabasePath } from "@loomrealm/fsdb/names";
+
 export interface WebPresentationResourceRefV1 {
+  readonly databasePath: string;
   readonly namespace: string;
   readonly key: string;
 }
@@ -51,13 +54,17 @@ function refs(value: unknown, label: string): readonly WebPresentationResourceRe
   if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
   const seen = new Set<string>();
   return Object.freeze(value.map((candidate, index) => {
-    const record = exactObject(candidate, ["namespace", "key"], `${label}[${index}]`);
+    const record = exactObject(candidate, ["databasePath", "namespace", "key"], `${label}[${index}]`);
+    if (typeof record.databasePath !== "string") throw new TypeError(`Invalid ${label} databasePath`);
+    let databasePath: string;
+    try { databasePath = canonicalDatabasePath(record.databasePath); }
+    catch { throw new TypeError(`Invalid ${label} databasePath`); }
     const namespace = segment(record.namespace, `${label} namespace`, false);
     const key = segment(record.key, `${label} key`, true);
-    const identity = JSON.stringify([namespace, key]);
+    const identity = JSON.stringify([databasePath, namespace, key]);
     if (seen.has(identity)) throw new TypeError(`Duplicate ${label} resource`);
     seen.add(identity);
-    return Object.freeze({ namespace, key });
+    return Object.freeze({ databasePath, namespace, key });
   }));
 }
 
@@ -101,6 +108,7 @@ export async function prepareWebPresentationV1(
       typeof resolved.browserSource !== "string" || resolved.browserSource.length === 0
     ) throw new TypeError("Invalid prepared bootstrap resource");
     return Object.freeze({
+      databasePath: ref.databasePath,
       namespace: ref.namespace,
       key: ref.key,
       contentVersion: resolved.contentVersion,

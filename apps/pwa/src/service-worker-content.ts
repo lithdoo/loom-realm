@@ -1,3 +1,4 @@
+import { canonicalDatabasePath, canonicalName } from "@loomrealm/fsdb/names";
 import {
   getInstallation,
   markInstallationInvalid,
@@ -13,6 +14,7 @@ let concurrentContentRequests = 0;
 interface ContentIdentity {
   readonly installationId: string;
   readonly kind: "manifest" | "record" | "group" | "resource";
+  readonly databasePath?: string;
   readonly namespace?: string;
   readonly key?: string;
 }
@@ -38,13 +40,8 @@ function decodeSegment(value: string): string | null {
   let decoded: string;
   try { decoded = decodeURIComponent(value); }
   catch { return null; }
-  if (
-    decoded.length === 0
-    || decoded === "."
-    || decoded === ".."
-    || /[\\/\0:]|\p{Cc}|\p{Cs}/u.test(decoded)
-  ) return null;
-  return decoded;
+  try { return canonicalName(decoded); }
+  catch { return null; }
 }
 
 function parseIdentity(url: URL, path: readonly string[]): ContentIdentity | null {
@@ -53,17 +50,27 @@ function parseIdentity(url: URL, path: readonly string[]): ContentIdentity | nul
   if (installationId === null) return null;
   const route = path[1];
   if (route === "manifest" && path.length === 2) return Object.freeze({ installationId, kind: "manifest" });
-  if ((route === "records" || route === "groups") && path.length === 4) {
-    const namespace = decodeSegment(path[2]!);
-    const key = decodeSegment(path[3]!);
+  if (route !== "databases") return null;
+  const marker = path.indexOf("$db", 2);
+  if (marker <= 2 || path.indexOf("$db", marker + 1) !== -1) return null;
+  const databaseSegments = path.slice(2, marker).map(decodeSegment);
+  if (databaseSegments.some((value) => value === null)) return null;
+  let databasePath: string;
+  try { databasePath = canonicalDatabasePath((databaseSegments as string[]).join("/")); }
+  catch { return null; }
+  const rest = path.slice(marker + 1);
+  const collection = rest[0];
+  if ((collection === "records" || collection === "groups") && rest.length === 3) {
+    const namespace = decodeSegment(rest[1]!);
+    const key = decodeSegment(rest[2]!);
     if (namespace === null || key === null) return null;
-    return Object.freeze({ installationId, kind: route === "records" ? "record" : "group", namespace, key });
+    return Object.freeze({ installationId, databasePath, kind: collection === "records" ? "record" : "group", namespace, key });
   }
-  if (route === "resources" && path.length >= 4) {
-    const namespace = decodeSegment(path[2]!);
-    const segments = path.slice(3).map(decodeSegment);
+  if (collection === "resources" && rest.length >= 3) {
+    const namespace = decodeSegment(rest[1]!);
+    const segments = rest.slice(2).map(decodeSegment);
     if (namespace === null || segments.some((value) => value === null)) return null;
-    return Object.freeze({ installationId, kind: "resource", namespace, key: (segments as string[]).join("/") });
+    return Object.freeze({ installationId, databasePath, kind: "resource", namespace, key: (segments as string[]).join("/") });
   }
   return null;
 }
@@ -83,8 +90,8 @@ async function completeInstallation(installationId: string): Promise<PwaInstalla
 function matchEntry(installation: PwaInstallationRecord, identity: ContentIdentity): StoredContentIndexEntry | null {
   return installation.contentIndex.find((entry) => {
     if (entry.kind !== identity.kind) return false;
-    if (identity.kind === "manifest") return true;
-    return entry.namespace === identity.namespace && entry.key === identity.key;
+    if (identity.kind === "manifest") return entry.kind === "manifest";
+    return entry.kind !== "manifest" && entry.databasePath === identity.databasePath && entry.namespace === identity.namespace && entry.key === identity.key;
   }) ?? null;
 }
 

@@ -1,10 +1,14 @@
 import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, get as httpGet, request as nodeRequest } from "node:http";
+import { FsdbResolutionError, listFsdbPaths } from "@loomrealm/fsdb";
 import { createFsdbHttpHandler, openFsdb, serveFsdb } from "../dist/index.js";
 import { fixture, rawRequest, request } from "./helpers.mjs";
+
+const SERVED = "/fsdb/v1/游戏数据/$db";
 
 const coveredConformance = new Set();
 function conformance(ids, title, fn) {
@@ -14,7 +18,7 @@ function conformance(ids, title, fn) {
 
 conformance(["API-001", "API-002", "API-003", "FDB-001", "FDB-005", "FDB-006", "FDB-008", "FDB-009", "FDB-010", "LIFE-001"], "opens a Unicode Well-formed snapshot", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const db = await openFsdb({ root: f.root }); t.after(() => db.close());
+  const db = await openFsdb({ root: f.parent, path: "游戏数据" }); t.after(() => db.close());
   assert.equal(db.name, "游戏数据");
   assert.equal(db.state, "open");
   assert.deepEqual(Object.keys(db).sort(), ["close", "name", "state"]);
@@ -26,12 +30,12 @@ conformance(["FDB-013"], "directory marker casing does not affect the lowercase 
   const f = await fixture(); t.after(() => f.cleanup());
   const root = join(f.parent, "[FsDb]游戏数据");
   await rename(f.root, root);
-  await rename(join(root, "[struct]角色"), join(root, "[STRUCT]角色");
-  const service = await serveFsdb({ root }); t.after(() => service.close());
-  const response = await request(service.origin, "/fsdb/v1/struct/角色/皮卡丘");
+  await rename(join(root, "[struct]角色"), join(root, "[STRUCT]角色"));
+  const service = await serveFsdb({ root: f.parent }); t.after(() => service.close());
+  const response = await request(service.origin, `${SERVED}/struct/角色/皮卡丘`);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { name: "皮卡丘" });
-  const descriptor = await request(service.origin, "/fsdb/v1");
+  const descriptor = await request(service.origin, SERVED);
   assert.equal(descriptor.status, 200);
   assert.ok((await descriptor.json()).tables.some((item) => item.kind === "struct" && item.name === "角色"));
 });
@@ -40,15 +44,15 @@ conformance(["FDB-003", "FDB-007", "FDB-011"], "rejects normalization, ResourceK
   const a = await fixture(); t.after(() => a.cleanup());
   await writeFile(join(a.struct, "e\u0301.json"), "{}");
   await writeFile(join(a.struct, "é.json"), "{}");
-  await assert.rejects(openFsdb({ root: a.root }));
+  await assert.rejects(openFsdb({ root: a.parent, path: "游戏数据" }));
 
   const b = await fixture(); t.after(() => b.cleanup());
   await writeFile(join(b.resource, "说明.webp"), "duplicate key");
-  await assert.rejects(openFsdb({ root: b.root }));
+  await assert.rejects(openFsdb({ root: b.parent, path: "游戏数据" }));
 
   const c = await fixture(); t.after(() => c.cleanup());
   await writeFile(join(c.struct, "坏数据.json"), "[]");
-  await assert.rejects(openFsdb({ root: c.root }));
+  await assert.rejects(openFsdb({ root: c.parent, path: "游戏数据" }));
 });
 
 conformance(["FDB-002", "FDB-004", "FDB-008", "FDB-009", "FDB-012"], "canonicalizes physical spelling and validates reserved names/text", async (t) => {
@@ -56,25 +60,25 @@ conformance(["FDB-002", "FDB-004", "FDB-008", "FDB-009", "FDB-012"], "canonicali
   await writeFile(join(a.struct, "e\u0301.json"), "{}");
   await writeFile(join(a.struct, ".info.meta"), "true");
   await writeFile(join(a.root, "[extend]角色", ".extend.meta"), "\n");
-  const db = await openFsdb({ root: a.root }); await db.close();
+  const db = await openFsdb({ root: a.parent, path: "游戏数据" }); await db.close();
   if (process.platform !== "win32") {
     const invalidUtf8 = Buffer.concat([Buffer.from(a.struct), Buffer.from("/"), Buffer.from([0xff]), Buffer.from(".json")]);
     await writeFile(invalidUtf8, "{}");
-    await assert.rejects(openFsdb({ root: a.root }));
+    await assert.rejects(openFsdb({ root: a.parent, path: "游戏数据" }));
   }
 
   const b = await fixture(); t.after(() => b.cleanup());
   await writeFile(join(b.struct, "$reserved.json"), "{}");
-  await assert.rejects(openFsdb({ root: b.root }));
+  await assert.rejects(openFsdb({ root: b.parent, path: "游戏数据" }));
 
   const c = await fixture(); t.after(() => c.cleanup());
   await writeFile(join(c.struct, "bom.json"), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("{}") ]));
-  await assert.rejects(openFsdb({ root: c.root }));
+  await assert.rejects(openFsdb({ root: c.parent, path: "游戏数据" }));
 
   const d = await fixture(); t.after(() => d.cleanup());
   await writeFile(join(d.root, "notes.txt"), "auxiliary");
   await mkdir(join(d.root, "backup"));
-  const auxiliary = await openFsdb({ root: d.root }); await auxiliary.close();
+  const auxiliary = await openFsdb({ root: d.parent, path: "游戏数据" }); await auxiliary.close();
 });
 
 conformance(["ROOT-001", "ROOT-003"], "resolves a relative root once and rejects bad root identity", async (t) => {
@@ -82,12 +86,12 @@ conformance(["ROOT-001", "ROOT-003"], "resolves a relative root once and rejects
   const previous = process.cwd();
   try {
     process.chdir(f.parent);
-    const db = await openFsdb({ root: "[FSDB]游戏数据" });
+    const db = await openFsdb({ root: ".", path: "游戏数据" });
     process.chdir(previous);
     assert.equal(db.name, "游戏数据"); await db.close();
   } finally { process.chdir(previous); }
   const invalid = join(f.parent, "database"); await mkdir(invalid);
-  await assert.rejects(openFsdb({ root: invalid }));
+  await assert.rejects(openFsdb({ root: invalid, path: "游戏数据" }));
 });
 
 conformance(["SAFE-001", "SAFE-002"], "recognized indirection fails while auxiliary indirection is ignored", async (t) => {
@@ -98,25 +102,26 @@ conformance(["SAFE-001", "SAFE-002"], "recognized indirection fails while auxili
     if (error.code === "EPERM") return t.skip("host cannot create symlinks");
     throw error;
   }
-  await assert.rejects(openFsdb({ root: f.root }));
+  await assert.rejects(openFsdb({ root: f.parent, path: "游戏数据" }));
 });
 
 conformance(["ROOT-002", "SAFE-001", "SAFE-002"], "root junction resolves once and recognized descendant junction fails", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const rootLink = join(f.parent, "root-link");
-  try { await symlink(f.root, rootLink, "junction"); } catch (error) {
+  const rootLink = join(f.parent, "..", `root-link-${Date.now()}`);
+  try { await symlink(f.parent, rootLink, "junction"); } catch (error) {
     if (error.code === "EPERM") return t.skip("host cannot create junctions");
     throw error;
   }
-  const linked = await openFsdb({ root: rootLink }); assert.equal(linked.name, "游戏数据"); await linked.close();
+  t.after(() => rm(rootLink, { force: true }));
+  const linked = await openFsdb({ root: rootLink, path: "游戏数据" }); assert.equal(linked.name, "游戏数据"); await linked.close();
   const badTable = join(f.root, "[struct]链接表");
   await symlink(f.struct, badTable, "junction");
-  await assert.rejects(openFsdb({ root: f.root }));
+  await assert.rejects(openFsdb({ root: f.parent, path: "游戏数据" }));
 });
 
 conformance(["HTTP-002", "HTTP-003", "HTTP-004", "HTTP-005", "HTTP-006", "HTTP-008", "STATUS-002", "STATUS-003", "STATUS-004", "STATUS-005", "STATUS-007", "MIME-001", "RESP-001", "RESP-002", "RESP-003", "CACHE-001", "CACHE-003"], "serves deterministic Unicode routes, metadata, bytes, status precedence, and HEAD", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const db = await openFsdb({ root: f.root }); t.after(() => db.close());
+  const db = await openFsdb({ root: f.parent, path: "游戏数据" }); t.after(() => db.close());
   const server = createServer(createFsdbHttpHandler(db));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -160,7 +165,7 @@ conformance(["HTTP-002", "HTTP-003", "HTTP-004", "HTTP-005", "HTTP-006", "HTTP-0
 
 conformance(["HTTP-001", "HTTP-007", "HTTP-009", "HTTP-010", "HTTP-011", "HTTP-012", "STATUS-001", "SAFE-003", "SAFE-004"], "enforces raw request-target spelling and traversal safety", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const db = await openFsdb({ root: f.root }); t.after(() => db.close());
+  const db = await openFsdb({ root: f.parent, path: "游戏数据" }); t.after(() => db.close());
   const server = createServer(createFsdbHttpHandler(db));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -189,10 +194,10 @@ conformance(["MIME-002", "MIME-003", "MIME-004", "MIME-005"], "uses the frozen d
   };
   let index = 0;
   for (const extension of Object.keys(mapping)) await writeFile(join(f.resource, `mime-${index++}.${extension}`), "x");
-  const service = await serveFsdb({ root: f.root }); t.after(() => service.close());
+  const service = await serveFsdb({ root: f.parent }); t.after(() => service.close());
   index = 0;
   for (const [extension, expected] of Object.entries(mapping)) {
-    const response = await request(service.origin, `/fsdb/v1/resource/图片/mime-${index++}`);
+    const response = await request(service.origin, `${SERVED}/resource/图片/mime-${index++}`);
     assert.equal(response.headers.get("content-type"), expected, extension);
     assert.equal(response.headers.get("content-type").includes("charset"), false, extension);
   }
@@ -200,8 +205,8 @@ conformance(["MIME-002", "MIME-003", "MIME-004", "MIME-005"], "uses the frozen d
 
 conformance(["COND-001", "COND-002", "COND-003", "COND-004", "COND-005", "COND-006", "COND-007", "CACHE-002", "CACHE-005"], "implements snapshot validators, preconditions, ignored dates/ranges, and reopen", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const service = await serveFsdb({ root: f.root }); t.after(() => service.close());
-  const path = "/fsdb/v1/struct/角色/皮卡丘";
+  const service = await serveFsdb({ root: f.parent }); t.after(() => service.close());
+  const path = `${SERVED}/struct/角色/皮卡丘`;
   const first = await request(service.origin, path);
   const tag = first.headers.get("etag"); assert.match(tag, /^W\//);
   const notModified = await request(service.origin, path, { headers: { "If-None-Match": tag } });
@@ -217,14 +222,14 @@ conformance(["COND-001", "COND-002", "COND-003", "COND-004", "COND-005", "COND-0
   assert.equal(ranged.status, 200); assert.equal(await ranged.text(), "{\"name\":\"皮卡丘\"}");
   assert.equal((await request(service.origin, path, { headers: { Range: "bytes=0-1", "If-Range": tag } })).status, 200);
   await service.close();
-  const reopened = await serveFsdb({ root: f.root }); t.after(() => reopened.close());
+  const reopened = await serveFsdb({ root: f.parent }); t.after(() => reopened.close());
   const second = await request(reopened.origin, path);
   assert.notEqual(second.headers.get("etag"), tag);
 });
 
 conformance(["SAFE-005", "LIFE-002", "LIFE-003", "LIFE-007", "STATUS-006", "CACHE-004"], "makes replacement stale before preconditions and closes idempotently", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const db = await openFsdb({ root: f.root });
+  const db = await openFsdb({ root: f.parent, path: "游戏数据" });
   const server = createServer(createFsdbHttpHandler(db));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -242,7 +247,7 @@ conformance(["SAFE-005", "LIFE-002", "LIFE-003", "LIFE-007", "STATUS-006", "CACH
 
 conformance(["API-005", "API-007", "API-008", "API-009", "HTTP-014"], "owns standalone lifecycle and rejects CONNECT authority-form", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const service = await serveFsdb({ root: f.root });
+  const service = await serveFsdb({ root: f.parent });
   assert.equal(service.address.host, "127.0.0.1"); assert.ok(service.address.port > 0); assert.ok(service.origin);
   assert.equal("db" in service, false);
   assert.match(await rawRequest(service.address.port, "localhost:80", "CONNECT"), /^HTTP\/1\.1 400/);
@@ -252,7 +257,7 @@ conformance(["API-005", "API-007", "API-008", "API-009", "HTTP-014"], "owns stan
 
 conformance(["API-004", "LIFE-004", "BOUNDARY-002"], "handler borrows db and new files stay invisible until reopen", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const db = await openFsdb({ root: f.root });
+  const db = await openFsdb({ root: f.parent, path: "游戏数据" });
   const server = createServer(createFsdbHttpHandler(db));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   await new Promise((resolve) => server.close(resolve));
@@ -263,7 +268,7 @@ conformance(["API-004", "LIFE-004", "BOUNDARY-002"], "handler borrows db and new
   const { port } = secondServer.address();
   assert.equal((await request(`http://127.0.0.1:${port}`, "/fsdb/v1/struct/角色/新增")).status, 404);
   await new Promise((resolve) => secondServer.close(resolve)); await db.close();
-  const reopened = await openFsdb({ root: f.root });
+  const reopened = await openFsdb({ root: f.parent, path: "游戏数据" });
   const third = createServer(createFsdbHttpHandler(reopened));
   await new Promise((resolve) => third.listen(0, "127.0.0.1", resolve));
   const address = third.address();
@@ -274,7 +279,7 @@ conformance(["API-004", "LIFE-004", "BOUNDARY-002"], "handler borrows db and new
 conformance(["LIFE-005", "LIFE-006", "LIFE-007", "LIFE-009"], "close drains admitted reads and client abort does not make source stale", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   await writeFile(join(f.resource, "large.bin"), Buffer.alloc(4 * 1024 * 1024, 0x61));
-  const db = await openFsdb({ root: f.root });
+  const db = await openFsdb({ root: f.parent, path: "游戏数据" });
   const server = createServer(createFsdbHttpHandler(db));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -309,17 +314,17 @@ conformance(["LIFE-005", "LIFE-006", "LIFE-007", "LIFE-009"], "close drains admi
 
 conformance(["HTTP-013", "STATUS-007", "RESP-003"], "request content is ignored and errors are body/path safe", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const service = await serveFsdb({ root: f.root }); t.after(() => service.close());
+  const service = await serveFsdb({ root: f.parent }); t.after(() => service.close());
   const withBody = await new Promise((resolve, reject) => {
-    const req = nodeRequest(new URL("/fsdb/v1/struct/角色/皮卡丘", service.origin), { method: "GET", headers: { "Content-Length": "7" } }, (res) => {
+    const req = nodeRequest(new URL(`${SERVED}/struct/角色/皮卡丘`, service.origin), { method: "GET", headers: { "Content-Length": "7" } }, (res) => {
       let body = ""; res.setEncoding("utf8"); res.on("data", (chunk) => { body += chunk; }); res.on("end", () => resolve({ status: res.statusCode, body }));
     });
     req.on("error", reject); req.end("ignored");
   });
   assert.equal(withBody.status, 200); assert.equal(withBody.body, "{\"name\":\"皮卡丘\"}");
-  const headError = await request(service.origin, "/fsdb/v1/struct/角色/不存在", { method: "HEAD" });
+  const headError = await request(service.origin, `${SERVED}/struct/角色/不存在`, { method: "HEAD" });
   assert.equal(headError.status, 404); assert.equal(await headError.text(), "");
-  const error = await request(service.origin, "/fsdb/v1/struct//bad");
+  const error = await request(service.origin, `${SERVED}/struct//bad`);
   const body = await error.text(); assert.equal(body, ""); assert.equal(body.includes(f.parent), false);
 });
 
@@ -329,16 +334,16 @@ conformance(["API-006"], "standalone listen failure rejects without retaining th
   await new Promise((resolve) => blocker.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => blocker.close(resolve)));
   const { port } = blocker.address();
-  await assert.rejects(serveFsdb({ root: f.root, host: "127.0.0.1", port }));
+  await assert.rejects(serveFsdb({ root: f.parent, host: "127.0.0.1", port }));
   await new Promise((resolve) => blocker.close(resolve));
-  const recovered = await serveFsdb({ root: f.root, host: "127.0.0.1", port });
+  const recovered = await serveFsdb({ root: f.parent, host: "127.0.0.1", port });
   assert.equal(recovered.address.port, port);
   await recovered.close();
 });
 
 conformance(["API-009"], "wildcard bind reports address but no fabricated client origin", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const service = await serveFsdb({ root: f.root, host: "0.0.0.0" }); t.after(() => service.close());
+  const service = await serveFsdb({ root: f.parent, host: "0.0.0.0" }); t.after(() => service.close());
   assert.equal(service.address.host, "0.0.0.0"); assert.ok(service.address.port > 0);
   assert.equal(service.origin, undefined);
 });
@@ -346,20 +351,20 @@ conformance(["API-009"], "wildcard bind reports address but no fabricated client
 conformance(["FDB-008", "FDB-011"], "validates JSON Schema roots and .extend.meta record fields", async (t) => {
   const invalidSchema = await fixture(); t.after(() => invalidSchema.cleanup());
   await writeFile(join(invalidSchema.struct, ".info.meta"), "42");
-  await assert.rejects(openFsdb({ root: invalidSchema.root }));
+  await assert.rejects(openFsdb({ root: invalidSchema.parent, path: "游戏数据" }));
 
   const invalidField = await fixture(); t.after(() => invalidField.cleanup());
   await writeFile(join(invalidField.root, "[extend]角色", ".extend.meta"), "{\"field\":1,\"struct\":\"角色\"}\n");
-  await assert.rejects(openFsdb({ root: invalidField.root }));
+  await assert.rejects(openFsdb({ root: invalidField.parent, path: "游戏数据" }));
 
   const invalidStruct = await fixture(); t.after(() => invalidStruct.cleanup());
   await writeFile(join(invalidStruct.root, "[extend]角色", ".extend.meta"), "{\"field\":\"角色\",\"struct\":\"é\",\"desc\":1}\n");
-  await assert.rejects(openFsdb({ root: invalidStruct.root }));
+  await assert.rejects(openFsdb({ root: invalidStruct.parent, path: "游戏数据" }));
 });
 
 conformance(["SAFE-006"], "serves bytes admitted through the core same-handle read lease", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const db = await openFsdb({ root: f.root }); t.after(() => db.close());
+  const db = await openFsdb({ root: f.parent, path: "游戏数据" }); t.after(() => db.close());
   const server = createServer(createFsdbHttpHandler(db));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -373,7 +378,7 @@ conformance(["SAFE-006"], "serves bytes admitted through the core same-handle re
 
 conformance(["LIFE-008"], "attributes source failure to drift and marks the shared core stale", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
-  const db = await openFsdb({ root: f.root }); t.after(() => db.close());
+  const db = await openFsdb({ root: f.parent, path: "游戏数据" }); t.after(() => db.close());
   await writeFile(join(f.struct, "皮卡丘.json"), '{"changed":true}');
   const server = createServer(createFsdbHttpHandler(db));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -386,10 +391,10 @@ conformance(["LIFE-008"], "attributes source failure to drift and marks the shar
 conformance(["API-007", "API-008", "LIFE-006"], "service.close waits for an already-started external server.close", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   await writeFile(join(f.resource, "close-race.bin"), Buffer.alloc(4 * 1024 * 1024, 0x61));
-  const service = await serveFsdb({ root: f.root });
+  const service = await serveFsdb({ root: f.parent });
   let finishResponse;
   const firstChunk = new Promise((resolve, reject) => {
-    const req = httpGet(new URL("/fsdb/v1/resource/图片/close-race", service.origin), (res) => {
+    const req = httpGet(new URL(`${SERVED}/resource/图片/close-race`, service.origin), (res) => {
       res.once("data", () => { res.pause(); resolve(() => res.resume()); });
       finishResponse = new Promise((done) => res.once("end", done));
     });
@@ -409,6 +414,164 @@ conformance(["BOUNDARY-001", "BOUNDARY-003"], "has no runtime framework dependen
   assert.deepEqual(manifest.dependencies ?? {}, { "@loomrealm/fsdb": "0.1.0-alpha.0" });
   const source = await readFile(new URL("../src/public.ts", import.meta.url), "utf8");
   assert.equal(/express|koa|fastify|hono|installationId|game package/i.test(source), false);
+});
+
+async function writeStruct(database, body) {
+  const table = join(database, "[STRUCT]Config");
+  await mkdir(table, { recursive: true });
+  await writeFile(join(table, ".info.meta"), "{\"type\":\"object\"}");
+  await writeFile(join(table, "common.json"), body);
+}
+
+conformance(["FDB-014", "FDB-015", "FDB-016", "FDB-019", "FDB-020", "ROOT-004"], "discovers nested databases and opens one explicit path", async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), "fsdb-http-mdb-"));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const game = join(parent, "[FSDB]GameData");
+  const world = join(game, "[FSDB]World");
+  const character = join(game, "[FSDB]Character");
+  const broken = join(game, "[FSDB]Broken");
+  const mod = join(parent, "[FSDB]ModData");
+  const empty = join(parent, "[FSDB]Empty");
+  await writeStruct(game, "{\"owner\":\"parent\"}");
+  await writeStruct(world, "{\"owner\":\"world\"}");
+  await writeStruct(character, "{\"owner\":\"character\"}");
+  await writeStruct(mod, "{\"owner\":\"mod\"}");
+  await mkdir(empty, { recursive: true });
+  const brokenTable = join(broken, "[STRUCT]Config");
+  await mkdir(brokenTable, { recursive: true });
+  await writeFile(join(brokenTable, ".info.meta"), "[]");
+  const hidden = join(game, "[RESOURCE]NotADatabase", "[FSDB]Something");
+  await mkdir(hidden, { recursive: true });
+  await writeFile(join(game, "[RESOURCE]NotADatabase", ".desc.meta"), "hidden");
+  await writeFile(join(hidden, "ordinary.txt"), "not-a-database");
+  assert.deepEqual(await listFsdbPaths({ root: parent }), ["Empty", "GameData", "GameData/Broken", "GameData/Character", "GameData/World", "ModData"]);
+  const child = await openFsdb({ root: parent, path: "GameData/World" });
+  t.after(() => child.close());
+  assert.equal(child.name, "World");
+  const openedParent = await openFsdb({ root: parent, path: "GameData" });
+  t.after(() => openedParent.close());
+  assert.equal(openedParent.name, "GameData");
+  await assert.rejects(openFsdb({ root: parent, path: "GameData/Broken" }), (error) => error instanceof FsdbResolutionError && error.code === "DATABASE_INVALID");
+  const invalidRoot = join(parent, "missing-container");
+  for (const path of ["", "/GameData", "GameData/", "GameData//World", ".", "..", "a/../b", "Game\\Data", "CON"]) {
+    await assert.rejects(openFsdb({ root: invalidRoot, path }), (error) => error instanceof FsdbResolutionError && error.code === "DATABASE_PATH_INVALID");
+  }
+  await assert.rejects(openFsdb({ root: parent, path: "GameData/Missing" }), (error) => error instanceof FsdbResolutionError && error.code === "DATABASE_NOT_FOUND");
+  const invalidParent = await mkdtemp(join(tmpdir(), "fsdb-http-parent-"));
+  t.after(() => rm(invalidParent, { recursive: true, force: true }));
+  const bad = join(invalidParent, "[FSDB]BadParent");
+  const still = join(bad, "[FSDB]StillGood");
+  await mkdir(join(bad, "[STRUCT]Config"), { recursive: true });
+  await writeFile(join(bad, "[STRUCT]Config", ".info.meta"), "[]");
+  await writeStruct(still, "{\"owner\":\"child\"}");
+  const isolated = await openFsdb({ root: invalidParent, path: "BadParent/StillGood" });
+  assert.equal(isolated.name, "StillGood");
+  await isolated.close();
+  await assert.rejects(openFsdb({ root: invalidParent, path: "BadParent" }), (error) => error instanceof FsdbResolutionError && error.code === "DATABASE_INVALID");
+});
+
+conformance(["FDB-017"], "duplicate ASCII-case database markers fail closed", async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), "fsdb-http-case-"));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  await mkdir(join(parent, "[FSDB]GameData"));
+  try { await mkdir(join(parent, "[fsdb]GameData")); }
+  catch (error) {
+    if (error.code === "EEXIST") return t.skip("filesystem folds ASCII case");
+    throw error;
+  }
+  await assert.rejects(listFsdbPaths({ root: parent }), (error) => error instanceof FsdbResolutionError && error.code === "DATABASE_PATH_AMBIGUOUS");
+  await assert.rejects(openFsdb({ root: parent, path: "GameData" }), (error) => error instanceof FsdbResolutionError && error.code === "DATABASE_PATH_AMBIGUOUS");
+});
+
+conformance(["FDB-018"], "database directory junctions are not discovered or opened", async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), "fsdb-http-link-"));
+  const outside = await mkdtemp(join(tmpdir(), "fsdb-http-link-target-"));
+  const link = join(parent, "[FSDB]Link");
+  t.after(async () => {
+    await rm(link, { force: true });
+    await rm(parent, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  });
+  try { await symlink(outside, link, "junction"); }
+  catch (error) {
+    if (error.code === "EPERM") return t.skip("host cannot create junctions");
+    throw error;
+  }
+  await assert.rejects(listFsdbPaths({ root: parent }), (error) => error instanceof FsdbResolutionError && error.code === "DATABASE_PATH_AMBIGUOUS");
+  await assert.rejects(openFsdb({ root: parent, path: "Link" }), (error) => error instanceof FsdbResolutionError && error.code === "DATABASE_PATH_AMBIGUOUS");
+});
+
+conformance(["API-010", "API-011", "API-012", "API-013", "HTTP-015", "HTTP-016", "HTTP-017", "HTTP-018", "HTTP-019", "STATUS-008"], "serves many databases from one root without a default", async (t) => {
+  const source = await readFile(new URL("../src/public.ts", import.meta.url), "utf8");
+  assert.equal(source.includes("listFsdbPaths"), false);
+  const parent = await mkdtemp(join(tmpdir(), "fsdb-http-serve-"));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const service = await serveFsdb({ root: parent });
+  t.after(() => service.close());
+  const game = join(parent, "[FSDB]GameData");
+  const world = join(game, "[FSDB]World");
+  const mod = join(parent, "[FSDB]ModData");
+  await writeStruct(game, "{\"owner\":\"parent\"}");
+  await writeStruct(world, "{\"owner\":\"world\"}");
+  await writeStruct(mod, "{\"owner\":\"mod\"}");
+  assert.equal((await request(service.origin, "/fsdb/v1")).status, 404);
+  const parentBody = await request(service.origin, "/fsdb/v1/GameData/$db/struct/Config/common");
+  const nested = await request(service.origin, "/fsdb/v1/GameData/World/$db/struct/Config/common");
+  const modBody = await request(service.origin, "/fsdb/v1/ModData/$db/struct/Config/common");
+  assert.equal(parentBody.status, 200);
+  assert.equal(nested.status, 200);
+  assert.equal(modBody.status, 200);
+  assert.equal(await parentBody.text(), "{\"owner\":\"parent\"}");
+  assert.equal(await nested.text(), "{\"owner\":\"world\"}");
+  assert.equal(await modBody.text(), "{\"owner\":\"mod\"}");
+  const descriptor = await request(service.origin, "/fsdb/v1/GameData/$db");
+  assert.equal(descriptor.status, 200);
+  assert.deepEqual(await descriptor.json(), { name: "GameData", tables: [{ kind: "struct", name: "Config" }] });
+  const [first, second] = await Promise.all([
+    request(service.origin, "/fsdb/v1/GameData/$db/struct/Config/common"),
+    request(service.origin, "/fsdb/v1/GameData/$db/struct/Config/common"),
+  ]);
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(first.headers.get("etag"), second.headers.get("etag"));
+  assert.notEqual(first.headers.get("etag"), modBody.headers.get("etag"));
+  await first.arrayBuffer();
+  await second.arrayBuffer();
+  assert.equal((await request(service.origin, "/fsdb/v1/Missing/$db")).status, 404);
+  assert.equal((await request(service.origin, "/fsdb/v1/GameData/$db/struct/Config/missing")).status, 404);
+  await mkdir(join(parent, "[FSDB]Missing", "[STRUCT]Config"), { recursive: true });
+  await writeFile(join(parent, "[FSDB]Missing", "[STRUCT]Config", ".info.meta"), "{\"type\":\"object\"}");
+  await writeFile(join(parent, "[FSDB]Missing", "[STRUCT]Config", "common.json"), "{\"owner\":\"retry\"}");
+  const [retried, retriedAgain] = await Promise.all([
+    request(service.origin, "/fsdb/v1/Missing/$db/struct/Config/common"),
+    request(service.origin, "/fsdb/v1/Missing/$db/struct/Config/common"),
+  ]);
+  assert.equal(retried.status, 200);
+  assert.equal(retriedAgain.status, 200);
+  assert.equal(retried.headers.get("etag"), retriedAgain.headers.get("etag"));
+  assert.equal(await retried.text(), "{\"owner\":\"retry\"}");
+  await retriedAgain.arrayBuffer();
+  const broken = join(parent, "[FSDB]Broken");
+  await mkdir(join(broken, "[STRUCT]Config"), { recursive: true });
+  await writeFile(join(broken, "[STRUCT]Config", ".info.meta"), "[]");
+  assert.equal((await request(service.origin, "/fsdb/v1/Broken/$db")).status, 422);
+  assert.equal((await request(service.origin, "/fsdb/v1/$db")).status, 400);
+  assert.equal((await request(service.origin, "/fsdb/v1/GameData/%24db")).status, 400);
+  assert.equal((await request(service.origin, "/fsdb/v1/GameData/$db/$db")).status, 400);
+  assert.equal((await request(service.origin, "/fsdb/v1/GameData%2FWorld/$db")).status, 400);
+  await writeFile(join(game, "[STRUCT]Config", "common.json"), "{\"owner\":\"replaced\"}");
+  assert.equal((await request(service.origin, "/fsdb/v1/GameData/$db/struct/Config/common")).status, 503);
+  assert.equal((await request(service.origin, "/fsdb/v1/GameData/$db/struct/Config/common")).status, 503);
+  const sibling = await request(service.origin, "/fsdb/v1/ModData/$db/struct/Config/common");
+  assert.equal(sibling.status, 200);
+  assert.equal(await sibling.text(), "{\"owner\":\"mod\"}");
+  const ambiguous = await mkdtemp(join(tmpdir(), "fsdb-http-ambiguous-"));
+  t.after(() => rm(ambiguous, { recursive: true, force: true }));
+  await mkdir(join(ambiguous, "[FSDB]é"));
+  await mkdir(join(ambiguous, "[FSDB]e\u0301"));
+  const ambiguousService = await serveFsdb({ root: ambiguous });
+  t.after(() => ambiguousService.close());
+  assert.equal((await request(ambiguousService.origin, `/fsdb/v1/${encodeURIComponent("é")}/$db`)).status, 409);
 });
 
 nodeTest("every mandatory conformance ID is attached to an executable behavioral test", async () => {

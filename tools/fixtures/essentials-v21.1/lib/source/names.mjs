@@ -9,12 +9,12 @@ const REPOSITORY_ROOT = resolve(HERE, "../../../../..");
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
 
 export async function loadNameAuthority() {
-  const authorityPath = join(REPOSITORY_ROOT, "packages", "fsdb-http", "dist", "names.js");
+  const authorityPath = join(REPOSITORY_ROOT, "packages", "fsdb", "dist", "names.js");
   try {
     await access(authorityPath, fsConstants.R_OK);
     return await import(pathToFileURL(authorityPath).href);
   } catch {
-    fail("FSDB_VALIDATION_FAILURE", "Build @loomrealm/fsdb-http before importing (npm run build -w @loomrealm/fsdb-http)");
+    fail("FSDB_VALIDATION_FAILURE", "Build @loomrealm/fsdb before importing (npm run build -w @loomrealm/fsdb)");
   }
 }
 

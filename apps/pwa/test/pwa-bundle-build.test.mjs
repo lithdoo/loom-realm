@@ -24,6 +24,7 @@ const fixture = () => ({
     contentVersion: "sha256:demo",
   }],
   content: [{
+    databasePath: "Demo",
     kind: "record",
     namespace: "struct.demo",
     key: "config",
@@ -38,6 +39,12 @@ test("generic PWA bundle input rejects malformed manifests, duplicate identities
   const duplicate = fixture();
   duplicate.content.push({ ...duplicate.content[0] });
   assert.throws(() => validatePwaBundlePayload(duplicate), /Duplicate PWA Content identity/);
+  const otherDatabase = fixture();
+  otherDatabase.content.push({ ...otherDatabase.content[0], databasePath: "ModData" });
+  assert.doesNotThrow(() => validatePwaBundlePayload(otherDatabase));
+  const invalidPath = fixture();
+  invalidPath.content[0].databasePath = "Demo/";
+  assert.throws(() => validatePwaBundlePayload(invalidPath), /Invalid databasePath/);
   const invalidEncoding = fixture();
   invalidEncoding.content[0].body = "not base64!";
   assert.throws(() => validatePwaBundlePayload(invalidEncoding), /canonical base64/);

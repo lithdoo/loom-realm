@@ -12,12 +12,23 @@ import {
   type FsdbObjectIdentity,
   type FsdbReadLease,
 } from "./database.js";
-import { scanFsdb } from "./scanner.js";
+import { FsdbResolutionError } from "./errors.js";
+import { canonicalDatabasePath, canonicalName } from "./names.js";
+import { discoverDatabasePaths, resolveContainerRoot, resolveDatabaseDirectory, scanFsdb } from "./scanner.js";
 import type { FsdbMetadataName, FsdbTableKind } from "./model.js";
 
 declare const fsdbDatabaseBrand: unique symbol;
 
-export interface OpenFsdbOptions { readonly root: string; }
+export interface OpenFsdbOptions {
+  /** Filesystem container root, not an individual FSDB directory. */
+  readonly root: string;
+  /** Required logical path to exactly one FSDB. */
+  readonly path: string;
+}
+
+export interface ListFsdbPathsOptions {
+  readonly root: string;
+}
 export interface FsdbDatabase {
   readonly [fsdbDatabaseBrand]: never;
   readonly name: string;
@@ -31,11 +42,36 @@ function assertSignal(signal: unknown): asserts signal is AbortSignal {
       typeof (signal as AbortSignal).addEventListener !== "function") throw new TypeError("Invalid AbortSignal");
 }
 
-export async function openFsdb(options: OpenFsdbOptions): Promise<FsdbDatabase> {
+function wrapScan(error: unknown): never {
+  if (error instanceof FsdbResolutionError) throw error;
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "EMFILE" || code === "ENFILE" || code === "ENOMEM" || code === "EBUSY" || code === "EAGAIN") {
+    throw new FsdbResolutionError("DATABASE_UNAVAILABLE", "Database is temporarily unavailable");
+  }
+  if (error instanceof Error) throw new FsdbResolutionError("DATABASE_INVALID", error.message);
+  throw error;
+}
+
+export async function listFsdbPaths(options: ListFsdbPathsOptions): Promise<readonly string[]> {
   if (options === null || typeof options !== "object" || Array.isArray(options) || typeof options.root !== "string") {
     throw new TypeError("Invalid options");
   }
-  return createDatabaseHandle(new DatabaseImpl(await scanFsdb(options.root))) as FsdbDatabase;
+  return discoverDatabasePaths(await resolveContainerRoot(options.root));
+}
+
+export async function openFsdb(options: OpenFsdbOptions): Promise<FsdbDatabase> {
+  if (options === null || typeof options !== "object" || Array.isArray(options) || typeof options.root !== "string" || typeof options.path !== "string") {
+    throw new TypeError("Invalid options");
+  }
+  try { canonicalDatabasePath(options.path); }
+  catch { throw new FsdbResolutionError("DATABASE_PATH_INVALID", "Invalid database path"); }
+  const container = await resolveContainerRoot(options.root);
+  const directory = await resolveDatabaseDirectory(container, options.path);
+  try {
+    return createDatabaseHandle(new DatabaseImpl(await scanFsdb(directory))) as FsdbDatabase;
+  } catch (error) {
+    wrapScan(error);
+  }
 }
 
 export function describeFsdb(db: FsdbDatabase): Uint8Array {
@@ -97,6 +133,10 @@ export async function openFsdbObject(
   return lease;
 }
 
+export { canonicalDatabasePath, canonicalName };
+export { FsdbResolutionError } from "./errors.js";
+export type { FsdbResolutionCode } from "./errors.js";
+export { SourceUnavailableError } from "./database.js";
 export type {
   FsdbDatabaseState, FsdbEntryDescriptor, FsdbMetadataName,
   FsdbObjectDescriptor, FsdbObjectIdentity, FsdbReadLease, FsdbTableKind,

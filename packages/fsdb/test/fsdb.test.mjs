@@ -52,7 +52,7 @@ test("directory type markers accept mixed ASCII case and retain lowercase logica
       writeFile(join(group, ".desc.meta"), "队伍说明"),
       writeFile(join(group, "主力.jsonl"), '{"name":"皮卡丘"}\n'),
     ]);
-    const db = await openFsdb({ root });
+    const db = await openFsdb({ root: f.parent, path: "游戏数据" });
     try {
       assert.deepEqual(JSON.parse(Buffer.from(describeFsdb(db))), {
         name: "游戏数据",
@@ -87,7 +87,7 @@ test("case variants of the same type marker collide as one TableIdentity", async
     }
     if (!separate) { t.skip("Filesystem does not distinguish ASCII case"); return; }
     await writeFile(join(duplicate, ".info.meta"), '{"type":"object"}');
-    await assert.rejects(openFsdb({ root: f.root }), /Duplicate table identity/);
+    await assert.rejects(openFsdb({ root: f.parent, path: "游戏数据" }), /Duplicate table identity/);
   } finally { await f.cleanup(); }
 });
 
@@ -95,18 +95,18 @@ test("recognized mixed-case malformed tables fail while similar auxiliary prefix
   const f = await fixture();
   try {
     await mkdir(join(f.root, "[StRuCtural]notes"));
-    const db = await openFsdb({ root: f.root });
+    const db = await openFsdb({ root: f.parent, path: "游戏数据" });
     await db.close();
     await mkdir(join(f.root, "[StRuCt]"));
-    await assert.rejects(openFsdb({ root: f.root }), /Invalid FSDB name/);
+    await assert.rejects(openFsdb({ root: f.parent, path: "游戏数据" }), /Invalid FSDB name/);
   } finally { await f.cleanup(); }
 });
 
 test("core exposes a detached deterministic descriptor and fresh snapshot identity", async () => {
   const f = await fixture();
   try {
-    const first = await openFsdb({ root: f.root });
-    const second = await openFsdb({ root: f.root });
+    const first = await openFsdb({ root: f.parent, path: "游戏数据" });
+    const second = await openFsdb({ root: f.parent, path: "游戏数据" });
     const descriptor = describeFsdb(first);
     assert.deepEqual(JSON.parse(Buffer.from(descriptor)), {
       name: "游戏数据",
@@ -123,7 +123,7 @@ test("core exposes a detached deterministic descriptor and fresh snapshot identi
 test("ordinary entries and metadata use one immutable logical snapshot", async () => {
   const f = await fixture();
   try {
-    const db = await openFsdb({ root: f.root });
+    const db = await openFsdb({ root: f.parent, path: "游戏数据" });
     const entries = listFsdbEntries(db);
     assert.equal(entries.length, 2);
     assert.ok(Object.isFrozen(entries));
@@ -149,7 +149,7 @@ test("ordinary entries and metadata use one immutable logical snapshot", async (
 test("validation, abort, source drift, and close drain fail closed", async () => {
   const f = await fixture();
   try {
-    const db = await openFsdb({ root: f.root });
+    const db = await openFsdb({ root: f.parent, path: "游戏数据" });
     assert.throws(() => getFsdbSnapshotId({}), TypeError);
     await assert.rejects(openFsdbObject(db, {
       type: "entry", kind: "struct", table: "../角色", key: "皮卡丘",
@@ -174,7 +174,7 @@ test("validation, abort, source drift, and close drain fail closed", async () =>
 
   const staleFixture = await fixture();
   try {
-    const db = await openFsdb({ root: staleFixture.root });
+    const db = await openFsdb({ root: staleFixture.parent, path: "游戏数据" });
     await writeFile(join(staleFixture.struct, "皮卡丘.json"), '{"changed":true}');
     await assert.rejects(openFsdbObject(db, {
       type: "entry", kind: "struct", table: "角色", key: "皮卡丘",

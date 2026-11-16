@@ -53,7 +53,8 @@ async function resolveBootstrapResource(
   objectUrls: string[],
 ): Promise<ResolvedBootstrapResource> {
   const parts = ref.key.split("/").map(encodeURIComponent).join("/");
-  const base = new NativeURL(`_lr/v1/games/${encodeURIComponent(envelope.content.installationId)}/resources/`, envelope.content.origin);
+  const databasePath = ref.databasePath.split("/").map(encodeURIComponent).join("/");
+  const base = new NativeURL(`_lr/v1/games/${encodeURIComponent(envelope.content.installationId)}/databases/${databasePath}/$db/resources/`, envelope.content.origin);
   const response = await trustedFetch(new NativeURL(`${encodeURIComponent(`resource.${ref.namespace}`)}/${parts}`, base), {
     headers: { Authorization: `Bearer ${envelope.content.token}` },
     signal: lifetime.signal,
