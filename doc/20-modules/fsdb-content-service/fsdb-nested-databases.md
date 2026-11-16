@@ -17,7 +17,7 @@ The architecture has four distinct responsibilities:
 3. **LoomRealm Content API:** make databasePath part of every record/group/resource identity. Desktop and PWA expose the same logical contract through different storage implementations. Keep the `/_lr/v1` base path and extend its route shape in place.
 4. **Packaging:** enumerate and package every database at build time. Preserve databasePath in every packaged content entry; do not introduce a runtime database catalog.
 
-The Core API is deliberately breaking:
+The existing Core API is updated in place to make database selection explicit:
 
 ~~~ts
 export interface OpenFsdbOptions {
@@ -68,7 +68,7 @@ export interface ContentClient {
 }
 ~~~
 
-There is deliberately no Runtime database catalog, no ContentClient.databases(), no /databases endpoint, no per-database availability state, and no default database. A caller must already know the logical databasePath it wants to read.
+There is deliberately no Runtime database catalog, no ContentClient.databases(), no database-listing endpoint, no per-database availability state, and no default database. The `/databases/{databasePathSegments}/$db/` route prefix addresses one known database; it does not enumerate databases. A caller must already know the logical databasePath it wants to read.
 
 Desktop uses FSDB Core directly and lazily creates a per-database Content index inside one installation-level Content View. PWA packages all database content at build time and persists databasePath in its Content Index. Neither platform merges database namespaces.
 
