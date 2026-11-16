@@ -58,7 +58,7 @@ implementation
 ```
 
 - **clarification**：不改变预期行为，可直接修正文档或增加测试；
-- **semantic change**：改变 public API、HTTP observable behavior、identity、lifecycle 或 security invariant 时，直接更新本 DESIGN.md、CONFORMANCE.md 与实现；不创建 `/fsdb/v2`、平行类型或兼容适配层。
+- **semantic change**：改变 public API、HTTP observable behavior、identity、lifecycle 或 security invariant 时，直接更新本 DESIGN.md、CONFORMANCE.md 与实现；不创建新的 versioned route namespace、平行类型或兼容适配层。
 - 外部正式发布后再按当时的兼容性与发布政策管理变更；当前不得提前把未发布的合同视为冻结协议。
 
 Node.js 对合法 `CONNECT` authority-form 不触发 `request` 事件，而触发 Server 的 `connect` 事件。因此 `createFsdbHttpHandler()` 的 request-target authority 限定为 Node 交付给 `RequestListener` 的请求；`serveFsdb()` 额外拥有并拒绝 server-level CONNECT。
