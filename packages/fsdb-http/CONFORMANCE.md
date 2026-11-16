@@ -193,9 +193,9 @@ A selected or discovered `[FSDB]` directory that is a symlink/junction MUST fail
 
 relative `root` MUST 相对 `openFsdb()` 调用时 `process.cwd()` resolve；随后改变 cwd 不得改变已打开 instance 的 source root。
 
-### ROOT-002 — root indirection may resolve once
+### ROOT-002 — Container Root indirection may resolve once
 
-调用方 path 通过 symlink/junction 指向实际 FSDB root 时，允许 resolve 到实际 root 并 open；logical DatabaseName 取实际 FSDB root directory identity。
+调用方传入的 Container Root 通过 symlink/junction 指向实际目录时，允许 resolve 到 canonical Container Root。其下被选中的 `[FSDB]` database directories 不得是 symlink/junction。
 
 ### ROOT-003 — container root is not itself an FSDB
 
@@ -251,7 +251,7 @@ openFsdb
 listFsdbPaths
 createFsdbHttpHandler
 serveFsdb
-以及 DESIGN 冻结 public types
+以及 DESIGN 当前定义的 public types
 ```
 
 ### API-002 — FsdbDatabase is opaque
@@ -301,6 +301,22 @@ port = 0
 ```
 
 wildcard bind 必须给出 concrete bound port/address，但不得暴露 wildcard 为唯一 client `origin`。
+
+### API-010 — service opens databases lazily
+
+`serveFsdb({ root })` 启动时只 canonicalize Container Root；不得调用 `listFsdbPaths()`、遍历所有数据库或预先打开数据库。只有一个合法数据库路由请求才触发该 databasePath 的 open。
+
+### API-011 — concurrent first request is single-flight
+
+同一 canonical databasePath 的并发首次请求 MUST 共用一个 open Promise 和一个 FsdbDatabase handle；不同 databasePath 独立打开。
+
+### API-012 — failed open can retry
+
+数据库 open 失败时，其 rejected Promise MUST 从 cache 移除；后续请求可以重新尝试。成功打开的 handle 不得因 index/entry missing 而被无条件替换。
+
+### API-013 — stale handle is not silently replaced
+
+已缓存数据库进入 STALE 后，对该 path 的后续请求 MUST 返回 unavailable；不得自动 close/reopen 并切换到新 snapshot。
 
 ---
 
