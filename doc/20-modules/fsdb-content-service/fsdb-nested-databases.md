@@ -1115,6 +1115,9 @@ Game/
 ├── [FSDB]GameData/
 │   ├── [STRUCT]Config/
 │   │   └── common.json
+│   ├── [RESOURCE]NotADatabase/
+│   │   └── [FSDB]Something/
+│   │       └── ordinary.txt
 │   ├── [FSDB]World/
 │   │   └── [STRUCT]Config/
 │   │       └── common.json
@@ -1125,14 +1128,6 @@ Game/
 │   └── [STRUCT]Config/
 │       └── common.json
 └── [FSDB]Empty/
-
-[FSDB]GameData also contains this RESOURCE table:
-
-~~~text
-[RESOURCE]NotADatabase/
-└── [FSDB]Something/
-    └── ordinary.txt
-~~~
 
 The fixture MUST prove:
 
