@@ -759,7 +759,7 @@ Do not mark this work complete merely because nested directories can be opened.
 
 The branch currently has the single-database implementation at these hotspots. This inventory is a migration map, not a claim that those code paths have already been changed.
 
-## 11. Final design rules
+## 12. Final design rules
 
 ```text
 Installation Root
