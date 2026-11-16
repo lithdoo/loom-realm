@@ -1040,16 +1040,16 @@ v1 不以 WHATWG `Request → Response` 为主 API；出现真实非 Node consum
 3. recursive listFsdbPaths() discovery (direct child FSDB nodes only)
 4. selected-database Well-formed scanner
 5. NFC logical index + descendant indirection policy
-4. source fingerprint + read lease + safe same-handle open/fstat
-5. Resource hierarchy
-6. origin-form raw request-target parser + logical resolver
-7. RequestListener + route/method/status precedence
-8. raw JSON/JSONL/metadata/Resource response
-9. deterministic descriptor + MIME table
-10. OPEN/STALE/CLOSED + client abort + close drain
-11. snapshot ETag + If-Match/If-None-Match + cache headers
-12. serveFsdb ownership/startup cleanup/wildcard address
-13. mandatory conformance + Unicode/security/standalone smoke
+6. source fingerprint + read lease + safe same-handle open/fstat
+7. Resource hierarchy
+8. origin-form raw request-target parser + logical resolver
+9. RequestListener + route/method/status precedence
+10. raw JSON/JSONL/metadata/Resource response
+11. deterministic descriptor + MIME table
+12. OPEN/STALE/CLOSED + client abort + close drain
+13. snapshot ETag + If-Match/If-None-Match + cache headers
+14. serveFsdb ownership/startup cleanup/wildcard address
+15. mandatory conformance + Unicode/security/standalone smoke
 ```
 
 明确不在当前协议实现：
