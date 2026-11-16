@@ -1,20 +1,20 @@
-# @loomrealm/fsdb-http v1 实现合同
+# @loomrealm/fsdb-http /fsdb/v1 实现合同
 
-> 状态：**Implemented / Release Candidate — v1**
-> 最后冻结复核：2026-08-17  
-> 目标：把硬盘上的只读 FSDB 目录转换成稳定、安全、可独立使用的 Node.js HTTP 接口  
-> FSDB authority：[FSDB 目录结构详解](../../doc/fsdb/FSDB目录结构详解.md)  
+> 状态：**Active / Normative / Pre-release / Evolving**
+> 最近复核：2026-11-16  
+> 目标：把一个 Container Root 下的只读 FSDB 数据库转换成稳定、安全、可独立使用的 Node.js HTTP 接口  
+> FSDB authority：[FSDB 目录结构详解](../../doc/20-modules/fsdb-content-service/fsdb-layout.md)  
 > Conformance：[CONFORMANCE.md](./CONFORMANCE.md)
 
-本文冻结 `@loomrealm/fsdb-http` v1 的**可观察行为、public API、ownership、HTTP 语义与安全不变量**。实现可以自由调整内部模块、类、helper、索引结构和性能策略，只要不改变本文冻结的 contract。
+本文定义当前 `/fsdb/v1` 协议的**可观察行为、public API、ownership、HTTP 语义与安全不变量**。项目尚未对外发布，因此本合同在发布前直接原地演进；保持 `/fsdb/v1` 路由命名空间，不创建平行版本或兼容适配层。实现可以调整内部模块、类、helper、索引结构和性能策略，但必须符合本文及 conformance。
 
 ---
 
-## 0. Frozen Contract
+## 0. 当前协议合同
 
-### 0.1 冻结内容
+### 0.1 当前协议范围
 
-v1 冻结：
+当前 `/fsdb/v1` 合同定义：
 
 ```text
 FSDB authority 的继承方式
@@ -48,19 +48,20 @@ logging / diagnostics
 性能优化
 ```
 
-### 0.3 Frozen 后变更规则
+### 0.3 发布前原地演进规则
 
 ```text
 implementation
 → conformance
 → real boundary issue
-→ classify
+→ update current contract in place
 ```
 
-- **clarification**：不改变合法实现集合，可直接修正文档或增加测试；
-- **semantic change**：改变 public API、HTTP observable behavior、identity、lifecycle 或 security invariant，必须显式 unfreeze v1 或进入后续版本，不得静默修改。
+- **clarification**：不改变预期行为，可直接修正文档或增加测试；
+- **semantic change**：改变 public API、HTTP observable behavior、identity、lifecycle 或 security invariant 时，直接更新本 DESIGN.md、CONFORMANCE.md 与实现；不创建 `/fsdb/v2`、平行类型或兼容适配层。
+- 外部正式发布后再按当时的兼容性与发布政策管理变更；当前不得提前把未发布的合同视为冻结协议。
 
-实现期 clarification：Node.js 对合法 `CONNECT` authority-form 不触发 `request` 事件，而触发 Server 的 `connect` 事件。因此 `createFsdbHttpHandler()` 的 request-target authority 限定为 Node 交付给 `RequestListener` 的请求；`serveFsdb()` 额外拥有并拒绝 server-level CONNECT。该澄清不扩大 public API，也不改变任何交付给 handler 的请求语义。
+Node.js 对合法 `CONNECT` authority-form 不触发 `request` 事件，而触发 Server 的 `connect` 事件。因此 `createFsdbHttpHandler()` 的 request-target authority 限定为 Node 交付给 `RequestListener` 的请求；`serveFsdb()` 额外拥有并拒绝 server-level CONNECT。
 
 ---
 
@@ -95,7 +96,8 @@ v1 保持 **0 runtime dependencies**。
 本包负责：
 
 ```text
-打开一个 FSDB root
+在 Container Root 下解析并打开一个指定 FSDB
+递归发现逻辑 databasePath（供 build/tooling 使用）
 验证 Well-formed FSDB
 构建 immutable logical index
 按 FSDB logical identity lookup
@@ -191,31 +193,19 @@ Resource 最后 extension 不属于 identity；同一 Resource 表：
 
 ## 3. Root、Physical Object 与 Snapshot Boundary
 
-### 3.1 Root resolution
+### 3.1 Container Root 与 databasePath resolution
 
-`OpenFsdbOptions.root`：
+`OpenFsdbOptions.root` 是 filesystem Container Root，不是选中的 `[FSDB]` 目录。绝对/相对路径解析规则保持现有行为：relative path 在调用时相对 `process.cwd()` resolve 一次，然后 canonicalize 为实际目录。Container Root 本身可以由调用方通过 symlink/junction 指向；canonical Root 成为本次 discovery/open 的边界。
 
-```text
-absolute path
-    → use as supplied location
+`OpenFsdbOptions.path` 是必填的逻辑 `databasePath`，相对于 Container Root，不含 `[FSDB]` 前缀。它由一个或多个 NameSegment 组成，使用 `/` 分隔；每段按 FSDB NameSegment 规则 NFC canonicalize 并保持大小写敏感。空路径、空 segment、前导/尾随 `/`、重复 `/`、`.`、`..`、反斜杠、绝对路径和 OS 路径语法均无效。
 
-relative path
-    → resolve once against process.cwd() at openFsdb() call time
-```
+解析必须逐段进行：从 Container Root 查找直接子目录 `[FSDB]<segment>`，之后每一段只在前一个已解析 FSDB 目录的直接子目录中查找。`[FSDB]` 类型标记按 ASCII case-insensitive 识别，DatabaseName 大小写敏感。重复 physical candidate、symlink/junction、非目录候选、越界路径或歧义匹配均必须失败；不得任选一个候选。
 
-随后 MUST 解析到实际 root directory（等价于 `realpath` 语义），并验证最终目录名满足：
+每个选中的数据库目录必须位于 canonical Container Root 之下。Container Root 之外的 recognized FSDB object 不得被扫描。
 
-```text
-[FSDB]<DatabaseName>
-```
+### 3.2 Database descendants 与 table object classification
 
-以上 `[FSDB]` 为推荐全大写写法。根据 FSDB format authority，物理目录方括号内的 `FSDB` / 表类型标记以 ASCII case-insensitive 方式识别；逻辑名称仍区分大小写。该规则不改变 `/fsdb/v1` 的小写 HTTP kind 与路由语法。
-
-调用方通过 symlink/junction 指向 FSDB root 是允许的；解析后的实际目录成为本次 snapshot 的 physical root。之后不得通过请求路径重新解释调用方原始 root spelling。
-
-### 3.2 Descendant object classification
-
-scanner 不得 follow FSDB root 内部的 symlink/junction/文件系统间接引用。
+scanner 不得 follow Container Root 下的数据库目录、FSDB root 内部 table/object 的 symlink/junction/文件系统间接引用。数据库发现只递归进入 FSDB root 的直接 `[FSDB]` 子目录；不得扫描 table 或 RESOURCE 子目录来发现数据库。
 
 ```text
 recognized table / metadata / data / resource candidate
@@ -244,7 +234,7 @@ index 中的 physical location 不得返回客户端。
 `openFsdb()` MUST 要求 **Well-formed FSDB**，至少验证：
 
 ```text
-root/database/table naming
+container Root / databasePath / database / table naming
 TableIdentity uniqueness
 NameSegment / Key / ResourceKey
 NFC normalization collision
@@ -285,17 +275,17 @@ scan
 → OPEN
 ```
 
-新增但未进入初始 index 的对象在当前 instance 中不可见。v1 不做目录 watch、主动 rescan 或 partial reindex。
+新增但未进入初始 index 的对象在当前 instance 中不可见。当前协议不做目录 watch、主动 rescan 或 partial reindex。
 
 ---
 
-## 4. Frozen Node.js Public API
+## 4. Node.js Public API
 
-v1 engine：Node.js `>=20`。
+Node.js engine：`>=20`。
 
 `FsdbDatabase` 是 **opaque handle**：只有本 package 的 `openFsdb()` / 内部 standalone composition 可以产生有效 instance。TypeScript declaration SHOULD 使用 module-private `unique symbol` brand 或等价 nominal technique；运行时也不得把任意 structural look-alike object 当成有效 database。
 
-冻结 public shape：
+当前 public shape：
 
 ```ts
 import type { RequestListener, Server } from "node:http";
@@ -303,8 +293,19 @@ import type { RequestListener, Server } from "node:http";
 declare const fsdbDatabaseBrand: unique symbol; // module-private
 
 export interface OpenFsdbOptions {
+  /** Filesystem container Root. */
+  readonly root: string;
+  /** Required logical path to one FSDB, relative to root. */
+  readonly path: string;
+}
+
+export interface ListFsdbPathsOptions {
   readonly root: string;
 }
+
+export function listFsdbPaths(
+  options: ListFsdbPathsOptions,
+): Promise<readonly string[]>;
 
 export type FsdbDatabaseState = "open" | "stale" | "closed";
 
@@ -323,7 +324,9 @@ export function createFsdbHttpHandler(
   db: FsdbDatabase,
 ): RequestListener;
 
-export interface ServeFsdbOptions extends OpenFsdbOptions {
+export interface ServeFsdbOptions {
+  /** Container Root; databases are opened lazily from request paths. */
+  readonly root: string;
   readonly host?: string;
   readonly port?: number;
 }
@@ -354,7 +357,7 @@ serveFsdb
 
 ### 4.1 JavaScript failure shape
 
-无效 root、malformed FSDB、伪造 database handle、listen failure 等 API failure 必须 fail closed，但 **具体 Error subclass、`message`、`code`、stack text 不属于 v1 contract**。消费者不得依赖它们做跨版本协议判断。
+无效 Container Root、databasePath、malformed FSDB、伪造 database handle、listen failure 等 API failure 必须 fail closed，但 **具体 Error subclass、`message`、`code`、stack text 不属于当前 API contract**。消费者不得依赖它们做协议判断。
 
 ### 4.2 `openFsdb()` ownership
 
@@ -392,20 +395,23 @@ host = 127.0.0.1
 port = 0
 ```
 
-`serveFsdb()` owns 它内部创建的 database 与 `http.Server`。database 不作为 public service field 暴露，避免绕过 standalone lifecycle owner。
+`serveFsdb()` owns 一个 Container Root 对应的 `http.Server`，以及它按请求惰性打开的全部 `FsdbDatabase` handles。服务启动时只 canonicalize Container Root，不枚举或打开所有数据库。database handles 不作为 public service field 暴露，避免绕过 service lifecycle owner。
 
-如果 listen/startup 失败，`serveFsdb()` MUST 清理已经创建的 owned database/server 后再 reject。
+如果 listen/startup 失败，`serveFsdb()` MUST 清理已经创建的 Server 与所有已取得的 database handles 后再 reject。
 
 `service.close()` MUST 幂等，并建立 shutdown barrier：
 
 ```text
-no new database reads
-no new HTTP connections
-admitted responses may drain
-owned server closes
-owned database closes
+stop admitting new requests
+stop accepting new connections
+await active handlers and admitted reads
+await already-admitted database opening Promises
+close every successfully opened database handle
+close owned Server
 Promise resolves
 ```
+
+Root service 对 canonical databasePath 使用 single-flight Promise cache：相同 path 的并发首次请求共享一次 open；不同 path 独立打开。open 失败的 Promise 从 cache 移除以允许重试；成功 handle 保留至 service.close()。已打开 handle 进入 STALE 后不得自动 reopen 替换 snapshot。
 
 `address.host` / `address.port` 表示实际 bind address。`origin` 仅在该 bind address 能表达具体 client origin 时提供；`0.0.0.0`、`::` 等 wildcard bind 不得伪造唯一 externally reachable origin。
 
@@ -451,10 +457,21 @@ literal `#` 不属于合法 origin-form path/query spelling，v1 收到时 → `
 
 ### 5.2 HTTP Surface
 
+借用单数据库的 `createFsdbHttpHandler(db)` 保持原有路由：
+
 ```text
 GET|HEAD /fsdb/v1
 GET|HEAD /fsdb/v1/{kind}/{table}/{entry...}
 ```
+
+Root-scoped `serveFsdb({ root })` 在同一 `/fsdb/v1` namespace 下增加数据库路由：
+
+```text
+GET|HEAD /fsdb/v1/{databasePathSegments}/$db
+GET|HEAD /fsdb/v1/{databasePathSegments}/$db/{kind}/{table}/{entry...}
+```
+
+第一个 Root-scoped route 返回所选数据库 Descriptor；第二个读取该数据库中的 entry/metadata。Root-scoped service 不提供 `/fsdb/v1` 默认数据库 Descriptor，也不提供数据库 catalog。
 
 其中：
 
@@ -493,9 +510,7 @@ metadata：
 
 ### 5.3 Database Descriptor
 
-```text
-GET|HEAD /fsdb/v1
-```
+单数据库 handler 使用 `GET|HEAD /fsdb/v1`；Root-scoped service 使用 `GET|HEAD /fsdb/v1/{databasePathSegments}/$db`。两者返回相同 Descriptor representation。
 
 逻辑结构：
 
@@ -524,6 +539,8 @@ logical segment
 → UTF-8 bytes
 → RFC 3986 percent encoding
 ```
+
+Root-scoped routes 对 databasePath 的每个 segment 独立编码，segment 之间保留 literal `/`，随后追加 literal `/$db`。Server 必须先按 raw path 的 literal `/` 拆分并识别 raw `$db` delimiter，再对其他 segment 解码一次。不得把整个 databasePath 编成一个含 `%2F` 的 segment；`%24db` 不是 delimiter。
 
 仅 ASCII unreserved 保持原样：
 
@@ -794,9 +811,9 @@ date preconditions按 7.5 忽略，Range 按 7.6 忽略。
 ```text
 0. request-target form
 1. /fsdb/v1 namespace
-2. path / encoding / route syntax
+2. path / encoding / route syntax, including databasePath delimiter
 3. method
-4. GET/HEAD logical lookup / existence
+4. databasePath resolution (Root service) and logical object lookup / existence
 5. source-state / same-handle validation
 6. ETag preconditions
 7. response
@@ -828,7 +845,9 @@ GET /fsdb/v1/struct/角色/不存在
 | GET/HEAD representation | `200` |
 | If-None-Match false | `304` |
 | malformed target/path/encoding/identity | `400` |
-| namespace 外或 logical object 不存在 | `404` |
+| databasePath / logical object 不存在 | `404` |
+| duplicate physical database candidates / ambiguous path | `409` |
+| selected database fails Well-formed validation | `422` |
 | valid route + unsupported method | `405` |
 | If-Match false | `412` |
 | database stale/closed/source drift | `503` |
@@ -934,7 +953,7 @@ stale detection 是 fail-closed defense，不是 filesystem transaction；v1 不
 
 ```text
 close
-→ openFsdb(root)
+→ openFsdb({ root, path })
 ```
 
 ### 10.3 CLOSED / drain
@@ -1009,8 +1028,10 @@ v1 不以 WHATWG `Request → Response` 为主 API；出现真实非 Node consum
 
 ```text
 1. FSDB identity types + opaque FsdbDatabase handle
-2. root resolution + Well-formed scanner
-3. NFC logical index + descendant indirection policy
+2. Container Root + required databasePath resolution
+3. recursive listFsdbPaths() discovery (direct child FSDB nodes only)
+4. selected-database Well-formed scanner
+5. NFC logical index + descendant indirection policy
 4. source fingerprint + read lease + safe same-handle open/fstat
 5. Resource hierarchy
 6. origin-form raw request-target parser + logical resolver
@@ -1023,7 +1044,7 @@ v1 不以 WHATWG `Request → Response` 为主 API；出现真实非 Node consum
 13. mandatory conformance + Unicode/security/standalone smoke
 ```
 
-明确不在 v1 实现：
+明确不在当前协议实现：
 
 ```text
 Range
@@ -1040,8 +1061,6 @@ CLI/daemon
 
 ## 14. Implementation Exit Gate
 
-v1 implementation 必须通过 [CONFORMANCE.md](./CONFORMANCE.md) 全部 mandatory cases。
+当前实现必须通过 [CONFORMANCE.md](./CONFORMANCE.md) 全部 mandatory cases。通过后才可进入 Release Candidate 并推进发布。
 
-通过后才能保持 **Implemented / Release Candidate** 状态并推进发布。
-
-实现中若发现本文 contract 本身不可实现、互相矛盾或导致真实 interoperability/security 问题，必须按 0.3 的 frozen change rule 处理；不得通过 hidden special-case 绕过合同。
+发布前若发现本文合同不可实现、互相矛盾或导致真实 interoperability/security 问题，直接更新本 DESIGN.md、CONFORMANCE.md 和实现；不得通过 hidden special-case 绕过合同，也不得为尚未发布的协议额外创建版本分支。
