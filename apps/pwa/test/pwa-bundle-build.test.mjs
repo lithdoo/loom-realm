@@ -45,6 +45,27 @@ test("generic PWA bundle input rejects malformed manifests, duplicate identities
   const invalidPath = fixture();
   invalidPath.content[0].databasePath = "Demo/";
   assert.throws(() => validatePwaBundlePayload(invalidPath), /Invalid databasePath/);
+  for (const key of [123, null, { key: "config" }]) {
+    const typed = fixture();
+    typed.content[0].key = key;
+    assert.throws(() => validatePwaBundlePayload(typed), /content\[0\]\.key must be a non-empty string/);
+  }
+  const missingKey = fixture();
+  delete missingKey.content[0].key;
+  assert.throws(() => validatePwaBundlePayload(missingKey), /content\[0\]\.key must be a non-empty string/);
+  const numericPath = fixture();
+  numericPath.content[0].databasePath = 123;
+  assert.throws(() => validatePwaBundlePayload(numericPath), /content\[0\]\.databasePath must be a non-empty string/);
+  const ordinary = fixture();
+  ordinary.content[0].namespace = "CON";
+  ordinary.content[0].key = "icon*";
+  assert.doesNotThrow(() => validatePwaBundlePayload(ordinary));
+  const nestedResource = fixture();
+  nestedResource.content[0].kind = "resource";
+  nestedResource.content[0].namespace = "resource.images";
+  nestedResource.content[0].key = "ui/icons/potion*";
+  nestedResource.content[0].mime = "image/png";
+  assert.doesNotThrow(() => validatePwaBundlePayload(nestedResource));
   const invalidEncoding = fixture();
   invalidEncoding.content[0].body = "not base64!";
   assert.throws(() => validatePwaBundlePayload(invalidEncoding), /canonical base64/);

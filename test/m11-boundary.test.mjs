@@ -32,6 +32,7 @@ test("Renderer keeps Render replica and qualification observation internal", asy
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), [
     "@loomrealm/data",
     "@loomrealm/foundation",
+    "@loomrealm/fsdb",
     "@loomrealm/platform-ports",
     "@loomrealm/renderer-control",
     "@loomrealm/wire",

@@ -1,4 +1,4 @@
-import { canonicalDatabasePath, canonicalName } from "@loomrealm/fsdb/names";
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 import { parseJsonText, type JsonValue } from "@loomrealm/wire";
 import {
   ContentReadError,
@@ -23,7 +23,7 @@ export interface SameOriginContentAccess {
 
 function named(value: unknown, label: string): string {
   if (typeof value !== "string") throw new TypeError(label);
-  try { return canonicalName(value); }
+  try { return contentLogicalSegment(value); }
   catch { throw new TypeError(label); }
 }
 

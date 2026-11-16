@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { canonicalDatabasePath, canonicalName } from "@loomrealm/fsdb/names";
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 import { deriveProductGeneration, emitProductArtifacts } from "./build-identity.mjs";
 import { pwaBundleId } from "./pwa-bundle-id.mjs";
 
@@ -67,14 +67,17 @@ export function validatePwaBundlePayload(value) {
     if (!["record", "group", "resource"].includes(entry.kind)) {
       throw new TypeError("Invalid Content kind at index " + index);
     }
+    requireString(entry.databasePath, "content[" + index + "].databasePath");
+    requireString(entry.namespace, "content[" + index + "].namespace");
+    requireString(entry.key, "content[" + index + "].key");
     let databasePath;
     try { databasePath = canonicalDatabasePath(entry.databasePath); }
     catch { throw new TypeError("Invalid databasePath at index " + index); }
     let namespace;
     let key;
     try {
-      namespace = canonicalName(entry.namespace);
-      key = String(entry.key).split("/").map((part) => canonicalName(part)).join("/");
+      namespace = contentLogicalSegment(entry.namespace);
+      key = entry.key.split("/").map((part) => contentLogicalSegment(part)).join("/");
     } catch {
       throw new TypeError("Invalid Content name at index " + index);
     }

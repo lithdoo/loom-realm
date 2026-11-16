@@ -4,7 +4,7 @@ import {
   buildPwaExecutableIndexV1,
   parsePwaLaunchManifestV1,
 } from "@loomrealm/game-launcher-pwa";
-import { canonicalDatabasePath, canonicalName } from "@loomrealm/fsdb/names";
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 import { parseJsonText } from "@loomrealm/wire";
 import { serializePwaPublicManifestV1 } from "./content-manifest.js";
 import type { PwaInstallationBundleV1 } from "./installation-bundle.js";
@@ -122,7 +122,7 @@ function exact(value: unknown, fields: readonly string[], label: string): Record
 
 function contentName(value: unknown): string {
   if (typeof value !== "string") throw new TypeError("Invalid installation segment");
-  try { return canonicalName(value); }
+  try { return contentLogicalSegment(value); }
   catch { throw new TypeError("Invalid installation segment"); }
 }
 

@@ -1,4 +1,4 @@
-import { canonicalDatabasePath } from "@loomrealm/fsdb/names";
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 
 export interface WebPresentationResourceRefV1 {
   readonly databasePath: string;
@@ -41,13 +41,14 @@ function exactObject(value: unknown, fields: readonly string[], label: string): 
 }
 
 function segment(value: unknown, label: string, hierarchy: boolean): string {
-  if (
-    typeof value !== "string" || value.length === 0 || value === "." || value === ".." ||
-    /[\\\0]|\p{Cc}|\p{Cs}/u.test(value) || (!hierarchy && value.includes("/")) ||
-    value.startsWith("/") || value.endsWith("/") || value.split("/").some((part) => part.length === 0 || part === "." || part === "..") ||
-    /^[A-Za-z]:/.test(value) || value.startsWith("\\\\") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)
-  ) throw new TypeError(`Invalid ${label}`);
-  return value;
+  if (typeof value !== "string" || value.length === 0 || value.startsWith("/") || value.endsWith("/") || (!hierarchy && value.includes("/"))) {
+    throw new TypeError(`Invalid ${label}`);
+  }
+  try {
+    return value.split("/").map((part) => contentLogicalSegment(part)).join("/");
+  } catch {
+    throw new TypeError(`Invalid ${label}`);
+  }
 }
 
 function refs(value: unknown, label: string): readonly WebPresentationResourceRefV1[] {

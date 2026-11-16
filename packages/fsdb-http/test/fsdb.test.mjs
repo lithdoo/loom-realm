@@ -574,6 +574,39 @@ conformance(["API-010", "API-011", "API-012", "API-013", "HTTP-015", "HTTP-016",
   assert.equal((await request(ambiguousService.origin, `/fsdb/v1/${encodeURIComponent("é")}/$db`)).status, 409);
 });
 
+nodeTest("root service checks method before opening a database", async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), "fsdb-http-method-"));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const game = join(parent, "[FSDB]GameData");
+  await writeStruct(game, "{\"owner\":\"before\"}");
+  const broken = join(parent, "[FSDB]Broken");
+  await mkdir(join(broken, "[STRUCT]Config"), { recursive: true });
+  await writeFile(join(broken, "[STRUCT]Config", ".info.meta"), "[]");
+  const service = await serveFsdb({ root: parent });
+  t.after(() => service.close());
+  const post = async (path) => request(service.origin, path, { method: "POST" });
+  const existing = await post("/fsdb/v1/GameData/$db/struct/Config/common");
+  const missing = await post("/fsdb/v1/Missing/$db/struct/Config/common");
+  const invalidDatabase = await post("/fsdb/v1/Broken/$db/struct/Config/common");
+  const malformed = await post("/fsdb/v1/GameData//$db");
+  const outside = await post("/other");
+  for (const response of [existing, missing, invalidDatabase]) {
+    assert.equal(response.status, 405);
+    assert.equal(response.headers.get("allow"), "GET, HEAD");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(await response.text(), "");
+  }
+  assert.equal(malformed.status, 400);
+  assert.equal(outside.status, 404);
+  await writeFile(join(game, "[STRUCT]Config", "common.json"), "{\"owner\":\"after\"}");
+  const get = await request(service.origin, "/fsdb/v1/GameData/$db/struct/Config/common");
+  const head = await request(service.origin, "/fsdb/v1/GameData/$db/struct/Config/common", { method: "HEAD" });
+  assert.equal(get.status, 200);
+  assert.equal(await get.text(), "{\"owner\":\"after\"}");
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), "");
+});
+
 nodeTest("every mandatory conformance ID is attached to an executable behavioral test", async () => {
   const contract = await readFile(new URL("../CONFORMANCE.md", import.meta.url), "utf8");
   const mandatory = new Set(contract.match(/(?:FDB|ROOT|SAFE|API|HTTP|STATUS|MIME|RESP|COND|CACHE|LIFE|BOUNDARY)-\d{3}/g));

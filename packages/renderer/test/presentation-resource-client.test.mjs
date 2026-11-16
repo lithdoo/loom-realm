@@ -33,6 +33,20 @@ test("presentation resource façade maps errors and returns caller-owned bytes",
     const failing = createPresentationResourceClient({ async resource() { throw new RendererResourceError(internal); } }, lifetime.signal);
     await assert.rejects(failing.resource("content", "images", "icons/a.png", version), (error) => error.code === external);
   }
+  await assert.rejects(client.resource("GameData/", "images", "icons/a.png", version), (error) => error.code === "CONTENT_INVALID");
+  const seen = [];
+  const permissive = createPresentationResourceClient({
+    async resource(databasePath, namespace, key, expected) {
+      seen.push([databasePath, namespace, key, expected]);
+      return { bytes: source, mime: "image/png", contentVersion: version };
+    },
+  }, lifetime.signal);
+  await permissive.resource("GameData", "CON", "icons/a*.png", version);
+  await permissive.resource("ModData", "CON", "icons/a*.png", version);
+  assert.deepEqual(seen, [
+    ["GameData", "CON", "icons/a*.png", version],
+    ["ModData", "CON", "icons/a*.png", version],
+  ]);
 });
 
 test("presentation resource lifetime and caller cancellation both close reads", async () => {

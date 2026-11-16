@@ -10,7 +10,7 @@ import {
   type FsdbDatabase,
   type FsdbObjectIdentity,
 } from "@loomrealm/fsdb";
-import { canonicalDatabasePath, canonicalName } from "@loomrealm/fsdb/names";
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 import { type PreparedHostraGame } from "@loomrealm/game-launcher-hostra";
 import {
   projectHostraPreparedInstallation,
@@ -303,11 +303,19 @@ function validPermission(value: unknown): value is DesktopContentPermission {
   return value === "manifest" || value === "records" || value === "groups" || value === "resources";
 }
 
-function segment(raw: string): string {
+function contentSegment(raw: string): string {
   if (raw.length === 0) throw new TypeError("Invalid Content segment");
   let value: string;
   try { value = decodeURIComponent(raw); } catch { throw new TypeError("Invalid Content segment"); }
-  try { return canonicalName(value); } catch { throw new TypeError("Invalid Content segment"); }
+  try { return contentLogicalSegment(value); } catch { throw new TypeError("Invalid Content segment"); }
+}
+
+function databaseSegment(raw: string): string {
+  if (raw.length === 0) throw new FsdbResolutionError("DATABASE_PATH_INVALID", "Invalid database path");
+  let value: string;
+  try { value = decodeURIComponent(raw); } catch { throw new TypeError("Invalid Content segment"); }
+  if (/[\\/\0]|\p{Cc}|\p{Cs}/u.test(value)) throw new FsdbResolutionError("DATABASE_PATH_INVALID", "Invalid database path");
+  return value;
 }
 
 type Route =
@@ -319,22 +327,23 @@ function parseRoute(raw: string | undefined): Route | null {
   const parts = raw.slice(1).split("/");
   if (parts[0] !== "_lr" || parts[1] !== "v1" || parts[2] !== "games") return null;
   if (parts.length < 5) throw new TypeError("Invalid Content target");
-  const installationId = segment(parts[3]!);
+  const installationId = contentSegment(parts[3]!);
   if (parts[4] === "manifest" && parts.length === 5) return { kind: "manifest", installationId, permission: "manifest" };
   if (parts[4] !== "databases") throw new TypeError("Invalid Content target");
   const marker = parts.indexOf("$db", 5);
-  if (marker <= 5 || parts.indexOf("$db", marker + 1) !== -1) throw new TypeError("Invalid Content target");
+  if (marker < 0 || parts.indexOf("$db", marker + 1) !== -1) throw new TypeError("Invalid Content target");
+  if (marker <= 5) throw new FsdbResolutionError("DATABASE_PATH_INVALID", "Invalid database path");
   let databasePath: string;
-  try { databasePath = canonicalDatabasePath(parts.slice(5, marker).map(segment).join("/")); }
+  try { databasePath = canonicalDatabasePath(parts.slice(5, marker).map(databaseSegment).join("/")); }
   catch (error) {
-    if (error instanceof TypeError) throw error;
+    if (error instanceof TypeError || error instanceof FsdbResolutionError) throw error;
     throw new FsdbResolutionError("DATABASE_PATH_INVALID", "Invalid database path");
   }
   const rest = parts.slice(marker + 1);
   const collection = rest[0];
   if (rest.length < 3 || (collection !== "records" && collection !== "groups" && collection !== "resources")) throw new TypeError("Invalid Content target");
-  const namespace = segment(rest[1]!);
-  const keyParts = rest.slice(2).map(segment);
+  const namespace = contentSegment(rest[1]!);
+  const keyParts = rest.slice(2).map(contentSegment);
   if (collection !== "resources" && keyParts.length !== 1) throw new TypeError("Invalid Content target");
   const kind = collection === "records" ? "record" : collection === "groups" ? "group" : "resource";
   return { kind, installationId, databasePath, namespace, key: keyParts.join("/"), permission: collection };

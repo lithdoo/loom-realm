@@ -1,4 +1,4 @@
-import { canonicalDatabasePath } from "@loomrealm/fsdb/names";
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 import {
   RendererResourceError,
   type RendererResourceClient,
@@ -76,10 +76,11 @@ function validSignal(value: unknown): value is AbortSignal {
 }
 
 function validSegment(value: unknown, hierarchy: boolean): value is string {
-  return typeof value === "string" && value.length > 0 && value !== "." && value !== ".." &&
-    !/[\\\0]|\p{Cc}|\p{Cs}/u.test(value) && (hierarchy || !value.includes("/")) && !value.startsWith("/") && !value.endsWith("/") &&
-    !value.split("/").some((part) => part.length === 0 || part === "." || part === "..") &&
-    !/^[A-Za-z]:/.test(value) && !value.startsWith("\\\\") && !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value);
+  if (typeof value !== "string" || value.length === 0 || value.startsWith("/") || value.endsWith("/") || (!hierarchy && value.includes("/"))) return false;
+  return value.split("/").every((part) => {
+    try { contentLogicalSegment(part); return true; }
+    catch { return false; }
+  });
 }
 
 export function createPresentationResourceClient(

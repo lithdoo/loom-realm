@@ -1,4 +1,4 @@
-import { canonicalDatabasePath } from "@loomrealm/fsdb/names";
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 
 const VERSION = /^sha256:[0-9a-f]{64}$/;
 
@@ -28,7 +28,9 @@ export interface RendererResourceClient {
 }
 
 function segment(value: unknown): asserts value is string {
-  if (typeof value !== "string" || value.length === 0 || value === "." || value === ".." || /[\\/\0]|\p{Cc}|\p{Cs}/u.test(value) || /^[A-Za-z]:/.test(value) || value.startsWith("\\\\") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) throw new TypeError("Invalid resource segment");
+  if (typeof value !== "string") throw new TypeError("Invalid resource segment");
+  try { contentLogicalSegment(value); }
+  catch { throw new TypeError("Invalid resource segment"); }
 }
 
 function signal(value: unknown): value is AbortSignal {

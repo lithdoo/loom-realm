@@ -219,7 +219,7 @@ ContentClient.resource(databasePath,namespace,key)
 → bytes + mime + contentVersion
 ```
 
-Runtime only needs existence/version and does not keep bytes。Render carries `{namespace,key,contentVersion}`；map-owned WC obtains browser bytes through M13 `PresentationResourceClient`。
+Runtime only needs existence/version and does not keep bytes。当前资源引用身份是 `{databasePath,namespace,key}`，内容版本另由 `contentVersion` 校验；map-owned WC obtains browser bytes through M13 `PresentationResourceClient.resource(databasePath, namespace, key, expectedContentVersion)`。
 
 Runtime/Renderer duplicate reads are accepted。No metadata API or AssetManager is added for theoretical efficiency。
 

@@ -461,3 +461,56 @@ test("a complete installation without databasePath is not reused", async () => {
     assert.deepEqual(JSON.parse(after.body), { message: "ready" });
   } finally { await product.close(); }
 });
+
+test("database path problem codes stay distinct from ordinary Content names", async () => {
+  const product = await openProduct();
+  try {
+    const result = await product.page.evaluate(async () => {
+      const source = "export default () => ({ frame: async () => ({ type: 'completed', value: null }) });";
+      const entry = (databasePath, body) => ({
+        databasePath, kind: "record", namespace: "CON", key: "icon*",
+        mime: "application/json; charset=utf-8", body: new Blob([body], { type: "application/json" }),
+      });
+      const installed = await window.__loomrealmPwaQualification.install({
+        formatVersion: 1,
+        gameEntryText: JSON.stringify({ formatVersion: 1, initial: { subsystem: "content", input: null }, subsystems: [{ key: "content" }] }),
+        launchManifestText: JSON.stringify({ formatVersion: 1, subsystems: [{ key: "content", module: "content.mjs" }] }),
+        content: [entry("GameData", "{\"owner\":\"game\"}"), entry("ModData", "{\"owner\":\"mod\"}")],
+        executables: [{ logicalModule: "content.mjs", mime: "text/javascript", body: new Blob([source], { type: "text/javascript" }) }],
+      });
+      const base = `/_lr/v1/games/${encodeURIComponent(installed.installationId)}`;
+      const read = async (url) => {
+        const response = await fetch(url);
+        const text = await response.text();
+        return { status: response.status, cache: response.headers.get("cache-control"), body: text, code: response.headers.get("content-type")?.includes("problem") ? JSON.parse(text).code : undefined };
+      };
+      const game = await read(`${base}/databases/GameData/$db/records/CON/${encodeURIComponent("icon*")}`);
+      const mod = await read(`${base}/databases/ModData/$db/records/CON/${encodeURIComponent("icon*")}`);
+      const invalid = await read(`${base}/databases/CON/$db/records/CON/${encodeURIComponent("icon*")}`);
+      const empty = await read(`${base}/databases/$db/records/CON/${encodeURIComponent("icon*")}`);
+      const separators = await read(`${base}/databases/GameData//$db/records/CON/${encodeURIComponent("icon*")}`);
+      const encodedDelimiter = await read(`${base}/databases/GameData/%24db/records/CON/${encodeURIComponent("icon*")}`);
+      const badEncoding = await read(`${base}/databases/Game%ZZ/$db/records/CON/${encodeURIComponent("icon*")}`);
+      const structure = await read(`${base}/nope`);
+      const missing = await read(`${base}/databases/GameData/$db/records/CON/missing`);
+      await window.__loomrealmPwaQualification.uninstall(installed.installationId);
+      return { game, mod, invalid, empty, separators, encodedDelimiter, badEncoding, structure, missing };
+    });
+    assert.equal(result.game.status, 200);
+    assert.equal(result.game.body, "{\"owner\":\"game\"}");
+    assert.equal(result.mod.body, "{\"owner\":\"mod\"}");
+    for (const failure of [result.invalid, result.empty, result.separators]) {
+      assert.equal(failure.status, 400);
+      assert.equal(failure.code, "DATABASE_PATH_INVALID");
+      assert.equal(failure.cache, "no-store");
+      assert.equal(failure.body.includes("[FSDB]"), false);
+    }
+    for (const failure of [result.encodedDelimiter, result.badEncoding, result.structure]) {
+      assert.equal(failure.status, 400);
+      assert.equal(failure.code, "INVALID_CONTENT_ROUTE");
+      assert.equal(failure.cache, "no-store");
+    }
+    assert.equal(result.missing.status, 404);
+    assert.equal(result.missing.code, "CONTENT_NOT_FOUND");
+  } finally { await product.close(); }
+});

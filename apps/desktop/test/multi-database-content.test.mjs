@@ -88,3 +88,34 @@ test("one installation view serves nested databases without merging identities",
   assert.equal(sibling.status, 200);
   assert.deepEqual(await sibling.json(), { owner: "mod" });
 });
+
+test("database path failures keep their problem codes and ordinary names stay routable", async (t) => {
+  const f = await installation();
+  t.after(() => f.cleanup());
+  const view = await prepareDesktopContentView(f.prepared);
+  const service = await createDesktopContentService({ view });
+  t.after(() => service.close());
+  const access = service.access(service.createGrant({ permissions: ["records"], expiresAtUnixMs: Date.now() + 60_000 }));
+  async function problem(suffix) {
+    const response = await request(access, suffix);
+    const body = await response.json();
+    return { status: response.status, code: body.code, cache: response.headers.get("cache-control"), text: JSON.stringify(body) };
+  }
+  const cases = [
+    ["/databases/CON/$db/records/struct.Config/common", 400, "DATABASE_PATH_INVALID"],
+    ["/databases/GameData//$db/records/struct.Config/common", 400, "DATABASE_PATH_INVALID"],
+    ["/databases/$db/records/struct.Config/common", 400, "DATABASE_PATH_INVALID"],
+    ["/databases/Game%ZZ/$db/records/struct.Config/common", 400, "CONTENT_REQUEST_INVALID"],
+    ["/databases/GameData/%24db/records/struct.Config/common", 400, "CONTENT_REQUEST_INVALID"],
+    ["/nope", 400, "CONTENT_REQUEST_INVALID"],
+    ["/databases/GameData/$db/records/struct.Config/missing", 404, "CONTENT_NOT_FOUND"],
+    [`/databases/GameData/$db/records/${encodeURIComponent("CON")}/${encodeURIComponent("icon*")}`, 404, "CONTENT_NOT_FOUND"],
+  ];
+  for (const [suffix, status, code] of cases) {
+    const result = await problem(suffix);
+    assert.deepEqual({ status: result.status, code: result.code }, { status, code }, suffix);
+    assert.equal(result.cache, "no-store");
+    assert.equal(result.text.includes("[FSDB]"), false);
+    assert.equal(result.text.includes("\\\\"), false);
+  }
+});

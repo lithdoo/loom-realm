@@ -15,6 +15,24 @@ export function canonicalName(value: string): string {
   return normalized;
 }
 
+const CONTENT_FORBIDDEN = /[\\/\0]|\p{Cc}|\p{Cs}/u;
+const DRIVE_PREFIX = /^[A-Za-z]:/;
+const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+/**
+ * One Content API logical segment.
+ * Database paths continue to use {@link canonicalName}; ordinary Content
+ * namespace, key, and installation segments do not inherit FSDB filename limits.
+ */
+export function contentLogicalSegment(value: string): string {
+  if (
+    typeof value !== "string" || value.length === 0 || value === "." || value === ".." ||
+    CONTENT_FORBIDDEN.test(value) || DRIVE_PREFIX.test(value) || value.startsWith("\\") ||
+    URL_SCHEME.test(value)
+  ) throw new Error("Invalid content segment");
+  return value;
+}
+
 /** Logical database path: one or more NameSegments joined by `/`. */
 export function canonicalDatabasePath(value: string): string {
   if (typeof value !== "string" || value.length === 0 || value.includes("\\") || value.startsWith("/") || value.endsWith("/") || value.includes("//")) {

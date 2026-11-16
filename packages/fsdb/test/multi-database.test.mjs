@@ -13,6 +13,7 @@ import {
   openFsdb,
   openFsdbObject,
 } from "../dist/index.js";
+import { canonicalName, contentLogicalSegment } from "../dist/names.js";
 
 async function tree() {
   const parent = await mkdtemp(join(tmpdir(), "fsdb-multi-"));
@@ -74,6 +75,18 @@ async function readCommon(root, path) {
     throw error;
   }
 }
+
+test("content logical segments do not inherit FSDB filename limits", () => {
+  assert.equal(contentLogicalSegment("icon*"), "icon*");
+  assert.equal(contentLogicalSegment("CON"), "CON");
+  assert.equal(contentLogicalSegment("$meta"), "$meta");
+  assert.throws(() => canonicalName("icon*"));
+  assert.throws(() => canonicalName("CON"));
+  assert.throws(() => canonicalName("$meta"));
+  assert.throws(() => contentLogicalSegment(".."));
+  assert.throws(() => contentLogicalSegment("a/b"));
+  assert.throws(() => contentLogicalSegment("C:drive"));
+});
 
 test("discovery lists nested databases and ignores resource pseudo databases", async () => {
   const f = await tree();

@@ -1,4 +1,4 @@
-import { canonicalDatabasePath, canonicalName } from "@loomrealm/fsdb/names";
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 import {
   getInstallation,
   markInstallationInvalid,
@@ -36,43 +36,67 @@ function problem(status: number, code: string, detail?: string, headers?: Header
   });
 }
 
-function decodeSegment(value: string): string | null {
-  let decoded: string;
-  try { decoded = decodeURIComponent(value); }
-  catch { return null; }
-  try { return canonicalName(decoded); }
+type IdentityParse =
+  | { readonly type: "identity"; readonly identity: ContentIdentity }
+  | { readonly type: "invalid-route" }
+  | { readonly type: "invalid-database-path" };
+
+function decodePercent(value: string): string | undefined {
+  try { return decodeURIComponent(value); }
+  catch { return undefined; }
+}
+
+function contentSegment(value: string): string | null {
+  try { return contentLogicalSegment(value); }
   catch { return null; }
 }
 
-function parseIdentity(url: URL, path: readonly string[]): ContentIdentity | null {
-  if (url.search !== "") return null;
-  const installationId = decodeSegment(path[0] ?? "");
-  if (installationId === null) return null;
+function parseIdentity(url: URL, path: readonly string[]): IdentityParse {
+  if (url.search !== "") return { type: "invalid-route" };
+  const decodedInstallation = decodePercent(path[0] ?? "");
+  if (decodedInstallation === undefined) return { type: "invalid-route" };
+  const installationId = contentSegment(decodedInstallation);
+  if (installationId === null) return { type: "invalid-route" };
   const route = path[1];
-  if (route === "manifest" && path.length === 2) return Object.freeze({ installationId, kind: "manifest" });
-  if (route !== "databases") return null;
+  if (route === "manifest" && path.length === 2) return { type: "identity", identity: Object.freeze({ installationId, kind: "manifest" }) };
+  if (route !== "databases") return { type: "invalid-route" };
   const marker = path.indexOf("$db", 2);
-  if (marker <= 2 || path.indexOf("$db", marker + 1) !== -1) return null;
-  const databaseSegments = path.slice(2, marker).map(decodeSegment);
-  if (databaseSegments.some((value) => value === null)) return null;
+  if (marker < 0 || path.indexOf("$db", marker + 1) !== -1) return { type: "invalid-route" };
+  if (marker <= 2) return { type: "invalid-database-path" };
+  const encodedDatabase = path.slice(2, marker);
+  if (encodedDatabase.some((part) => part.length === 0)) return { type: "invalid-database-path" };
+  const decodedDatabase: string[] = [];
+  for (const part of encodedDatabase) {
+    const decoded = decodePercent(part);
+    if (decoded === undefined) return { type: "invalid-route" };
+    if (/[\\/\0]|\p{Cc}|\p{Cs}/u.test(decoded)) return { type: "invalid-database-path" };
+    decodedDatabase.push(decoded);
+  }
   let databasePath: string;
-  try { databasePath = canonicalDatabasePath((databaseSegments as string[]).join("/")); }
-  catch { return null; }
+  try { databasePath = canonicalDatabasePath(decodedDatabase.join("/")); }
+  catch { return { type: "invalid-database-path" }; }
   const rest = path.slice(marker + 1);
   const collection = rest[0];
   if ((collection === "records" || collection === "groups") && rest.length === 3) {
-    const namespace = decodeSegment(rest[1]!);
-    const key = decodeSegment(rest[2]!);
-    if (namespace === null || key === null) return null;
-    return Object.freeze({ installationId, databasePath, kind: collection === "records" ? "record" : "group", namespace, key });
+    const namespaceRaw = decodePercent(rest[1]!);
+    const keyRaw = decodePercent(rest[2]!);
+    if (namespaceRaw === undefined || keyRaw === undefined) return { type: "invalid-route" };
+    const namespace = contentSegment(namespaceRaw);
+    const key = contentSegment(keyRaw);
+    if (namespace === null || key === null) return { type: "invalid-route" };
+    return { type: "identity", identity: Object.freeze({ installationId, databasePath, kind: collection === "records" ? "record" : "group", namespace, key }) };
   }
   if (collection === "resources" && rest.length >= 3) {
-    const namespace = decodeSegment(rest[1]!);
-    const segments = rest.slice(2).map(decodeSegment);
-    if (namespace === null || segments.some((value) => value === null)) return null;
-    return Object.freeze({ installationId, databasePath, kind: "resource", namespace, key: (segments as string[]).join("/") });
+    const namespaceRaw = decodePercent(rest[1]!);
+    if (namespaceRaw === undefined) return { type: "invalid-route" };
+    const namespace = contentSegment(namespaceRaw);
+    const segments = rest.slice(2).map((part) => decodePercent(part));
+    if (namespace === null || segments.some((value) => value === undefined)) return { type: "invalid-route" };
+    const keys = (segments as string[]).map((part) => contentSegment(part));
+    if (keys.some((value) => value === null)) return { type: "invalid-route" };
+    return { type: "identity", identity: Object.freeze({ installationId, databasePath, kind: "resource", namespace, key: (keys as string[]).join("/") }) };
   }
-  return null;
+  return { type: "invalid-route" };
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
@@ -138,8 +162,10 @@ async function realizeContentRequestInner(request: Request, url: URL, path: read
   if (request.method !== "GET" && request.method !== "HEAD") {
     return problem(405, "METHOD_NOT_ALLOWED", "Only GET and HEAD are supported", { Allow: "GET, HEAD" });
   }
-  const identity = parseIdentity(url, path);
-  if (identity === null) return problem(400, "INVALID_CONTENT_ROUTE");
+  const parsed = parseIdentity(url, path);
+  if (parsed.type === "invalid-database-path") return problem(400, "DATABASE_PATH_INVALID");
+  if (parsed.type !== "identity") return problem(400, "INVALID_CONTENT_ROUTE");
+  const identity = parsed.identity;
   const installation = await completeInstallation(identity.installationId);
   if (installation instanceof Response) return installation;
   const entry = matchEntry(installation, identity);

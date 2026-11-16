@@ -11,7 +11,18 @@ const text = (relative) => readFile(new URL(relative, root), "utf8");
 const json = async (relative) => JSON.parse(await text(relative));
 
 test("@loomrealm/fsdb has the exact frozen public value surface and Node-only dependency boundary", async () => {
-  assert.deepEqual(Object.keys(fsdb).sort(), ["describeFsdb", "getFsdbSnapshotId", "listFsdbEntries", "openFsdb", "openFsdbObject"]);
+  assert.deepEqual(Object.keys(fsdb).sort(), [
+    "FsdbResolutionError",
+    "SourceUnavailableError",
+    "canonicalDatabasePath",
+    "canonicalName",
+    "describeFsdb",
+    "getFsdbSnapshotId",
+    "listFsdbEntries",
+    "listFsdbPaths",
+    "openFsdb",
+    "openFsdbObject",
+  ]);
   const manifest = await json("packages/fsdb/package.json");
   assert.deepEqual(manifest.dependencies ?? {}, {});
   const source = await Promise.all(["database.ts", "index.ts", "mime.ts", "model.ts", "names.ts", "scanner.ts"].map((file) => text(`packages/fsdb/src/${file}`)));

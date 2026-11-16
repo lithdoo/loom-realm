@@ -33,6 +33,7 @@ test("Renderer resource client validates locally before HTTP", async (t) => {
   const f = await fixture(); t.after(() => f.close());
   const lifetime = new AbortController();
   const client = createRendererResourceClient({ origin: f.origin, installationId: "installation", token: "renderer_token" }, lifetime.signal);
+  assert.throws(() => client.resource("GameData/", "resource.images", "key", version(bodies.get("v1"))), TypeError);
   assert.throws(() => client.resource("content", "bad/name", "key", version(bodies.get("v1"))), TypeError);
   assert.throws(() => client.resource("content", "resource.images", "../key", version(bodies.get("v1"))), TypeError);
   assert.throws(() => client.resource("content", "resource.images", "key", "bad-version"), TypeError);
@@ -52,12 +53,14 @@ test("expected version, hierarchical routing, and immutable cache identity are e
   first.bytes[0] = 99;
   assert.deepEqual([...(await client.resource("content", "resource.images", "ui/icons/potion", v1)).bytes], [1, 2, 3]);
   assert.equal(f.requests, 1);
+  await client.resource("ModData", "resource.images", "ui/icons/potion", v1);
+  assert.equal(f.requests, 2);
 
   f.setCurrent("v2");
   const v2 = version(bodies.get("v2"));
   const second = await client.resource("content", "resource.images", "ui/icons/potion", v2);
   assert.deepEqual([...second.bytes], [4, 5, 6]);
-  assert.equal(f.requests, 2);
+  assert.equal(f.requests, 3);
   await assert.rejects(client.resource("content", "resource.images", "other", v1), (error) => error.code === "conflict");
   await assert.rejects(client.resource("content", "resource.images", "missing", v2), (error) => error.code === "not-found");
 });

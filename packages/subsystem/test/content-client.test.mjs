@@ -97,6 +97,18 @@ test("local validation is synchronous and starts zero HTTP requests", async (t) 
   assert.equal(fixture.requests.length, 0);
 });
 
+test("ordinary Content names stay distinct from FSDB database names", async (t) => {
+  const fixture = await serverFixture(); t.after(() => fixture.close());
+  const content = client(fixture.origin).value;
+  assert.throws(() => content.record("CON", "struct.hero", "hero"), TypeError);
+  assert.throws(() => content.record("Game*/Data", "struct.hero", "hero"), TypeError);
+  assert.throws(() => content.record("GameData", "..", "hero"), TypeError);
+  assert.deepEqual((await content.record("GameData", "CON", "icon*")).value, { hero: { name: "Pika" } });
+  assert.equal(fixture.requests.at(-1), "/_lr/v1/games/installation/databases/GameData/$db/records/CON/icon*");
+  await content.resource("GameData", "resource.images", "ui/icons/potion*");
+  assert.equal(fixture.requests.at(-1), "/_lr/v1/games/installation/databases/GameData/$db/resources/resource.images/ui/icons/potion*");
+});
+
 test("record/resource reads map errors, versions, hierarchy, cancellation, and value ownership", async (t) => {
   const fixture = await serverFixture(); t.after(() => fixture.close());
   const bound = client(fixture.origin);

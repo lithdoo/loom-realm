@@ -102,6 +102,7 @@ export async function serveFsdb(options: ServeFsdbOptions): Promise<FsdbHttpServ
       try { route = parseRootTarget(req.url); }
       catch (error) { return errorResponse(res, error instanceof BadTargetError ? 400 : 500); }
       if (route.type === "outside") return errorResponse(res, 404);
+      if (req.method !== "GET" && req.method !== "HEAD") return errorResponse(res, 405, true);
       let db: FsdbDatabase;
       try { db = await openDatabase(route.databasePath); }
       catch (error) { return errorResponse(res, failureStatus(error)); }
