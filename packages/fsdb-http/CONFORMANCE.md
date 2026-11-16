@@ -247,11 +247,16 @@ stream (GET)
 MUST export：
 
 ```text
-openFsdb
-listFsdbPaths
-createFsdbHttpHandler
-serveFsdb
-以及 DESIGN 当前定义的 public types
+@loomrealm/fsdb:
+  openFsdb
+  listFsdbPaths
+  FsdbDatabase / OpenFsdbOptions / related Core types
+
+@loomrealm/fsdb-http:
+  openFsdb (existing re-export)
+  createFsdbHttpHandler
+  serveFsdb
+  FsdbHttpService / ServeFsdbOptions
 ```
 
 ### API-002 — FsdbDatabase is opaque
