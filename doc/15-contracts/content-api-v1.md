@@ -5,7 +5,7 @@
 > 层级：正式契约  
 > 状态：Active / Normative / Evolving  
 > 主要定义：跨 Desktop/PWA 的逻辑只读内容访问、路由、缓存、错误、完整性与 request authorization semantics  
-> 依赖：[存储与内容系统](../10-architecture/storage-system.md)、[Game Package v1](./game-package-v1.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
+> 依赖：[存储与内容系统](../10-architecture/storage-system.md)、[FSDB 目录结构](../20-modules/fsdb-content-service/fsdb-layout.md)、[Game Package v1](./game-package-v1.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
 > 最近复核：2026-09-08
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
@@ -186,6 +186,13 @@ HEAD /_lr/v1/games/{installationId}/databases/{databasePathSegments}/$db/resourc
 `{key...}` 是一个或多个 resource path segments。服务端逐 segment decode/validate 后，以 `/` 连接成 logical ResourceKey；不得把原始 request path 直接交给 filesystem resolver。
 
 返回 Package Index 声明的 MIME + binary body；普通资源不得 Base64 包入 JSON。
+
+### 3.1 Database addressing boundary
+
+- 每个 record/group/resource request MUST 显式包含 databasePath；不得选择默认数据库或首个发现的数据库。
+- 当前协议不提供数据库列表/catalog route，也不提供 ContentClient 数据库枚举方法。
+- 空数据库与不存在的数据库无法通过 Content catalog 区分；对不存在的 entry，两者均返回 `404 CONTENT_NOT_FOUND`。
+- 父、子、兄弟数据库相互独立；Content lookup 不得跨 databasePath fallback。
 
 ---
 
