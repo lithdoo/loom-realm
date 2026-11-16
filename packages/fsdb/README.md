@@ -24,3 +24,7 @@ Qualification:
 npm test -w @loomrealm/fsdb
 npm pack -w @loomrealm/fsdb --dry-run
 ```
+
+## Proposed evolution
+
+Nested databases and explicit `root + path` selection are described in the [FSDB Nested Database design proposal](../../doc/20-modules/fsdb-content-service/fsdb-nested-database-v2.md). This is a future design, not current package behavior; the current implementation still opens one existing FSDB root directly.

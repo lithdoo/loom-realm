@@ -23,3 +23,7 @@ Content capability != executable resolver，URL != filesystem path。Content fai
 主要实现位于 `packages/fsdb/`、`packages/fsdb-http/`、`packages/subsystem/`、`packages/renderer/` 以及 concrete platform/app composition。验证包含 FSDB/core/http conformance、Content integration、fixture importer 与 Desktop/PWA product tests。
 
 现有 `test:m12` 等名字是历史兼容的 command alias。资格 currentness 由[subject/staleness](../../30-development/qualification.md)判断，而不是由阶段编号决定。Historical ownership decision 见 [ADR0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)。
+
+## Proposed next evolution
+
+The next proposed FSDB format / API evolution is documented in [FSDB Nested Databases and Explicit Database Selection](./fsdb-nested-database-v2.md). It covers recursive physical nesting, independent database boundaries, explicit `root + path` selection, and the required Core / HTTP / Desktop / PWA migration. The proposal is not yet implemented; the current format remains defined by [FSDB layout](./fsdb-layout.md).
