@@ -470,6 +470,9 @@ Allow: GET, HEAD
 429 Too Many Requests
     deployment concurrency/rate policy exceeded
 
+503 Service Unavailable
+    selected database is stale or temporarily unavailable
+
 500 Internal Server Error
     unexpected service failure
 ```
@@ -477,8 +480,8 @@ Allow: GET, HEAD
 固定分类：
 
 ```text
-state/version/index conflict → 409
-body schema/integrity failure → 422
+ambiguous databasePath / state/version/index conflict → 409
+FSDB validation / body schema/integrity failure → 422
 ```
 
 同一失败事实不得自由选择 409/422。
@@ -510,7 +513,6 @@ Stable codes 至少：
 ```text
 INSTALLATION_NOT_FOUND              404
 DATABASE_PATH_INVALID               400
-DATABASE_NOT_FOUND                  404
 DATABASE_PATH_AMBIGUOUS             409
 DATABASE_INVALID                    422
 DATABASE_UNAVAILABLE                503
