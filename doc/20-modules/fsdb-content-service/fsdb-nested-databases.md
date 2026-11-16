@@ -333,7 +333,7 @@ Normative behavior:
 - For each discovered FSDB directory, inspect only its direct children for further [FSDB] directories, and recurse only through those database directories.
 - Never interpret directories inside [STRUCT], [EXTEND], [GROUP], or [RESOURCE] tables as databases. A resource key segment named [FSDB]Something remains ordinary resource content.
 - Return canonical logical paths relative to Root, without type markers.
-- Return paths in deterministic Unicode code-point order.
+- Return paths in deterministic Unicode code-point order by the complete canonical logical path.
 - Validate each database path segment, marker casing, duplicate logical child names, directory type, and no-symlink rule.
 - Discovery does not scan table contents, build snapshots, validate table metadata, open database handles, or calculate content hashes.
 - A discovered database is opened and validated independently by openFsdb({ root, path }).
@@ -559,12 +559,16 @@ Rules:
 - A decoded slash or backslash inside one segment is invalid; percent encoding cannot manufacture a path separator.
 - Malformed percent escapes, invalid UTF-8, empty segments, dot segments, forbidden NameSegment characters, and invalid route shape return 400.
 - A non-empty query string is rejected, matching the existing FSDB HTTP request contract.
+- Invalid request-target, route shape, percent encoding, UTF-8, or logical path syntax returns 400.
+- Unsupported methods return 405 with Allow: GET, HEAD.
 - A missing database path or missing object returns 404.
-- An ambiguous physical database path returns a conflict response; the service MUST NOT choose one candidate.
-- A database that fails FSDB Well-formed validation returns an invalid-database response; a stale source returns an unavailable response.
-- No response may disclose an absolute filesystem path or raw filesystem error message.
+- Ambiguous physical candidates or unsafe database-directory indirection return 409; the service MUST NOT choose a candidate.
+- A selected database that fails FSDB Well-formed validation returns 422.
+- A database that becomes STALE, or a transient read/open I/O failure, returns 503.
+- An unexpected internal failure returns 500.
+- Error responses use the existing empty-body style, include Cache-Control: no-store, and never disclose an absolute filesystem path or raw filesystem error message.
 
-The existing FSDB HTTP v1 MIME, ETag, conditional request, GET/HEAD, and immutable snapshot semantics are retained where they remain meaningful. The v2 conformance document must freeze the exact status mapping and response headers for the new database-resolution failure cases before implementation is declared complete.
+Successful responses retain the existing FSDB HTTP MIME, ETag, conditional request, GET/HEAD, and immutable snapshot semantics where they remain meaningful. These status mappings and headers are part of the v2 contract, not deferred implementation choices.
 
 ### 7.4 Lazy handle cache and concurrency
 
@@ -696,6 +700,19 @@ Route rules:
 - Manifest has no database path.
 - There is no database catalog route and no default database route.
 
+Content v2 status mapping for database-backed reads:
+
+| Condition | HTTP status / Content result |
+|---|---|
+| Invalid route or databasePath syntax | 400 / CONTENT_REQUEST_INVALID |
+| Missing database path or content entry | 404 / CONTENT_NOT_FOUND |
+| Ambiguous physical database path | 409 / CONTENT_CONFLICT |
+| Selected database fails FSDB validation | 422 / CONTENT_INVALID |
+| Selected database is STALE or temporarily unavailable | 503 / CONTENT_UNAVAILABLE |
+| Unexpected internal failure | 500 / CONTENT_UNAVAILABLE |
+
+Existing authentication, permission, installation-state, size-limit, and integrity semantics remain in force. Manifest remains installation-scoped.
+
 ### 8.3 Runtime discovery policy
 
 ContentClient requires the caller to supply databasePath. It does not expose a database-listing method.
@@ -777,9 +794,11 @@ Rules:
 - Database handles and indexes are created lazily on the first request for that path.
 - Concurrent first requests for the same path share one preparation Promise.
 - Index construction is owned by the Content View, not by an individual request AbortSignal. A disconnected first requester MUST NOT cancel shared preparation needed by other requests.
-- A failed database open/index MUST NOT prevent healthy siblings from being opened or served.
-- A failed preparation Promise is removed so a later request can retry.
-- A successfully opened database remains attached to its original snapshot. If it becomes STALE, do not silently reopen it.
+- A failed database open MUST NOT prevent healthy siblings from being opened or served.
+- If openFsdb rejects before returning a handle, remove that rejected opening Promise so a later request can retry.
+- Once a handle has been acquired, the Content View retains ownership of it even if index construction fails; the handle is included in shutdown cleanup.
+- If the acquired handle is STALE, retain that failed state for the lifetime of the view and do not silently reopen a new snapshot. A later request MUST NOT turn a stale snapshot into a different snapshot under the same view.
+- If index construction fails after a handle has been acquired, the view retains that handle in its owned-handle set so shutdown can close it even though no usable index was published.
 - Closing the installation Content View stops new reads, waits for pending opens and active leases, then closes all successfully opened handles.
 - Do not call listFsdbPaths() at Desktop Runtime startup; a known Content databasePath is resolved directly by Core.
 - Do not create a database availability catalog or installation-wide failure state.
@@ -799,6 +818,12 @@ export interface PwaBundleContentEntryV2 {
   readonly namespace: string;
   readonly key: string;
   readonly mime: string;
+  readonly body: Blob;
+}
+
+export interface PwaBundleExecutableEntryV2 {
+  readonly logicalModule: string;
+  readonly mime: "text/javascript" | "application/javascript";
   readonly body: Blob;
 }
 
@@ -925,9 +950,9 @@ This is an intentional breaking migration. The old single-database APIs are not 
 | Missing database path | Open fails | 404 | 404 / CONTENT_NOT_FOUND | 404 / CONTENT_NOT_FOUND |
 | Missing content entry | null lease | 404 | 404 / CONTENT_NOT_FOUND | 404 / CONTENT_NOT_FOUND |
 | Empty database | Opens successfully | Descriptor has no tables/entries | Content read returns not found | Emits no entries; reads return not found |
-| Malformed selected database | That open fails | Invalid-database response | That database request fails; siblings remain usable | Whole Bundle build fails atomically |
-| Duplicate physical candidates | Resolution/discovery fails | Conflict; never choose one | Selected path fails; siblings remain usable | Bundle build fails if discovery is ambiguous |
-| Database becomes stale after open | That handle becomes STALE | Requests to that path fail unavailable | Requests to that path fail unavailable | Installed immutable bytes are unaffected |
+| Malformed selected database | That open fails | 422 | 422 / CONTENT_INVALID for that path; siblings remain usable | Whole Bundle build fails atomically |
+| Duplicate physical candidates | Resolution/discovery fails | 409 | 409 / CONTENT_CONFLICT for that path; siblings remain usable | Bundle build fails if discovery is ambiguous |
+| Database becomes stale after open | That handle becomes STALE | 503 for that path | 503 / CONTENT_UNAVAILABLE for that path | Installed immutable bytes are unaffected |
 | Malformed sibling not selected | Does not affect direct open of valid DB | Does not affect requests to valid DB | Does not affect requests to valid DB | Whole source Bundle build fails because packaging includes all discovered DBs |
 
 The PWA row is intentionally different at build time: a Bundle is one atomic installation artifact. This does not create a runtime dependency between databases or merge their identities.
@@ -1099,10 +1124,14 @@ Game/
 ├── [FSDB]ModData/
 │   └── [STRUCT]Config/
 │       └── common.json
-├── [FSDB]Empty/
-└── [RESOURCE]NotADatabase/
-    └── [FSDB]Something/
-        └── ordinary.txt
+└── [FSDB]Empty/
+
+[FSDB]GameData also contains this RESOURCE table:
+
+~~~text
+[RESOURCE]NotADatabase/
+└── [FSDB]Something/
+    └── ordinary.txt
 ~~~
 
 The fixture MUST prove:
