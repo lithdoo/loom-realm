@@ -8,7 +8,9 @@ Build/test 请使用本 package 与 repository root `package.json` 中现有脚�
 
 ## Generic game installation bundles
 
-A consumer repository owns game-specific packaging (game entry, launch manifest, presentation, executable modules, and FSDB Content). It supplies a versioned JSON payload to the generic PWA builder; the builder does not inspect a game's source tree or know its product identity.
+A consumer repository owns game-specific source packaging. Its Source Packager reads the game FSDB Root, calls `listFsdbPaths`, opens each database with `openFsdb({ root, path })`, and attaches that database's `databasePath` to every content entry. It then supplies one JSON payload to the LoomRealm generic PWA builder.
+
+The generic builder validates that payload, checks `databasePath` and full Content identity uniqueness, computes the bundle ID, and emits install assets. It does not scan a game source directory, discover databases, or call FSDB Core. The installer continues to stage, verify, index, and publish the installation.
 
 The input payload has this shape:
 
@@ -28,6 +30,7 @@ The input payload has this shape:
   ],
   "content": [
     {
+      "databasePath": "GameData/World",
       "kind": "record",
       "namespace": "struct.Map",
       "key": "1",
@@ -48,6 +51,6 @@ npm run build:bundle -w @loomrealm/pwa -- \
   --base-path /pwa/my-game/
 ```
 
-The artifact is written to `apps/pwa/dist/staging/pwa/<app-id>/`. The builder validates the manifests, executable module identities, Content identities and base64 bodies. Its content-addressed bundle ID covers the PWA shell generation and the complete supplied payload, so a content-only game update also creates a new installation identity.
+The artifact is written to `apps/pwa/dist/staging/pwa/<app-id>/`. The builder validates the manifests, executable module identities, `databasePath`, full Content identities (`databasePath + kind + namespace + key`) and base64 bodies. The same local name in two databases is kept. A repeated full identity is rejected. Its content-addressed bundle ID covers the PWA shell generation and the complete supplied payload, so a content-only game update also creates a new installation identity.
 
 The legacy PokeMan staging path remains temporarily available while the PokeMan repository switches to this generic contract.

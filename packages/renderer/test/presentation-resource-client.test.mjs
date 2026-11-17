@@ -12,14 +12,14 @@ test("presentation resource façade maps errors and returns caller-owned bytes",
   const source = new Uint8Array([1, 2, 3]);
   const lifetime = new AbortController();
   const client = createPresentationResourceClient({
-    async resource(namespace, key, expected) {
-      assert.deepEqual([namespace, key, expected], ["images", "icons/a.png", version]);
+    async resource(databasePath, namespace, key, expected) {
+      assert.deepEqual([databasePath, namespace, key, expected], ["content", "images", "icons/a.png", version]);
       return { bytes: source, mime: "image/png", contentVersion: version };
     },
   }, lifetime.signal);
-  const first = await client.resource("images", "icons/a.png", version);
+  const first = await client.resource("content", "images", "icons/a.png", version);
   first.bytes[0] = 9;
-  const second = await client.resource("images", "icons/a.png", version);
+  const second = await client.resource("content", "images", "icons/a.png", version);
   assert.deepEqual([...second.bytes], [1, 2, 3]);
   assert.notEqual(first.bytes, source);
 
@@ -31,8 +31,22 @@ test("presentation resource façade maps errors and returns caller-owned bytes",
     ["cancelled", "CONTENT_CANCELLED"],
   ]) {
     const failing = createPresentationResourceClient({ async resource() { throw new RendererResourceError(internal); } }, lifetime.signal);
-    await assert.rejects(failing.resource("images", "icons/a.png", version), (error) => error.code === external);
+    await assert.rejects(failing.resource("content", "images", "icons/a.png", version), (error) => error.code === external);
   }
+  await assert.rejects(client.resource("GameData/", "images", "icons/a.png", version), (error) => error.code === "CONTENT_INVALID");
+  const seen = [];
+  const permissive = createPresentationResourceClient({
+    async resource(databasePath, namespace, key, expected) {
+      seen.push([databasePath, namespace, key, expected]);
+      return { bytes: source, mime: "image/png", contentVersion: version };
+    },
+  }, lifetime.signal);
+  await permissive.resource("GameData", "CON", "icons/a*.png", version);
+  await permissive.resource("ModData", "CON", "icons/a*.png", version);
+  assert.deepEqual(seen, [
+    ["GameData", "CON", "icons/a*.png", version],
+    ["ModData", "CON", "icons/a*.png", version],
+  ]);
 });
 
 test("presentation resource lifetime and caller cancellation both close reads", async () => {
@@ -40,11 +54,11 @@ test("presentation resource lifetime and caller cancellation both close reads", 
     const lifetime = new AbortController();
     const caller = new AbortController();
     const client = createPresentationResourceClient({
-      resource(namespace, key, expected, signal) {
+      resource(databasePath, namespace, key, expected, signal) {
         return new Promise((resolve, reject) => signal.addEventListener("abort", () => reject(new RendererResourceError("cancelled")), { once: true }));
       },
     }, lifetime.signal);
-    const pending = client.resource("images", "icons/a.png", version, { signal: caller.signal });
+    const pending = client.resource("content", "images", "icons/a.png", version, { signal: caller.signal });
     (owner === "caller" ? caller : lifetime).abort();
     await assert.rejects(pending, (error) => error instanceof PresentationResourceError && error.code === "CONTENT_CANCELLED");
   }
@@ -55,7 +69,7 @@ test("post-teardown well-formed reads cancel before the private client is called
   let calls = 0;
   const client = createPresentationResourceClient({ async resource() { calls += 1; throw new Error(); } }, lifetime.signal);
   lifetime.abort();
-  await assert.rejects(client.resource("images", "icons/a.png", version), (error) => error.code === "CONTENT_CANCELLED");
+  await assert.rejects(client.resource("content", "images", "icons/a.png", version), (error) => error.code === "CONTENT_CANCELLED");
   assert.equal(calls, 0);
 });
 
@@ -65,7 +79,7 @@ test("malformed signal-like input is rejected before the private client is calle
   const client = createPresentationResourceClient({ async resource() { calls += 1; throw new Error(); } }, lifetime.signal);
   const malformed = { aborted: false, addEventListener() {} };
   await assert.rejects(
-    client.resource("images", "icons/a.png", version, { signal: malformed }),
+    client.resource("content", "images", "icons/a.png", version, { signal: malformed }),
     (error) => error instanceof PresentationResourceError && error.code === "CONTENT_INVALID",
   );
   assert.equal(calls, 0);

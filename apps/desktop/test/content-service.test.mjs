@@ -11,12 +11,12 @@ import { createDesktopContentService, prepareDesktopContentView } from "../dist/
 
 const runnerPolicy = Object.freeze({ helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 1_000, terminationGraceMs: 100 });
 
-async function fixture(resourceBytes = Buffer.from([0, 255, 1, 2])) {
+async function fixture(resourceBytes = Buffer.from([0, 255, 1, 2]), { rootMarker = "[FSDB]", structMarker = "[struct]" } = {}) {
   const parent = await mkdtemp(join(tmpdir(), "desktop-content-"));
   const installationRoot = join(parent, "game");
   const subsystems = join(installationRoot, "subsystems");
-  const fsdbRoot = join(installationRoot, "[FSDB]内容");
-  const struct = join(fsdbRoot, "[struct]角色");
+  const fsdbRoot = join(installationRoot, `${rootMarker}内容`);
+  const struct = join(fsdbRoot, `${structMarker}角色`);
   const extend = join(fsdbRoot, "[extend]角色");
   const group = join(fsdbRoot, "[group]队伍");
   const mapStruct = join(fsdbRoot, "[struct]地图");
@@ -78,7 +78,8 @@ function hash(bytes) {
 }
 
 function pathFor(access, suffix) {
-  return new URL(`/_lr/v1/games/${encodeURIComponent(access.installationId)}${suffix}`, access.origin);
+  const routed = suffix === "/manifest" ? suffix : `/databases/${encodeURIComponent("内容")}/$db${suffix}`;
+  return new URL(`/_lr/v1/games/${encodeURIComponent(access.installationId)}${routed}`, access.origin);
 }
 
 function request(access, suffix, init = {}) {
@@ -114,6 +115,10 @@ async function assertProblem(response, status, code) {
       CONTENT_METHOD_NOT_ALLOWED: "Method Not Allowed",
       CONTENT_TOO_LARGE: "Content Too Large",
       INSTALLATION_INCOMPLETE: "Installation Incomplete",
+      DATABASE_UNAVAILABLE: "Database Unavailable",
+      DATABASE_PATH_INVALID: "Invalid Database Path",
+      DATABASE_INVALID: "Invalid Database",
+      DATABASE_PATH_AMBIGUOUS: "Ambiguous Database Path",
       CONTENT_SCHEMA_INVALID: "Content Schema Invalid",
       CONTENT_PRESSURE: "Too Many Requests",
     }[code],
@@ -121,6 +126,19 @@ async function assertProblem(response, status, code) {
     code,
   });
 }
+
+test("prepared content discovery accepts mixed-case FSDB and table markers", async (t) => {
+  const f = await fixture(undefined, { rootMarker: "[fSdB]", structMarker: "[STRUCT]" });
+  t.after(() => f.cleanup());
+  const view = await prepareDesktopContentView(f.prepared);
+  const service = await createDesktopContentService({ view }); t.after(() => service.close());
+  const access = service.access(service.createGrant({
+    permissions: ["records"], expiresAtUnixMs: Date.now() + 60_000,
+  }));
+  const record = await request(access, "/records/struct.%E8%A7%92%E8%89%B2/hero");
+  assert.equal(record.status, 200);
+  assert.deepEqual(await record.json(), { name: "Hero" });
+});
 
 test("prepared view serves deterministic manifest and the complete logical FSDB projection", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
@@ -172,37 +190,37 @@ test("bound Subsystem ContentClient reads records, groups, and resources from th
   const lifetime = new AbortController(); t.after(() => lifetime.abort());
   const content = createBoundContentClient({ origin: access.origin, installationId: access.installationId, token: access.token }, lifetime.signal);
 
-  const hero = await content.record("struct.角色", "hero");
+  const hero = await content.record("内容", "struct.角色", "hero");
   assert.deepEqual(hero.value, { name: "Hero" });
 
-  const party = await content.group("group.队伍", "party");
+  const party = await content.group("内容", "group.队伍", "party");
   const groupBytes = Buffer.from('{"hero":"hero"}\n', "utf8");
   assert.deepEqual(party.rows, [{ hero: "hero" }]);
   assert.equal(party.contentVersion, hash(groupBytes));
 
-  const map = await content.record("struct.地图", "100000000");
+  const map = await content.record("内容", "struct.地图", "100000000");
   assert.deepEqual(map.value, { name: "家", tilesetId: 1 });
   const tileBytes = Buffer.from('{"x":1,"y":1,"tile":14}\n{"x":2,"y":1,"tile":15}\n', "utf8");
-  const tiles = await content.group("group.Tile", "100000000");
+  const tiles = await content.group("内容", "group.Tile", "100000000");
   assert.deepEqual(tiles.rows, [{ x: 1, y: 1, tile: 14 }, { x: 2, y: 1, tile: 15 }]);
   assert.equal(tiles.contentVersion, hash(tileBytes));
-  assert.deepEqual((await content.group("group.Back", "100000000")).rows, [{ x: 1, y: 0, back: 7 }]);
-  assert.deepEqual((await content.group("group.Obj", "100000000")).rows, []);
-  assert.deepEqual((await content.group("group.Portal", "100000000")).rows, [{ x: 3, y: 8, target: "100000001" }]);
-  assert.deepEqual((await content.group("group.Foothold", "100000000")).rows.length, 2);
+  assert.deepEqual((await content.group("内容", "group.Back", "100000000")).rows, [{ x: 1, y: 0, back: 7 }]);
+  assert.deepEqual((await content.group("内容", "group.Obj", "100000000")).rows, []);
+  assert.deepEqual((await content.group("内容", "group.Portal", "100000000")).rows, [{ x: 3, y: 8, target: "100000001" }]);
+  assert.deepEqual((await content.group("内容", "group.Foothold", "100000000")).rows.length, 2);
 
-  const potion = await content.resource("resource.图像", "ui/icons/potion");
+  const potion = await content.resource("内容", "resource.图像", "ui/icons/potion");
   assert.deepEqual([...potion.bytes], [...f.resourceBytes]);
   assert.equal(potion.mime, "image/png");
 
-  await assert.rejects(content.group("group.队伍", "missing"), (error) => error.code === "CONTENT_NOT_FOUND");
+  await assert.rejects(content.group("内容", "group.队伍", "missing"), (error) => error.code === "CONTENT_NOT_FOUND");
   const denied = service.access(service.createGrant({ permissions: ["records"], expiresAtUnixMs: Date.now() + 60_000 }));
   const deniedLifetime = new AbortController(); t.after(() => deniedLifetime.abort());
   const deniedClient = createBoundContentClient({ origin: denied.origin, installationId: denied.installationId, token: denied.token }, deniedLifetime.signal);
-  await assert.rejects(deniedClient.group("group.队伍", "party"), (error) => error.code === "CONTENT_UNAVAILABLE");
+  await assert.rejects(deniedClient.group("内容", "group.队伍", "party"), (error) => error.code === "CONTENT_UNAVAILABLE");
 
   lifetime.abort();
-  await assert.rejects(content.group("group.队伍", "party"), (error) => error.code === "CONTENT_CANCELLED");
+  await assert.rejects(content.group("内容", "group.队伍", "party"), (error) => error.code === "CONTENT_CANCELLED");
 });
 
 test("trusted shell mints a document lifetime only for a real GET navigation", async (t) => {
@@ -291,8 +309,12 @@ test("deployment limits and source drift map to bounded Content failures", async
   const driftView = await prepareDesktopContentView(drift.prepared);
   const service = await createDesktopContentService({ view: driftView }); t.after(() => service.close());
   const access = service.access(service.createGrant({ permissions: ["records"], expiresAtUnixMs: Date.now() + 60_000 }));
+  const original = await request(access, "/records/struct.%E8%A7%92%E8%89%B2/hero");
+  assert.equal(original.status, 200);
+  await original.arrayBuffer();
   await writeFile(join(drift.struct, "hero.json"), '{"changed":true}');
-  await assertProblem(await request(access, "/records/struct.%E8%A7%92%E8%89%B2/hero"), 409, "INSTALLATION_INCOMPLETE");
+  await assertProblem(await request(access, "/records/struct.%E8%A7%92%E8%89%B2/hero"), 503, "DATABASE_UNAVAILABLE");
+  await assertProblem(await request(access, "/records/struct.%E8%A7%92%E8%89%B2/hero"), 503, "DATABASE_UNAVAILABLE");
 });
 
 test("bounded concurrent admission reports 429 without corrupting the admitted read", async (t) => {

@@ -1,3 +1,4 @@
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 import {
   RendererResourceError,
   type RendererResourceClient,
@@ -27,6 +28,7 @@ export interface PresentationResource {
 
 export interface PresentationResourceClient {
   resource(
+    databasePath: string,
     namespace: string,
     key: string,
     expectedContentVersion: string,
@@ -74,10 +76,11 @@ function validSignal(value: unknown): value is AbortSignal {
 }
 
 function validSegment(value: unknown, hierarchy: boolean): value is string {
-  return typeof value === "string" && value.length > 0 && value !== "." && value !== ".." &&
-    !/[\\\0]|\p{Cc}|\p{Cs}/u.test(value) && (hierarchy || !value.includes("/")) && !value.startsWith("/") && !value.endsWith("/") &&
-    !value.split("/").some((part) => part.length === 0 || part === "." || part === "..") &&
-    !/^[A-Za-z]:/.test(value) && !value.startsWith("\\\\") && !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value);
+  if (typeof value !== "string" || value.length === 0 || value.startsWith("/") || value.endsWith("/") || (!hierarchy && value.includes("/"))) return false;
+  return value.split("/").every((part) => {
+    try { contentLogicalSegment(part); return true; }
+    catch { return false; }
+  });
 }
 
 export function createPresentationResourceClient(
@@ -88,7 +91,10 @@ export function createPresentationResourceClient(
     throw new TypeError("Invalid presentation resource binding");
   }
   return Object.freeze({
-    async resource(namespace: string, key: string, expectedContentVersion: string, options?: { readonly signal?: AbortSignal }) {
+    async resource(databasePath: string, namespace: string, key: string, expectedContentVersion: string, options?: { readonly signal?: AbortSignal }) {
+      let canonicalPath: string;
+      try { canonicalPath = canonicalDatabasePath(databasePath); }
+      catch { throw new PresentationResourceError("CONTENT_INVALID"); }
       if (!validSegment(namespace, false) || !validSegment(key, true) || !VERSION.test(expectedContentVersion)) {
         throw new PresentationResourceError("CONTENT_INVALID");
       }
@@ -100,7 +106,7 @@ export function createPresentationResourceClient(
       if (lifetimeSignal.aborted || options?.signal?.aborted) throw new PresentationResourceError("CONTENT_CANCELLED");
       const combined = abortSignal(options?.signal, lifetimeSignal);
       try {
-        const resource = await client.resource(namespace, key, expectedContentVersion, combined.signal);
+        const resource = await client.resource(canonicalPath, namespace, key, expectedContentVersion, combined.signal);
         return Object.freeze({
           bytes: new Uint8Array(resource.bytes),
           mime: resource.mime,

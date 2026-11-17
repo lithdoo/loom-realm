@@ -13,7 +13,7 @@ const fixture = () => ({
     source: "export default () => ({ async frame() { return { type: 'completed' }; } });",
     contentVersion: "sha256:demo",
   }],
-  content: [{ kind: "record", namespace: "struct.demo", key: "config", mime: "application/json", encoding: "base64", body: "eyJvayI6dHJ1ZX0=" }],
+  content: [{ databasePath: "Demo", kind: "record", namespace: "struct.demo", key: "config", mime: "application/json", encoding: "base64", body: "eyJvayI6dHJ1ZX0=" }],
 });
 
 test("PWA bundle identity is deterministic and incorporates the shell generation", () => {

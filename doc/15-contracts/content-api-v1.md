@@ -1,10 +1,12 @@
 # 只读 Content API v1
 
+> **Current in-place evolution:** this existing Content API contract is being extended before external release to address multiple independent FSDBs per installation. Keep the `/_lr/v1` route namespace and update these routes and identities directly; do not create a parallel protocol version or compatibility adapter. The cross-layer architecture is documented in [FSDB Nested and Multi-Database Architecture](../20-modules/fsdb-content-service/fsdb-nested-databases.md).
+
 > 层级：正式契约  
 > 状态：Active / Normative / Evolving  
 > 主要定义：跨 Desktop/PWA 的逻辑只读内容访问、路由、缓存、错误、完整性与 request authorization semantics  
-> 依赖：[存储与内容系统](../10-architecture/storage-system.md)、[Game Package v1](./game-package-v1.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
-> 最近复核：2026-09-08
+> 依赖：[存储与内容系统](../10-architecture/storage-system.md)、[FSDB 目录结构](../20-modules/fsdb-content-service/fsdb-layout.md)、[Game Package v1](./game-package-v1.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
+> 最近复核：2026-11-16
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
@@ -64,18 +66,35 @@ ordinary business payload
 ## 2. Logical Identity
 
 ```ts
-interface ContentIdentityV1 {
-  readonly installationId: string;
-  readonly kind: "manifest" | "record" | "group" | "resource";
-  readonly namespace?: string;
-  readonly key?: string;
-  readonly contentVersion?: string;
-}
+type ContentIdentityV1 =
+  | {
+      readonly installationId: string;
+      readonly kind: "manifest";
+      readonly contentVersion?: string;
+    }
+  | {
+      readonly installationId: string;
+      readonly kind: "record" | "group" | "resource";
+      readonly databasePath: string;
+      readonly namespace: string;
+      readonly key: string;
+      readonly contentVersion?: string;
+    };
 ```
 
 `installationId` 标识已验证/登记安装实例，不等于 physical directory。
 
-`namespace/key` 是 logical identity，MUST NOT 直接解释成 filesystem path。
+对 record/group/resource，完整 logical identity 为：
+
+```text
+installationId + databasePath + kind + namespace + key
+```
+
+Manifest 是 installation-level identity，不带 databasePath。
+
+`databasePath` 是相对于安装 Container Root 的逻辑 FSDB 路径，由一个或多个 NameSegment 组成，使用 `/` 分隔，不包含物理 `[FSDB]` 标记。每个 segment 使用 FSDB NameSegment 的 NFC、大小写敏感和保留字符规则；不得有空 segment、前导/尾随斜杠、重复斜杠、`.` 或 `..`。`databasePath` MUST NOT 被直接解释成 filesystem path。
+
+`namespace/key` 是 database-local logical identity，MUST NOT 直接解释成 filesystem path。相同 namespace/key 可以在不同 databasePath 下独立存在。
 
 Base route：
 
@@ -96,7 +115,9 @@ contain no NUL/control chars
 contain no Drive/UNC/URL semantics
 ```
 
-`installationId`、`namespace`、record/group `key` 都是单个 logical segment。
+`installationId`、`namespace`、record/group `key` 都是单个 logical segment。`databasePath` 是多个独立 NameSegment 组成的逻辑路径；每段单独 percent-encode/decode，`/` 只作为段分隔符。
+
+在 record/group/resource 路由中，`databases` 是固定字面 segment，紧随其后的一个或多个 path segment 是 databasePath；原始 URL 中的字面 `$db` segment 终止 databasePath。服务端必须先按原始 `/` 拆分路径并识别字面 `$db`，再对普通 segment 逐段 percent-decode 一次。编码形式 `%24db` 不是 delimiter。解码后包含 `/` 或 `\\` 的单个 segment 必须拒绝，不能借 percent-decoding 制造层级。
 
 Resource `key` MAY 是 hierarchical logical key：
 
@@ -126,8 +147,8 @@ HEAD /_lr/v1/games/{installationId}/manifest
 ### Record
 
 ```http
-GET  /_lr/v1/games/{installationId}/records/{namespace}/{key}
-HEAD /_lr/v1/games/{installationId}/records/{namespace}/{key}
+GET  /_lr/v1/games/{installationId}/databases/{databasePathSegments}/$db/records/{namespace}/{key}
+HEAD /_lr/v1/games/{installationId}/databases/{databasePathSegments}/$db/records/{namespace}/{key}
 ```
 
 `key` 是单个 logical segment。
@@ -141,8 +162,8 @@ Content-Type: application/json; charset=utf-8
 ### Group
 
 ```http
-GET  /_lr/v1/games/{installationId}/groups/{namespace}/{key}
-HEAD /_lr/v1/games/{installationId}/groups/{namespace}/{key}
+GET  /_lr/v1/games/{installationId}/databases/{databasePathSegments}/$db/groups/{namespace}/{key}
+HEAD /_lr/v1/games/{installationId}/databases/{databasePathSegments}/$db/groups/{namespace}/{key}
 ```
 
 `key` 是单个 logical segment。
@@ -158,13 +179,20 @@ Content-Type: application/x-ndjson; charset=utf-8
 ### Resource
 
 ```http
-GET  /_lr/v1/games/{installationId}/resources/{namespace}/{key...}
-HEAD /_lr/v1/games/{installationId}/resources/{namespace}/{key...}
+GET  /_lr/v1/games/{installationId}/databases/{databasePathSegments}/$db/resources/{namespace}/{key...}
+HEAD /_lr/v1/games/{installationId}/databases/{databasePathSegments}/$db/resources/{namespace}/{key...}
 ```
 
 `{key...}` 是一个或多个 resource path segments。服务端逐 segment decode/validate 后，以 `/` 连接成 logical ResourceKey；不得把原始 request path 直接交给 filesystem resolver。
 
 返回 Package Index 声明的 MIME + binary body；普通资源不得 Base64 包入 JSON。
+
+### 3.1 Database addressing boundary
+
+- 每个 record/group/resource request MUST 显式包含 databasePath；不得选择默认数据库或首个发现的数据库。
+- 当前协议不提供数据库列表/catalog route，也不提供 ContentClient 数据库枚举方法。
+- 空数据库与不存在的数据库无法通过 Content catalog 区分；对不存在的 entry，两者均返回 `404 CONTENT_NOT_FOUND`。
+- 父、子、兄弟数据库相互独立；Content lookup 不得跨 databasePath fallback。
 
 ---
 
@@ -174,6 +202,7 @@ Content Service 使用 trusted/validated Package Index：
 
 ```ts
 interface ContentIndexEntryV1 {
+  readonly databasePath: string;
   readonly kind: "record" | "group" | "resource";
   readonly namespace: string;
   readonly key: string;
@@ -282,7 +311,7 @@ HEAD/304 使用对应 full-body 200 representation 的同一 `contentVersion`，
 client cache identity 至少包含：
 
 ```text
-installationId + kind + namespace + key + contentVersion
+installationId + databasePath + kind + namespace + key + contentVersion
 ```
 
 不同 `contentVersion` 不得共享错误 bytes。
@@ -428,13 +457,13 @@ Allow: GET, HEAD
     authenticated but insufficient scope / forbidden origin
 
 404 Not Found
-    installation / namespace / key / indexed body not found
+    installation / databasePath / namespace / key / indexed body not found
 
 405 Method Not Allowed
     method other than GET/HEAD
 
 409 Conflict
-    installation/version/index state conflict
+    ambiguous databasePath resolution or installation/version/index state conflict
 
 413 Content Too Large
     deployment hard limit exceeded
@@ -443,10 +472,13 @@ Allow: GET, HEAD
     invalid/unsatisfiable supported Range request
 
 422 Unprocessable Content
-    selected body exists but schema/integrity invalid
+    selected database/body exists but FSDB validation, schema, or integrity is invalid
 
 429 Too Many Requests
     deployment concurrency/rate policy exceeded
+
+503 Service Unavailable
+    selected database is stale or temporarily unavailable
 
 500 Internal Server Error
     unexpected service failure
@@ -455,8 +487,8 @@ Allow: GET, HEAD
 固定分类：
 
 ```text
-state/version/index conflict → 409
-body schema/integrity failure → 422
+ambiguous databasePath / state/version/index conflict → 409
+FSDB validation / body schema/integrity failure → 422
 ```
 
 同一失败事实不得自由选择 409/422。
@@ -477,6 +509,7 @@ interface ContentProblemV1 {
   readonly code: string;
   readonly detail?: string;
   readonly installationId?: string;
+  readonly databasePath?: string;
   readonly namespace?: string;
   readonly key?: string;
 }
@@ -486,6 +519,10 @@ Stable codes 至少：
 
 ```text
 INSTALLATION_NOT_FOUND              404
+DATABASE_PATH_INVALID               400
+DATABASE_PATH_AMBIGUOUS             409
+DATABASE_INVALID                    422
+DATABASE_UNAVAILABLE                503
 INSTALLATION_INCOMPLETE             409
 CONTENT_NOT_FOUND                   404
 CONTENT_VERSION_MISMATCH            409
@@ -554,7 +591,7 @@ Content `contentVersion` 的 SHA-256 可以与 Package Index integrity hash 共�
 
 ## 14. Resource Reference Boundary
 
-业务/Render data只携 logical resource reference，例如：
+业务/Render data 里的 `ResourceReferenceV1` 是当前作用域内的局部引用，不是完整 Content identity：
 
 ```ts
 interface ResourceReferenceV1 {
@@ -563,9 +600,11 @@ interface ResourceReferenceV1 {
 }
 ```
 
-`resourceKey` MAY 是 `/` 分隔的 hierarchical logical ResourceKey；它不是 filesystem path。
+`resourceKey` MAY 是 `/` 分隔的 hierarchical logical ResourceKey；它不是 filesystem path，也不得把 databasePath 编码进 resourceKey 或 namespace。`contentVersion` 只校验响应字节，不是数据库标识。
 
-具体 Renderer Resource Client再根据 installation/namespace context 解析 Content API。
+真正读取 Content 时，调用方必须另外持有显式 databasePath。该路径来自已经声明的安装/数据库作用域，例如 Web Presentation 的 `WebPresentationResourceRefV1`（`databasePath` + `namespace` + `key`）。不得因为本引用没有 databasePath 就选择第一个数据库或默认数据库。
+
+Renderer-private Resource Client 仍是唯一被授权读取 Content 的 Renderer 边界。它按显式 databasePath、namespace 和 key 解析，不向业务暴露 bearer、FSDB handle、物理路径或特权 URL。
 
 不得在 Render/Frame/business payload中携带：
 
@@ -573,7 +612,9 @@ interface ResourceReferenceV1 {
 Content token
 absolute Content URL
 local filesystem path
+FSDB handle
 resource bytes
+databasePath disguised as a namespace or resourceKey
 ```
 
 Resource identity 不绑定 Frame/Activation。
@@ -605,6 +646,9 @@ Service Worker 不承担 Runtime Tick、Frame Stack、Renderer Control、User In
 
 ```text
 manifest/record/group/resource success
+same namespace/key independently addressable in two databasePath values
+missing/invalid/ambiguous databasePath status mapping
+nested databasePath route parsing and per-segment percent round-trip
 single-segment record/group identity
 multi-segment resource identity
 segment-level traversal/malformed rejection
@@ -632,7 +676,7 @@ Conformance 不检查 Host 使用何种内部机制把 Desktop grant交给 Runti
 ## 17. Final Invariants
 
 1. Content API 是 logical readonly GET/HEAD API；
-2. logical identity 不直接映射 filesystem path；
+2. record/group/resource logical identity 包含 databasePath，且不直接映射 filesystem path；
 3. record/group key 是单 segment，resource key 可由多个 validated logical segments组成；
 4. Desktop/PWA共享 route/cache/error/integrity semantics；
 5. `contentVersion` 精确为 `sha256:<64 lowercase hex>`，基于 exact successful full-body representation bytes；

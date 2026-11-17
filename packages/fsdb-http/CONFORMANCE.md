@@ -1,10 +1,10 @@
-# @loomrealm/fsdb-http v1 Conformance
+# @loomrealm/fsdb-http /fsdb/v1 Conformance
 
-> 状态：**Implemented / Release Candidate — v1**
+> 状态：**Active / Normative / Pre-release / Evolving**
 > Contract：[DESIGN.md](./DESIGN.md)  
-> FSDB authority：[FSDB 目录结构详解](../../doc/fsdb/FSDB目录结构详解.md)
+> FSDB authority：[FSDB 目录结构详解](../../doc/20-modules/fsdb-content-service/fsdb-layout.md)
 
-本文定义 `@loomrealm/fsdb-http` v1 mandatory conformance cases。测试 runner、fixture layout、内部 helper 可以自由选择，但实现必须证明本文列出的 observable behavior 与 safety invariants。
+本文定义当前 `@loomrealm/fsdb-http` mandatory conformance cases。项目尚未对外发布；新增的多数据库行为直接纳入当前 `/fsdb/v1` contract，不建立平行版本。测试 runner、fixture layout、内部 helper 可以自由选择，但实现必须证明本文列出的 observable behavior 与 safety invariants。
 
 ---
 
@@ -14,6 +14,7 @@ Mandatory：
 
 ```text
 public API / ownership
+Container Root / databasePath resolution / recursive discovery
 FSDB authority inheritance
 root / physical object classification
 logical identity / Unicode
@@ -82,7 +83,7 @@ client-abort large resource
 合法 NFC Unicode `DatabaseName` / `TableName` / `Key` MUST 成功 open，例如：
 
 ```text
-[FSDB]游戏数据/[struct]角色/皮卡丘.json
+[FSDB]游戏数据/[STRUCT]角色/皮卡丘.json
 ```
 
 ### FDB-002 — physical spelling canonicalizes to NFC
@@ -100,8 +101,8 @@ client-abort large resource
 ### FDB-005 — TableIdentity includes kind
 
 ```text
-[struct]角色
-[resource]角色
+[STRUCT]角色
+[RESOURCE]角色
 ```
 
 MUST 可以共存；同一 `(TableKind, TableName)` duplicate MUST fail open。
@@ -109,7 +110,7 @@ MUST 可以共存；同一 `(TableKind, TableName)` duplicate MUST fail open。
 ### FDB-006 — hierarchical ResourceKey
 
 ```text
-[resource]图片/关都地区/真新镇.png
+[RESOURCE]图片/关都地区/真新镇.png
 ```
 
 MUST index 为：
@@ -147,6 +148,51 @@ Resource 即使 extension 为 `txt/json/html`，scanner 不得因为内容不是
 
 不属于 recognized candidate 的辅助对象 MUST NOT 被 index/serve。
 
+### FDB-013 — physical directory type marker is ASCII case-insensitive
+
+FSDB root 和四类表目录的方括号内类型标记 MUST 接受任意 ASCII 大小写组合。大小写不同的相同标记归一化为同一 logical kind；`TableName` / `DatabaseName` 不因此改变大小写。由此产生的同一 `TableIdentity` 重复定义 MUST fail open。已存在的小写目录必须继续兼容；新 Writer SHOULD 输出全大写。FSDB HTTP v1 路由中的 `struct` / `extend` / `group` / `resource` 保持原有小写协议形式。
+
+### FDB-014 — nested database discovery is recursive and database-root scoped
+
+Given:
+
+```text
+Container/
+├── [FSDB]GameData/
+│   ├── [STRUCT]Config/
+│   ├── [FSDB]World/
+│   │   └── [STRUCT]Map/
+│   └── [RESOURCE]Assets/
+│       └── [FSDB]NotADatabase/
+└── [FSDB]ModData/
+```
+
+`listFsdbPaths({ root })` MUST return exactly `GameData`, `GameData/World`, and `ModData`, in deterministic canonical path order. It MUST NOT discover `[FSDB]NotADatabase` beneath RESOURCE.
+
+### FDB-015 — explicit path opens exactly one database
+
+`openFsdb({ root, path: "GameData/World" })` MUST open only `[FSDB]GameData/[FSDB]World`. It MUST NOT scan or validate parent `GameData`, sibling databases, or other top-level databases.
+
+### FDB-016 — databasePath validation
+
+Empty path, leading/trailing/repeated slash, `.`, `..`, backslash, absolute path, non-NFC invalid segment, and invalid NameSegment MUST fail before filesystem traversal. Each valid segment is NFC canonicalized and remains case-sensitive.
+
+### FDB-017 — duplicate physical database candidates fail closed
+
+Two direct child directories whose type markers differ only in ASCII case but whose DatabaseName canonicalizes to the same logical name MUST make resolution/discovery fail. The implementation MUST NOT choose one arbitrarily.
+
+### FDB-018 — database directory indirection rejected
+
+A selected or discovered `[FSDB]` directory that is a symlink/junction MUST fail resolution/discovery; it MUST NOT be followed.
+
+### FDB-019 — discovery does not scan table contents
+
+`listFsdbPaths({ root })` MUST discover physical database boundaries without parsing table metadata or record/resource bodies. A malformed table body does not prevent path discovery; opening that database may fail independently.
+
+### FDB-020 — opening a parent does not open child databases
+
+`openFsdb({ root, path: "GameData" })` MUST scan only GameData's own tables and MUST NOT scan/validate `GameData/World` or any other child database. The child is only a direct child directory entry at the parent boundary.
+
 ---
 
 ## 4. Root / Physical Safety
@@ -155,13 +201,17 @@ Resource 即使 extension 为 `txt/json/html`，scanner 不得因为内容不是
 
 relative `root` MUST 相对 `openFsdb()` 调用时 `process.cwd()` resolve；随后改变 cwd 不得改变已打开 instance 的 source root。
 
-### ROOT-002 — root indirection may resolve once
+### ROOT-002 — Container Root indirection may resolve once
 
-调用方 path 通过 symlink/junction 指向实际 FSDB root 时，允许 resolve 到实际 root 并 open；logical DatabaseName 取实际 FSDB root directory identity。
+调用方传入的 Container Root 通过 symlink/junction 指向实际目录时，允许 resolve 到 canonical Container Root。其下被选中的 `[FSDB]` database directories 不得是 symlink/junction。
 
-### ROOT-003 — root name validation
+### ROOT-003 — container root is not itself an FSDB
 
-解析后的实际 root directory 名称不满足 `[FSDB]<DatabaseName>` → open fail。
+Container Root 只需是可 canonicalize 的实际 directory；它的 basename 不要求 `[FSDB]<DatabaseName>`。
+
+### ROOT-004 — databasePath resolves segment by segment
+
+每个 databasePath segment MUST 在当前容器/数据库目录的直接子目录中解析为 `[FSDB]<DatabaseName>`。中间 segment 缺失、非目录、重复候选或超出 canonical Root → fail closed。
 
 ### SAFE-001 — recognized descendant symlink rejected
 
@@ -198,17 +248,23 @@ stream (GET)
 
 ---
 
-## 5. Frozen Public API / Ownership
+## 5. Current Public API / Ownership
 
 ### API-001 — exports
 
 MUST export：
 
 ```text
-openFsdb
-createFsdbHttpHandler
-serveFsdb
-以及 DESIGN 冻结 public types
+@loomrealm/fsdb:
+  openFsdb
+  listFsdbPaths
+  FsdbDatabase / OpenFsdbOptions / related Core types
+
+@loomrealm/fsdb-http:
+  openFsdb (existing re-export)
+  createFsdbHttpHandler
+  serveFsdb
+  FsdbHttpService / ServeFsdbOptions
 ```
 
 ### API-002 — FsdbDatabase is opaque
@@ -223,22 +279,24 @@ TypeScript consumer 不应能仅通过 structural look-alike 合法构造 `FsdbD
 
 关闭 `createServer(createFsdbHttpHandler(db))` 的 server MUST NOT 自动 close caller-owned `db`。
 
-### API-005 — service owns internal database/server
+### API-005 — Root service owns lazy database handles and Server
 
-`serveFsdb()` public service shape MUST NOT 暴露可绕过 lifecycle owner 的 `db` field；service owns 内部 database + server。
+`serveFsdb()` public service shape MUST NOT 暴露可绕过 lifecycle owner 的 `db` field；service owns one Container Root, one Server, and every database handle it lazily opens. Service startup MUST NOT enumerate/open all databases.
 
 ### API-006 — startup failure cleanup
 
-使 listen/startup 失败后，`serveFsdb()` MUST reject 且不得泄漏已创建 database/server resources。
+使 listen/startup 失败后，`serveFsdb()` MUST reject 且不得泄漏已创建 Server/database resources。
 
 ### API-007 — service close
 
 `service.close()` MUST 幂等，并：
 
 ```text
-block new reads/connections
-allow admitted responses to drain
-close owned resources
+stop new requests/connections
+await active handlers and admitted reads
+await admitted database-opening Promises
+close every successfully opened database handle
+close owned Server
 resolve
 ```
 
@@ -256,6 +314,22 @@ port = 0
 ```
 
 wildcard bind 必须给出 concrete bound port/address，但不得暴露 wildcard 为唯一 client `origin`。
+
+### API-010 — service opens databases lazily
+
+`serveFsdb({ root })` 启动时只 canonicalize Container Root；不得调用 `listFsdbPaths()`、遍历所有数据库或预先打开数据库。只有一个合法数据库路由请求才触发该 databasePath 的 open。
+
+### API-011 — concurrent first request is single-flight
+
+同一 canonical databasePath 的并发首次请求 MUST 共用一个 open Promise 和一个 FsdbDatabase handle；不同 databasePath 独立打开。
+
+### API-012 — failed open can retry
+
+数据库 open 失败时，其 rejected Promise MUST 从 cache 移除；后续请求可以重新尝试。成功打开的 handle 不得因 index/entry missing 而被无条件替换。
+
+### API-013 — stale handle is not silently replaced
+
+已缓存数据库进入 STALE 后，对该 path 的后续请求 MUST 返回 unavailable；不得自动 close/reopen 并切换到新 snapshot。
 
 ---
 
@@ -291,9 +365,29 @@ no response body
 
 caller-composed `createServer(createFsdbHttpHandler(db))` 的 server-level `connect` policy 不属于 borrowed handler ownership。
 
-### HTTP-002 — descriptor
+### HTTP-002 — single-handle descriptor
 
-`GET /fsdb/v1` → `200`。
+`createFsdbHttpHandler(db)` + `GET /fsdb/v1` → `200`。
+
+### HTTP-015 — Root-scoped descriptor
+
+`serveFsdb({ root })` + `GET /fsdb/v1/GameData/$db` → `200` and the descriptor for exactly `GameData`.
+
+### HTTP-016 — Root-scoped nested database route
+
+`GET /fsdb/v1/GameData/World/$db/struct/Map/town` MUST read the entry from `GameData/World`, not the parent or sibling database.
+
+### HTTP-017 — Root-scoped route has no default database
+
+`GET /fsdb/v1` against the Root-scoped service MUST NOT select the first discovered database; it returns not found.
+
+### HTTP-018 — databasePath delimiter is literal and unique
+
+The raw `$db` path segment terminates databasePath exactly once. `%24db` is not a delimiter; encoded slash cannot create a path segment; missing, duplicate, or misplaced delimiter → `400`.
+
+### HTTP-019 — same local identity in different databases
+
+The same `(kind, table, key)` in `GameData` and `ModData` MUST return their respective bytes through their explicit database paths.
 
 ### HTTP-003 — deterministic descriptor bytes
 
@@ -391,6 +485,22 @@ Allow: GET, HEAD
 ### STATUS-007 — HEAD no body
 
 所有 HEAD success/error/conditional response MUST 无 body。
+
+---
+
+### STATUS-008 — database resolution failure mapping
+
+For the Root-scoped service:
+
+```text
+invalid databasePath / malformed route → 400
+missing databasePath / database / object → 404
+duplicate physical candidate / ambiguous path → 409
+selected database fails Well-formed validation → 422
+selected opened database becomes STALE → 503
+```
+
+A malformed or stale database MUST NOT be silently skipped in favor of another database.
 
 ---
 
@@ -617,4 +727,4 @@ serveFsdb standalone smoke PASS
 package build/test PASS
 ```
 
-若失败说明 Frozen contract 本身不可实现、互相矛盾或造成真实 interoperability/security 问题，必须按 DESIGN frozen change rule 处理，不得通过 test special-case 隐藏合同问题。
+若失败说明当前 contract 本身不可实现、互相矛盾或造成真实 interoperability/security 问题，直接更新 DESIGN.md、CONFORMANCE.md 与实现；项目尚未发布，不得以 frozen-version 规则阻止必要的协议原地修订，也不得通过 test special-case 隐藏合同问题。

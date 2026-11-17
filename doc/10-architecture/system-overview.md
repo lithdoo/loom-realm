@@ -126,7 +126,7 @@ DOM/Web Component 私有状态不得 reverse-sync Renderer Store，更不得成�
 
 ## 5. Content
 
-Content 是 installation-scoped readonly definition authority。业务通过 `ContentClient` 消费 logical record/resource；Runtime 不依赖 importer、filesystem path、FSDB transport、Marshal 或 acquisition mechanics。
+Content 是 installation-scoped readonly definition authority。业务通过 `ContentClient` 消费带逻辑 `databasePath` 的 record、group、resource；Runtime 不依赖 importer、filesystem path、FSDB transport、Marshal 或 acquisition mechanics。
 
 Desktop 可使用 FSDB-backed physical service；PWA 可使用 same-origin Service Worker/OPFS realization。两者只要满足 [Content API v1](../15-contracts/content-api-v1.md)，就不需要共享物理实现。
 

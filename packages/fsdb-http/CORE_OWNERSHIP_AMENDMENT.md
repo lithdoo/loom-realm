@@ -1,10 +1,10 @@
 # @loomrealm/fsdb-http — Core Ownership Amendment
 
-> Status: **Frozen Contract Amendment**  
+> Status: **Historical ownership amendment / current package-boundary reference**  
 > Historical origin: Content/core extraction work later known by the M12 delivery label  
 > Current provenance: [ADR 0030](../../doc/decisions/0030-freeze-m12-content-preimplementation-closure.md)
 
-本 amendment 只修订 `@loomrealm/fsdb-http` v1 原冻结合同中与 **package dependency / FSDB core ownership / valid database-handle producer** 有关的条款。其余 `DESIGN.md` 与 `CONFORMANCE.md` public API、HTTP observable behavior、安全不变量、lifecycle 和 conformance 要求继续有效。
+本 amendment 记录 `@loomrealm/fsdb-http` 的 **package dependency / FSDB core ownership / valid database-handle producer** 边界。它不是 HTTP 协议冻结声明，也不限制项目在正式发布前原地调整 public API 或 route semantics。当前 HTTP observable behavior、Root-scoped database routes、lifecycle 和 conformance 以持续演进的 `DESIGN.md` 与 `CONFORMANCE.md` 为准。
 
 ## Dependency and ownership
 
@@ -22,10 +22,10 @@ Node.js stdlib
 
 ## Opaque handle
 
-唯一 valid runtime producer 是 `@loomrealm/fsdb.openFsdb()`；`@loomrealm/fsdb-http.openFsdb()` 是 source-compatible re-export/projection。Structural look-alike remains invalid。
+唯一 valid runtime producer 是 `@loomrealm/fsdb.openFsdb()`；`@loomrealm/fsdb-http.openFsdb()` 是该 Core function 的直接 re-export，其 options signature 始终跟随 Core 当前合同（Container Root + required databasePath）。Structural look-alike remains invalid。
 
 ## Compatibility
 
 `@loomrealm/fsdb-http` root public surface保持：`openFsdb`、`createFsdbHttpHandler`、`serveFsdb`、`FsdbDatabase`、`FsdbDatabaseState`、`OpenFsdbOptions`、`ServeFsdbOptions`、`FsdbHttpService`。Core-only describe/list/open-object/lease capabilities 不从 HTTP package root re-export。
 
-该 amendment 不授权 generic repository/storage provider/query framework/transaction/watch system，也不改变 FSDB HTTP observable contract。
+该 amendment 不授权 generic repository/storage provider/query framework/transaction/watch system。它只记录 package ownership；FSDB HTTP 当前 observable contract 由 DESIGN.md / CONFORMANCE.md 定义并在发布前原地演进。

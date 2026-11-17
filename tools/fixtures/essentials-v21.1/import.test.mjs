@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { serveFsdb } from "../../../packages/fsdb-http/dist/index.js";
 import { ImportFailure, parseArguments, run, validateArchivePath } from "./import.mjs";
@@ -52,16 +52,17 @@ test("local directory import is byte-preserving and never overwrites", async (t)
   const second = await run(["--source", source, "--output", output]);
   assert.equal(first, join(output, "[FSDB]Essentials v21.1"));
   assert.equal(second, join(output, "[FSDB]Essentials v21.1 2"));
-  assert.deepEqual(await readFile(join(first, "[resource]Graphics", "nested", "sample.bin")), Buffer.from("Graphics\0fixture"));
-  assert.deepEqual(await readFile(join(second, "[resource]Graphics", "nested", "sample.bin")), Buffer.from("Graphics\0fixture"));
-  assert.equal(await readFile(join(first, "[resource]Graphics", "café", "ré.bin"), "utf8"), "NFC target");
-  assert.equal(await readFile(join(first, "[resource]Plugins", "sample.rb"), "utf8"), "plugin bytes");
-  const provenance = JSON.parse(await readFile(join(first, "[struct]测试信息", "来源.json"), "utf8"));
+  assert.deepEqual(await readFile(join(first, "[RESOURCE]Graphics", "nested", "sample.bin")), Buffer.from("Graphics\0fixture"));
+  assert.deepEqual(await readFile(join(second, "[RESOURCE]Graphics", "nested", "sample.bin")), Buffer.from("Graphics\0fixture"));
+  assert.equal(await readFile(join(first, "[RESOURCE]Graphics", "café", "ré.bin"), "utf8"), "NFC target");
+  assert.equal(await readFile(join(first, "[RESOURCE]Plugins", "sample.rb"), "utf8"), "plugin bytes");
+  const provenance = JSON.parse(await readFile(join(first, "[STRUCT]测试信息", "来源.json"), "utf8"));
   assert.equal(provenance.acquisition, "local-directory");
 
-  const service = await serveFsdb({ root: first, host: "127.0.0.1", port: 0 });
+  const logicalName = basename(first).slice("[FSDB]".length);
+  const service = await serveFsdb({ root: dirname(first), host: "127.0.0.1", port: 0 });
   t.after(() => service.close());
-  const endpoint = new URL("/fsdb/v1/resource/Graphics/nested/sample", service.origin);
+  const endpoint = new URL(`/fsdb/v1/${encodeURIComponent(logicalName)}/$db/resource/Graphics/nested/sample`, service.origin);
   const get = await fetch(endpoint);
   assert.equal(get.status, 200);
   assert.equal(Number(get.headers.get("content-length")), 16);

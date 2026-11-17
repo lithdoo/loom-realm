@@ -1,4 +1,5 @@
 export interface PwaBundleContentEntryV1 {
+  readonly databasePath: string;
   readonly kind: "record" | "group" | "resource";
   readonly namespace: string;
   readonly key: string;
@@ -32,7 +33,7 @@ export default (scope) => ({
     const sessionEvent = await sessionEventReceived;
     sessionEventSubscription.close();
     const sessionEventClosed = await sessionEventSubscription.closed;
-    const content = await scope.content.record("struct.demo", "config");
+    const content = await scope.content.record("Demo", "struct.demo", "config");
     const key = { namespace: "demo", key: "visits" };
     const snapshot = await scope.state.read([key]);
     const current = snapshot.records[0];
@@ -100,7 +101,7 @@ export default (scope) => ({
 
 export const DEMO_PRESENTATION = Object.freeze({
   formatVersion: 1,
-  scripts: Object.freeze([{ namespace: "Presentation", key: "controls/device-input.browser.js" }]),
+  scripts: Object.freeze([{ databasePath: "Demo", namespace: "Presentation", key: "controls/device-input.browser.js" }]),
   styles: Object.freeze([]),
 });
 
@@ -118,11 +119,11 @@ export function createDemoInstallationBundle(): PwaInstallationBundleV1 {
       subsystems: [{ key: "demo", module: "subsystems/demo.mjs" }],
     }),
     content: Object.freeze([
-      Object.freeze({ kind: "record", namespace: "struct.demo", key: "config", mime: "application/json; charset=utf-8", body: new Blob([JSON.stringify({ message: "ready" })], { type: "application/json; charset=utf-8" }) }),
-      Object.freeze({ kind: "group", namespace: "group.demo", key: "items", mime: "application/x-ndjson; charset=utf-8", body: new Blob(['{"id":1}\n{"id":2}\n'], { type: "application/x-ndjson; charset=utf-8" }) }),
-      Object.freeze({ kind: "resource", namespace: "resource.demo", key: "hello.txt", mime: "text/plain; charset=utf-8", body: new Blob(["LoomRealm PWA"], { type: "text/plain; charset=utf-8" }) }),
-      Object.freeze({ kind: "resource", namespace: "resource.demo", key: "nested/hello.txt", mime: "text/plain; charset=utf-8", body: new Blob(["Nested LoomRealm PWA"], { type: "text/plain; charset=utf-8" }) }),
-      Object.freeze({ kind: "resource", namespace: "resource.Presentation", key: "controls/device-input.browser.js", mime: "text/javascript; charset=utf-8", body: new Blob([__LOOMREALM_GAME_COMMON_CONTROLS_SOURCE__], { type: "text/javascript; charset=utf-8" }) }),
+      Object.freeze({ databasePath: "Demo", kind: "record", namespace: "struct.demo", key: "config", mime: "application/json; charset=utf-8", body: new Blob([JSON.stringify({ message: "ready" })], { type: "application/json; charset=utf-8" }) }),
+      Object.freeze({ databasePath: "Demo", kind: "group", namespace: "group.demo", key: "items", mime: "application/x-ndjson; charset=utf-8", body: new Blob(['{"id":1}\n{"id":2}\n'], { type: "application/x-ndjson; charset=utf-8" }) }),
+      Object.freeze({ databasePath: "Demo", kind: "resource", namespace: "resource.demo", key: "hello.txt", mime: "text/plain; charset=utf-8", body: new Blob(["LoomRealm PWA"], { type: "text/plain; charset=utf-8" }) }),
+      Object.freeze({ databasePath: "Demo", kind: "resource", namespace: "resource.demo", key: "nested/hello.txt", mime: "text/plain; charset=utf-8", body: new Blob(["Nested LoomRealm PWA"], { type: "text/plain; charset=utf-8" }) }),
+      Object.freeze({ databasePath: "Demo", kind: "resource", namespace: "resource.Presentation", key: "controls/device-input.browser.js", mime: "text/javascript; charset=utf-8", body: new Blob([__LOOMREALM_GAME_COMMON_CONTROLS_SOURCE__], { type: "text/javascript; charset=utf-8" }) }),
     ]),
     executables: Object.freeze([
       Object.freeze({ logicalModule: "subsystems/demo.mjs", mime: "text/javascript", body: new Blob([DEMO_EXECUTABLE], { type: "text/javascript" }) }),

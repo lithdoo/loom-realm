@@ -8,7 +8,7 @@
   "scripts": {
     "prebuild": "npm run build -w @loomrealm/fsdb",
     "build": "tsc -p tsconfig.json && node scripts/build.mjs",
-    "test": "npm run build && node --test"
+    "test": "npm run build -w @loomrealm/fsdb-http && npm run build && node --test"
   },
   "dependencies": {
     "@loomrealm/data": "0.1.0-alpha.0",

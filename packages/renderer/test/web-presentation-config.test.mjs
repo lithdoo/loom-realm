@@ -8,8 +8,8 @@ import {
 const version = `sha256:${"a".repeat(64)}`;
 const valid = {
   formatVersion: 1,
-  scripts: [{ namespace: "presentation", key: "scripts/main.js" }],
-  styles: [{ namespace: "presentation", key: "styles/main.css" }],
+  scripts: [{ databasePath: "content", namespace: "presentation", key: "scripts/main.js" }],
+  styles: [{ databasePath: "content", namespace: "presentation", key: "styles/main.css" }],
 };
 
 test("Web Presentation Config v1 accepts only its closed frozen shape", () => {
@@ -19,10 +19,25 @@ test("Web Presentation Config v1 accepts only its closed frozen shape", () => {
     {},
     { ...valid, formatVersion: 2 },
     { ...valid, extra: true },
-    { ...valid, scripts: [{ namespace: "presentation", key: "a.js", extra: true }] },
-    { ...valid, scripts: [{ namespace: "presentation", key: "a.js" }, { namespace: "presentation", key: "a.js" }] },
-    { ...valid, styles: [{ namespace: "presentation", key: "a.css" }, { namespace: "presentation", key: "a.css" }] },
+    { ...valid, scripts: [{ databasePath: "content", namespace: "presentation", key: "a.js", extra: true }] },
+    { ...valid, scripts: [{ databasePath: "content", namespace: "presentation", key: "a.js" }, { databasePath: "content", namespace: "presentation", key: "a.js" }] },
+    { ...valid, styles: [{ databasePath: "content", namespace: "presentation", key: "a.css" }, { databasePath: "content", namespace: "presentation", key: "a.css" }] },
   ]) assert.throws(() => validateWebPresentationConfigV1(candidate));
+  assert.throws(() => validateWebPresentationConfigV1({
+    ...valid,
+    scripts: [{ namespace: "presentation", key: "a.js" }],
+  }));
+  assert.throws(() => validateWebPresentationConfigV1({
+    ...valid,
+    scripts: [{ databasePath: "GameData/", namespace: "presentation", key: "a.js" }],
+  }));
+  assert.deepEqual(validateWebPresentationConfigV1({
+    ...valid,
+    scripts: [
+      { databasePath: "GameData", namespace: "CON", key: "icons/a*.js" },
+      { databasePath: "ModData", namespace: "CON", key: "icons/a*.js" },
+    ],
+  }).scripts.map((ref) => ref.databasePath), ["GameData", "ModData"]);
 });
 
 test("validation completes before prepared Content resolution begins", async () => {
@@ -38,12 +53,12 @@ test("preparation fixes declaration order, versions and exact MIME essence", asy
   const config = {
     formatVersion: 1,
     scripts: [
-      { namespace: "presentation", key: "scripts/first.js" },
-      { namespace: "presentation", key: "scripts/second.js" },
+      { databasePath: "content", namespace: "presentation", key: "scripts/first.js" },
+      { databasePath: "content", namespace: "presentation", key: "scripts/second.js" },
     ],
     styles: [
-      { namespace: "presentation", key: "styles/first.css" },
-      { namespace: "presentation", key: "styles/second.css" },
+      { databasePath: "content", namespace: "presentation", key: "styles/first.css" },
+      { databasePath: "content", namespace: "presentation", key: "styles/second.css" },
     ],
   };
   const prepared = await prepareWebPresentationV1(config, async (ref) => ({

@@ -1,3 +1,4 @@
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 import { parseJsonText, type JsonValue } from "@loomrealm/wire";
 import {
   ContentReadError,
@@ -20,17 +21,25 @@ export interface SameOriginContentAccess {
   readonly installationId: string;
 }
 
-function segment(value: unknown): asserts value is string {
-  if (typeof value !== "string" || value.length === 0 || value === "." || value === ".." || /[\\/\0]|\p{Cc}|\p{Cs}/u.test(value) || /^[A-Za-z]:/.test(value) || value.startsWith("\\\\") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) {
-    throw new TypeError("Invalid Content segment");
-  }
+function named(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new TypeError(label);
+  try { return contentLogicalSegment(value); }
+  catch { throw new TypeError(label); }
 }
 
-function resourceKey(value: unknown): asserts value is string {
-  if (typeof value !== "string") throw new TypeError("Invalid Content resource key");
-  const parts = value.split("/");
-  if (parts.length === 0) throw new TypeError("Invalid Content resource key");
-  for (const part of parts) segment(part);
+function databasePath(value: unknown): string {
+  if (typeof value !== "string") throw new TypeError("Invalid database path");
+  try { return canonicalDatabasePath(value); }
+  catch { throw new TypeError("Invalid database path"); }
+}
+
+function resourceKey(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) throw new TypeError("Invalid Content resource key");
+  return value.split("/").map((part) => named(part, "Invalid Content resource key")).join("/");
+}
+
+function encodePath(value: string): string {
+  return value.split("/").map(encodeURIComponent).join("/");
 }
 
 function abortSignal(value: unknown): value is AbortSignal {
@@ -88,10 +97,6 @@ function combineSignal(local: AbortSignal | undefined, lifetime: AbortSignal): {
   };
 }
 
-function encodeResourceKey(key: string): string {
-  return key.split("/").map(encodeURIComponent).join("/");
-}
-
 interface ContentFetchBinding {
   readonly installationId: string;
   readonly base: URL;
@@ -113,11 +118,13 @@ function createContentClient(binding: ContentFetchBinding, lifetimeSignal: Abort
   }
 
   return Object.freeze({
-    record(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentRecord> {
-      segment(namespace); segment(key);
+    record(databasePathValue: string, namespaceValue: string, keyValue: string, options?: ContentReadOptions): Promise<ContentRecord> {
+      const path = databasePath(databasePathValue);
+      const namespace = named(namespaceValue, "Invalid Content segment");
+      const key = named(keyValue, "Invalid Content segment");
       const signal = readOptions(options);
       if (signal?.aborted || lifetimeSignal.aborted) return Promise.reject(new ContentReadError("CONTENT_CANCELLED"));
-      return readContent(`records/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`, signal, async (response) => {
+      return readContent(`databases/${encodePath(path)}/$db/records/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`, signal, async (response) => {
         const observedVersion = contentVersion(response);
         let value: JsonValue;
         try { value = parseJsonText(await response.text()); }
@@ -125,11 +132,13 @@ function createContentClient(binding: ContentFetchBinding, lifetimeSignal: Abort
         return Object.freeze({ value, contentVersion: observedVersion });
       });
     },
-    group(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentGroup> {
-      segment(namespace); segment(key);
+    group(databasePathValue: string, namespaceValue: string, keyValue: string, options?: ContentReadOptions): Promise<ContentGroup> {
+      const path = databasePath(databasePathValue);
+      const namespace = named(namespaceValue, "Invalid Content segment");
+      const key = named(keyValue, "Invalid Content segment");
       const signal = readOptions(options);
       if (signal?.aborted || lifetimeSignal.aborted) return Promise.reject(new ContentReadError("CONTENT_CANCELLED"));
-      return readContent(`groups/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`, signal, async (response) => {
+      return readContent(`databases/${encodePath(path)}/$db/groups/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`, signal, async (response) => {
         const observedVersion = contentVersion(response);
         ndjsonMediaType(response);
         let rows: JsonValue[];
@@ -138,11 +147,13 @@ function createContentClient(binding: ContentFetchBinding, lifetimeSignal: Abort
         return Object.freeze({ rows: Object.freeze(rows), contentVersion: observedVersion });
       });
     },
-    resource(namespace: string, key: string, options?: ContentReadOptions): Promise<ContentResource> {
-      segment(namespace); resourceKey(key);
+    resource(databasePathValue: string, namespaceValue: string, keyValue: string, options?: ContentReadOptions): Promise<ContentResource> {
+      const path = databasePath(databasePathValue);
+      const namespace = named(namespaceValue, "Invalid Content segment");
+      const key = resourceKey(keyValue);
       const signal = readOptions(options);
       if (signal?.aborted || lifetimeSignal.aborted) return Promise.reject(new ContentReadError("CONTENT_CANCELLED"));
-      return readContent(`resources/${encodeURIComponent(namespace)}/${encodeResourceKey(key)}`, signal, async (response) => {
+      return readContent(`databases/${encodePath(path)}/$db/resources/${encodeURIComponent(namespace)}/${encodePath(key)}`, signal, async (response) => {
         const observedVersion = contentVersion(response);
         const mime = response.headers.get("content-type");
         if (!mime) throw new ContentReadError("CONTENT_INVALID");
@@ -179,7 +190,7 @@ export function createSameOriginContentClient(access: SameOriginContentAccess, l
   if (access === null || typeof access !== "object" || Object.keys(access).length !== 1 || !abortSignal(lifetimeSignal)) {
     throw new TypeError("Invalid same-origin Content access");
   }
-  segment(access.installationId);
+  named(access.installationId, "Invalid Content segment");
   if (typeof location !== "object" || (location.protocol !== "http:" && location.protocol !== "https:") || location.search !== "" || location.hash !== "" || location.href.includes("@")) {
     throw new TypeError("Same-origin Content requires an HTTP(S) realm");
   }

@@ -55,7 +55,7 @@ async function writeProducedFile(object, target) {
 
 export async function materializeRawFixture(stagingPath, plan, acquisitionMode) {
   for (const table of plan.tables) {
-    const target = join(stagingPath, `[resource]${table}`);
+    const target = join(stagingPath, `[RESOURCE]${table}`);
     await mkdir(target);
     await writeFile(
       join(target, ".desc.meta"),
@@ -64,22 +64,22 @@ export async function materializeRawFixture(stagingPath, plan, acquisitionMode) 
     );
   }
   for (const directory of plan.directories) {
-    await mkdir(join(stagingPath, `[resource]${directory.table}`, ...directory.segments), { recursive: true });
+    await mkdir(join(stagingPath, `[RESOURCE]${directory.table}`, ...directory.segments), { recursive: true });
   }
   for (const resource of plan.resources) {
-    const target = join(stagingPath, `[resource]${resource.table}`, ...resource.relativeSegments);
+    const target = join(stagingPath, `[RESOURCE]${resource.table}`, ...resource.relativeSegments);
     await copyPlannedFile(resource, target);
   }
   for (const table of plan.structured.tables) {
-    const target = join(stagingPath, `[${table.kind}]${table.name}`);
+    const target = join(stagingPath, `[${table.kind.toUpperCase()}]${table.name}`);
     await mkdir(target);
     await writeFile(join(target, ".info.meta"), `${JSON.stringify(table.schema)}\n`, { encoding: "utf8", flag: "wx" });
   }
   for (const object of plan.structured.objects) {
-    const target = join(stagingPath, `[struct]${object.table}`, ...object.relativeSegments);
+    const target = join(stagingPath, `[STRUCT]${object.table}`, ...object.relativeSegments);
     await writeProducedFile(object, target);
   }
-  const info = join(stagingPath, "[struct]测试信息");
+  const info = join(stagingPath, "[STRUCT]测试信息");
   await mkdir(info);
   await writeFile(join(info, ".info.meta"), '{"type":"object"}\n', { encoding: "utf8", flag: "wx" });
   await writeFile(

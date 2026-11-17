@@ -80,73 +80,87 @@ test("ContentReadError and author surface have the exact frozen shape", () => {
 test("local validation is synchronous and starts zero HTTP requests", async (t) => {
   const fixture = await serverFixture(); t.after(() => fixture.close());
   const content = client(fixture.origin).value;
-  assert.throws(() => content.record("bad/name", "key"), TypeError);
-  assert.throws(() => content.resource("resource.images", "../secret"), TypeError);
-  assert.throws(() => content.record("struct.hero", "hero", null), TypeError);
-  assert.throws(() => content.record("struct.hero", "hero", { unknown: true }), TypeError);
-  assert.throws(() => content.record("struct.hero", "hero", { signal: {} }), TypeError);
-  assert.throws(() => content.group("bad/group", "key"), TypeError);
-  assert.throws(() => content.group("group.party", "hierarchical/keys"), TypeError);
-  assert.throws(() => content.group("group.party", ".."), TypeError);
-  assert.throws(() => content.group("group.party", "party", { unknown: true }), TypeError);
+  assert.throws(() => content.record("GameData", "bad/name", "key"), TypeError);
+  assert.throws(() => content.record("GameData/", "struct.hero", "hero"), TypeError);
+  assert.throws(() => content.record("GameData", "struct.hero"), TypeError);
+  assert.throws(() => content.resource("GameData", "resource.images", "../secret"), TypeError);
+  assert.throws(() => content.record("GameData", "struct.hero", "hero", null), TypeError);
+  assert.throws(() => content.record("GameData", "struct.hero", "hero", { unknown: true }), TypeError);
+  assert.throws(() => content.record("GameData", "struct.hero", "hero", { signal: {} }), TypeError);
+  assert.throws(() => content.group("GameData", "bad/group", "key"), TypeError);
+  assert.throws(() => content.group("GameData", "group.party", "hierarchical/keys"), TypeError);
+  assert.throws(() => content.group("GameData", "group.party", ".."), TypeError);
+  assert.throws(() => content.group("GameData", "group.party", "party", { unknown: true }), TypeError);
   const controller = new AbortController(); controller.abort();
-  await assert.rejects(content.record("struct.hero", "hero", { signal: controller.signal }), (error) => error instanceof ContentReadError && error.code === "CONTENT_CANCELLED");
-  await assert.rejects(content.group("group.party", "party", { signal: controller.signal }), (error) => error instanceof ContentReadError && error.code === "CONTENT_CANCELLED");
+  await assert.rejects(content.record("GameData", "struct.hero", "hero", { signal: controller.signal }), (error) => error instanceof ContentReadError && error.code === "CONTENT_CANCELLED");
+  await assert.rejects(content.group("GameData", "group.party", "party", { signal: controller.signal }), (error) => error instanceof ContentReadError && error.code === "CONTENT_CANCELLED");
   assert.equal(fixture.requests.length, 0);
+});
+
+test("ordinary Content names stay distinct from FSDB database names", async (t) => {
+  const fixture = await serverFixture(); t.after(() => fixture.close());
+  const content = client(fixture.origin).value;
+  assert.throws(() => content.record("CON", "struct.hero", "hero"), TypeError);
+  assert.throws(() => content.record("Game*/Data", "struct.hero", "hero"), TypeError);
+  assert.throws(() => content.record("GameData", "..", "hero"), TypeError);
+  assert.deepEqual((await content.record("GameData", "CON", "icon*")).value, { hero: { name: "Pika" } });
+  assert.equal(fixture.requests.at(-1), "/_lr/v1/games/installation/databases/GameData/$db/records/CON/icon*");
+  await content.resource("GameData", "resource.images", "ui/icons/potion*");
+  assert.equal(fixture.requests.at(-1), "/_lr/v1/games/installation/databases/GameData/$db/resources/resource.images/ui/icons/potion*");
 });
 
 test("record/resource reads map errors, versions, hierarchy, cancellation, and value ownership", async (t) => {
   const fixture = await serverFixture(); t.after(() => fixture.close());
   const bound = client(fixture.origin);
-  const first = await bound.value.record("struct.hero", "hero");
+  const first = await bound.value.record("GameData", "struct.hero", "hero");
   assert.deepEqual(first.value, { hero: { name: "Pika" } });
   assert.equal(first.contentVersion, hash(recordBytes));
   try { first.value.hero.name = "poison"; } catch {}
-  assert.deepEqual((await bound.value.record("struct.hero", "hero")).value, { hero: { name: "Pika" } });
+  assert.deepEqual((await bound.value.record("GameData", "struct.hero", "hero")).value, { hero: { name: "Pika" } });
 
-  const resource = await bound.value.resource("resource.images", "ui/icons/potion");
+  const resource = await bound.value.resource("GameData", "resource.images", "ui/icons/potion");
   assert.deepEqual([...resource.bytes], [...resourceBytes]);
   assert.equal(resource.mime, "image/png");
   resource.bytes[0] = 99;
-  assert.deepEqual([...(await bound.value.resource("resource.images", "ui/icons/potion")).bytes], [...resourceBytes]);
+  assert.deepEqual([...(await bound.value.resource("GameData", "resource.images", "ui/icons/potion")).bytes], [...resourceBytes]);
   assert.ok(fixture.requests.some((path) => path.endsWith("/resources/resource.images/ui/icons/potion")));
 
-  await assert.rejects(bound.value.record("struct.hero", "missing"), (error) => error.code === "CONTENT_NOT_FOUND");
-  await assert.rejects(bound.value.record("struct.hero", "conflict"), (error) => error.code === "CONTENT_CONFLICT");
-  await assert.rejects(bound.value.record("struct.hero", "invalid"), (error) => error.code === "CONTENT_INVALID");
+  await assert.rejects(bound.value.record("GameData", "struct.hero", "missing"), (error) => error.code === "CONTENT_NOT_FOUND");
+  await assert.rejects(bound.value.record("GameData", "struct.hero", "conflict"), (error) => error.code === "CONTENT_CONFLICT");
+  await assert.rejects(bound.value.record("GameData", "struct.hero", "invalid"), (error) => error.code === "CONTENT_INVALID");
   bound.lifetime.abort();
-  await assert.rejects(bound.value.record("struct.hero", "hero"), (error) => error.code === "CONTENT_CANCELLED");
+  await assert.rejects(bound.value.record("GameData", "struct.hero", "hero"), (error) => error.code === "CONTENT_CANCELLED");
 });
 
 test("group reads preserve JSONL row order, version bytes, strict NDJSON shape, and error mapping", async (t) => {
   const fixture = await serverFixture(); t.after(() => fixture.close());
   const bound = client(fixture.origin);
 
-  const party = await bound.value.group("group.party", "party");
+  const party = await bound.value.group("GameData", "group.party", "party");
   assert.deepEqual(party.rows, [{ hero: "hero" }, { party: ["闪光", "伙伴"] }]);
   assert.equal(party.contentVersion, hash(groupBytes));
   assert.ok(fixture.requests.some((path) => path.endsWith("/groups/group.party/party")));
 
   assert.throws(() => party.rows.push({ injected: true }), TypeError);
   try { party.rows[0].hero = "poison"; } catch {}
-  assert.deepEqual((await bound.value.group("group.party", "party")).rows, [{ hero: "hero" }, { party: ["闪光", "伙伴"] }]);
+  assert.deepEqual((await bound.value.group("GameData", "group.party", "party")).rows, [{ hero: "hero" }, { party: ["闪光", "伙伴"] }]);
 
-  const empty = await bound.value.group("group.party", "empty");
+  const empty = await bound.value.group("GameData", "group.party", "empty");
   assert.deepEqual(empty.rows, []);
   assert.equal(empty.contentVersion, hash(Buffer.alloc(0)));
 
-  const blankLines = await bound.value.group("group.party", "blank-lines");
+  const blankLines = await bound.value.group("GameData", "group.party", "blank-lines");
   assert.deepEqual(blankLines.rows, [{ a: 1 }, { b: 2 }]);
 
-  await assert.rejects(bound.value.group("group.party", "missing"), (error) => error.code === "CONTENT_NOT_FOUND");
-  await assert.rejects(bound.value.group("group.party", "conflict"), (error) => error.code === "CONTENT_CONFLICT");
-  await assert.rejects(bound.value.group("group.party", "invalid"), (error) => error.code === "CONTENT_INVALID");
-  await assert.rejects(bound.value.group("group.party", "bad-mime"), (error) => error.code === "CONTENT_INVALID");
-  await assert.rejects(bound.value.group("group.party", "bad-rows"), (error) => error.code === "CONTENT_INVALID");
-  await assert.rejects(bound.value.group("group.party", "bad-version"), (error) => error.code === "CONTENT_INVALID");
+  await assert.rejects(bound.value.group("GameData", "group.party", "missing"), (error) => error.code === "CONTENT_NOT_FOUND");
+  await assert.rejects(bound.value.group("GameData", "group.party", "conflict"), (error) => error.code === "CONTENT_CONFLICT");
+  await assert.rejects(bound.value.group("GameData", "group.party", "invalid"), (error) => error.code === "CONTENT_INVALID");
+  await assert.rejects(bound.value.group("GameData", "group.party", "bad-mime"), (error) => error.code === "CONTENT_INVALID");
+  await assert.rejects(bound.value.group("GameData", "group.party", "bad-rows"), (error) => error.code === "CONTENT_INVALID");
+  await assert.rejects(bound.value.group("GameData", "group.party", "bad-version"), (error) => error.code === "CONTENT_INVALID");
 
   bound.lifetime.abort();
-  await assert.rejects(bound.value.group("group.party", "party"), (error) => error.code === "CONTENT_CANCELLED");
+  await assert.rejects(bound.value.group("GameData", "group.party", "party"), (error) => error.code === "CONTENT_CANCELLED");
 });
 
 test("same-origin PWA Content client shares decoding semantics and never sends bearer auth", async () => {
@@ -166,16 +180,19 @@ test("same-origin PWA Content client shares decoding semantics and never sends b
   try {
     const lifetime = new AbortController();
     const content = createSameOriginContentClient({ installationId: "installation" }, lifetime.signal);
-    assert.deepEqual((await content.record("struct.hero", "hero")).value, { hero: { name: "Pika" } });
-    assert.equal(observed[0].url, "https://game.test/_lr/v1/games/installation/records/struct.hero/hero");
-    const party = await content.group("group.party", "party");
+    assert.deepEqual((await content.record("GameData", "struct.hero", "hero")).value, { hero: { name: "Pika" } });
+    assert.equal(observed[0].url, "https://game.test/_lr/v1/games/installation/databases/GameData/$db/records/struct.hero/hero");
+    const party = await content.group("GameData", "group.party", "party");
     assert.deepEqual(party.rows, [{ hero: "hero" }, { party: ["闪光", "伙伴"] }]);
     assert.equal(party.contentVersion, hash(groupBytes));
-    assert.equal(observed[1].url, "https://game.test/_lr/v1/games/installation/groups/group.party/party");
+    assert.equal(observed[1].url, "https://game.test/_lr/v1/games/installation/databases/GameData/$db/groups/group.party/party");
     Object.defineProperty(globalThis, "location", { configurable: true, value: new URL("https://game.test/pwa/pokeman/worker-runner.js") });
     observed.length = 0;
-    await createSameOriginContentClient({ installationId: "installation" }, lifetime.signal).record("struct.hero", "hero");
-    assert.equal(observed[0].url, "https://game.test/pwa/pokeman/_lr/v1/games/installation/records/struct.hero/hero");
+    const nested = createSameOriginContentClient({ installationId: "installation" }, lifetime.signal);
+    await nested.record("GameData", "struct.hero", "hero");
+    assert.equal(observed[0].url, "https://game.test/pwa/pokeman/_lr/v1/games/installation/databases/GameData/$db/records/struct.hero/hero");
+    assert.equal((await nested.record("GameData/World", "struct.hero", "hero")).contentVersion, hash(recordBytes));
+    assert.equal(observed[1].url, "https://game.test/pwa/pokeman/_lr/v1/games/installation/databases/GameData/World/$db/records/struct.hero/hero");
     assert.deepEqual(observed[0].headers, {});
     assert.throws(() => createSameOriginContentClient({ installationId: "installation", token: "forbidden" }, lifetime.signal), TypeError);
   } finally {

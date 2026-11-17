@@ -8,11 +8,14 @@ export interface StoredObjectRef {
   readonly mime: string;
 }
 
-export interface StoredContentIndexEntry extends StoredObjectRef {
-  readonly kind: "manifest" | "record" | "group" | "resource";
-  readonly namespace?: string;
-  readonly key?: string;
-}
+export type StoredContentIndexEntry =
+  | (StoredObjectRef & { readonly kind: "manifest" })
+  | (StoredObjectRef & {
+      readonly kind: "record" | "group" | "resource";
+      readonly databasePath: string;
+      readonly namespace: string;
+      readonly key: string;
+    });
 
 export interface StoredExecutableIndexEntry extends PwaExecutableIndexEntryV1, StoredObjectRef {}
 

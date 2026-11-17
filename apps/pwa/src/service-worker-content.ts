@@ -1,3 +1,4 @@
+import { canonicalDatabasePath, contentLogicalSegment } from "@loomrealm/fsdb/names";
 import {
   getInstallation,
   markInstallationInvalid,
@@ -13,6 +14,7 @@ let concurrentContentRequests = 0;
 interface ContentIdentity {
   readonly installationId: string;
   readonly kind: "manifest" | "record" | "group" | "resource";
+  readonly databasePath?: string;
   readonly namespace?: string;
   readonly key?: string;
 }
@@ -34,38 +36,67 @@ function problem(status: number, code: string, detail?: string, headers?: Header
   });
 }
 
-function decodeSegment(value: string): string | null {
-  let decoded: string;
-  try { decoded = decodeURIComponent(value); }
-  catch { return null; }
-  if (
-    decoded.length === 0
-    || decoded === "."
-    || decoded === ".."
-    || /[\\/\0:]|\p{Cc}|\p{Cs}/u.test(decoded)
-  ) return null;
-  return decoded;
+type IdentityParse =
+  | { readonly type: "identity"; readonly identity: ContentIdentity }
+  | { readonly type: "invalid-route" }
+  | { readonly type: "invalid-database-path" };
+
+function decodePercent(value: string): string | undefined {
+  try { return decodeURIComponent(value); }
+  catch { return undefined; }
 }
 
-function parseIdentity(url: URL, path: readonly string[]): ContentIdentity | null {
-  if (url.search !== "") return null;
-  const installationId = decodeSegment(path[0] ?? "");
-  if (installationId === null) return null;
+function contentSegment(value: string): string | null {
+  try { return contentLogicalSegment(value); }
+  catch { return null; }
+}
+
+function parseIdentity(url: URL, path: readonly string[]): IdentityParse {
+  if (url.search !== "") return { type: "invalid-route" };
+  const decodedInstallation = decodePercent(path[0] ?? "");
+  if (decodedInstallation === undefined) return { type: "invalid-route" };
+  const installationId = contentSegment(decodedInstallation);
+  if (installationId === null) return { type: "invalid-route" };
   const route = path[1];
-  if (route === "manifest" && path.length === 2) return Object.freeze({ installationId, kind: "manifest" });
-  if ((route === "records" || route === "groups") && path.length === 4) {
-    const namespace = decodeSegment(path[2]!);
-    const key = decodeSegment(path[3]!);
-    if (namespace === null || key === null) return null;
-    return Object.freeze({ installationId, kind: route === "records" ? "record" : "group", namespace, key });
+  if (route === "manifest" && path.length === 2) return { type: "identity", identity: Object.freeze({ installationId, kind: "manifest" }) };
+  if (route !== "databases") return { type: "invalid-route" };
+  const marker = path.indexOf("$db", 2);
+  if (marker < 0 || path.indexOf("$db", marker + 1) !== -1) return { type: "invalid-route" };
+  if (marker <= 2) return { type: "invalid-database-path" };
+  const encodedDatabase = path.slice(2, marker);
+  if (encodedDatabase.some((part) => part.length === 0)) return { type: "invalid-database-path" };
+  const decodedDatabase: string[] = [];
+  for (const part of encodedDatabase) {
+    const decoded = decodePercent(part);
+    if (decoded === undefined) return { type: "invalid-route" };
+    if (/[\\/\0]|\p{Cc}|\p{Cs}/u.test(decoded)) return { type: "invalid-database-path" };
+    decodedDatabase.push(decoded);
   }
-  if (route === "resources" && path.length >= 4) {
-    const namespace = decodeSegment(path[2]!);
-    const segments = path.slice(3).map(decodeSegment);
-    if (namespace === null || segments.some((value) => value === null)) return null;
-    return Object.freeze({ installationId, kind: "resource", namespace, key: (segments as string[]).join("/") });
+  let databasePath: string;
+  try { databasePath = canonicalDatabasePath(decodedDatabase.join("/")); }
+  catch { return { type: "invalid-database-path" }; }
+  const rest = path.slice(marker + 1);
+  const collection = rest[0];
+  if ((collection === "records" || collection === "groups") && rest.length === 3) {
+    const namespaceRaw = decodePercent(rest[1]!);
+    const keyRaw = decodePercent(rest[2]!);
+    if (namespaceRaw === undefined || keyRaw === undefined) return { type: "invalid-route" };
+    const namespace = contentSegment(namespaceRaw);
+    const key = contentSegment(keyRaw);
+    if (namespace === null || key === null) return { type: "invalid-route" };
+    return { type: "identity", identity: Object.freeze({ installationId, databasePath, kind: collection === "records" ? "record" : "group", namespace, key }) };
   }
-  return null;
+  if (collection === "resources" && rest.length >= 3) {
+    const namespaceRaw = decodePercent(rest[1]!);
+    if (namespaceRaw === undefined) return { type: "invalid-route" };
+    const namespace = contentSegment(namespaceRaw);
+    const segments = rest.slice(2).map((part) => decodePercent(part));
+    if (namespace === null || segments.some((value) => value === undefined)) return { type: "invalid-route" };
+    const keys = (segments as string[]).map((part) => contentSegment(part));
+    if (keys.some((value) => value === null)) return { type: "invalid-route" };
+    return { type: "identity", identity: Object.freeze({ installationId, databasePath, kind: "resource", namespace, key: (keys as string[]).join("/") }) };
+  }
+  return { type: "invalid-route" };
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
@@ -83,8 +114,8 @@ async function completeInstallation(installationId: string): Promise<PwaInstalla
 function matchEntry(installation: PwaInstallationRecord, identity: ContentIdentity): StoredContentIndexEntry | null {
   return installation.contentIndex.find((entry) => {
     if (entry.kind !== identity.kind) return false;
-    if (identity.kind === "manifest") return true;
-    return entry.namespace === identity.namespace && entry.key === identity.key;
+    if (identity.kind === "manifest") return entry.kind === "manifest";
+    return entry.kind !== "manifest" && entry.databasePath === identity.databasePath && entry.namespace === identity.namespace && entry.key === identity.key;
   }) ?? null;
 }
 
@@ -131,8 +162,10 @@ async function realizeContentRequestInner(request: Request, url: URL, path: read
   if (request.method !== "GET" && request.method !== "HEAD") {
     return problem(405, "METHOD_NOT_ALLOWED", "Only GET and HEAD are supported", { Allow: "GET, HEAD" });
   }
-  const identity = parseIdentity(url, path);
-  if (identity === null) return problem(400, "INVALID_CONTENT_ROUTE");
+  const parsed = parseIdentity(url, path);
+  if (parsed.type === "invalid-database-path") return problem(400, "DATABASE_PATH_INVALID");
+  if (parsed.type !== "identity") return problem(400, "INVALID_CONTENT_ROUTE");
+  const identity = parsed.identity;
   const installation = await completeInstallation(identity.installationId);
   if (installation instanceof Response) return installation;
   const entry = matchEntry(installation, identity);

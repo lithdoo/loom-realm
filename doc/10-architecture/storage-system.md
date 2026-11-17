@@ -256,11 +256,13 @@ Content API使用 logical identity：
 
 ```text
 installationId
+databasePath
 kind
 namespace
 key
-contentVersion
 ```
+
+`databasePath` 只属于 record、group、resource。Manifest 是安装级身份，没有 databasePath。`contentVersion` 是该身份上字节表示的 `sha256:<64 hex>` 校验值，不是数据库身份，也不参与逻辑身份比较。相同 kind/namespace/key 可以在不同 databasePath 下独立存在。
 
 Identity shape：
 
@@ -349,7 +351,7 @@ Content
     OPFS / Cache Storage
 ```
 
-PWA不依赖 Node-only `@loomrealm/fsdb`；它必须实现同一 Content logical identity、representation/version/cache/error semantics。Shared State physical realization也不要求与 Hostra 使用相同 storage/transport primitive，只要求 logical contract等价。
+PWA 浏览器运行时不打开 Node FSDB，也不持有数据库句柄。名称校验只复用浏览器可运行的 `@loomrealm/fsdb/names`。它必须实现同一 Content logical identity、representation/version/cache/error semantics。Shared State physical realization也不要求与 Hostra 使用相同 storage/transport primitive，只要求 logical contract等价。
 
 具体游戏的 Save/Load business 若使用 OPFS、filesystem、cloud storage 等，是其 persistence workflow选择，不进入 Shared State logical bootstrap contract。
 
@@ -360,6 +362,7 @@ PWA不依赖 Node-only `@loomrealm/fsdb`；它必须实现同一 Content logical
 普通 Content Index SHOULD保存：
 
 ```text
+databasePath
 kind / namespace / key
 validated internal content identity
 MIME
@@ -367,7 +370,9 @@ size
 contentVersion / hash
 ```
 
-M12 Desktop Content Index是 current prepared installation 的 immutable view；它不需要先 materialize全局 mutable Installation Registry。
+Manifest 索引项没有 databasePath。不同数据库中的相同 kind/namespace/key 不得合并。相同字节可以复用同一个 SHA-256 物理对象，但这不合并逻辑身份。
+
+Desktop 在一个安装级 Content View 里按 databasePath 惰性建立各自的 Content Index。PWA 在同一次安装发布里把 databasePath 写入 IndexedDB Content Index。两者都不需要先 materialize 全局 mutable Installation Registry，也不建立数据库目录。
 
 Platform executable resolver MAY使用同一可信 Installation Registry的底层 location/integrity primitive，但必须保持独立 capability surface。
 

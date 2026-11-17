@@ -23,3 +23,21 @@ Content capability != executable resolver，URL != filesystem path。Content fai
 主要实现位于 `packages/fsdb/`、`packages/fsdb-http/`、`packages/subsystem/`、`packages/renderer/` 以及 concrete platform/app composition。验证包含 FSDB/core/http conformance、Content integration、fixture importer 与 Desktop/PWA product tests。
 
 现有 `test:m12` 等名字是历史兼容的 command alias。资格 currentness 由[subject/staleness](../../30-development/qualification.md)判断，而不是由阶段编号决定。Historical ownership decision 见 [ADR0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)。
+
+## Multi-database implementation
+
+The pre-release multi-database contract is documented in [FSDB Nested and Multi-Database Architecture](./fsdb-nested-databases.md). `/fsdb/v1`, `/_lr/v1`, and PWA `formatVersion: 1` remain the current identifiers.
+
+This repository implements that contract in place:
+
+```text
+FSDB Core → FSDB HTTP Root service
+FSDB Core → Desktop Content
+Consumer JSON Bundle → PWA generic builder → Installer → Service Worker
+Subsystem ContentClient
+Renderer ResourceClient
+```
+
+An installation exposes top-level and nested FSDBs as independent databases. Callers pass an explicit databasePath. There is no default database and no installation-level database selector.
+
+The main qualification tests and cross-platform CI cover this in-repository path. A consumer-owned Source Packager's production integration belongs to that consumer repository. `test/fsdb-multi-database/pack-source.mjs` is the reference packager used by this repository's parity tests; it is not the external consumer's production integration.

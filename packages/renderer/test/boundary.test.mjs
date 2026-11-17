@@ -11,6 +11,7 @@ test("Renderer exposes the presentation publication construction seam and exact 
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), [
     "@loomrealm/data",
     "@loomrealm/foundation",
+    "@loomrealm/fsdb",
     "@loomrealm/platform-ports",
     "@loomrealm/renderer-control",
     "@loomrealm/wire",

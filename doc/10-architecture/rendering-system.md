@@ -251,7 +251,7 @@ structure/reorder → attrs → data only when retained JSON value changed
 
 Context同一 HTMLElement最多一次。Data callback throw不导致同一 value retry。
 
-PresentationResourceClient复用 M12 private ResourceClient；business看不到 bearer/path/origin/private client。Window teardown取消在途 reads；teardown 后格式正确的 read reject `CONTENT_CANCELLED`。
+PresentationResourceClient复用 M12 private ResourceClient，读取身份是 `databasePath + namespace + key`。business看不到 bearer、物理 path、origin 或 private client。Window teardown取消在途 reads；teardown 后格式正确的 read reject `CONTENT_CANCELLED`。
 
 ---
 

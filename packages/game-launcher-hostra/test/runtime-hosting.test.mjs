@@ -219,14 +219,30 @@ async function waitForFile(file, deadlineMs = 5_000) {
   throw new Error("Timed out waiting for child fixture output");
 }
 
+function releaseHosted(t, hosted) {
+  t.after(async () => {
+    try {
+      await hosted.requestTermination(new AbortController().signal);
+    } catch {
+      // A failed termination request still continues into bounded force cleanup.
+    }
+    await hosted.terminated;
+  });
+}
+
 test("wrong capability paths do not consume the one valid connection", async (t) => {
   const game = await prepared(t);
   const fixtureEntry = path.join(game.launchPlan.canonicalInstallationRoot, "fixture-runner.mjs");
   await writeFile(fixtureEntry, `
-    import { writeFile } from "node:fs/promises";
+    import { rename, writeFile } from "node:fs/promises";
     const bootstrap = JSON.parse(process.env.LOOMREALM_HOSTRA_RUNNER_BOOTSTRAP);
     delete process.env.LOOMREALM_HOSTRA_RUNNER_BOOTSTRAP;
-    await writeFile("endpoint.txt", bootstrap.controlEndpoint);
+    const endpoint = bootstrap.controlEndpoint;
+    if (typeof endpoint !== "string" || !endpoint.startsWith("ws://")) {
+      throw new Error("Runner fixture did not receive a control endpoint");
+    }
+    await writeFile("endpoint.txt.partial", endpoint);
+    await rename("endpoint.txt.partial", "endpoint.txt");
     setInterval(() => {}, 1000);
   `);
   const plan = Object.freeze({ ...game.launchPlan, runnerEntry: fixtureEntry });
@@ -234,9 +250,15 @@ test("wrong capability paths do not consume the one valid connection", async (t)
     { subsystemKey: "root", bootstrapToken: "token" },
     new AbortController().signal,
   );
+  const sockets = [];
+  releaseHosted(t, hosted);
+  t.after(() => {
+    for (const socket of sockets) socket.terminate();
+  });
   const endpoint = await waitForFile(path.join(game.launchPlan.canonicalInstallationRoot, "endpoint.txt"));
   const parsed = new URL(endpoint);
   const wrong = new WebSocket(`${parsed.origin}/wrong`);
+  sockets.push(wrong);
   const wrongOutcome = await Promise.race([
     new Promise((resolve) => wrong.once("unexpected-response", () => resolve("rejected"))),
     new Promise((resolve) => wrong.once("error", () => resolve("rejected"))),
@@ -246,6 +268,7 @@ test("wrong capability paths do not consume the one valid connection", async (t)
   wrong.terminate();
 
   const query = new WebSocket(`${endpoint}?extra=1`);
+  sockets.push(query);
   const queryOutcome = await Promise.race([
     new Promise((resolve) => query.once("unexpected-response", () => resolve("rejected"))),
     new Promise((resolve) => query.once("error", () => resolve("rejected"))),
@@ -256,6 +279,7 @@ test("wrong capability paths do not consume the one valid connection", async (t)
 
   const acquiring = hosted.runtimeControl.acquire(new AbortController().signal);
   const valid = new WebSocket(endpoint);
+  sockets.push(valid);
   const carrier = await acquiring;
   await new Promise((resolve, reject) => {
     if (valid.readyState === WebSocket.OPEN) resolve();
@@ -265,6 +289,7 @@ test("wrong capability paths do not consume the one valid connection", async (t)
     }
   });
   const reconnect = new WebSocket(endpoint);
+  sockets.push(reconnect);
   const reconnectOutcome = await Promise.race([
     new Promise((resolve) => reconnect.once("unexpected-response", () => resolve("rejected"))),
     new Promise((resolve) => reconnect.once("error", () => resolve("rejected"))),
@@ -283,7 +308,7 @@ test("dedicated Events endpoint rejects a wrong path and accepts a fresh sequent
   const fixtureEntry = path.join(game.launchPlan.canonicalInstallationRoot, "events-rebind-runner.mjs");
   const wsModule = import.meta.resolve("ws");
   await writeFile(fixtureEntry, `
-    import { writeFile } from "node:fs/promises";
+    import { rename, writeFile } from "node:fs/promises";
     import WebSocket from ${JSON.stringify(wsModule)};
     const bootstrap = JSON.parse(process.env.LOOMREALM_HOSTRA_RUNNER_BOOTSTRAP);
     const endpoint = process.env.LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT;
@@ -306,11 +331,13 @@ test("dedicated Events endpoint rejects a wrong path and accepts a fresh sequent
     await new Promise((resolve) => { first.once("close", resolve); first.close(); });
     await new Promise((resolve) => setTimeout(resolve, 30));
     const second = await open(endpoint);
-    await writeFile("events-rebind.json", JSON.stringify({
+    const evidence = JSON.stringify({
       wrongRejected,
       distinct: endpoint !== bootstrap.controlEndpoint && endpoint !== bootstrap.sharedStateEndpoint,
       scrubbed: process.env.LOOMREALM_HOSTRA_SESSION_EVENTS_ENDPOINT === undefined
-    }));
+    });
+    await writeFile("events-rebind.json.partial", evidence);
+    await rename("events-rebind.json.partial", "events-rebind.json");
     await new Promise((resolve) => { second.once("close", resolve); second.close(); });
     setInterval(() => {}, 1000);
   `);
@@ -319,6 +346,7 @@ test("dedicated Events endpoint rejects a wrong path and accepts a fresh sequent
     { subsystemKey: "root", bootstrapToken: "token" },
     new AbortController().signal,
   );
+  releaseHosted(t, hosted);
   const evidence = JSON.parse(await waitForFile(
     path.join(game.launchPlan.canonicalInstallationRoot, "events-rebind.json"),
   ));

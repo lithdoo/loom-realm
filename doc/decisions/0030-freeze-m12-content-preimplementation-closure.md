@@ -176,7 +176,7 @@ PWA M16证明当前 logical Content contract无法保持跨平台等价
 ```text
 仍不提供 manifest()/head()/raw fetch/URL builder/bearer/filesystem path
 不引入 client-selected historical contentVersion
-不修改 Content API v1 group wire contract（GET /groups/{namespace}/{key}，NDJSON，早已冻结）
+不修改 Content API v1 group body contract（NDJSON）。当前路由是 `GET /databases/{databasePath}/$db/groups/{namespace}/{key}`
 不修改 FSDB on-disk JSONL layout
 Desktop bound client 与 PWA same-origin client 共用同一 createContentClient 实现
 ```
@@ -191,3 +191,7 @@ contentVersion = full-body 200 bytes 的 sha256:<64 lowercase hex>（不是解�
 空合法 JSONL → 空 rows；正常末尾换行允许
 404 → CONTENT_NOT_FOUND；409 → CONTENT_CONFLICT；422 → CONTENT_INVALID（沿用既有错误映射）
 ```
+
+## 更新记录：多数据库身份
+
+`record`、`group`、`resource` 现在都要求显式 `databasePath`。逻辑身份是 `databasePath + kind + namespace + key`。不保留省略 databasePath 的旧签名。

@@ -6,11 +6,16 @@ Public values:
 
 ```text
 openFsdb
+listFsdbPaths
 describeFsdb
 getFsdbSnapshotId
 listFsdbEntries
 openFsdbObject
 ```
+
+`openFsdb({ root, path })` opens exactly one database. `root` is the container directory. `path` is the required logical database path, such as `GameData/World`. `listFsdbPaths({ root })` discovers those paths and does not open or hash them. `@loomrealm/fsdb/names` exports the browser-safe NameSegment and databasePath checks.
+
+Physical FSDB directory type markers are ASCII case-insensitive (e.g. `[FSDB]` / `[fsdb]`, `[STRUCT]` / `[struct]`). New writers should emit uppercase markers; logical `TableKind` values stay lowercase, and database/table/key names retain their original case-sensitive identity. A parent database scan does not read child database tables.
 
 The package depends only on Node standard-library modules. It does not own HTTP routes, LoomRealm Content hashing/version policy, installations, authorization, repositories, or storage-provider abstractions.
 
@@ -22,3 +27,5 @@ Qualification:
 npm test -w @loomrealm/fsdb
 npm pack -w @loomrealm/fsdb --dry-run
 ```
+
+Nested databases and explicit `root + path` selection are specified in the [FSDB Nested and Multi-Database Architecture](../../doc/20-modules/fsdb-content-service/fsdb-nested-databases.md). The current package implements that contract in place.

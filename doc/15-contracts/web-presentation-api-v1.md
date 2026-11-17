@@ -45,6 +45,7 @@ interface WebPresentationContext {
 
 interface PresentationResourceClient {
   resource(
+    databasePath: string,
     namespace: string,
     key: string,
     expectedContentVersion: string,
@@ -338,11 +339,11 @@ Transient Event 只能影响 WC presentation-local behavior，不能创建/删�
 `PresentationResourceClient` 是 Renderer-private Content resource capability 的 narrow readonly façade：
 
 ```text
-namespace + hierarchical key + expectedContentVersion
+databasePath + namespace + hierarchical key + expectedContentVersion
 → caller-owned bytes + MIME + actual contentVersion
 ```
 
-`expectedContentVersion` 必须满足 Content contract 的 `sha256:<64 lowercase hex>`；version mismatch reject `CONTENT_CONFLICT`。
+资源逻辑身份是 `databasePath + namespace + key`。`databasePath` 是 Content API 的逻辑数据库路径。缺失或非法 databasePath reject `CONTENT_INVALID`。`expectedContentVersion` 必须满足 Content contract 的 `sha256:<64 lowercase hex>`，它是预期内容版本，不是数据库身份；version mismatch reject `CONTENT_CONFLICT`。
 
 Business 不获得 origin、installationId、token/bearer、path、FSDB、privileged URL、raw Response、private ResourceClient 或 Platform resolver。
 

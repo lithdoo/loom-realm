@@ -2,7 +2,7 @@
 
 Read-only HTTP adapter for filesystem-backed FSDB directories.
 
-> Status: **v1 / implemented and qualified**. The package is the HTTP adapter over `@loomrealm/fsdb`; its public HTTP contract remains unchanged.
+> Status: **Pre-release / Active / Evolving**. The project has not published the current protocol; the existing `/fsdb/v1` contract is being extended in place for Root-scoped multi-database serving.
 
 ## Contracts
 
@@ -11,24 +11,23 @@ Read-only HTTP adapter for filesystem-backed FSDB directories.
 - Mandatory conformance: [CONFORMANCE.md](./CONFORMANCE.md)
 - FSDB storage reference: [FSDB layout](../../doc/20-modules/fsdb-content-service/fsdb-layout.md)
 
-Do not read the original DESIGN statements “0 runtime dependencies” or “only fsdb-http can mint `FsdbDatabase`” as current ownership; those exact clauses are superseded by the ownership amendment. All non-superseded HTTP behavior/security/lifecycle clauses remain in force.
+The current design and conformance documents are the active pre-release contract. `serveFsdb({ root })` implements that Root-scoped contract. `createFsdbHttpHandler(db)` remains the borrowed single-database handler. No parallel route namespace or compatibility adapter is part of this contract.
 
 ## Current composition
 
 ```text
-filesystem FSDB directory
+Container Root + databasePath
         ↓
 @loomrealm/fsdb
         ↓
-opaque FsdbDatabase
+one opaque FsdbDatabase handle
         ↓
 @loomrealm/fsdb-http
         ↓
-createFsdbHttpHandler()
-        ↓
-node:http RequestListener
+createFsdbHttpHandler(db)  — borrowed single-database handler
+serveFsdb({ root })        — one Root-scoped Server, lazy database handles
 ```
 
-`FsdbDatabase` is opaque and core-minted. `createFsdbHttpHandler(db)` borrows a caller-owned database；`serveFsdb()` owns its internal database + `node:http` server and exposes one lifecycle owner through `service.close()`。
+`FsdbDatabase` is opaque and Core-minted. Core owns each snapshot. `createFsdbHttpHandler(db)` borrows one caller-owned database and does not own its lifecycle. `serveFsdb({ root })` owns one Container Root, one `node:http` Server, and the database handles it opens lazily, one single-flight handle per databasePath. `service.close()` is the single lifecycle owner for those handles.
 
-Express/Koa/Fastify/Hono are not core dependencies. Existing HTTP route/status/MIME/weak-ETag/conditional/stale/abort/close-drain/no-path-disclosure conformance remains unchanged.
+This pre-release implementation serves multiple root and nested databases from that one Server. It is not a stability promise, and it does not add a database catalog or a per-database Server. Express/Koa/Fastify/Hono are not core dependencies.

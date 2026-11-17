@@ -2,11 +2,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { isAbsolute, resolve, sep } from "node:path";
 import { open, lstat, readdir, realpath } from "node:fs/promises";
 import type { BigIntStats } from "node:fs";
-import { canonicalName, resourceExtension } from "./names.js";
+import { FsdbResolutionError } from "./errors.js";
+import { canonicalDatabasePath, canonicalName, resourceExtension } from "./names.js";
 import { JSONL_TYPE, JSON_TYPE, MARKDOWN_TYPE, SCHEMA_TYPE, resourceMime } from "./mime.js";
 import { tableId, type FileEntry, type Fingerprint, type FsdbMetadataName, type Snapshot, type TableIndex, type FsdbTableKind } from "./model.js";
 
-const TABLE = /^\[(struct|extend|group|resource)\](.*)$/;
+const TABLE_KINDS = ["struct", "extend", "group", "resource"] as const;
 const PATH_SEPARATOR = Buffer.from(sep);
 
 function childPath(parent: Buffer, name: Buffer | string): Buffer {
@@ -18,9 +19,17 @@ function baseName(path: Buffer): Buffer {
   return index < 0 ? path : path.subarray(index + 1);
 }
 
-function startsWithAscii(name: Buffer, prefix: string): boolean {
-  const bytes = Buffer.from(prefix);
-  return name.length >= bytes.length && name.subarray(0, bytes.length).equals(bytes);
+function startsWithAsciiCaseInsensitive(name: Buffer, prefix: string): boolean {
+  const bytes = Buffer.from(prefix, "ascii");
+  if (name.length < bytes.length) return false;
+  for (let index = 0; index < bytes.length; index++) {
+    const actual = name[index]!;
+    const expected = bytes[index]!;
+    const foldedActual = actual >= 0x41 && actual <= 0x5a ? actual + 0x20 : actual;
+    const foldedExpected = expected >= 0x41 && expected <= 0x5a ? expected + 0x20 : expected;
+    if (foldedActual !== foldedExpected) return false;
+  }
+  return true;
 }
 
 function endsWithAscii(name: Buffer, suffix: string): boolean {
@@ -175,23 +184,142 @@ async function scanTable(path: Buffer, kind: FsdbTableKind, name: string): Promi
   return { kind, name, entries, metadata: meta };
 }
 
-export async function scanFsdb(rootInput: string): Promise<Snapshot> {
-  if (typeof rootInput !== "string" || rootInput.length === 0) throw new Error("root is required");
+function isWithin(root: Buffer, child: Buffer): boolean {
+  if (child.equals(root)) return true;
+  const prefix = Buffer.concat([root, PATH_SEPARATOR]);
+  return child.length > prefix.length && child.subarray(0, prefix.length).equals(prefix);
+}
+
+function mapIo(error: unknown): never {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ENOENT") throw new FsdbResolutionError("DATABASE_NOT_FOUND", "Database was not found");
+  if (code === "EMFILE" || code === "ENFILE" || code === "ENOMEM" || code === "EBUSY" || code === "EAGAIN") {
+    throw new FsdbResolutionError("DATABASE_UNAVAILABLE", "Database is temporarily unavailable");
+  }
+  throw error;
+}
+
+export async function resolveContainerRoot(rootInput: string): Promise<Buffer> {
+  if (typeof rootInput !== "string" || rootInput.length === 0) throw new TypeError("root is required");
   const supplied = isAbsolute(rootInput) ? rootInput : resolve(process.cwd(), rootInput);
-  const root = await realpath(supplied, { encoding: "buffer" });
+  let root: Buffer;
+  try { root = await realpath(supplied, { encoding: "buffer" }); }
+  catch (error) { mapIo(error); }
   const rootStat = await lstat(root);
-  if (!rootStat.isDirectory()) throw new Error("FSDB root must be a directory");
-  const rootName = decodePhysicalName(baseName(root));
-  if (!rootName.startsWith("[FSDB]")) throw new Error("Invalid FSDB root name");
-  const name = canonicalName(rootName.slice(6));
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new FsdbResolutionError("DATABASE_INVALID", "Container root must be a directory");
+  return root;
+}
+
+interface DatabaseCandidate {
+  readonly logical?: string;
+  readonly physical: Buffer;
+  readonly symbolic: boolean;
+  readonly directory: boolean;
+  readonly invalidName: boolean;
+}
+
+async function databaseCandidates(directory: Buffer): Promise<readonly DatabaseCandidate[]> {
+  let entries;
+  try { entries = await readdir(directory, { withFileTypes: true, encoding: "buffer" }); }
+  catch (error) { mapIo(error); }
+  if (!entries) throw new FsdbResolutionError("DATABASE_UNAVAILABLE", "Database is temporarily unavailable");
+  const found: DatabaseCandidate[] = [];
+  for (const item of entries) {
+    if (!startsWithAsciiCaseInsensitive(item.name, "[FSDB]")) continue;
+    const physical = childPath(directory, item.name);
+    const stat = await lstat(physical);
+    let logical: string | undefined;
+    let invalidName = item.name.length === "[FSDB]".length;
+    if (!invalidName) {
+      try { logical = canonicalName(decodePhysicalName(item.name).slice("[FSDB]".length)); }
+      catch { invalidName = true; }
+    }
+    found.push({
+      ...(logical === undefined ? {} : { logical }),
+      physical,
+      symbolic: stat.isSymbolicLink(),
+      directory: stat.isDirectory(),
+      invalidName,
+    });
+  }
+  return found;
+}
+
+function usableDatabase(candidate: DatabaseCandidate, container: Buffer): Buffer {
+  if (candidate.invalidName || candidate.logical === undefined) throw new FsdbResolutionError("DATABASE_INVALID", "Invalid FSDB name");
+  if (candidate.symbolic || !candidate.directory || !isWithin(container, candidate.physical)) {
+    throw new FsdbResolutionError("DATABASE_PATH_AMBIGUOUS", "FSDB directory indirection is forbidden");
+  }
+  return candidate.physical;
+}
+
+async function selectDatabaseChild(directory: Buffer, container: Buffer, segment: string): Promise<Buffer> {
+  const matches = (await databaseCandidates(directory)).filter((candidate) => candidate.logical === segment);
+  if (matches.length > 1) throw new FsdbResolutionError("DATABASE_PATH_AMBIGUOUS", "Duplicate logical database name");
+  if (matches.length === 0) throw new FsdbResolutionError("DATABASE_NOT_FOUND", "Database was not found");
+  return usableDatabase(matches[0]!, container);
+}
+
+async function discoverDatabaseChildren(directory: Buffer, container: Buffer): Promise<Map<string, Buffer>> {
+  const found = new Map<string, Buffer>();
+  for (const candidate of await databaseCandidates(directory)) {
+    const physical = usableDatabase(candidate, container);
+    if (found.has(candidate.logical!)) throw new FsdbResolutionError("DATABASE_PATH_AMBIGUOUS", "Duplicate logical database name");
+    found.set(candidate.logical!, physical);
+  }
+  return found;
+}
+
+export function databasePathSegments(path: string): readonly string[] {
+  let canonical: string;
+  try { canonical = canonicalDatabasePath(path); }
+  catch { throw new FsdbResolutionError("DATABASE_PATH_INVALID", "Invalid database path"); }
+  return canonical.split("/");
+}
+
+export async function resolveDatabaseDirectory(container: Buffer, path: string): Promise<Buffer> {
+  const segments = databasePathSegments(path);
+  let current = container;
+  for (const segment of segments) {
+    current = await selectDatabaseChild(current, container, segment);
+  }
+  const confirmed = await lstat(current);
+  if (confirmed.isSymbolicLink() || !confirmed.isDirectory() || !isWithin(container, current)) {
+    throw new FsdbResolutionError("DATABASE_PATH_AMBIGUOUS", "FSDB directory indirection is forbidden");
+  }
+  return current;
+}
+
+export async function discoverDatabasePaths(container: Buffer): Promise<readonly string[]> {
+  const paths: string[] = [];
+  async function walk(directory: Buffer, prefix: string): Promise<void> {
+    const children = await discoverDatabaseChildren(directory, container);
+    for (const name of [...children.keys()].sort(codePointCompare)) {
+      const physical = children.get(name)!;
+      if (!isWithin(container, physical)) throw new FsdbResolutionError("DATABASE_PATH_AMBIGUOUS", "FSDB directory indirection is forbidden");
+      const path = prefix.length === 0 ? name : `${prefix}/${name}`;
+      paths.push(path);
+      await walk(physical, path);
+    }
+  }
+  await walk(container, "");
+  paths.sort(codePointCompare);
+  return Object.freeze(paths);
+}
+
+export async function scanFsdb(root: Buffer): Promise<Snapshot> {
+  const rootStat = await lstat(root);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("FSDB root must be a directory");
+  const rootNameBytes = baseName(root);
+  if (!startsWithAsciiCaseInsensitive(rootNameBytes, "[FSDB]")) throw new Error("Invalid FSDB root name");
+  const rootName = decodePhysicalName(rootNameBytes);
+  const name = canonicalName(rootName.slice("[FSDB]".length));
   const tables = new Map<string, TableIndex>();
   for (const item of await readdir(root, { withFileTypes: true, encoding: "buffer" })) {
-    if (!startsWithAscii(item.name, "[struct]") && !startsWithAscii(item.name, "[extend]") && !startsWithAscii(item.name, "[group]") && !startsWithAscii(item.name, "[resource]")) continue;
+    const kind = TABLE_KINDS.find((candidate) => startsWithAsciiCaseInsensitive(item.name, `[${candidate}]`));
+    if (!kind) continue;
     const physicalName = decodePhysicalName(item.name);
-    const match = TABLE.exec(physicalName);
-    if (!match) continue;
-    const kind = match[1] as FsdbTableKind;
-    const tableName = canonicalName(match[2]!);
+    const tableName = canonicalName(physicalName.slice(kind.length + 2));
     const path = childPath(root, item.name);
     const stat = await lstat(path);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Table candidate must be a real directory");

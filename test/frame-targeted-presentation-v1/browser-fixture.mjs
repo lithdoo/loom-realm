@@ -14,7 +14,7 @@ export const launchManifestText = JSON.stringify({
 
 export const presentation = Object.freeze({
   formatVersion: 1,
-  scripts: Object.freeze([{ namespace: "Presentation", key: "frame-event-probe.browser.js" }]),
+  scripts: Object.freeze([{ databasePath: "Demo", namespace: "Presentation", key: "frame-event-probe.browser.js" }]),
   styles: Object.freeze([]),
 });
 

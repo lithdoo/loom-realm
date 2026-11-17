@@ -12,7 +12,12 @@ export async function validateWithProductionFsdb(stagingPath) {
     fail("FSDB_VALIDATION_FAILURE", "Cannot load built @loomrealm/fsdb-http production entry point");
   }
   try {
-    const db = await openFsdb({ root: stagingPath });
+    const marker = "[FSDB]";
+    const base = stagingPath.split(/[\\/]/u).at(-1) ?? "";
+    if (!base.toLowerCase().startsWith(marker.toLowerCase())) {
+      fail("FSDB_VALIDATION_FAILURE", "Generated fixture directory is not an FSDB database");
+    }
+    const db = await openFsdb({ root: dirname(stagingPath), path: base.slice(marker.length) });
     await db.close();
   } catch (error) {
     fail("FSDB_VALIDATION_FAILURE", `Production openFsdb() rejected the generated fixture: ${error.message}`);

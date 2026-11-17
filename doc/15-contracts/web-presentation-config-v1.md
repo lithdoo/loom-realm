@@ -46,6 +46,7 @@ interface WebPresentationConfigV1 {
 }
 
 interface WebPresentationResourceRefV1 {
+  readonly databasePath: string;
   readonly namespace: string;
   readonly key: string;
 }
@@ -61,7 +62,7 @@ styles
 
 `formatVersion` MUST === `1`。Unknown/missing fields invalid。
 
-`scripts` 与 `styles` 各自列表内 `(namespace,key)` MUST 唯一；duplicate config MUST 在任何 browser bootstrap side effect 前拒绝。实现不得 dedupe、repeat 或自行解释 duplicate。
+`scripts` 与 `styles` 各自列表内 `(databasePath, namespace, key)` MUST 唯一。相同 namespace/key 可以在不同 databasePath 下共存。duplicate config MUST 在任何 browser bootstrap side effect 前拒绝。实现不得 dedupe、repeat 或自行解释 duplicate。`databasePath` 使用 Content API 的逻辑数据库路径；缺失或非法 databasePath 使整份 Config 无效。
 
 V1 MUST NOT增加 subsystem、module/url/path、credential、loader/resolver 或 runtime resource capability 字段。
 
@@ -77,11 +78,13 @@ V1 MUST NOT增加 subsystem、module/url/path、credential、loader/resolver 或
 
 ## 4. Prepared Content / MIME
 
-每个 ref使用 M12 logical identity：
+每个 ref使用当前 Content logical identity：
 
 ```text
-namespace + hierarchical ResourceKey
+databasePath + namespace + hierarchical ResourceKey
 ```
+
+`expectedContentVersion` 仍是该身份上的字节版本，不是数据库身份。
 
 trusted composition MUST 在 current prepared Content view 中 resolve ref，并在 browser side effect 前固定：
 
@@ -244,7 +247,7 @@ Browser-observable evidence MUST 使用 real Chromium；纯 validation/resolutio
 
 1. Config exact shape = `{formatVersion,scripts,styles}`；
 2. source acquisition属于 product/platform-private mechanics；
-3. refs复用 M12 logical Content identity；
+3. refs复用当前 Content logical identity：`databasePath + namespace + key`；
 4. script/style MIME essence分别固定为 `text/javascript` / `text/css`；
 5. bootstrap固定为 ordered `<link>` + ordered classic `<script>`；
 6. `window.onload` 后 presentation才可启动；

@@ -336,8 +336,9 @@ This package may cause Runner construction of a PWA same-origin `ContentClient`,
 Business API stays：
 
 ```text
-scope.content.record(...)
-scope.content.resource(...)
+scope.content.record(databasePath, namespace, key)
+scope.content.group(databasePath, namespace, key)
+scope.content.resource(databasePath, namespace, key)
 ```
 
 PWA MUST NOT distribute Desktop bearer tokens merely to reuse a concrete Desktop Content binding。

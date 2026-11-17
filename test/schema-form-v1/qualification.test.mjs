@@ -24,6 +24,7 @@ const importMap = JSON.stringify({
     "@loomrealm/subsystem/host": "/packages/subsystem/dist/host/index.js",
     "@loomrealm/renderer": "/packages/renderer/dist/index.js",
     "@loomrealm/renderer/web-presentation": "/packages/renderer/dist/web-presentation.js",
+    "@loomrealm/fsdb/names": "/packages/fsdb/dist/names.js",
     "@loomrealm-game/schema-form": "/game-libs/schema-form/dist/index.js",
   },
 });
